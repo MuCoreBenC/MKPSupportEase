@@ -19,7 +19,7 @@
  *
  * # 与外壳的关系
  *
- * 即时落盘（`wb.setMachineDimensions`），不进参数草稿栈 —— 与品牌 / 机型那套一致：
+ * 走草稿（保存后写入）（`wb.setMachineDimensions`），不进参数草稿栈 —— 与品牌 / 机型那套一致：
  * 一次提交 = 一次应用（进草稿）= 回一份新清单；写文件仍归右上角那颗「保存」，
  * 所以这里是「取消 / 确认」两颗按钮，
  * 不是"改了立刻写"（六组一起改，中间态不该漂在文件上）。
@@ -170,7 +170,7 @@ export default function MachineDimensionsModal({
     <ModalC14
       open={machineId !== null}
       title={`机型尺寸 · ${cur?.display || machineId || ''}`}
-      subtitle={`写回 presets/machines/${cur?.file ?? ''} 的 [dimensions] —— 即时落盘，没有草稿`}
+      subtitle={`写回 presets/machines/${cur?.file ?? ''} 的 [dimensions] —— 先进草稿，保存后写入`}
       size="lg"
       closeOnScrim={false}
       onClose={onClose}

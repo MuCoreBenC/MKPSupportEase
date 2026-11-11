@@ -1,8 +1,10 @@
-import { Fragment, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 import Modal from '../../components/modal/Modal'
 import NumberField from '../../components/field/NumberField'
+/* 勾选共用件：全站同一套墨色，不用原生绿勾 */
+import { Check } from '../../components/check'
 import { Switch } from '../../components/switch'
 import { Tip } from '../../components/tooltip'
 import { useModalHeadSlot } from '../../components/modal/modalHeadSlot'
@@ -11,6 +13,7 @@ import { useT } from '../../i18n'
 import { usePostprocPrefs } from '../state/usePostprocPrefs'
 import type { ResolvedPostprocPrefs } from '../../api/contract'
 import {
+  clearPresets,
   FACTORY_ANCHORS,
   fmt,
   loadPresets,
@@ -18,6 +21,7 @@ import {
   savePreset,
   summarize,
   type DebugPreset,
+  type FactoryAnchorRow,
 } from './debugPresets'
 import s from './PageSettings.module.css'
 
@@ -62,12 +66,29 @@ export default function DebugPrefsModal({ open, onClose }: { open: boolean; onCl
       {
         debugWaitX: p.waitX,
         debugWaitY: p.waitY,
+        debugMountWaitX: p.mountWaitX,
+        debugMountWaitY: p.mountWaitY,
         debugMountX: p.mountX,
         debugMountY: p.mountY,
+        debugUnmountWaitX: p.unmountWaitX,
+        debugUnmountWaitY: p.unmountWaitY,
         debugUnmountX: p.unmountX,
         debugUnmountY: p.unmountY,
         debugSpeed: p.speed,
         debugMoveY: p.moveY,
+      },
+      () => {},
+    )
+  }
+
+  /** 把一行出厂点位填进右栏：两个等待位 + 落笔位 + 收笔位；驻点位不动 */
+  const applyAnchor = (row: FactoryAnchorRow) => {
+    void set(
+      {
+        debugMountWaitX: row.mountWaitX,
+        debugMountX: row.mountX,
+        debugUnmountWaitX: row.unmountWaitX,
+        debugUnmountX: row.unmountX,
       },
       () => {},
     )
@@ -78,8 +99,12 @@ export default function DebugPrefsModal({ open, onClose }: { open: boolean; onCl
       savePreset({
         waitX: r.debugWaitX,
         waitY: r.debugWaitY,
+        mountWaitX: r.debugMountWaitX,
+        mountWaitY: r.debugMountWaitY,
         mountX: r.debugMountX,
         mountY: r.debugMountY,
+        unmountWaitX: r.debugUnmountWaitX,
+        unmountWaitY: r.debugUnmountWaitY,
         unmountX: r.debugUnmountX,
         unmountY: r.debugUnmountY,
         speed: r.debugSpeed,
@@ -180,7 +205,7 @@ export default function DebugPrefsModal({ open, onClose }: { open: boolean; onCl
             </button>
           </div>
           {panel === 'anchors' ? (
-            <AnchorTable />
+            <AnchorTable onUse={applyAnchor} />
           ) : r.debugCustomGcode !== null ? (
             /* 高级模式：整段自己写。打开那一刻已经把当前生成的那份灌进来，改的是它 */
             <>
@@ -227,55 +252,117 @@ export default function DebugPrefsModal({ open, onClose }: { open: boolean; onCl
               onUse={applyPreset}
               onDelete={(id) => setPresets(removePreset(id))}
               onKeep={keep}
+              onClear={() => setPresets(clearPresets())}
             />
           ) : (
             <>
+              {/* 驻点位：调试循环从这里出发，最后也回到这里 */}
               <NumRow
                 label={tr('settings.calib.debugWait')}
                 value={r.debugWaitX}
                 disabled={!on}
                 onChange={(next) => void set({ debugWaitX: next }, () => {})}
               />
-              <NumRow
-                label={tr('settings.calib.debugWaitY')}
-                value={r.debugWaitY}
-                disabled={!yOn}
-                onChange={(next) => void set({ debugWaitY: next }, () => {})}
+              {r.debugMoveY && (
+                <NumRow
+                  label={tr('settings.calib.debugWaitY')}
+                  value={r.debugWaitY}
+                  disabled={!yOn}
+                  onChange={(next) => void set({ debugWaitY: next }, () => {})}
+                />
+              )}
+              <FollowRow
+                label={tr('settings.calib.debugMountWait')}
+                followLabel={tr('settings.calib.debugFollowPark')}
+                value={r.debugMountWaitX}
+                followOf={r.debugWaitX}
+                disabled={!on}
+                onFollow={(follow) =>
+                  void set({ debugMountWaitX: follow ? null : r.debugWaitX }, () => {})
+                }
+                onChange={(next) => void set({ debugMountWaitX: next }, () => {})}
               />
+              {r.debugMoveY && (
+                <FollowRow
+                  label={tr('settings.calib.debugMountWaitY')}
+                  followLabel={tr('settings.calib.debugFollowPark')}
+                  value={r.debugMountWaitY}
+                  followOf={r.debugWaitY}
+                  disabled={!yOn}
+                  onFollow={(follow) =>
+                    void set({ debugMountWaitY: follow ? null : r.debugWaitY }, () => {})
+                  }
+                  onChange={(next) => void set({ debugMountWaitY: next }, () => {})}
+                />
+              )}
               <NumRow
                 label={tr('settings.calib.debugMount')}
                 value={r.debugMountX}
                 disabled={!on}
                 onChange={(next) => void set({ debugMountX: next }, () => {})}
               />
-              <YRow
-                label={tr('settings.calib.debugMountY')}
-                followLabel={tr('settings.calib.debugFollowWait')}
-                value={r.debugMountY}
-                waitY={r.debugWaitY}
-                disabled={!yOn}
+              {r.debugMoveY && (
+                <FollowRow
+                  label={tr('settings.calib.debugMountY')}
+                  followLabel={tr('settings.calib.debugFollowMountWait')}
+                  value={r.debugMountY}
+                  followOf={r.debugMountWaitY ?? r.debugWaitY}
+                  disabled={!yOn}
+                  onFollow={(follow) =>
+                    void set(
+                      { debugMountY: follow ? null : (r.debugMountWaitY ?? r.debugWaitY) },
+                      () => {},
+                    )
+                  }
+                  onChange={(next) => void set({ debugMountY: next }, () => {})}
+                />
+              )}
+              <FollowRow
+                label={tr('settings.calib.debugUnmountWait')}
+                followLabel={tr('settings.calib.debugFollowPark')}
+                value={r.debugUnmountWaitX}
+                followOf={r.debugWaitX}
+                disabled={!on}
                 onFollow={(follow) =>
-                  void set({ debugMountY: follow ? null : r.debugWaitY }, () => {})
+                  void set({ debugUnmountWaitX: follow ? null : r.debugWaitX }, () => {})
                 }
-                onChange={(next) => void set({ debugMountY: next }, () => {})}
+                onChange={(next) => void set({ debugUnmountWaitX: next }, () => {})}
               />
+              {r.debugMoveY && (
+                <FollowRow
+                  label={tr('settings.calib.debugUnmountWaitY')}
+                  followLabel={tr('settings.calib.debugFollowPark')}
+                  value={r.debugUnmountWaitY}
+                  followOf={r.debugWaitY}
+                  disabled={!yOn}
+                  onFollow={(follow) =>
+                    void set({ debugUnmountWaitY: follow ? null : r.debugWaitY }, () => {})
+                  }
+                  onChange={(next) => void set({ debugUnmountWaitY: next }, () => {})}
+                />
+              )}
               <NumRow
                 label={tr('settings.calib.debugUnmount')}
                 value={r.debugUnmountX}
                 disabled={!on}
                 onChange={(next) => void set({ debugUnmountX: next }, () => {})}
               />
-              <YRow
-                label={tr('settings.calib.debugUnmountY')}
-                followLabel={tr('settings.calib.debugFollowWait')}
-                value={r.debugUnmountY}
-                waitY={r.debugWaitY}
-                disabled={!yOn}
-                onFollow={(follow) =>
-                  void set({ debugUnmountY: follow ? null : r.debugWaitY }, () => {})
-                }
-                onChange={(next) => void set({ debugUnmountY: next }, () => {})}
-              />
+              {r.debugMoveY && (
+                <FollowRow
+                  label={tr('settings.calib.debugUnmountY')}
+                  followLabel={tr('settings.calib.debugFollowUnmountWait')}
+                  value={r.debugUnmountY}
+                  followOf={r.debugUnmountWaitY ?? r.debugWaitY}
+                  disabled={!yOn}
+                  onFollow={(follow) =>
+                    void set(
+                      { debugUnmountY: follow ? null : (r.debugUnmountWaitY ?? r.debugWaitY) },
+                      () => {},
+                    )
+                  }
+                  onChange={(next) => void set({ debugUnmountY: next }, () => {})}
+                />
+              )}
               <NumRow
                 label={tr('settings.calib.debugRepeat')}
                 unit={tr('settings.calib.debugRepeatUnit')}
@@ -369,16 +456,39 @@ function HeadAnchorsButton({ active, onClick }: { active: boolean; onClick: () =
   return slot === null ? node : createPortal(node, slot)
 }
 
-/** 左栏的「出厂点位」参照表：点「默认点位」才出来，默认位置是代码预览 */
-function AnchorTable() {
+/**
+ * 左栏的「出厂点位」参照表：点「默认点位」才出来，默认位置是代码预览。
+ *
+ * 每行末尾那颗「用」把这一行的三组 X 填进右栏 —— 参照表同时是取数入口，
+ * 不用照着数字一个个手敲。
+ */
+function AnchorTable({ onUse }: { onUse: (row: FactoryAnchorRow) => void }) {
   const tr = useT()
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+
+  /*
+   * 矮窗里开关那几行就把左栏占满了，表格被顶到视野外 —— 点开却看不到东西。
+   * 只在"整张表落在可视区下面"时把左栏滚过去；正常窗高一点不动，
+   * 免得把上面的开关滚走。
+   */
+  useEffect(() => {
+    const el = wrapRef.current
+    if (el === null) return
+    const box = el.parentElement
+    if (box === null) return
+    const r = el.getBoundingClientRect()
+    const b = box.getBoundingClientRect()
+    if (r.top >= b.bottom - 24) box.scrollTop += r.top - b.top
+  }, [])
+
   return (
-    <div className={s.anchorWrap}>
+    <div ref={wrapRef} className={s.anchorWrap}>
       <p className={s.anchorLegend}>{tr('settings.calib.debugAnchorLegend')}</p>
       <div className={s.anchorRow}>
         <span className={s.anchorHead}>{tr('settings.calib.debugAnchorVersion')}</span>
         <span className={s.anchorHead}>{tr('settings.calib.debugMountPath')}</span>
         <span className={s.anchorHead}>{tr('settings.calib.debugUnmountPath')}</span>
+        <span />
       </div>
       {FACTORY_ANCHORS.map((g) => (
         <Fragment key={g.machine}>
@@ -386,14 +496,25 @@ function AnchorTable() {
           <div className={s.anchorGroup}>
             <span className={s.anchorGroupName}>{g.machine}</span>
             <span className={s.anchorGroupNote}>
-              {tr('settings.calib.debugAnchorStart')} {g.startRetract}
+              {tr('settings.calib.debugAnchorStart')} {g.startPath}
             </span>
           </div>
           {g.rows.map((row) => (
             <div key={row.version || 'base'} className={s.anchorRow}>
               <span className={s.anchorVersion}>{row.version || '—'}</span>
-              <span className={s.anchorNum}>{row.mountPath}</span>
-              <span className={s.anchorNum}>{row.unmountPath}</span>
+              <span className={s.anchorNum}>
+                {fmt(row.mountWaitX)} → {fmt(row.mountX)}
+              </span>
+              <span className={s.anchorNum}>
+                {fmt(row.unmountWaitX)} → {fmt(row.unmountX)}
+              </span>
+              <button
+                type="button"
+                className={s.anchorUse}
+                onClick={() => onUse(row)}
+              >
+                {tr('settings.calib.debugAnchorUse')}
+              </button>
             </div>
           ))}
         </Fragment>
@@ -409,13 +530,23 @@ function PresetList({
   onUse,
   onDelete,
   onKeep,
+  onClear,
 }: {
   presets: DebugPreset[]
   onUse: (p: DebugPreset) => void
   onDelete: (id: string) => void
   onKeep: () => void
+  onClear: () => void
 }) {
   const tr = useT()
+  /* 「清空」点两下才动手：第一下变确认，三秒不动自己退回去 */
+  const [armed, setArmed] = useState(false)
+  useEffect(() => {
+    if (!armed) return
+    const t = window.setTimeout(() => setArmed(false), CONFIRM_MS)
+    return () => window.clearTimeout(t)
+  }, [armed])
+
   if (presets.length === 0) {
     return (
       <div className={s.presetEmpty}>
@@ -439,12 +570,28 @@ function PresetList({
               aria-label={tr('settings.calib.debugDeletePreset')}
               onClick={() => onDelete(p.id)}
             >
-              ✕
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
             </button>
           </div>
         ))}
       </div>
-      <p className={s.presetHint}>{tr('settings.calib.debugPresetLimit')}</p>
+      <div className={s.presetFoot}>
+        <span className={s.presetHint}>{tr('settings.calib.debugPresetLimit')}</span>
+        <button
+          type="button"
+          className={armed ? `${s.presetClear} ${s.presetClearArmed}` : s.presetClear}
+          onClick={() => {
+            if (!armed) {
+              setArmed(true)
+              return
+            }
+            setArmed(false)
+            onClear()
+          }}
+        >
+          {armed ? tr('settings.calib.debugClearConfirm') : tr('settings.calib.debugClear')}
+        </button>
+      </div>
     </>
   )
 }
@@ -521,16 +668,16 @@ function NumRow({
 }
 
 /**
- * 可以在「跟随驻点」与「自己填」之间切的那一行 Y。
+ * 可以在「跟随」与「自己填」之间切的那一行（等待位、落笔位 / 收笔位的 Y）。
  *
- * `value === null` 就是跟随：框里显示驻点的 Y 并且灰着。
- * 勾掉之后**从驻点的值起步**，不会一下跳回 0。
+ * `value === null` 就是跟随：框里显示被跟随那一格的值并且灰着。
+ * 勾掉之后**从被跟随的值起步**，不会一下跳回 0。
  */
-function YRow({
+function FollowRow({
   label,
   followLabel,
   value,
-  waitY,
+  followOf,
   disabled,
   onFollow,
   onChange,
@@ -538,7 +685,7 @@ function YRow({
   label: string
   followLabel: string
   value: number | null
-  waitY: number
+  followOf: number
   disabled: boolean
   onFollow: (follow: boolean) => void
   onChange: (next: number) => void
@@ -548,20 +695,19 @@ function YRow({
     <div className={s.modalRow}>
       <span className={s.modalLabel}>{label}</span>
       <span className={s.rowTail}>
-        <label className={s.followCheck}>
-          <input
-            type="checkbox"
-            checked={following}
-            disabled={disabled}
-            onChange={(e) => onFollow(e.target.checked)}
-          />
+        <Check
+          className={s.followCheck}
+          checked={following}
+          disabled={disabled}
+          onChange={onFollow}
+        >
           {followLabel}
-        </label>
+        </Check>
         <span className={s.numBox}>
           <NumberField
             label={label}
             unit="mm"
-            value={following ? waitY : value}
+            value={following ? followOf : value}
             min={-20}
             max={320}
             step={0.1}
@@ -579,6 +725,9 @@ function YRow({
  *
  * `G28 Y` **总是**出现，哪怕没开「移动 Y」—— 归零是定基准，不是移动。
  */
+/** 「清空」第一下变确认，三秒不动就退回（与「最近删除」那颗同一个口径） */
+const CONFIRM_MS = 3000
+
 /**
  * 「恢复默认」的那一份补丁：全给 `null`，由后端按出厂常量重算。
  *
@@ -588,8 +737,12 @@ function YRow({
 const RESET_PATCH = {
   debugWaitX: null,
   debugWaitY: null,
+  debugMountWaitX: null,
+  debugMountWaitY: null,
   debugMountX: null,
   debugMountY: null,
+  debugUnmountWaitX: null,
+  debugUnmountWaitY: null,
   debugUnmountX: null,
   debugUnmountY: null,
   debugSpeed: null,
@@ -650,25 +803,66 @@ function backToWait(r: ResolvedPostprocPrefs): string {
 
 /** 这一段会写进产物的动作（高级模式打开那一刻要拿它当初始文本） */
 function previewLines(r: ResolvedPostprocPrefs): string[] {
+  /*
+   * ★ 先把这一帧要用的数**一次性解构**下来。
+   *
+   * 直接循环里反复读 `r.debugMountX` 时，作者见过「第一遍是新值、下面几遍是旧值」——
+   * 说明读的过程中 `r` 被换过（偏好在跑 IPC，回来是另一份对象）。
+   * 解构等于把这一帧的数拍下来，整段都用同一份。
+   */
+  const {
+    debugWaitX,
+    debugWaitY,
+    debugMountWaitX,
+    debugMountWaitY,
+    debugMountX,
+    debugMountY,
+    debugUnmountWaitX,
+    debugUnmountWaitY,
+    debugUnmountX,
+    debugUnmountY,
+    debugSpeed,
+    debugTravelSpeed,
+    debugUseTravelSpeed,
+    debugRepeat,
+    debugMoveY,
+  } = r
+
   /* 与内核的 `num()` 同一口径：整数不带小数点，小数保留原样 */
   const n = (v: number) => fmt(v)
-  const my = r.debugMountY ?? r.debugWaitY
-  const uy = r.debugUnmountY ?? r.debugWaitY
-  const mv = (x: number, y: number) =>
-    r.debugMoveY ? `G1 X${n(x)} Y${n(y)} F${n(r.debugSpeed)}` : `G1 X${n(x)} F${n(r.debugSpeed)}`
-  /* 到驻点那一档：开了「驻点速度单独调」就用它，否则与落笔同速 */
-  const travelF = r.debugUseTravelSpeed ? n(r.debugTravelSpeed) : n(r.debugSpeed)
-  const walk = (x: number, y: number) =>
-    r.debugMoveY ? `G1 X${n(x)} Y${n(y)} F${travelF}` : `G1 X${n(x)} F${travelF}`
+  const wait = { x: debugWaitX, y: debugWaitY }
+  /* 两个等待位各自跟随驻点位；落笔 / 收笔位的 Y 再跟随各自那一档等待位 */
+  const mountWait = { x: debugMountWaitX ?? wait.x, y: debugMountWaitY ?? wait.y }
+  const unmountWait = { x: debugUnmountWaitX ?? wait.x, y: debugUnmountWaitY ?? wait.y }
+  const mount = { x: debugMountX, y: debugMountY ?? mountWait.y }
+  const unmount = { x: debugUnmountX, y: debugUnmountY ?? unmountWait.y }
+  /* 到等待位那一档：开了「驻点速度单独调」就用它，否则与落笔同速 */
+  const travelF = debugUseTravelSpeed ? debugTravelSpeed : debugSpeed
 
-  const lines: string[] = ['G28 X', 'G28 Y', walk(r.debugWaitX, r.debugWaitY)]
-  /* 与内核同一个循环：落笔 → 驻点 → 收笔 → 驻点，跑 `repeat` 遍 */
-  for (let i = 0; i < Math.max(1, r.debugRepeat); i++) {
-    lines.push(mv(r.debugMountX, my))
-    lines.push(walk(r.debugWaitX, r.debugWaitY))
-    lines.push(mv(r.debugUnmountX, uy))
-    lines.push(walk(r.debugWaitX, r.debugWaitY))
+  const lines: string[] = ['G28 X', 'G28 Y']
+  let at: { x: number; y: number } | null = null
+  /* 与内核同一个去重：不动 Y 时只看 X，重合的那一条不重复写 */
+  const same = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    a.x === b.x && (!debugMoveY || a.y === b.y)
+  const go = (p: { x: number; y: number }, f: number) => {
+    if (at !== null && same(at, p)) return
+    lines.push(
+      debugMoveY ? `G1 X${n(p.x)} Y${n(p.y)} F${n(f)}` : `G1 X${n(p.x)} F${n(f)}`,
+    )
+    at = p
   }
+
+  go(wait, travelF)
+  /* 与内核同一个循环：落笔 → 回落笔等待位 → 收笔 → 回收笔等待位，跑 `repeat` 遍 */
+  for (let i = 0; i < Math.max(1, debugRepeat); i++) {
+    go(mountWait, travelF)
+    go(mount, debugSpeed)
+    go(mountWait, travelF)
+    go(unmountWait, travelF)
+    go(unmount, debugSpeed)
+    go(unmountWait, travelF)
+  }
+  go(wait, travelF)
   return lines
 }
 
@@ -681,7 +875,20 @@ function CodePreview({ r }: { r: ResolvedPostprocPrefs }) {
   return (
     /* 不摆标题行：它白占一行，框高还跟着它上下跳 */
     <div className={s.debugCode}>
-      <pre className={s.previewCode}>{lines.join('\n')}</pre>
+      {/*
+       * ★ 一行一个元素，`key` 里带**行内容**。
+       *
+       * 原来是一整段字符串塞进 `<pre>`。作者反复看到「两遍里一遍新一遍旧」——
+       * 那是文本节点在整块替换时被浏览器/React 复用留下的残影。
+       * 拆成逐行之后，内容变了 key 就变，React 只能重建那一行，留不下上一帧的字。
+       */}
+      <div className={s.previewCode}>
+        {lines.map((line, i) => (
+          <div key={`${i}:${line}`} className={s.previewLine}>
+            {line}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

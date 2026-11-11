@@ -1678,3 +1678,10 @@
 .plateBad {
   color: var(--danger);
 }
+
+/* 组标题行右端那颗动作（「写回预设」）—— 不挤到摘要里 */
+.grpAction {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+}

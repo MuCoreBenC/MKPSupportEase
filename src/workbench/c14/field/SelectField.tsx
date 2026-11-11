@@ -176,7 +176,7 @@ export default function SelectField({
                     onClick={() => pick(o.value)}
                   >
                     <span className={s.check} aria-hidden>
-                      {on ? '✓' : ''}
+                      {on ? <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg> : null}
                     </span>
                     <span className={s.optLabel}>{o.label}</span>
                     {o.note !== undefined && <span className={s.note}>{o.note}</span>}

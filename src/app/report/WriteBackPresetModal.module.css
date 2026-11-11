@@ -1,0 +1,240 @@
+/* 写回预设那扇窗（2026-11-12）。与调试窗同一套行节奏，不另造视觉 */
+
+.footNote {
+  flex: 1 1 auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 六个值：两列，左标签右数字 */
+.valueGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 20px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* 表头：每列各一份，往数值那一侧靠 */
+.valueHead {
+  display: flex;
+  justify-content: flex-end;
+  gap: 18px;
+  margin-bottom: 2px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/*
+ * 不用 baseline：标签旁那颗 ✕ 是 inline-flex，它的基线会把整块往下拽
+ * （作者两次截图都是「叉叉还是低了」）。整行改中线对齐。
+ */
+.valueRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 26px;
+}
+
+/* 「报告值 → 预设值」两格，右对齐 */
+.valuePair {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.arrow {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* 属性选择器比单个类优先级高：不管这条写在哪儿都压得住 `.valueNum` 的白 */
+.valueNum[data-diff='true'] {
+  color: var(--accent);
+}
+
+.valueLabel {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.valueNum {
+  font-family: var(--font-code);
+  font-size: var(--fs-code);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.err {
+  margin: 0 0 10px;
+  font-size: var(--fs-label);
+  color: var(--danger);
+}
+
+/* 分组标题：「这台机器的」/「全部预设」 */
+.groupHead {
+  margin: 0 0 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/*
+ * 一个列表、一个**定高**滚动盒。
+ *
+ * 200px = 折叠态那几行刚好铺满（组头 + 3 行 + 「其余 N 份」）；
+ * 小窗口按 `22vh` 收矮，最低 120px —— 框不会再顶到屏幕上下沿。
+ * 于是折叠时下面不空，展开时多出来的行在这个 200px 里滚 ——
+ * 窗的高度**两态完全一样**（作者：「展开也不要变高」）。
+ */
+.presetArea {
+  height: clamp(120px, 22vh, 200px);
+  overflow-y: auto;
+  margin-right: -4px;
+  padding-right: 4px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 一行预设：整块是按钮，点哪都算选中 */
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  color: var(--text-1);
+  text-align: left;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--surface-sunken);
+}
+
+/* 选中：主色描边 + 淡底，与参数页选中行同一套 */
+.row[data-on='true'] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+
+.rowName {
+  font-size: var(--fs-body);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rowMeta {
+  flex: 0 0 auto;
+  font-family: var(--font-code);
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* 「其余 N 份」那颗折叠开关 */
+.foldBtn {
+  align-self: flex-start;
+  margin: 10px 0 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.foldBtn:hover {
+  text-decoration: underline;
+}
+
+/* 写成之后底栏那句：绿字，与"只改本地文件"那句同一格 */
+.okNote {
+  color: var(--accent);
+}
+
+/* 标签 + 那颗 ✕ */
+.valueLabelWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* SVG 是几何图形，在 flex 里天然正中，不吃字体基线 */
+.skipBtn {
+  display: inline-flex;
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.valueLabelWrap {
+  align-items: center;
+}
+
+.skipBtn svg {
+  display: block;
+}
+
+.skipBtn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* 已经排除：整行淡下去，那颗 ✕ 变成 ↩ */
+.skipBtn[data-on='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.valueRowOff {
+  opacity: 0.42;
+}
+
+.valueRowOff .valueNum,
+.valueRowOff .valueLabel {
+  text-decoration: line-through;
+}
+
+/*
+ * 跟随后没定过 / 旧记录没记：也淡，但**不划线** ——
+ * 划线是"用户自己排除了"，这一种是"本来就没有值"，两件事不能长成一个样。
+ */
+.valueRowAuto {
+  opacity: 0.55;
+}
+
+/* 那两行右侧不摆数字，摆一句「跟随驻点位 · 不写入」 */
+.valueSkip {
+  flex: 0 0 auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}

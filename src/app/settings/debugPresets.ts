@@ -17,11 +17,19 @@ export type DebugPreset = {
   at: number
   waitX: number
   waitY: number
+  /** `null` = 跟随驻点位 */
+  mountWaitX: number | null
+  /** `null` = 跟随驻点位 */
+  mountWaitY: number | null
   mountX: number
-  /** `null` = 跟随驻点 */
+  /** `null` = 跟随落笔等待位 */
   mountY: number | null
+  /** `null` = 跟随驻点位 */
+  unmountWaitX: number | null
+  /** `null` = 跟随驻点位 */
+  unmountWaitY: number | null
   unmountX: number
-  /** `null` = 跟随驻点 */
+  /** `null` = 跟随收笔等待位 */
   unmountY: number | null
   speed: number
   moveY: boolean
@@ -37,28 +45,77 @@ export function loadPresets(): DebugPreset[] {
     if (raw === null) return []
     const list: unknown = JSON.parse(raw)
     if (!Array.isArray(list)) return []
-    return list.filter(isPreset).slice(0, MAX)
+    return list
+      .flatMap((v) => {
+        const p = normalize(v)
+        return p === null ? [] : [p]
+      })
+      .slice(0, MAX)
   } catch (err) {
     console.error('[debugPresets] 读存档失败', err)
     return []
   }
 }
 
-function isPreset(v: unknown): v is DebugPreset {
-  if (typeof v !== 'object' || v === null) return false
+/** `undefined` / `null` 都是"跟随"；别的形状记成 `undefined`（这一条作废） */
+function optNum(v: unknown): number | null | undefined {
+  if (v === undefined || v === null) return null
+  return typeof v === 'number' ? v : undefined
+}
+
+/**
+ * 一条存档归一成当前形状。
+ *
+ * 等待位那几格是后加的：早先存的记录里没有它们，读到就当「跟随驻点位」——
+ * 不能因为多了四个键把作者手上的记录整批作废。
+ */
+function normalize(v: unknown): DebugPreset | null {
+  if (typeof v !== 'object' || v === null) return null
   const p = v as Record<string, unknown>
-  return (
-    typeof p.id === 'string' &&
-    typeof p.at === 'number' &&
-    typeof p.waitX === 'number' &&
-    typeof p.waitY === 'number' &&
-    typeof p.mountX === 'number' &&
-    typeof p.unmountX === 'number' &&
-    typeof p.speed === 'number' &&
-    typeof p.moveY === 'boolean' &&
-    (p.mountY === null || typeof p.mountY === 'number') &&
-    (p.unmountY === null || typeof p.unmountY === 'number')
-  )
+  if (
+    typeof p.id !== 'string' ||
+    typeof p.at !== 'number' ||
+    typeof p.waitX !== 'number' ||
+    typeof p.waitY !== 'number' ||
+    typeof p.mountX !== 'number' ||
+    typeof p.unmountX !== 'number' ||
+    typeof p.speed !== 'number' ||
+    typeof p.moveY !== 'boolean'
+  ) {
+    return null
+  }
+  const mountWaitX = optNum(p.mountWaitX)
+  const mountWaitY = optNum(p.mountWaitY)
+  const unmountWaitX = optNum(p.unmountWaitX)
+  const unmountWaitY = optNum(p.unmountWaitY)
+  const mountY = optNum(p.mountY)
+  const unmountY = optNum(p.unmountY)
+  if (
+    mountWaitX === undefined ||
+    mountWaitY === undefined ||
+    unmountWaitX === undefined ||
+    unmountWaitY === undefined ||
+    mountY === undefined ||
+    unmountY === undefined
+  ) {
+    return null
+  }
+  return {
+    id: p.id,
+    at: p.at,
+    waitX: p.waitX,
+    waitY: p.waitY,
+    mountWaitX,
+    mountWaitY,
+    mountX: p.mountX,
+    mountY,
+    unmountWaitX,
+    unmountWaitY,
+    unmountX: p.unmountX,
+    unmountY,
+    speed: p.speed,
+    moveY: p.moveY,
+  }
 }
 
 function write(list: DebugPreset[]): void {
@@ -87,6 +144,16 @@ export function removePreset(id: string): DebugPreset[] {
   const list = loadPresets().filter((p) => p.id !== id)
   write(list)
   return list
+}
+
+/** 清空全部 */
+export function clearPresets(): DebugPreset[] {
+  try {
+    localStorage.removeItem(KEY)
+  } catch (err) {
+    console.error('[debugPresets] 清空失败', err)
+  }
+  return []
 }
 
 /** 一行摘要：「驻点 20 / 267 · 10000」，列表里那一行用它 */
@@ -118,20 +185,27 @@ export function fmt(v: number): string {
 export type FactoryAnchorRow = {
   /** 版本（`FAST` / `FASTV3.3` …）；空串 = 该机型的裸键（没有版本那一档） */
   version: string
-  /** 落笔那一路：等待位 → 落笔位 */
-  mountPath: string
-  /** 收笔那一路：等待位 → 收笔位 */
-  unmountPath: string
+  /** 落笔等待位 X。调试窗只有一个驻点，套用这一行时驻点取它 */
+  mountWaitX: number
+  /** 落笔位 X */
+  mountX: number
+  /** 收笔等待位 X（P 系列与落笔等待位不同，调试窗只放得下一个驻点） */
+  unmountWaitX: number
+  /** 收笔位 X */
+  unmountX: number
 }
 
 export type FactoryAnchorGroup = {
   /** 机型显示名（组标题，只在组头写一次） */
   machine: string
   /**
-   * **开始阶段收笔**的位置（打印一开始先把笔收起来那一段）。
+   * **开始阶段收笔**的整条路径（打印一开始先把笔收起来那一段）。
+   *
    * 来源：`crates/postprocess/src/pipeline/hooks.rs` 的 `BEGIN_STAGE_RETRACT_*`。
+   * A 系列两步就走完；P 系列要绕角擦一下（先压到 X256，再降到 Y200，再退回 X250），
+   * 中间每一段都写出来 —— 少写一段就复现不了。
    */
-  startRetract: string
+  startPath: string
   /** 组内每个版本一行 */
   rows: FactoryAnchorRow[]
 }
@@ -139,46 +213,46 @@ export type FactoryAnchorGroup = {
 export const FACTORY_ANCHORS: FactoryAnchorGroup[] = [
   {
     machine: 'A1',
-    startRetract: '276',
+    startPath: '276 → 20',
     rows: [
-      { version: '', mountPath: '256 → 267', unmountPath: '256 → 271' },
-      { version: 'FAST', mountPath: '256 → 267', unmountPath: '256 → 271' },
-      { version: 'FASTV3.3', mountPath: '256 → 267', unmountPath: '256 → 273' },
-      { version: 'STANDARD', mountPath: '256 → 267', unmountPath: '256 → 271' },
+      { version: '', mountWaitX: 256, mountX: 267, unmountWaitX: 256, unmountX: 271 },
+      { version: 'FAST', mountWaitX: 256, mountX: 267, unmountWaitX: 256, unmountX: 271 },
+      { version: 'FASTV3.3', mountWaitX: 256, mountX: 267, unmountWaitX: 256, unmountX: 273 },
+      { version: 'STANDARD', mountWaitX: 256, mountX: 267, unmountWaitX: 256, unmountX: 271 },
     ],
   },
   {
     machine: 'A1_MINI',
-    startRetract: '191',
+    startPath: '191 → 20',
     rows: [
-      { version: '', mountPath: '168 → 185', unmountPath: '168 → 189' },
-      { version: 'FAST', mountPath: '168 → 185', unmountPath: '168 → 189' },
-      { version: 'FASTV3.3', mountPath: '168 → 185', unmountPath: '168 → 189' },
-      { version: 'STANDARD', mountPath: '168 → 185', unmountPath: '168 → 189' },
+      { version: '', mountWaitX: 168, mountX: 185, unmountWaitX: 168, unmountX: 189 },
+      { version: 'FAST', mountWaitX: 168, mountX: 185, unmountWaitX: 168, unmountX: 189 },
+      { version: 'FASTV3.3', mountWaitX: 168, mountX: 185, unmountWaitX: 168, unmountX: 189 },
+      { version: 'STANDARD', mountWaitX: 168, mountX: 185, unmountWaitX: 168, unmountX: 189 },
     ],
   },
   {
     machine: 'P1S',
-    startRetract: '256',
+    startPath: '250,216 → 256 → 215 → 200 → 250',
     rows: [
-      { version: '', mountPath: '20 → 1', unmountPath: '246 → 256' },
-      { version: 'LITE', mountPath: '20 → 1', unmountPath: '246 → 256' },
+      { version: '', mountWaitX: 20, mountX: 1, unmountWaitX: 246, unmountX: 256 },
+      { version: 'LITE', mountWaitX: 20, mountX: 1, unmountWaitX: 246, unmountX: 256 },
     ],
   },
   {
     machine: 'P2S',
-    startRetract: '256',
+    startPath: '250,216 → 256 → 215 → 200 → 250',
     rows: [
-      { version: '', mountPath: '20 → 1', unmountPath: '246 → 256' },
-      { version: 'STANDARD', mountPath: '20 → 1', unmountPath: '246 → 256' },
+      { version: '', mountWaitX: 20, mountX: 1, unmountWaitX: 246, unmountX: 256 },
+      { version: 'STANDARD', mountWaitX: 20, mountX: 1, unmountWaitX: 246, unmountX: 256 },
     ],
   },
   {
     machine: 'X1C',
-    startRetract: '256',
+    startPath: '250,216 → 256 → 215 → 200 → 250',
     rows: [
-      { version: '', mountPath: '20 → 1', unmountPath: '246 → 256' },
-      { version: 'LITE', mountPath: '20 → 1', unmountPath: '246 → 256' },
+      { version: '', mountWaitX: 20, mountX: 1, unmountWaitX: 246, unmountX: 256 },
+      { version: 'LITE', mountWaitX: 20, mountX: 1, unmountWaitX: 246, unmountX: 256 },
     ],
   },
 ]

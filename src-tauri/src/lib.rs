@@ -926,6 +926,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::machines::wb_add_version,
         app::machines::wb_version_orphans,
         app::machines::wb_remove_version,
+        app::machines::wb_set_version_id,
         app::machines::wb_set_version_field,
         app::machines::wb_set_machine_field,
         // 默认视角是分组列表（`wb_desk`）；矩阵退成「同时看几台机器的同一项」那个对比工具

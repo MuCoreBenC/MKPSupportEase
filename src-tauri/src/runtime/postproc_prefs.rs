@@ -71,6 +71,10 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
         Some(postprocess::ir::types::DebugIr {
             wait_x: prefs.debug_wait_x,
             wait_y: prefs.debug_wait_y,
+            mount_wait_x: prefs.debug_mount_wait_x,
+            mount_wait_y: prefs.debug_mount_wait_y,
+            unmount_wait_x: prefs.debug_unmount_wait_x,
+            unmount_wait_y: prefs.debug_unmount_wait_y,
             mount_y: prefs.debug_mount_y,
             unmount_y: prefs.debug_unmount_y,
             mount_x: prefs.debug_mount_x,
@@ -184,12 +188,16 @@ mod tests {
             begin_stage_retract_z_lift_mm: 42,
             debug_mode_enabled: false,
             debug_wait_x: 20.0,
+            debug_mount_wait_x: Some(256.0),
             debug_mount_x: 267.0,
+            debug_unmount_wait_x: Some(256.0),
             debug_unmount_x: 276.0,
             debug_speed: 10000.0,
-            /* 落笔 / 收笔的 Y 为 `None` = 跟随驻点，与界面上的「跟随」勾一致 */
+            /* 落笔 / 收笔的 Y 为 `None` = 跟随各自那一档等待位，与界面上的「跟随」勾一致 */
             debug_wait_y: 0.0,
+            debug_mount_wait_y: None,
             debug_mount_y: None,
+            debug_unmount_wait_y: None,
             debug_unmount_y: None,
             debug_custom_gcode: None,
             debug_travel_speed: 30000.0,

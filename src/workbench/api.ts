@@ -846,7 +846,7 @@ export const WHY_LABEL: Record<string, string> = {
  *
  * `kind` 是 serde 的内部标签，所以这里也用它做可辨识联合。
  *
- * b04 Task 12 之后结构手势就归了「机型与版本」页即时落盘（REPORT §7）；
+ * b04 Task 12 之后结构手势就归了「机型与版本」页走草稿（保存后写入）（REPORT §7）；
  * 2026-10-06 状态机修正又删掉了第四种 `markBuilt` —— 生成记录是**台账**
  * （`workbench/built.json`），由生成事务直接落盘，从来不进草稿。
  */
@@ -2208,6 +2208,13 @@ export interface MachineList {
   root: string
 }
 
+/** `machines::VersionAssetView` —— 归属某版本的资产，以及谁在引用它 */
+export interface VersionAssetRef {
+  id: string
+  machines: string[]
+  bundles: string[]
+}
+
 /* ---------- 资产库（`app::assets` / `presets::assets`） ---------- */
 
 /**
@@ -2829,7 +2836,7 @@ export const wb = {
   registry: () => invoke<RegistryView>('wb_registry'),
   /**
    * 改一条参数的**定义**（名称 / 说明 / 单位 / 值类型 / 控件 / 范围 / 步进 /
-   * 出厂默认 / 属于 / 前置条件 / 弃用）。**即时落盘**（与机型尺寸那套一致），
+   * 出厂默认 / 属于 / 前置条件 / 弃用）。**走草稿（保存后写入）**（与机型尺寸那套一致），
    * 不走参数草稿 —— 定义与值在撤销语义上不是一件事。返回重读后的注册表
    */
   setParamMeta: (key: string, edit: ParamMetaEdit) =>
@@ -2897,7 +2904,7 @@ export const wb = {
   /** 删一条资产。反查守卫在后端：有人引用整次拒绝（界面把它转成拦截页） */
   removeAsset: (assetId: string) => invoke<AssetList>('wb_remove_asset', { assetId }),
 
-  /** 改一条资产的交付档位（download ↔ bundled）。即时落盘；mkPreset 不许随包 */
+  /** 改一条资产的交付档位（download ↔ bundled）。走草稿（保存后写入）；mkPreset 不许随包 */
   /**
    * **补标 / 改写 / 移除一份校准 3MF 的身份**（2026-10-19）。
    *
@@ -2913,7 +2920,7 @@ export const wb = {
     invoke<AssetList>('wb_set_asset_delivery', { assetId, delivery }),
 
   /**
-   * **新建或改写一个分组**（2026-10-16）。即时落盘，回一份新清单。
+   * **新建或改写一个分组**（2026-10-16）。走草稿（保存后写入），回一份新清单。
    *
    * 分组 = "哪几张图共用同一份标注源稿"，登记在台账 `[[groups]]` 里 ——
    * 跟资产一起入库、跟仓库走、编进 catalog（客户端按 `role` 挑图，不认文件名）。
@@ -2961,7 +2968,7 @@ export const wb = {
   bundles: (query: string | null) => invoke<BundleList>('wb_bundles', { query }),
 
   /**
-   * 换一份套餐的文件清单（P4 套餐内容编辑）。**即时落盘**，不走参数草稿 ——
+   * 换一份套餐的文件清单（P4 套餐内容编辑）。**走草稿（保存后写入）**，不走参数草稿 ——
    * 悬空引用 / 「没有一条 BBS」在后端拦；MKP 预设也在 `assetIds` 里
    * （2026-10-03 进资产库，`type = 'mkPreset'`，**文件在不在都能选**）；
    * `updatedAt` 由那次写盖上当天
@@ -2982,7 +2989,7 @@ export const wb = {
     invoke<BundleList>('wb_copy_bundle', { bundleId, newId, display }),
 
   /** **把一批版本指到这份套餐**（多选 + 确认）。不限机型；已经指着它的跳过。
-   *  即时落盘，界面在确认前先摆影响预览 */
+   *  走草稿（保存后写入），界面在确认前先摆影响预览 */
   assignBundleVersions: (bundleId: string, uids: string[]) =>
     invoke<BundleList>('wb_assign_bundle_versions', { bundleId, uids }),
 
@@ -3031,13 +3038,13 @@ export const wb = {
     invoke<MachineList>('wb_set_machine_field', { machineId, field, value }),
 
   /**
-   * 改品牌的一格（`name` / `logo`）。**即时落盘**（同机型那一套：没有草稿、没有撤销）。
+   * 改品牌的一格（`name` / `logo`）。走草稿（保存后写入），与机型那一套一致。
    * `logo = null` 是**清空**（删键，消费侧回落内置字标）；`name` 不许清空
    */
   setBrandField: (brandId: string, field: 'name' | 'logo', value: string | null) =>
     invoke<MachineList>('wb_set_brand_field', { brandId, field, value }),
 
-  /** 新建一个品牌（id + 显示名；品牌图后配）。**即时落盘**，撞名（含仅大小写不同）当场拒 */
+  /** 新建一个品牌（id + 显示名；品牌图后配）。**走草稿（保存后写入）**，撞名（含仅大小写不同）当场拒 */
   addBrand: (id: string, name: string) => invoke<MachineList>('wb_add_brand', { id, name }),
 
   /**
@@ -3048,7 +3055,7 @@ export const wb = {
     invoke<MachineList>('wb_move_machine_to_brand', { machineId, brandId }),
 
   /**
-   * **写一台机型的整张 `[dimensions]`**（六组一起）。即时落盘。
+   * **写一台机型的整张 `[dimensions]`**（六组一起）。走草稿（保存后写入）。
    * 校验在后端：床身宽深必须为正、数字必须有限；全零的可选组由后端写零值（不删子表）
    */
   setMachineDimensions: (machineId: string, dimensions: MachineDimensions) =>
@@ -3062,15 +3069,27 @@ export const wb = {
     invoke<MachineList>('wb_set_machine_zones', { machineId, zones }),
 
   /**
-   * 删这个版本会让哪些字段留下孤儿引用。**删之前先问这一条。**
+   * 删这个版本会一起清掉哪些参数记录。**删之前先问这一条。**
    * 返回的是字段 key（`wiping.wiper_x` 这种）—— 那是用户能据以行动的单位
    */
   versionOrphans: (machineId: string, versionId: string) =>
     invoke<string[]>('wb_version_orphans', { machineId, versionId }),
 
+  /** 这一版还挂着哪些资产、谁在引用 —— 删版本会连带删掉它们，确认框里要先摆出来 */
+  versionAssets: (machineId: string, versionId: string) =>
+    invoke<VersionAssetRef[]>('wb_version_assets', { machineId, versionId }),
+
   /** 删一个版本。**不可逆**，所以界面上是两步确认 */
   removeVersion: (machineId: string, versionId: string) =>
     invoke<MachineList>('wb_remove_version', { machineId, versionId }),
+
+  /**
+   * 改一个版本的 id（**主键**）。参数四张表与归属资产一起搬到新 id；
+   * 产物名按新 id 变、旧产物留盘，这一版会判「待重新生成」。
+   * 有未保存的参数改动时后端拒绝（先保存再改）
+   */
+  setVersionId: (machineId: string, oldVersionId: string, newVersionId: string) =>
+    invoke<MachineList>('wb_set_version_id', { machineId, oldVersionId, newVersionId }),
 
   /**
    * 加一个版本。**立刻落盘，没有草稿也没有撤销** ——
@@ -3359,9 +3378,9 @@ export const wb = {
   devMatrixClear: () => invoke<number>('wb_dev_matrix_clear'),
 
   /**
-   * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——
-   * `recommendedBundle` 抄模板；
-   * `tag` / `description` 前端拿模板值预填。返回刷新后的清单
+   * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义**。
+   * 除 id 与名称外各格照抄模板（套餐指向、三册译名、角标、说明、备注、版图）——
+   * `tag` / `description` 不给就是照抄。返回刷新后的清单
    */
   copyVersion: (machineId: string, templateVersionId: string, id: string, name: string, tag?: string, description?: string) =>
     invoke<MachineList>('wb_copy_version', {

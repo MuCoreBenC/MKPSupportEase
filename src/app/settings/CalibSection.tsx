@@ -135,7 +135,14 @@ export default function CalibSection({ nested = false }: { nested?: boolean }) {
         </button>
       </div>
 
-      <DebugPrefsModal open={debugOpen} onClose={() => setDebugOpen(false)} />
+      {/* `key` 跟着开/关走：每次打开都是新实例，`panel` 自然回到编辑那一屏。
+          之前靠 `useEffect` 里 `setPanel('edit')`，要等 prefs 异步回来那一帧才生效，
+          作者看到的就是「打开是记录页、点返回没反应、几秒后才好」 */}
+      <DebugPrefsModal
+        key={debugOpen ? 'open' : 'closed'}
+        open={debugOpen}
+        onClose={() => setDebugOpen(false)}
+      />
 
       {/* 停留时间是并列的参数（不是哪一行的派生值）⇒ 不缩进 */}
       <div className={`${s.field} ${s.fieldRow}`}>

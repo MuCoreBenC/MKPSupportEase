@@ -741,21 +741,20 @@ impl Machine {
             None,
             None,
             None,
-            None,
-            None,
-            None,
         )
     }
 
-    /// **复制已有版本**（b05 Task 14.3 / doc §4.3 第 2–5 步）：从模板版本抄
-    /// `recommendedBundle`（版本 → 套餐的关系随复制走），`tag` / `description`
-    /// 由调用方给（前端拿模板值预填，人可改）。
+    /// **复制已有版本**（b05 Task 14.3 / doc §4.3 第 2–5 步）：新版本除了 `id` 与
+    /// `name`，其余各格与模板**逐格相同**（套餐指向、三册译名、角标、说明、备注、版图）——
+    /// 「照抄一份，再只改想改的」。
     ///
     /// 两条**刻意不做**：
     /// - **不复制参数源状态** —— 新版本默认「待补」（`hasRecipe` 14.4 呈现它）；
     /// - **不碰参数正文** —— doc 第 5 步「只写版本定义」，参数正文是 14.5 的
     ///   独立动作（`wb_copy_recipe`）。两步分离让每次写都只落一个文件，
     ///   不需要 16.2 的跨文件事务。
+    ///
+    /// `tag` / `description` 传 `Some` 就是改写模板那两格；传 `None` 照抄。
     pub fn copy_version(
         &mut self,
         template_id: &str,
@@ -771,39 +770,35 @@ impl Machine {
                 &[],
             )));
         }
-        let new_id = validate_new_version_id(self, new_id)?;
         let template = self
             .versions
             .iter()
             .find(|v| v.id == template_id)
+            .cloned()
             .ok_or_else(|| {
                 AppError::not_found(messages::text(
                     "ui.presetdata.catalog.231",
                     &[("template_id", template_id)],
                 ))
             })?;
-        let bundle = template.recommended_bundle.clone();
-        /* 英文那三册也随复制走 —— 否则每复制一版就得重新译一遍（缺了也只是回落中文） */
-        let name_en = template.name_en.clone();
-        let tag_en = template.tag_en.clone();
-        let description_en = template.description_en.clone();
+        let new_id = validate_new_version_id(self, new_id)?;
         Self::append_version(
             &mut self.doc,
             &self.file,
             &mut self.versions,
             &new_id,
             name,
-            bundle,
+            Some(&template),
             tag,
             description,
-            name_en.as_deref(),
-            tag_en.as_deref(),
-            description_en.as_deref(),
         )
     }
 
     /// 建一个 `[[versions]]` 块并同步内存清单。`add_version` 与 `copy_version` 共用，
-    /// 免得两条路分岔（谁忘了同步 `self.versions` 都会让界面上少一行）
+    /// 免得两条路分岔（谁忘了同步 `self.versions` 都会让界面上少一行）。
+    ///
+    /// **`template` 决定这一版带多少格**：`None` = 空壳，除 `id` 与 `name` 外一个键都不写；
+    /// `Some` = 其余各格整份照抄。`tag` / `description` 是调用方的改写（`None` = 照抄）。
     #[allow(clippy::too_many_arguments)]
     fn append_version(
         doc: &mut toml_edit::DocumentMut,
@@ -811,34 +806,77 @@ impl Machine {
         versions: &mut Vec<MachineVersion>,
         id: &str,
         name: &str,
-        recommended_bundle: Option<String>,
+        template: Option<&MachineVersion>,
         tag: Option<&str>,
         description: Option<&str>,
-        name_en: Option<&str>,
-        tag_en: Option<&str>,
-        description_en: Option<&str>,
     ) -> Result<(), AppError> {
+        /// 文本格：**空串 = 没写**（空串会被读成"填过，填了个空"）
+        fn put(t: &mut toml_edit::Table, key: &str, v: Option<&str>) {
+            if let Some(s) = v.map(str::trim).filter(|s| !s.is_empty()) {
+                t[key] = literal_str(s);
+            }
+        }
+        /// 调用方给的覆盖优先；`Some("")` = 明确不要这一格，不是"照抄"。
+        fn pick(given: Option<&str>, fallback: Option<&str>) -> Option<String> {
+            match given {
+                Some(s) => Some(s.trim()).filter(|s| !s.is_empty()).map(str::to_owned),
+                None => fallback.map(str::to_owned),
+            }
+        }
+
         let mut t = toml_edit::Table::new();
         t["id"] = literal_str(id);
         t["name"] = literal_str(name);
-        if let Some(v) = name_en.filter(|s| !s.trim().is_empty()) {
-            t["nameEn"] = literal_str(v.trim());
-        }
-        if let Some(v) = tag_en.filter(|s| !s.trim().is_empty()) {
-            t["tagEn"] = literal_str(v.trim());
-        }
-        if let Some(v) = description_en.filter(|s| !s.trim().is_empty()) {
-            t["descriptionEn"] = literal_str(v.trim());
-        }
-        if let Some(tag) = tag.filter(|s| !s.trim().is_empty()) {
-            t["tag"] = literal_str(tag.trim());
-        }
-        if let Some(desc) = description.filter(|s| !s.trim().is_empty()) {
-            t["description"] = literal_str(desc.trim());
-        }
-        if let Some(b) = &recommended_bundle {
-            t["recommendedBundle"] = literal_str(b);
-        }
+        put(
+            &mut t,
+            "nameEn",
+            template.and_then(|v| v.name_en.as_deref()),
+        );
+        put(
+            &mut t,
+            "nameTw",
+            template.and_then(|v| v.name_tw.as_deref()),
+        );
+        put(
+            &mut t,
+            "nameJa",
+            template.and_then(|v| v.name_ja.as_deref()),
+        );
+        put(
+            &mut t,
+            "tag",
+            tag.or_else(|| template.and_then(|v| v.tag.as_deref())),
+        );
+        put(&mut t, "tagEn", template.and_then(|v| v.tag_en.as_deref()));
+        put(&mut t, "tagTw", template.and_then(|v| v.tag_tw.as_deref()));
+        put(&mut t, "tagJa", template.and_then(|v| v.tag_ja.as_deref()));
+        put(
+            &mut t,
+            "description",
+            description.or_else(|| template.and_then(|v| v.description.as_deref())),
+        );
+        put(
+            &mut t,
+            "descriptionEn",
+            template.and_then(|v| v.description_en.as_deref()),
+        );
+        put(
+            &mut t,
+            "descriptionTw",
+            template.and_then(|v| v.description_tw.as_deref()),
+        );
+        put(
+            &mut t,
+            "descriptionJa",
+            template.and_then(|v| v.description_ja.as_deref()),
+        );
+        put(&mut t, "remark", template.and_then(|v| v.remark.as_deref()));
+        put(&mut t, "image", template.and_then(|v| v.image.as_deref()));
+        put(
+            &mut t,
+            "recommendedBundle",
+            template.and_then(|v| v.recommended_bundle.as_deref()),
+        );
 
         // `versions` 可能整个不存在（一个版本都没有的机型）
         let entry = doc
@@ -854,32 +892,33 @@ impl Machine {
         })?;
         arr.push(t);
 
-        versions.push(MachineVersion {
-            id: id.to_owned(),
-            name: name.to_owned(),
-            name_en: name_en.map(str::to_owned),
-            recommended_bundle,
-            tag: tag
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned),
-            tag_en: tag_en.map(str::to_owned),
-            description: description
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned),
-            description_en: description_en.map(str::to_owned),
-            // 新建版本不写其他语言的册子 —— 空了客户端回落中文那一册
-            name_tw: None,
-            name_ja: None,
-            tag_tw: None,
-            tag_ja: None,
-            description_tw: None,
-            description_ja: None,
-            // 新建版本不写备注 —— 客户端副标题空了回落路径文本
-            remark: None,
-            // 新建版本不带图 —— 版本图缺就是"回落机型图"，不是"没图"
-            image: None,
+        versions.push(match template {
+            None => MachineVersion {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                name_en: None,
+                name_tw: None,
+                name_ja: None,
+                recommended_bundle: None,
+                tag: None,
+                tag_en: None,
+                tag_tw: None,
+                tag_ja: None,
+                description: None,
+                description_en: None,
+                description_tw: None,
+                description_ja: None,
+                // 空壳版本：备注空着（副标题回落路径）、不带图（回落机型图）
+                remark: None,
+                image: None,
+            },
+            Some(v) => MachineVersion {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                tag: pick(tag, v.tag.as_deref()),
+                description: pick(description, v.description.as_deref()),
+                ..v.clone()
+            },
         });
         Ok(())
     }
@@ -937,6 +976,90 @@ impl Machine {
         }
         arr.remove(at);
         self.versions.remove(at);
+        Ok(())
+    }
+
+    /// 改一个版本的 id（**主键**）。只动 `[[versions]]` 那一块里的 `id` 一格。
+    ///
+    /// # 为什么单开一条，不并进 [`Self::set_version_field`]
+    ///
+    /// 改 id 会**改主键**：`A1:FAST` 这样的键散在参数四张表、资产归属里，保存后
+    /// 还要重算产物文件名。改一格值（`name` / `tag`）只影响这个文件一处。
+    /// 两件事的风险不同，所以跨文件的编排在
+    /// [`super::Presets::rename_version_uid`]，这一层只管机型文件。
+    ///
+    /// 校验复用 [`validate_new_version_id`] 的三条口径（非空 / 字符集 / 机型内唯一），
+    /// 但**要排除自己** —— 直接调它会把「改成同一个 id」判成重名。
+    pub fn rename_version(&mut self, old_id: &str, new_id: &str) -> Result<(), AppError> {
+        let old_id = old_id.trim();
+        let at = self
+            .versions
+            .iter()
+            .position(|v| v.id == old_id)
+            .ok_or_else(|| {
+                AppError::not_found(messages::text(
+                    "ui.presetdata.catalog.233",
+                    &[("v1", &self.id.to_string()), ("id", old_id)],
+                ))
+            })?;
+
+        let new_id = new_id.trim();
+        if new_id.is_empty() {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.263",
+                &[],
+            )));
+        }
+        if !new_id
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.264",
+                &[],
+            )));
+        }
+        if self
+            .versions
+            .iter()
+            .any(|v| v.id == new_id && v.id != old_id)
+        {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.265",
+                &[("id", new_id)],
+            )));
+        }
+        if new_id == old_id {
+            return Ok(());
+        }
+
+        let file = self.file.display().to_string();
+        let arr = self
+            .doc
+            .get_mut("versions")
+            .and_then(toml_edit::Item::as_array_of_tables_mut)
+            .ok_or_else(|| {
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.catalog.234",
+                    &[("file", &file.to_string())],
+                ))
+            })?;
+        // 与 `remove_version` 同一条：文件里的顺序与 `self.versions` 一致，下标通用
+        let n = arr.len();
+        let t = arr.get_mut(at).ok_or_else(|| {
+            AppError::corrupted(messages::text(
+                "ui.presetdata.catalog.235",
+                &[
+                    ("file", &file.to_string()),
+                    ("mem", &self.versions.len().to_string()),
+                    ("v1", &n.to_string()),
+                ],
+            ))
+        })?;
+        // 引号风格与源文件保持一致（单引号，`literal_str`）
+        t["id"] = literal_str(new_id);
+
+        self.versions[at].id = new_id.to_owned();
         Ok(())
     }
 
@@ -2739,8 +2862,8 @@ mod tests {
 
     /* ---------- 复制版本（b05 Task 14.3） ---------- */
 
-    /// **复制版本只写版本定义**，从模板抄 recommendedBundle，tag/description 按参数。
-    /// 落盘后从盘上重读核对（副本上改，不碰真数据）
+    /// **复制版本只写版本定义**：除 id 与名称外与模板逐格相同（各册译名、角标、
+    /// 说明、套餐指向都跟着走）。落盘后从盘上重读核对（副本上改，不碰真数据）
     #[test]
     fn copy_version_writes_the_definition_only() {
         let Some((root, _c)) = catalog() else {
@@ -2765,12 +2888,17 @@ mod tests {
             .find(|v| v.id == "COPYTEST")
             .expect("新版本在");
         assert_eq!(nv.name, "复制测试");
-        assert_eq!(nv.tag.as_deref(), Some("新标签"));
+        assert_eq!(nv.tag.as_deref(), Some("新标签"), "调用方给的覆盖优先");
         assert_eq!(
             nv.recommended_bundle.as_deref(),
             template.recommended_bundle.as_deref(),
             "版本 → 套餐的关系随复制走"
         );
+        assert_eq!(nv.name_tw, template.name_tw, "繁中那一册照抄");
+        assert_eq!(nv.name_ja, template.name_ja, "日文那一册照抄");
+        assert_eq!(nv.description.as_deref(), template.description.as_deref());
+        assert_eq!(nv.description_ja, template.description_ja);
+        assert_eq!(nv.image, template.image, "版图照抄");
         assert_eq!(a1.versions.len(), 4, "原有三版一台不少");
 
         // 反向：重名、非法 id、模板不存在，一个都进不来

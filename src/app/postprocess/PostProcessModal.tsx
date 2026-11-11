@@ -1429,7 +1429,7 @@ export default function PostProcessModal({
               ? 'postproc.ask.calibTitle'
               : 'postproc.ask.machineTitle',
         )}
-        lines={[run.question.text]}
+        lines={run.question.text.split('\n')}
         hint={countdownText(run.question.deadlineUnixMs) ?? undefined}
         /* 圈里那枚 `✦` 是**画出来的 SVG**：字体符号自带基线偏移，几何坐标不会 */
         glyph={
@@ -1641,8 +1641,8 @@ export default function PostProcessModal({
             </Btn>
           ) : showAsk && run.question !== null ? (
             /*
-             * 那一问的按钮（2026-10-17 泛化）：**问句自带选项表就照它画**，没有就还是
-             * 机型那一问的老两颗（强制继续不强调 / 终止占强调位 —— 第 9~11 轮定的）。
+             * 那一问的按钮（2026-10-17 泛化）：**问句自带选项表就照它画**；没有就摆兜底两颗，
+             * 顺序与强调位按问句种类分（调试继续优先 / 机型不匹配终止优先，见下面两支）。
              * 按钮皮肤是全站那一套（`.btn` 默认胶囊），这里不加任何 className。
              */
             run.question.choices !== undefined && run.question.choices.length > 0 ? (
@@ -1678,7 +1678,35 @@ export default function PostProcessModal({
                     </Btn>
                   ))}
               </span>
+            ) : run.question.questionKind === 'debug-plan' ? (
+              /*
+               * 调试那一问：**继续优先**（2026-11-12 作者：「按钮换一下位置，继续优先」）。
+               * 这一趟只是去试位置，继续占强调位、放最右；停下退到左边、用普通皮肤。
+               */
+              <>
+                <Btn
+                  disabled={busy}
+                  onClick={() =>
+                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'stop'))
+                  }
+                >
+                  {tr('postproc.choice.stop')}
+                </Btn>
+                <Btn
+                  variant="accent"
+                  disabled={busy}
+                  onClick={() =>
+                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'keep'))
+                  }
+                >
+                  {tr('postproc.choice.keep')}
+                </Btn>
+              </>
             ) : (
+              /*
+               * 机型不匹配：维持老口径 —— 强制继续不强调、终止占强调位
+               * （第 9~11 轮定的：不匹配还硬跑会出事，强调位留给人先看清再决定）。
+               */
               <>
                 <Btn
                   disabled={busy}

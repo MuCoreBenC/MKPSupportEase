@@ -53,11 +53,26 @@ fn tail_start(lines: &[String]) -> Option<usize> {
         .position(|l| l.contains("; EXECUTABLE_BLOCK_END"))
 }
 
-/// 动作块：驻点 → 落笔位 → 驻点 → 收笔位 → 驻点。
+/// 一次动作块里的一个位置。
+#[derive(Clone, Copy)]
+struct At {
+    x: f64,
+    y: f64,
+}
+
+/// 两个位置算不算同一个：不动 Y 时只看 X（Y 压根没写进产物）。
+fn same(d: &DebugIr, a: At, b: At) -> bool {
+    a.x == b.x && (!d.move_y || a.y == b.y)
+}
+
+/// 走到 `p`；已经在那个位置就**不重复写**一条。
 ///
-/// 两个动作各自可勾选；都不勾时只走一遍驻点，用来确认 XY 归零是否正常。
-fn action_block(d: &DebugIr) -> Vec<String> {
-    let speed = num(d.speed);
+/// 去重是必须的：两个等待位都跟随驻点位时，每段开头/收尾的移动会与上一条重合，
+/// 不去重的话默认那一趟会从 5 条涨到 9 条。
+fn push_move(out: &mut Vec<String>, d: &DebugIr, at: &mut Option<At>, p: At, f: &str) {
+    if at.is_some_and(|a| same(d, a, p)) {
+        return;
+    }
     /*
      * 动不动 Y 是**用户勾的那一格**（2026-11-11 作者）：
      *   勾了 → **每一条移动**都带 Y（`G1 X267 Y0 F…`），包括 Y 恰好是 0 的时候；
@@ -66,31 +81,48 @@ fn action_block(d: &DebugIr) -> Vec<String> {
      * ★ 不能拿「Y 坐标是不是 0」当判据：作者要的正是「显式把 Y 移到 0」，
      *   0 是一个合法的目标位置，不是「没填」。
      */
-    /* 落笔 / 收笔的 Y 没填就**跟随驻点**（作者：不填写就用驻点的） */
-    let mount_y = d.mount_y.unwrap_or(d.wait_y);
-    let unmount_y = d.unmount_y.unwrap_or(d.wait_y);
-    /* 落笔 / 收笔那一档（`F{speed}`） */
-    let mv = |x: f64, y: f64| {
-        if d.move_y {
-            format!("G1 X{} Y{} F{}", num(x), num(y), speed)
-        } else {
-            format!("G1 X{} F{}", num(x), speed)
-        }
-    };
-    /* 到驻点 / 回驻点那一档：开了单独的驻点速度才换，否则与落笔同速 */
+    out.push(if d.move_y {
+        format!("G1 X{} Y{} F{}", num(p.x), num(p.y), f)
+    } else {
+        format!("G1 X{} F{}", num(p.x), f)
+    });
+    *at = Some(p);
+}
+
+/// 动作块：驻点位 →（落笔等待位 → 落笔位 → 落笔等待位）→（收笔等待位 → 收笔位 → 收笔等待位）→ 驻点位。
+///
+/// 两段各有自己的等待位：没填就跟随驻点位，于是默认那一趟仍是
+/// 「驻点 → 落笔 → 驻点 → 收笔 → 驻点」这五条（见 [`push_move`] 的去重）。
+fn action_block(d: &DebugIr) -> Vec<String> {
+    let speed = num(d.speed);
+    /* 到等待位 / 回驻点那一档：开了单独的驻点速度才换，否则与落笔同速 */
     let travel = if d.use_travel_speed {
         num(d.travel_speed)
     } else {
         speed.clone()
     };
-    let walk = |x: f64, y: f64| {
-        if d.move_y {
-            format!("G1 X{} Y{} F{}", num(x), num(y), travel)
-        } else {
-            format!("G1 X{} F{}", num(x), travel)
-        }
+
+    let wait = At {
+        x: d.wait_x,
+        y: d.wait_y,
     };
-    let to_wait = walk(d.wait_x, d.wait_y);
+    /* 两个等待位各自跟随驻点位；落笔 / 收笔位的 Y 再跟随各自那一档等待位 */
+    let mount_wait = At {
+        x: d.mount_wait_x.unwrap_or(wait.x),
+        y: d.mount_wait_y.unwrap_or(wait.y),
+    };
+    let unmount_wait = At {
+        x: d.unmount_wait_x.unwrap_or(wait.x),
+        y: d.unmount_wait_y.unwrap_or(wait.y),
+    };
+    let mount = At {
+        x: d.mount_x,
+        y: d.mount_y.unwrap_or(mount_wait.y),
+    };
+    let unmount = At {
+        x: d.unmount_x,
+        y: d.unmount_y.unwrap_or(unmount_wait.y),
+    };
 
     let mut out = vec![";===== debug actions ==================".to_string()];
     /*
@@ -104,23 +136,24 @@ fn action_block(d: &DebugIr) -> Vec<String> {
      */
     out.push("G28 X".to_string());
     out.push("G28 Y".to_string());
-    out.push(to_wait.clone());
-    /* 落笔 → 回驻点 → 收笔 → 回驻点，整段按 `repeat` 跑几遍 */
+
+    let mut at: Option<At> = None;
+    push_move(&mut out, d, &mut at, wait, &travel);
+    /* 落笔、收笔各自的「去 → 回」整段按 `repeat` 跑几遍 */
     for _ in 0..d.repeat.max(1) {
         if d.test_mount {
-            out.push(mv(d.mount_x, mount_y));
-            out.push(walk(d.wait_x, d.wait_y));
+            push_move(&mut out, d, &mut at, mount_wait, &travel);
+            push_move(&mut out, d, &mut at, mount, &speed);
+            push_move(&mut out, d, &mut at, mount_wait, &travel);
         }
         if d.test_unmount {
-            out.push(mv(d.unmount_x, unmount_y));
-            out.push(walk(d.wait_x, d.wait_y));
+            push_move(&mut out, d, &mut at, unmount_wait, &travel);
+            push_move(&mut out, d, &mut at, unmount, &speed);
+            push_move(&mut out, d, &mut at, unmount_wait, &travel);
         }
     }
-    /* 末尾那条回驻点只留一条：重复时每遍都已经回到驻点，最后这条只是收口 */
-    if out.last() == Some(&to_wait) {
-        out.pop();
-    }
-    out.push(to_wait);
+    /* 收口：回到驻点位（上一段已经停在这里就不重复写） */
+    push_move(&mut out, d, &mut at, wait, &travel);
     out.push(";===== debug actions end ==============".to_string());
     out
 }
@@ -191,6 +224,10 @@ mod tests {
         DebugIr {
             wait_x: 256.0,
             wait_y: 0.0,
+            mount_wait_x: None,
+            mount_wait_y: None,
+            unmount_wait_x: None,
+            unmount_wait_y: None,
             mount_x: 267.0,
             unmount_x: 276.0,
             speed: 10000.0,
@@ -263,6 +300,67 @@ mod tests {
         assert_eq!(
             seq.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
             want,
+            "{out:?}"
+        );
+    }
+
+    /// 两段各有自己的等待位：落笔那段回 20，收笔那段回 246。
+    #[test]
+    fn each_action_returns_to_its_own_wait_point() {
+        let mut d = params();
+        d.wait_x = 20.0;
+        d.mount_x = 1.0;
+        d.unmount_wait_x = Some(246.0);
+        d.unmount_x = 256.0;
+        let out = build_debug_gcode(&startup(), &d);
+        let seq: Vec<&str> = out
+            .iter()
+            .filter(|l| l.starts_with("G1 X"))
+            .map(|s| s.as_str())
+            .collect();
+        assert_eq!(
+            seq,
+            vec![
+                "G1 X20 F10000",
+                "G1 X1 F10000",
+                "G1 X20 F10000",
+                "G1 X246 F10000",
+                "G1 X256 F10000",
+                "G1 X246 F10000",
+                "G1 X20 F10000",
+            ],
+            "{out:?}"
+        );
+    }
+
+    /// 等待位可以各带一个 Y；落笔 / 收笔位的 Y 没填就跟随各自那一档等待位。
+    #[test]
+    fn wait_points_carry_their_own_y() {
+        let mut d = params();
+        d.move_y = true;
+        d.wait_x = 20.0;
+        d.wait_y = 7.0;
+        d.mount_x = 1.0;
+        d.unmount_wait_x = Some(246.0);
+        d.unmount_wait_y = Some(0.0);
+        d.unmount_x = 256.0;
+        let out = build_debug_gcode(&startup(), &d);
+        let seq: Vec<&str> = out
+            .iter()
+            .filter(|l| l.starts_with("G1 X"))
+            .map(|s| s.as_str())
+            .collect();
+        assert_eq!(
+            seq,
+            vec![
+                "G1 X20 Y7 F10000",
+                "G1 X1 Y7 F10000",
+                "G1 X20 Y7 F10000",
+                "G1 X246 Y0 F10000",
+                "G1 X256 Y0 F10000",
+                "G1 X246 Y0 F10000",
+                "G1 X20 Y7 F10000",
+            ],
             "{out:?}"
         );
     }

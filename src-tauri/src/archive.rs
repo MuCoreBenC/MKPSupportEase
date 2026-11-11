@@ -492,6 +492,14 @@ pub struct Detail {
 pub struct DebugFacts {
     pub wait_x: f64,
     pub wait_y: f64,
+    /// 落笔等待位 X。`null` = 跟随驻点位。
+    ///
+    /// ★ **不加** `skip_serializing_if`：新记录一定写这个键（跟随时是 `null`），
+    ///   旧记录根本没有这个键 —— 写回要靠"有没有这个键"分出「跟随」与「没记」，
+    ///   两者混成一个值就会把 P 系列的 246 当成 20。
+    pub mount_wait_x: Option<f64>,
+    /// 收笔等待位 X。`null` = 跟随驻点位（同上）。
+    pub unmount_wait_x: Option<f64>,
     pub mount_x: f64,
     pub unmount_x: f64,
     pub speed: f64,

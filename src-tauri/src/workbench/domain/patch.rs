@@ -185,6 +185,33 @@ impl Draft {
         self.dirty_count() == 0
     }
 
+    /// 把草稿里指向旧 uid（`机型/版本`）的键**重指到新 uid**（改版本 id 时用）。
+    ///
+    /// 键的形状是 `v:{uid}:{key}`。不重指的话，保存那一刻这批格子会按旧 uid 写进
+    /// `machineVariants` —— 而那个版本已经没了，下一次加载判 Corrupted（与
+    /// [`super::txn::Txn`] 里 `A1:FAST` 那些键同一条事故）。
+    ///
+    /// 只动版本层的键；机型层（`m:A1:key`）与 uid 无关，一个字节都不碰。
+    pub fn retarget_version_uid(&mut self, old_uid: &str, new_uid: &str) {
+        fn move_keys<V>(map: &mut BTreeMap<String, V>, old: &str, new: &str) {
+            if !map.keys().any(|k| k.starts_with(old)) {
+                return;
+            }
+            let taken = std::mem::take(map);
+            *map = taken
+                .into_iter()
+                .map(|(k, v)| match k.strip_prefix(old) {
+                    Some(rest) => (format!("{new}{rest}"), v),
+                    None => (k, v),
+                })
+                .collect();
+        }
+        let old = format!("v:{old_uid}:");
+        let new = format!("v:{new_uid}:");
+        move_keys(&mut self.values, &old, &new);
+        move_keys(&mut self.follows, &old, &new);
+    }
+
     /// 某一层在草稿里挂着的值改动
     pub fn pending(&self, level: Level, owner: &str, key: &str) -> Option<&Option<Value>> {
         self.values.get(&value_key(level, owner, key))
@@ -302,6 +329,33 @@ pub struct CatalogMachine {
     /// 版本 id，**照机型文件里的顺序**。
     /// 不用 `BTreeSet` 是因为顺序会直接进界面，而字典序不是作者写下的顺序
     pub version_ids: Vec<String>,
+}
+
+/// 从**编辑态**的预设数据里摊出清单 —— [`CatalogMachine`] 构造的唯一实现。
+///
+/// 两个调用方：
+///
+/// - `app::storage::load`：开会话 / 保存后把「已落盘那一份」记成 [`Committed`]；
+/// - `domain::derive::Book::new`：界面读的那一份，**必须跟着编辑态走**。
+///
+/// 两处共用一条是因为 `Book` 曾经自己从 `Committed.catalog` 取清单：新建的版本
+/// 只写进 `presets` 与影子树，`Committed` 要等保存才更新 —— 于是「新增版本」
+/// 只在左侧列表里出现，详情卡、参数台、生成页都看不见它（作者 2026-11-12 报的
+/// 「新增的这些展开不了详情」）。
+pub fn catalog_machines_of(presets: &crate::workbench::presets::Presets) -> Vec<CatalogMachine> {
+    presets
+        .catalog
+        .machines()
+        .iter()
+        .map(|m| CatalogMachine {
+            id: m.id.clone(),
+            display: m.display.clone(),
+            icon: m.icon.clone(),
+            default_bundle: m.default_bundle.clone(),
+            has_dimensions: m.has_dimensions,
+            version_ids: m.versions.iter().map(|v| v.id.clone()).collect(),
+        })
+        .collect()
 }
 
 /// 应用的结果

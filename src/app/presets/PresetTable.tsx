@@ -2564,7 +2564,7 @@ function ComboField(props: {
                 onClick={() => pick(o.value)}
               >
                 <span className={s.comboCheck} aria-hidden>
-                  ✓
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 </span>
                 <span className={s.comboText}>
                   <span className={s.comboTitle}>{o.title}</span>

@@ -1656,6 +1656,8 @@
   font-size: var(--fs-body);
   font-weight: 400;
   color: var(--text-1);
+  /* 「落笔等待位 X」不许折成两行：一折行，右边那组勾与框就跟着错位 */
+  white-space: nowrap;
 }
 
 /* 调试窗底部的代码预览：等宽、浅底，行数固定所以框高不会跳 */
@@ -1673,14 +1675,17 @@
 }
 
 .previewCode {
-  margin: 0;
+  flex: 1 1 0;
+  overflow: auto;
   font-family: var(--font-code);
   font-size: var(--fs-code);
   line-height: 1.7;
   color: var(--text-2);
-  flex: 1 1 0;
+}
+
+/* 一行一个 div：内容变了 key 变，React 重建这一行，不残留上一帧的字 */
+.previewLine {
   white-space: pre;
-  overflow: auto;
 }
 
 /*
@@ -1695,7 +1700,8 @@
  */
 .debugGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
+  /* 右栏 360：最长一行是「落笔等待位 X + 跟随驻点位 + 数字框」，再窄就装不下 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 360px);
   gap: 32px;
   align-items: stretch;
   /*
@@ -1703,9 +1709,14 @@
    * 真正生效，否则「表格多少行」会反过来决定框多高 —— 作者两次截图都是
    * 一点「默认点位」框就长到屏幕上下沿。
    *
-   * 320 = 右栏八行（`.modalRow` 40 × 8）。改行高时这里跟着改。
+   * 340 = 右栏九行（`.modalRow` 36 + 间距）。不勾「移动 Y」时就是九行；
+   * 勾了多出四行 Y，右栏自己滚。改行高时这里跟着改。
+   *
+   * ★ 小窗要收：前面那个 `78vh - 172px` 就是"框占窗口八成" ——
+   *   172 = 标题栏 74 + 底栏 60 + 框身内衬 36。窗口矮到 399 时它算出 139，
+   *   由 140 兜底（再矮就没有可读高度了）；高窗照旧顶到 340。
    */
-  height: 290px;
+  height: clamp(140px, calc(78vh - 172px), 340px);
 }
 
 .debugLeft {
@@ -1714,8 +1725,12 @@
   min-height: 0;
   /* 与右栏等高（grid 的 stretch），内部 flex 才能算出「剩余多少给代码」 */
   height: 100%;
-  /* 里面的表格再长也只能在自己的格子里滚，不许把框顶高 */
-  overflow: hidden;
+  /*
+   * 矮窗里开关 + 代码块 + 恢复默认放不进 140：让整栏滚，
+   * 而不是把代码块裁掉（`.debugCode` 有 80 的下限，撑破也只能滚）。
+   */
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .debugParams {
@@ -1746,13 +1761,10 @@
   gap: 12px;
 }
 
+/* 「跟随驻点位」那颗勾：字号与颜色跟着行内小字，摆法交给共用件 */
 .followCheck {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
   font-size: var(--fs-label);
   color: var(--text-2);
-  cursor: pointer;
   white-space: nowrap;
 }
 
@@ -1890,6 +1902,49 @@
   line-height: 1.5;
 }
 
+/* 列表底下那一行：左边上限提示，右边「清空」 */
+.presetFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* 提示在页脚里靠左，上下不再留白（外面那行已经给了间距） */
+.presetFoot > .presetHint {
+  margin: 0;
+}
+
+/* 右下角那颗「清空」：第一下变确认，三秒不动退回去 */
+.presetClear {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.presetClear:hover {
+  border-color: var(--line);
+  color: var(--text-1);
+}
+
+.presetClearArmed {
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+  color: var(--danger);
+}
+
+.presetClearArmed:hover {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
 /* 出厂点位参照表：四列，第一列机型宽一点 */
 .anchorWrap {
   display: flex;
@@ -1905,10 +1960,26 @@
   padding-right: 4px;
 }
 
+/*
+ * 矮窗里表格不再抢剩余高度，按内容长 —— 滚动交给 `.debugLeft` 这一层，
+ * 免得"外层滚到表格、内层还套一条"。
+ *
+ * ★ `flex: 0 0 auto` + `overflow: visible` 两个一起：只放开 flex 的话，
+ *   表格会被压成 11px 高、自己内部滚，而左栏因为"没有溢出"根本不滚 ——
+ *   点开「默认点位」看到的还是一条缝。
+ * ★ 必须写在 `.anchorWrap` 之后：同特异性，靠"后写者赢"压下上面那条 `flex`。
+ */
+@media (height <= 640px) {
+  .anchorWrap {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+}
+
 .anchorRow {
   display: grid;
-  /* 固定列宽：`256 → 267` 要多宽就留多宽，窗口小了靠横向滚，不压缩 */
-  grid-template-columns: 62px 84px 84px;
+  /* 固定列宽：`256 → 267` 要多宽就留多宽，窗口小了靠横向滚，不压缩；末列放「用」 */
+  grid-template-columns: 62px 84px 84px 34px;
   justify-content: center;
   gap: 10px;
   width: max-content;
@@ -1956,14 +2027,21 @@
   white-space: nowrap;
 }
 
-/* 组头：机型名只写这一次；右边那句「开始收笔 276」按机型，组内各版本相同 */
+/*
+ * 组头：机型名只写这一次；右边那句「开始收笔 …」按机型，组内各版本相同。
+ *
+ * ★ `width: 100%` + `wrap`：P 系列那条路径有五段（`250,216 → 256 → 215 → 200 → 250`），
+ *   一行放不下。这里是整张表里唯一允许折行的一格 —— 路径要能照着复现，
+ *   不能像表格行那样靠横向滚（滚出去就少看一段）。
+ */
 .anchorGroup {
   display: flex;
   align-items: baseline;
   /* 靠左挨着机型名写，不推到行的右端（那样会单独占出一列空白） */
   justify-content: flex-start;
-  gap: 10px;
-  width: max-content;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  width: 100%;
   padding: 8px 4px 2px;
   /* 组与组之间用双实线隔开 —— 有了它就不用每行都重复机型名 */
   border-top: 3px double var(--hairline);
@@ -1980,9 +2058,11 @@
 }
 
 .anchorGroupNote {
+  /* 路径可以折行（见 `.anchorGroup`）：窄栏时在箭头处断，不许截 */
+  min-width: 0;
   font-size: var(--fs-label);
   color: var(--text-3);
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .anchorVersion {
@@ -1990,6 +2070,25 @@
   color: var(--text-2);
   text-align: center;
   white-space: nowrap;
+}
+
+/* 行末那颗「用」：把这一行的 X 填进右栏，比照着数字手敲省事 */
+.anchorUse {
+  justify-self: center;
+  align-self: center;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.anchorUse:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* 高级模式的代码编辑器：与只读预览同一块底，但能改 */

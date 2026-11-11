@@ -413,12 +413,24 @@ pub struct Ir {
 /// 一次调试运行的动作参数（见 [`Ir::debug`]）。
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 pub struct DebugIr {
-    /// 驻点（两个动作出发与返回都到这里）。
+    /// 驻点位：调试循环从这里出发，收口也回到这里。
     pub wait_x: f64,
-    /// 驻点的 Y。A 系列不用，留 0。
+    /// 驻点位的 Y。A 系列不用，留 0。
     pub wait_y: f64,
+    /// 落笔等待位 X。`None` = 跟随驻点位。
+    #[serde(default)]
+    pub mount_wait_x: Option<f64>,
+    /// 落笔等待位 Y。`None` = 跟随驻点位。
+    #[serde(default)]
+    pub mount_wait_y: Option<f64>,
     /// 落笔位。
     pub mount_x: f64,
+    /// 收笔等待位 X。`None` = 跟随驻点位。
+    #[serde(default)]
+    pub unmount_wait_x: Option<f64>,
+    /// 收笔等待位 Y。`None` = 跟随驻点位。
+    #[serde(default)]
+    pub unmount_wait_y: Option<f64>,
     /// 收笔位。
     pub unmount_x: f64,
     /// 动作行的移动速度（mm/min）。
@@ -427,10 +439,10 @@ pub struct DebugIr {
     pub test_mount: bool,
     /// 要不要测收笔。
     pub test_unmount: bool,
-    /// 落笔位的 Y。`None` = **跟随驻点**（作者：「不填写的话就用驻点的」）。
+    /// 落笔位的 Y。`None` = 跟随落笔等待位（它又跟随驻点位）。
     #[serde(default)]
     pub mount_y: Option<f64>,
-    /// 收笔位的 Y。`None` = 跟随驻点。
+    /// 收笔位的 Y。`None` = 跟随收笔等待位。
     #[serde(default)]
     pub unmount_y: Option<f64>,
     /// **高级模式：整段动作块直接由用户写**（2026-11-11 作者：

@@ -130,22 +130,22 @@ pub fn wb_machines() -> Result<MachineList, AppError> {
     traced("wb_machines", |_| Ok(list_of(&load_session_presets()?)))
 }
 
-/// 加一个版本，**立刻落盘**，回一份新的清单。
+/// 加一个版本：**先落进草稿**（影子树），回一份新的清单。
 ///
-/// # 为什么不经草稿
+/// # 为什么是一条结构编辑，而不是另建页面级草稿
 ///
-/// 参数值那套有草稿 + 撤销栈，因为改一个数是高频动作、而且常常要连改一片再一起看。
-/// 「加一个版本」不是那种动作：它低频、而且**逆操作很直接**（删掉那个版本）。
-/// 为它建一套页面级草稿会把参数页那一整套状态机复制一遍，换来的只是一个
-/// 「还没保存」的中间态 —— 而那个中间态本身就是新的一类 bug 来源。
+/// 一条命令 = 一个对象的文件前后字节。新建只往 `machines/{机型}.toml` 插一个
+/// `[[versions]]` 块，撤销就是把之前那份字节写回去 —— 与改机型字段走同一条路
+/// （[`with_struct_ctx`]），不需要再复制一套状态机。保存（`wb_save`）才把影子树
+/// 提交到真仓库，放弃就把整份拉回去。
 ///
-/// 代价写明白：**没有撤销**。所以校验要严（ID 字符集、重名），
-/// 而写入用原子写（同目录临时文件 + rename），半个文件的 TOML 比没有更糟。
+/// 页头「未保存 N」由 `ctx.history` 数出来：新建没有字段账，按**一条**算。
+/// 校验仍然要严（ID 字符集、重名），写入用原子写 —— 半个文件的 TOML 比没有更糟。
 /// 写命令统一走 `Ctx`：**改的是 `Ctx` 里那份 `Presets`**（资产库 / 套餐页的读视图
-/// 建在它上面），落盘之后两边看到的就是同一个事实。以前这里各自 `load_presets()`
-/// fresh 一份来改 —— 落盘是对的，但 `Ctx` 里的机型清单还是启动时的旧指向，
+/// 建在它上面），写完两边看到的就是同一个事实。以前这里各自 `load_presets()`
+/// fresh 一份来改 —— 写是写对了，但 `Ctx` 里的机型清单还是启动时的旧指向，
 /// 套餐页「被哪些版本指向」于是纹丝不动（作者截图点名「改了没反应」）。
-/// 返回值仍从盘上重读：**界面看到的应该是落盘的结果**。
+/// 返回值仍从影子树重读：**界面看到的应该是写完的结果**。
 
 #[tauri::command]
 pub fn wb_add_version(
@@ -172,11 +172,77 @@ pub fn wb_add_version(
     })
 }
 
+/// 改一个版本的 id（**主键**）：写的是影子树（草稿），保存才进真仓库。
+///
+/// 与 [`wb_set_version_field`] 分开：那一条改的是这一版的某一格值，只动一个文件；
+/// 这一条换主键，`A1:OLD` 那些键与归属资产要跟着搬，风险不同（与 `VersionField`
+/// 的枚举注释同一条口径）。
+///
+/// # 「多个地方」都要跟着搬
+///
+/// 主键换了，指着它的东西一共四处，一条都不能漏：
+///
+/// | 在哪 | 怎么搬 |
+/// |---|---|
+/// | 机型文件 `[[versions]].id` | `Presets::rename_version_uid` |
+/// | 参数四张表（值 / 范围 / 跟随） | 同上（表与内联表两种形状） |
+/// | 资产归属 `versionId` | 同上 |
+/// | **还没保存的值草稿与字段账** | `Ctx::retarget_version_uid` |
+///
+/// 第四处是"先改了几格参数、再改 id"的那条路：只改前三处的话，那几格还挂在
+/// 旧 uid 上，保存时写进一个不存在的版本。所以这里**不拒绝带草稿的改名**，
+/// 而是把草稿一起搬过去（作者 2026-11-12）。
+#[tauri::command]
+pub fn wb_set_version_id(
+    machine_id: String,
+    old_version_id: String,
+    new_version_id: String,
+) -> Result<MachineList, AppError> {
+    traced("wb_set_version_id", |_| {
+        with_struct_ctx(
+            "",
+            |_| {
+                vec![
+                    format!("machines/{machine_id}.toml"),
+                    "registry/param_registry.toml".to_owned(),
+                    "assets.toml".to_owned(),
+                ]
+            },
+            |ctx| {
+                let old_vid = old_version_id.trim();
+                let new_vid = new_version_id.trim();
+
+                let moved = ctx
+                    .presets
+                    .rename_version_uid(&machine_id, old_vid, new_vid)?;
+                ctx.presets.registry.write_back()?;
+                ctx.presets.assets.write()?;
+                ctx.presets.catalog.write_machine(&machine_id)?;
+                /* 草稿里那些格子还挂在旧 uid 上 —— 一起搬到新 uid，
+                保存时才写得回去。比这一笔更早的文件字节不动：撤销是后进先出，
+                这一条会先被撤掉，id 退回旧值之后那些字节又是对的 */
+                ctx.retarget_version_uid(&machine_id, old_vid, new_vid);
+
+                tracing::info!(
+                    machine = %machine_id,
+                    from = %old_vid,
+                    to = %new_vid,
+                    params = moved.params.len(),
+                    assets = moved.assets.len(),
+                    "改了一个版本的 id（参数记录、资产归属与草稿一起搬）"
+                );
+                Ok(list_of(&ctx.presets.reload()?))
+            },
+        )
+    })
+}
+
 /// **复制已有版本**（b05 Task 14.3 / doc §4.3 第 2–5 步）：选一个模板版本，
-/// 填新 id / 名称 / tag / 描述，保存时**只写版本定义** —— 不碰参数正文
+/// 填新 id / 名称，保存时**只写版本定义** —— 不碰参数正文
 /// （那是 [`super::wb_copy_recipe`] 的独立动作，两步分离让每次写只落一个文件）。
 ///
-/// `tag` / `description` 由前端拿模板值预填、人可改；`recommendedBundle` 抄模板。
+/// 除 id 与名称外各格**逐格照抄模板**（套餐指向、三册译名、角标、说明、备注、版图）；
+/// `tag` / `description` 给了就是改写那两格。
 #[tauri::command]
 pub fn wb_copy_version(
     machine_id: String,
@@ -247,36 +313,100 @@ pub fn wb_version_orphans(machine_id: String, version_id: String) -> Result<Vec<
     })
 }
 
-/// 删一个版本，立刻落盘。**不可逆**（没有回收站也没有撤销），
-/// 所以界面那边是两步确认，而且确认框里要列出上面那条查出来的孤儿
+/// 一条归属某个版本的资产，连同**谁在引用它**。
+///
+/// 有引用的那几条删版本时会被拒（`remove_assets_of_version` 与删资产同一道闸），
+/// 所以这件事必须在确认框里先摆出来 —— 让人点完才看到报错是最差的顺序。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionAssetView {
+    pub id: String,
+    pub machines: Vec<String>,
+    pub bundles: Vec<String>,
+}
+
+/// 这一版还挂着哪些资产 —— **删版本会连带删掉它们**。确认框点之前就要摆出来
+#[tauri::command(async)]
+pub fn wb_version_assets(
+    machine_id: String,
+    version_id: String,
+) -> Result<Vec<VersionAssetView>, AppError> {
+    traced("wb_version_assets", |_| {
+        let presets = load_session_presets()?;
+        let mut out = Vec::new();
+        for id in presets.assets_of_version(&machine_id, &version_id) {
+            let usage = presets.asset_usage(&id)?;
+            out.push(VersionAssetView {
+                id,
+                machines: usage.machines,
+                bundles: usage.bundles,
+            });
+        }
+        Ok(out)
+    })
+}
+
+/// 删一个版本：**先进草稿**（撤销能整条退回来），保存才提交到真仓库。
+///
+/// 连带清掉的东西（归属资产、套餐里指向它的引用、参数四张表的键）必须在确认框里
+/// 先摆出来 —— 界面上是两步确认，因为这一步确实会让东西消失，只是能撤销。
 #[tauri::command]
 pub fn wb_remove_version(machine_id: String, version_id: String) -> Result<MachineList, AppError> {
     traced("wb_remove_version", |_| {
         with_struct_ctx(
             "",
-            |_| vec![format!("machines/{machine_id}.toml")],
+            |_| {
+                vec![
+                    format!("machines/{machine_id}.toml"),
+                    "registry/param_registry.toml".to_owned(),
+                    "bundles.toml".to_owned(),
+                    "assets.toml".to_owned(),
+                ]
+            },
             |ctx| {
                 // 先记下来再删 —— 删完就查不出它被谁引用了
                 let orphans = ctx
                     .presets
                     .orphans_if_version_removed(&machine_id, &version_id);
+                /* ★ 归属这一版的资产记录必须跟着走：版本没了它们就指向一个不存在的
+                对象，下一次启动 `check_cross_consistency` 会把整份数据判成
+                Corrupted（整个工作台起不来）。它已被套餐引用的那几条会先**从套餐里
+                摘掉**，否则套餐里那条 `assetRef` 就成了指向空气的引用。 */
+                let assets = ctx.presets.remove_assets_of_version(
+                    &machine_id,
+                    &version_id,
+                    &crate::workbench::clock::now_iso8601(),
+                )?;
+                /* 同一条理由：`A1:FAST` 在 machineVariants / follows 里留着的键
+                也是指向空气。**这一步不删的话删版本永远成功不了** —— 上面那条资产
+                检查过了，下一次 load 会栽在这些孤儿键上。 */
+                let overrides = ctx
+                    .presets
+                    .drop_version_overrides(&machine_id, &version_id)?;
+                if !overrides.is_empty() {
+                    ctx.presets.write_back()?;
+                }
                 ctx.presets
                     .catalog
                     .machine_mut(&machine_id)?
                     .remove_version(&version_id)?;
                 ctx.presets.catalog.write_machine(&machine_id)?;
-                if orphans.is_empty() {
-                    tracing::info!(machine = %machine_id, version = %version_id, "删了一个版本");
-                } else {
-                    // 留下孤儿是**要留痕**的事，不能只在界面上闪一下
-                    tracing::warn!(
-                        machine = %machine_id,
-                        version = %version_id,
-                        orphans = orphans.len(),
-                        keys = %orphans.join(","),
-                        "删了一个版本，留下了孤儿引用"
-                    );
-                }
+                // 连带清掉的东西**要留痕**，不能只在界面上闪一下
+                tracing::info!(
+                    machine = %machine_id,
+                    version = %version_id,
+                    assets = assets.removed.len(),
+                    detached = assets.detached.len(),
+                    bundles = %assets
+                        .detached
+                        .iter()
+                        .map(|(b, _)| b.as_str())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    overrides = overrides.len(),
+                    keys = %orphans.join(","),
+                    "删了一个版本（归属资产、套餐引用与参数覆盖一起清了）"
+                );
                 Ok(list_of(&ctx.presets.reload()?))
             },
         )
@@ -452,6 +582,10 @@ fn machine_field_text(m: &crate::presetdata::catalog::Machine, f: MachineField) 
 }
 
 /// 版本某一格现在是什么。`None` = 这一格空着
+///
+/// **每个 `VersionField` 都要有一条胳膊**（不许 `_ => ""`）：漏了的那几格
+/// （标签 / 说明 / 备注 / 版图）会算出 `None → None`，于是「改了它」在字段账上
+/// 是"没变"—— 页头写着「未保存 0」而文件确实改了（作者 2026-11-11 报的）。
 fn version_field_text(
     v: &crate::presetdata::catalog::MachineVersion,
     f: VersionField,
@@ -462,7 +596,16 @@ fn version_field_text(
         VersionField::NameTw => v.name_tw.clone().unwrap_or_default(),
         VersionField::NameJa => v.name_ja.clone().unwrap_or_default(),
         VersionField::RecommendedBundle => v.recommended_bundle.clone().unwrap_or_default(),
-        _ => String::new(),
+        VersionField::Tag => v.tag.clone().unwrap_or_default(),
+        VersionField::TagEn => v.tag_en.clone().unwrap_or_default(),
+        VersionField::TagTw => v.tag_tw.clone().unwrap_or_default(),
+        VersionField::TagJa => v.tag_ja.clone().unwrap_or_default(),
+        VersionField::Description => v.description.clone().unwrap_or_default(),
+        VersionField::DescriptionEn => v.description_en.clone().unwrap_or_default(),
+        VersionField::DescriptionTw => v.description_tw.clone().unwrap_or_default(),
+        VersionField::DescriptionJa => v.description_ja.clone().unwrap_or_default(),
+        VersionField::Remark => v.remark.clone().unwrap_or_default(),
+        VersionField::Image => v.image.clone().unwrap_or_default(),
     };
     Some(text).filter(|s| !s.is_empty())
 }
@@ -733,5 +876,50 @@ mod tests {
             Some("bambu-lab-logo"),
             "品牌图 = 资产 id"
         );
+    }
+
+    /// **版本每一格都要说得出"现在是什么"**。
+    ///
+    /// `None` 只该出现在**真的空着**的那几格。漏一条胳膊（早先是 `_ => ""`）时，
+    /// 标签 / 说明 / 备注 / 版图的改前与改后都是 `None` ⇒ 字段账上"没变" ⇒
+    /// 页头写着「未保存 0」而文件确实改了（作者 2026-11-11 报的那一幕）。
+    #[test]
+    fn every_version_field_knows_its_own_text() {
+        let Some(root) = crate::workbench::paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let p = Presets::load_from(&root).expect("读得通");
+        let v = p
+            .catalog
+            .machine("A1")
+            .and_then(|m| m.versions.iter().find(|v| v.id == "FASTV3.3"))
+            .expect("夹具前提：A1 有 FASTV3.3");
+
+        /* 夹具前提：这一版这十三格都填着东西 */
+        for f in [
+            VersionField::Name,
+            VersionField::NameEn,
+            VersionField::NameTw,
+            VersionField::NameJa,
+            VersionField::RecommendedBundle,
+            VersionField::Tag,
+            VersionField::TagEn,
+            VersionField::TagTw,
+            VersionField::TagJa,
+            VersionField::Description,
+            VersionField::DescriptionEn,
+            VersionField::DescriptionTw,
+            VersionField::DescriptionJa,
+        ] {
+            assert!(
+                version_field_text(v, f).is_some(),
+                "{f:?} 这一格填着东西却读成 None —— 改它会算成没改"
+            );
+        }
+
+        /* 这两格这一版确实没填 —— None 是对的 */
+        assert_eq!(version_field_text(v, VersionField::Remark), None);
+        assert_eq!(version_field_text(v, VersionField::Image), None);
     }
 }

@@ -1900,7 +1900,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                   }}
                   aria-label="收起"
                 >
-                  ×
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                 </button>
               </div>
             )}
@@ -1936,7 +1936,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                   onLocate={sel === null ? undefined : () => locateParam(sel)}
                   /* 「属于 X 的子参数」点 X 就换到 X —— 那一行是入口，不是注解 */
                   onPick={(key) => setSel(key)}
-                  /* 「编辑定义」：名称/单位/类型/范围/条件/弃用那条改的路（即时落盘） */
+                  /* 「编辑定义」：名称/单位/类型/范围/条件/弃用那条改的路（走草稿（保存后写入）） */
                   onEditDef={selParam ? () => setDefEditKey(sel) : undefined}
                   /* 「各版本取值」每一层各有一枚按钮 —— 进来的那一层就是它 */
                   onOpenGcode={(key, layerUid, layerMachineId) => {

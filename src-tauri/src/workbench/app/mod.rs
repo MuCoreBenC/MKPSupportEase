@@ -671,9 +671,36 @@ impl Ctx {
     /// "生成拦不拦取决于你看没看过未保存改动框"—— 那个框一打开就会把值编辑
     /// 写成影子字节，而只看影子与草稿的旧判据读不到内存里的命令。
     fn dirty_count(&self) -> usize {
+        self.struct_dirty_count() + self.draft.dirty_count() + self.txn.dirty_count()
+    }
+
+    /// 结构编辑那本账改了几处（机型 / 版本 / 套餐 / 资产的定义编辑）。
+    ///
+    /// 单独拎出来是因为 [`view_of`] 也要加它 —— 那个函数拿的是**传进来的**
+    /// committed / draft（可能是一份"假如"的），但这本账只有 `ctx` 上有。
+    fn struct_dirty_count(&self) -> usize {
         edit_history::dirty_fields(&self.history.entries().cloned().collect::<Vec<_>>())
-            + self.draft.dirty_count()
-            + self.txn.dirty_count()
+    }
+
+    /// 改版本 id 之后，把**还没保存的那些记录**一起重指到新 uid。
+    ///
+    /// 两处必须跟着换（第三处是 `edit_key`：主键变了，同一格连点不能再并到旧格子上）：
+    ///
+    /// - 值草稿的键（`v:A1/FAST:key`）—— 不换的话保存时按旧 uid 写进
+    ///   `machineVariants`，那个版本已经没了；
+    /// - 字段账的归属（`A1:FAST`）—— 撤销栈与「改了什么」都读它。
+    ///
+    /// **不动** `committed` / `base`：那是"已落盘 / 打开时"的两份，改 id 还没保存，
+    /// 它们该停在旧值上 —— 撤销这一笔时要能退回去。
+    fn retarget_version_uid(&mut self, machine_id: &str, old_vid: &str, new_vid: &str) {
+        let old_v = format!("{machine_id}/{old_vid}");
+        let new_v = format!("{machine_id}/{new_vid}");
+        let old_c = format!("{machine_id}:{old_vid}");
+        let new_c = format!("{machine_id}:{new_vid}");
+        self.draft.retarget_version_uid(&old_v, &new_v);
+        self.history
+            .retarget_version(&old_c, &new_c, &old_v, &new_v);
+        self.edit_key = None;
     }
 
     /// 重算「几份文件有改动」并写回缓存。**唯一实现** ——
@@ -885,6 +912,7 @@ const COMMAND_LABELS: &[(&str, &str)] = &[
     ("wb_set_brand_field", "改品牌信息"),
     ("wb_add_machine", "新增机型"),
     ("wb_add_version", "新增版本"),
+    ("wb_set_version_id", "改版本 id"),
     ("wb_copy_version", "复制版本"),
     ("wb_copy_recipe", "复制版本参数"),
     ("wb_remove_version", "删除版本"),
@@ -904,6 +932,7 @@ const COMMAND_LABELS: &[(&str, &str)] = &[
     ("wb_set_group", "改资产分组"),
     ("wb_remove_group", "删除资产分组"),
     ("wb_set_param_meta", "改参数定义"),
+    ("wb_clear_stale_translations", "清译文标记"),
     ("wb_set_section_meta", "改分组名与位置"),
     ("wb_remove_section", "删除分组"),
     ("wb_anno_write", "保存标注"),
@@ -1090,7 +1119,48 @@ pub(super) fn run_struct<T>(
             .iter()
             .map(|p| (p.clone(), std::fs::read(root.join(p)).ok()))
             .collect();
-        let out = f(ctx)?;
+        /*
+         * ★ 失败必须把影子文件退回去。
+         *
+         * 命令可能**改了文件才失败**：最典型的是"先写机型文件、再从盘上重读"，
+         * 删版本把 `A1/FAST` 写掉了，重读时才被资产台账判成 Corrupted。
+         * 那一份字节留在影子里，而这一条没进任何一本账 ⇒ 页头数不到、撤销退不回、
+         * 「放弃改动」又因为三本账都干净直接放行，影子从此带着一笔没人认领的改动。
+         *
+         * 内存文档也要重读：`machine_mut().remove_version()` 改的是 `ctx.presets`，
+         * 文件退回去了、内存还停在删完的样子，界面与影子就各说各话。
+         */
+        let out = match f(ctx) {
+            Ok(v) => v,
+            Err(e) => {
+                ctx.pending_fields.clear();
+                for (path, bytes) in &before {
+                    let target = root.join(path);
+                    let restored = match bytes {
+                        Some(b) => crate::fsx::atomic::atomic_write(&target, b),
+                        None => match std::fs::remove_file(&target) {
+                            Ok(()) => Ok(()),
+                            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                            Err(err) => {
+                                Err(AppError::io(format!("回滚出错文件：{}", target.display()))
+                                    .with_detail(err.to_string()))
+                            }
+                        },
+                    };
+                    if let Err(err) = restored {
+                        tracing::error!(
+                            path = %path,
+                            error = %err.message,
+                            "结构编辑失败，回滚影子文件也失败"
+                        );
+                    }
+                }
+                if let Err(err) = ctx.reload_presets() {
+                    tracing::error!(error = %err.message, "结构编辑失败，重读内存也失败");
+                }
+                return Err(e);
+            }
+        };
         let swaps = before
             .into_iter()
             .map(|(path, b)| edit_history::FileSwap {
@@ -1343,8 +1413,9 @@ fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>
 
     现在数**行**（`Txn::dirty_count` → `changed_lines`）。它与 diff 框里
     红绿行的条数同源，也和"`ops.len()` = 撤销栈几格"分得开。
-    唯一真值仍然是 `Txn::dirty_count()` —— 页头那个数由前端回填这一个。 */
-    v.dirty_count = ctx.txn.dirty_count() + draft.dirty_count();
+    **三项缺一不可**：结构编辑（`ctx.history`）/ 值草稿 / 值事务。
+    少加第一项就是作者 2026-11-11 报的那一幕 —— 改了标签，页头还是「未保存 0」。 */
+    v.dirty_count = ctx.struct_dirty_count() + ctx.txn.dirty_count() + draft.dirty_count();
     v
 }
 
@@ -1952,12 +2023,18 @@ pub fn wb_clear_stale_translations(
     keys: Vec<String>,
 ) -> Result<RegistryView, AppError> {
     traced("wb_clear_stale_translations", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.registry.clear_stale_translations(&key, &keys)?;
-            ctx.presets.registry.write_back()?;
-            ctx.reload_presets()?;
-            Ok(registry_view(&ctx.presets.registry))
-        })
+        /* 走**结构编辑**那条统一入口：它也是草稿（保存才落真仓库），
+         * 不进 `ctx.history` 的话页头「未保存 N」读不到这一笔 —— 清了几格标记、
+         * 页头还是 0，下一趟保存才发现自己也把它写进去了 */
+        with_struct_ctx(
+            "stale",
+            |_| vec!["registry/param_registry.toml".to_owned()],
+            |ctx| {
+                ctx.presets.registry.clear_stale_translations(&key, &keys)?;
+                ctx.presets.registry.write_back()?;
+                Ok(registry_view(&ctx.presets.registry))
+            },
+        )
     })
 }
 
@@ -3065,13 +3142,46 @@ pub fn wb_discard() -> Result<BookView, AppError> {
 
 /// [`wb_discard`] 的本体（**抽出来是为了可测**）：影子整个拉回磁盘原状、内存重读。
 pub(super) fn discard_in(ctx: &mut Ctx) -> Result<BookView, AppError> {
-    if ctx.draft.is_clean() && !ctx.txn.is_dirty() && ctx.history.is_empty() {
+    let base_root = txn::base_root(&ctx.store.root);
+    /* 空目录与"没有基准"是一回事 —— `txn::walk` 对不存在的目录给的是空快照 `Ok`，
+    拿它去判"影子脏不脏"必然说脏，而 `mirror(空 → 影子)` 会把整棵影子清掉 */
+    let base_snap = txn::snapshot(&base_root).ok().filter(|b| !b.is_empty());
+    /*
+     * "有没有可放弃的东西"必须**看影子**，不能只数三本账（草稿 / 事务 / 历史）。
+     *
+     * 结构命令可能改了文件才失败（先写、再从盘上重读校验）—— 那一笔不在任何一本账里，
+     * 影子却真的与基准不同。只数账会直接放行：用户点多少次「放弃改动」都清不掉它，
+     * 而「查看改动」照样能看见那几行。两条口径从此对不上。
+     *
+     * 只看源文件（`delivery/` 是生成产物，不算编辑）。基准读不出来时退回"只认三本账"：
+     * 没有可回退的那一份，判断也无从谈起。
+     */
+    let shadow_differs = match (&base_snap, txn::snapshot(&ctx.shadow_root)) {
+        (Some(base), Ok(shadow)) => {
+            let base = base.clone().without_products();
+            !txn::equal(&shadow.without_products(), &base)
+        }
+        _ => false,
+    };
+    if ctx.draft.is_clean() && !ctx.txn.is_dirty() && ctx.history.is_empty() && !shadow_differs {
         /* **没有可放弃的东西 = 已经是你要的样子**（2026-11-02）。
         作者点第二次「放弃改动」时，这条 `Err` 变成一条永远消不掉的横幅
         （`fatal` 只设不清、z 60、不能点穿），只能重开软件。
         幂等：什么都不做，把现在的状态交回去。 */
         let notices = ctx.notices_now();
         return Ok(view_of(ctx, &ctx.committed, &ctx.draft, notices));
+    }
+    /* 没有基准就**不能**往下走：`mirror(空 → 影子)` 会把整棵影子清掉，
+    而用户以为只是作废自己的编辑。缺就报错，不许兜底（AGENTS §8.1） */
+    if base_snap.is_none() {
+        return Err(
+            AppError::internal("基准快照不在，放弃改动没有可回退的那一份".to_owned()).with_detail(
+                format!(
+                    "期望 {} 里有一份完整的预设副本；它缺失时回铺会清空影子树",
+                    base_root.display()
+                ),
+            ),
+        );
     }
     let dropped = ctx.draft.dirty_count() + ctx.txn.dirty_count() + ctx.history.undo_depth();
     ctx.draft = Draft::default();
@@ -3103,7 +3213,6 @@ pub(super) fn discard_in(ctx: &mut Ctx) -> Result<BookView, AppError> {
      *
      * 基准（`base_root`）**不动**：它就是"我来的时候"那一份。
      * 增删改名排序全都不用逐种回退 —— 整份覆盖天然覆盖它们。 */
-    let base_root = txn::base_root(&ctx.store.root);
     txn::mirror(&base_root, &ctx.shadow_root)?;
     ctx.base = Presets::load_from(&base_root)?;
     ctx.txn.clear();
@@ -4579,6 +4688,73 @@ mod tests {
         drop(fx_dir);
     }
 
+    /// **结构编辑一定要进「未保存 N」**（作者 2026-11-11 报的：改了版本标签，
+    /// 页头一直写「未保存 0」，可导航那盏灯亮着、撤销也点得动）。
+    ///
+    /// 两种各验一次：记了字段账的（改一格）与一次性动作（新建 / 删除，没有格可记）。
+    /// `Ctx::dirty_count()`（状态栏那条）与 `view_of().dirty_count`（页头那份）同源。
+    #[test]
+    fn a_struct_edit_always_shows_up_in_the_unsaved_count() {
+        use crate::presetdata::VersionField;
+
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+        assert_eq!(ctx.dirty_count(), 0, "开场是干净的");
+
+        /* ① 改一格：命令把改前 / 改后写进 `pending_fields` —— 标签也必须算得出来 */
+        run_struct(
+            &mut ctx,
+            "改版本信息",
+            "tag",
+            |_| vec!["machines/A1.toml".to_owned()],
+            |ctx| {
+                ctx.presets.catalog.machine_mut("A1")?.set_version_field(
+                    "FAST",
+                    VersionField::Tag,
+                    Some("旧版"),
+                )?;
+                ctx.presets.catalog.write_machine("A1")?;
+                ctx.pending_fields = vec![one_field(
+                    "A1:FAST".to_owned(),
+                    "tag",
+                    "快拆版6月以前".to_owned(),
+                    Some("推荐".to_owned()),
+                    Some("旧版".to_owned()),
+                )];
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(ctx.dirty_count(), 1, "改了一格就是一处");
+        let (c, d, n) = state(&ctx).unwrap();
+        assert_eq!(
+            view_of(&ctx, &c, &d, n).dirty_count,
+            1,
+            "页头那份读数也要是 1（它曾经漏掉结构编辑那一项）"
+        );
+
+        /* ② 一次性动作：没有"格"，但它照样改了文件 —— 也算一处 */
+        run_struct(
+            &mut ctx,
+            "新增机型",
+            "",
+            |_| vec!["machines/NEW.toml".to_owned()],
+            |ctx| {
+                ctx.presets
+                    .catalog
+                    .add_machine("NEW", "BAMBU_LAB", "新机器")?;
+                ctx.presets.catalog.write_machine("NEW")
+            },
+        )
+        .unwrap();
+        assert_eq!(ctx.dirty_count(), 2, "1 格 + 1 个一次性动作");
+
+        drop(fx_dir);
+    }
+
     /// **新建机型撤销 ⇒ 那个文件被删掉**（`before` 为 `None` = 这一笔新建了它）
     #[test]
     fn undoing_a_new_machine_removes_its_file() {
@@ -4610,6 +4786,283 @@ mod tests {
         );
 
         drop(fx_dir);
+    }
+
+    /// **新建版本后，整本里立刻有它**（2026-11-12）。
+    ///
+    /// 详情卡由 `book.machines[].versions` 驱动（前端 `nodeOf` 按 `versionId` 找节点）。
+    /// 清单以前读 `committed.catalog`（已落盘那一份），新建的版本只在 `presets` 里 ——
+    /// 于是点完「新增版本」：列表里有、详情打不开、改不了，得先保存才看得见
+    /// （作者报的「新增的这些展开不了详情」）。
+    #[test]
+    fn a_new_version_shows_up_in_the_book_before_saving() {
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        run_struct(
+            &mut ctx,
+            "新增版本",
+            "",
+            |_| vec!["machines/A1.toml".to_owned()],
+            |ctx| {
+                ctx.presets
+                    .catalog
+                    .machine_mut("A1")?
+                    .add_version("NEW1", "新版本")?;
+                ctx.presets.catalog.write_machine("A1")
+            },
+        )
+        .unwrap();
+
+        let view = view_of(&ctx, &ctx.committed, &ctx.draft, Vec::new());
+        let a1 = view.machines.iter().find(|m| m.id == "A1").expect("A1 在");
+        let node = a1
+            .versions
+            .iter()
+            .find(|v| v.version_id == "NEW1")
+            .expect("新建的版本必须在整本里 —— 否则详情卡取不到节点");
+        assert_eq!(node.name, "新版本", "名字来自编辑态，不是回落的 id");
+        assert!(
+            view.dirty_count >= 1,
+            "新建一个版本算一处未保存，实测 {}",
+            view.dirty_count
+        );
+
+        drop(fx_dir);
+    }
+
+    /// **先改了参数再改版本 id：草稿要跟着搬到新 uid**（2026-11-12）。
+    ///
+    /// 主键换了而草稿还挂着 `v:A1/FAST:key` 的话，保存那一刻那几格会被写进一个
+    /// 不存在的版本（`machineVariants` 里留下 `A1:FAST`，下一次加载判 Corrupted）。
+    /// 早先的写法是"有值编辑就拒绝改 id" —— 作者要的是搬过去，不是拦下来。
+    #[test]
+    fn renaming_a_version_carries_unsaved_value_edits() {
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        /* ① 值编辑：草稿 + 历史各一份（真实路径 `wb_apply_draft` 落的也是这两笔） */
+        let patch = Patch::SetValue {
+            level: Level::Version,
+            owner: "A1/FAST".to_owned(),
+            key: "toolhead.offset.x".to_owned(),
+            value: Some(serde_json::json!(6.5)),
+        };
+        apply_patches(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.presets.registry,
+            std::slice::from_ref(&patch),
+        )
+        .unwrap();
+        ctx.history.record(
+            "A1 · 高速版 · X 轴偏移".to_owned(),
+            Some("v:A1/FAST:toolhead.offset.x".to_owned()),
+            patch,
+            vec![Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/FAST".to_owned(),
+                key: "toolhead.offset.x".to_owned(),
+                value: Some(serde_json::json!(-0.7)),
+            }],
+            Vec::new(),
+        );
+        assert!(
+            ctx.draft.values.keys().any(|k| k.starts_with("v:A1/FAST:")),
+            "前提：草稿里那一格挂在旧 uid 上"
+        );
+
+        /* ② 改 id：与命令体同一套动作 */
+        run_struct(
+            &mut ctx,
+            "改版本 id",
+            "",
+            |_| {
+                vec![
+                    "machines/A1.toml".to_owned(),
+                    "registry/param_registry.toml".to_owned(),
+                    "assets.toml".to_owned(),
+                ]
+            },
+            |ctx| {
+                ctx.presets.rename_version_uid("A1", "FAST", "FAST_NEW")?;
+                ctx.presets.registry.write_back()?;
+                ctx.presets.assets.write()?;
+                ctx.presets.catalog.write_machine("A1")?;
+                ctx.retarget_version_uid("A1", "FAST", "FAST_NEW");
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        /* ③ 草稿键跟着搬，旧键一个不剩 */
+        assert!(
+            !ctx.draft.values.keys().any(|k| k.contains("A1/FAST:")),
+            "旧 uid 的草稿键一条都不该剩：{:?}",
+            ctx.draft.values.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            ctx.draft
+                .values
+                .keys()
+                .any(|k| k.starts_with("v:A1/FAST_NEW:")),
+            "那一格要落在新 uid 上"
+        );
+
+        /* ④ 历史里那条值编辑也要重指：结构编辑会 `reload_presets`，它拿 patch 重放 */
+        ctx.reload_presets().unwrap();
+        let def = ctx
+            .presets
+            .registry
+            .param("toolhead.offset.x")
+            .expect("字段在");
+        assert_eq!(
+            def.machine_variants.get("A1:FAST_NEW"),
+            Some(&serde_json::json!(6.5)),
+            "重放之后值要落在新 uid 上，实测：{:?}",
+            def.machine_variants
+        );
+        assert!(
+            !def.machine_variants.contains_key("A1:FAST"),
+            "旧 uid 一条都不该剩"
+        );
+
+        drop(fx_dir);
+    }
+
+    /// **把版本指到套餐 = 一条可撤销的草稿编辑**（2026-11-12）。
+    ///
+    /// 它改的是**机型文件**里的 `recommendedBundle`，套餐内容一个字都不动。
+    /// `files_of` 曾经写成 `["bundles.toml"]` —— `run_struct` 拍不到被改的机型文件，
+    /// 撤销撤不回去、未保存数也不涨（这正是"还有哪些没用草稿"那一问里挖出来的）。
+    #[test]
+    fn assigning_versions_to_a_bundle_is_an_undoable_draft_edit() {
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        let rel = "machines/P1S.toml";
+        let before = std::fs::read(ctx.shadow_root.join(rel)).unwrap();
+        let uids = vec!["P1S/LITE".to_owned()];
+
+        run_struct(
+            &mut ctx,
+            "指派版本到套餐",
+            "members",
+            |_| super::bundles::assign_files_of(&uids),
+            |ctx| {
+                ctx.presets.assign_versions("A1_default", &uids)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(
+            ctx.dirty_count() >= 1,
+            "指派也是一处未保存改动（它改了机型文件）"
+        );
+        assert_ne!(
+            std::fs::read(ctx.shadow_root.join(rel)).unwrap(),
+            before,
+            "机型文件真的被改了"
+        );
+
+        undo_in(&mut ctx).unwrap();
+        assert_eq!(
+            std::fs::read(ctx.shadow_root.join(rel)).unwrap(),
+            before,
+            "撤销要退回机型文件 —— files_of 漏了它就退不回来"
+        );
+
+        drop(fx_dir);
+    }
+
+    /// **结构命令失败 ⇒ 影子文件退回 before，任何一本账都不留**（2026-11-11）。
+    ///
+    /// 现场：删版本先把 `A1/FAST` 从机型文件里写掉，再从盘上重读时才被资产台账
+    /// 判成 Corrupted。那半笔改动不在草稿 / 事务 / 历史任何一本账里 ——
+    /// 页头数不到、撤销退不回、「放弃改动」又因为三本账都干净直接放行。
+    #[test]
+    fn a_failed_struct_command_leaves_no_trace_in_the_shadow() {
+        let (_fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        let rel = "machines/A1.toml";
+        let before = std::fs::read(ctx.shadow_root.join(rel)).unwrap();
+
+        let err = run_struct(
+            &mut ctx,
+            "删除版本",
+            "",
+            |_| vec![rel.to_owned()],
+            |ctx| -> Result<(), AppError> {
+                /* 写盘成功、校验失败 —— 这一步的顺序就是真机上出事的顺序 */
+                ctx.presets
+                    .catalog
+                    .machine_mut("A1")?
+                    .remove_version("FAST")?;
+                ctx.presets.catalog.write_machine("A1")?;
+                Err(AppError::corrupted("模拟重读失败".to_owned()))
+            },
+        );
+        assert!(err.is_err());
+
+        assert_eq!(
+            std::fs::read(ctx.shadow_root.join(rel)).unwrap(),
+            before,
+            "失败之后影子必须退回命令之前那一份"
+        );
+        assert!(!ctx.txn.is_dirty(), "失败的一笔不进事务");
+        assert_eq!(ctx.history.undo_depth(), 0, "失败的一笔不进历史");
+        assert!(
+            ctx.presets
+                .catalog
+                .machine("A1")
+                .unwrap()
+                .versions
+                .iter()
+                .any(|v| v.id == "FAST"),
+            "内存文档也要退回删除之前"
+        );
+    }
+
+    /// **三本账都干净、影子却真的脏 ⇒ 「放弃改动」必须照清**（2026-11-11）。
+    ///
+    /// 作者遇到的那一屏：页头「未保存 (0)」，「查看改动」有 -16 行，
+    /// 点「放弃改动」什么都不做。只数账的判据认不出这种残迹。
+    #[test]
+    fn discard_cleans_a_shadow_that_no_book_accounts_for() {
+        let (_fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        let rel = "machines/A1.toml";
+        let pristine = std::fs::read(ctx.shadow_root.join(rel)).unwrap();
+        let mut dirty = String::from_utf8(pristine.clone()).unwrap();
+        dirty.push_str("\n# 没人认领的一笔\n");
+        crate::fsx::atomic::atomic_write(&ctx.shadow_root.join(rel), dirty.as_bytes()).unwrap();
+        assert!(ctx.draft.is_clean() && !ctx.txn.is_dirty() && ctx.history.is_empty());
+
+        discard_in(&mut ctx).unwrap();
+
+        assert_eq!(
+            std::fs::read(ctx.shadow_root.join(rel)).unwrap(),
+            pristine,
+            "放弃之后影子要回到打开那一刻"
+        );
     }
 
     /// **机器页的结构编辑不许冲掉内存里的值编辑**（2026-11-03 换代回归）。
@@ -5954,6 +6407,58 @@ mod tests {
     /// 真机事故：`wb_publish` 当时是同步命令，读 Keychain（系统弹密码框，凭据后来
     /// 改住凭据文件）、推 git、建 PR 全发生在主线程上，窗口一动不动；作者原话
     /// 「卡住了，我什么都没办法点」。那条命令现在已经 `(async)`，这里把它钉住，别再退回去。
+    /// **每一个编辑命令都要进未保存账**（作者 2026-11-12：「可能还有很多地方改了，
+    /// 它都显示这个未保存 0」）。
+    ///
+    /// 判据：登记在 [`COMMAND_LABELS`] 里的命令 = 编辑，正文必须走
+    /// [`with_struct_ctx`]（它在 `run_struct` 里记 `ctx.history`，页头那个 N 才数得到）。
+    /// 既没进 history 也没进 txn 的写命令，界面就是「文件改了、页头 0」，
+    /// 2026-11-11 改版本标签那一幕就是这么来的（`version_field_text` 漏胳膊）。
+    ///
+    /// 用登记表当输入而不是"猜哪些命令会写盘"：写盘可能藏在
+    /// `Presets::set_asset_delivery` 这类封装里，源码里看不到 `write()`，
+    /// 按写调用扫会漏掉一半命令。
+    #[test]
+    fn every_editing_command_goes_through_the_edit_ledger() {
+        // 走 `txn` 那一套栈（`TXN_EDIT_COMMANDS` 的唯一一条），不是 `ctx.history`
+        const EXEMPT: &[&str] = &["wb_anno_write"];
+
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workbench/app");
+        let mut all = String::new();
+        for entry in std::fs::read_dir(&dir).expect("app 目录").flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("rs") {
+                continue;
+            }
+            all.push_str(&std::fs::read_to_string(&path).expect("读源码"));
+            all.push('\n');
+        }
+
+        let mut checked = 0usize;
+        for (cmd, label) in COMMAND_LABELS {
+            if EXEMPT.contains(cmd) {
+                continue;
+            }
+            let Some(start) = all.find(&format!("pub fn {cmd}")) else {
+                panic!("{cmd}（{label}）登记在 COMMAND_LABELS 里，源码里却找不到这个函数");
+            };
+            /* 一条命令的正文到下一个命令注解为止；文件末尾那一条会吞掉测试模块，
+            再按 `#[cfg(test)]` 截一次（里面全是"造现场"的写盘调用，扫进来就是假阳性） */
+            let body = all[start..]
+                .split("#[tauri::command")
+                .next()
+                .unwrap_or_default();
+            let body = body.split("#[cfg(test)]").next().unwrap_or(body);
+            checked += 1;
+            assert!(
+                body.contains("with_struct_ctx("),
+                "{cmd}（{label}）是编辑却没过 with_struct_ctx —— \
+                 页头「未保存 N」会漏掉它"
+            );
+        }
+        assert!(checked > 20, "只验了 {checked} 条编辑命令，判据大概没生效");
+    }
+
     #[test]
     fn read_commands_are_async_so_they_never_freeze_the_window() {
         /// 这一批是**只读**（只算不写盘）的 —— 全部必须是 `(async)`。

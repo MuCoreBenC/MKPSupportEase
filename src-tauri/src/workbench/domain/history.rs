@@ -41,7 +41,7 @@ use crate::workbench::presets::ParamRegistry as Registry;
 
 use crate::error::AppError;
 
-use super::patch::{self, Committed, Draft, Patch};
+use super::patch::{self, Committed, CommittedVersion, Draft, Patch};
 
 /// 同一条 `EditKey` 的两笔之间，超过这个间隔就**另起一条**。
 ///
@@ -160,6 +160,34 @@ impl History {
         presets: &mut crate::workbench::presets::Presets,
         committed: &Committed,
     ) -> Result<(), AppError> {
+        /* 清单以**当前编辑态**为准。
+         *
+         * `committed` 是"打开工作台那一刻"的清单：新建版本、改版本 id 之后，
+         * 新 uid 只存在于 `presets` 里。拿旧清单校验会把整批重放拒掉
+         * （`版本 A1/FAST_NEW 不存在`）—— 界面上看就是"改了 id，参数全没了"。
+         * 新建版本后补参数同理。 */
+        let live = Committed {
+            versions: presets
+                .catalog
+                .machines()
+                .iter()
+                .flat_map(|m| {
+                    m.versions.iter().map(move |v| {
+                        (
+                            format!("{}/{}", m.id, v.id),
+                            CommittedVersion {
+                                machine_id: m.id.clone(),
+                                version_id: v.id.clone(),
+                                name: v.name.clone(),
+                                tag: v.tag.clone(),
+                            },
+                        )
+                    })
+                })
+                .collect(),
+            catalog: patch::catalog_machines_of(presets),
+            ..committed.clone()
+        };
         for e in self.undo.iter() {
             /* 结构编辑写的是影子文件（`reload` 会读回来），只有值编辑需要重放 */
             let fwd = match &e.action {
@@ -167,12 +195,7 @@ impl History {
                 Action::Struct(_) => continue,
             };
             let mut d = Self::baseline_draft();
-            patch::apply(
-                &mut d,
-                committed,
-                &presets.registry,
-                std::slice::from_ref(fwd),
-            )?;
+            patch::apply(&mut d, &live, &presets.registry, std::slice::from_ref(fwd))?;
             let staged = crate::workbench::app::storage::stage_value_edits(presets, committed, &d);
             crate::workbench::app::storage::stage_into(presets, &staged)?;
         }
@@ -220,6 +243,51 @@ impl History {
     /// 栈里所有条目（从旧到新）。给「改了什么」与日志用，**不许拿它当真相**
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
         self.undo.iter()
+    }
+
+    /// 把两套栈里指向旧版本的记录重指到新 uid（改版本 id 时用）。
+    ///
+    /// 两种写法都要认，`c` = `machineVariants` 的写法、`v` = uid 的写法：
+    ///
+    /// | 在哪 | 形状 | 漏了会怎样 |
+    /// |---|---|---|
+    /// | 字段账 `owner` | `A1:FAST` | 「改了什么」指着一个不存在的版本 |
+    /// | `Action::Value` 的 patch / inverse | `A1/FAST` | `reload_presets` 重放时写回旧 uid |
+    ///
+    /// 第二行是真坑：改完 id 后任何一次结构编辑都会 `reload_presets`，
+    /// 那条重放按旧 owner 写值 —— 界面上看就是"改过的参数又跑回旧版本了"。
+    ///
+    /// 文件字节（`Action::Struct` 里的 `before` / `after`）**不在这里改**：它们是
+    /// "那一刻的文件长什么样"，撤销是后进先出 —— 改 id 这一条会先被撤掉，
+    /// id 退回旧值之后那些字节才是对的。
+    pub fn retarget_version(&mut self, old_c: &str, new_c: &str, old_v: &str, new_v: &str) {
+        fn retarget_patch(p: &mut Patch, old: &str, new: &str) {
+            if let Patch::SetValue { owner, .. } = p {
+                if owner == old {
+                    *owner = new.to_owned();
+                }
+            }
+        }
+        let old_prefix = format!("v:{old_v}:");
+        let new_prefix = format!("v:{new_v}:");
+        for e in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            for f in &mut e.fields {
+                if f.owner == old_c {
+                    f.owner = new_c.to_owned();
+                }
+            }
+            if let Action::Value { patch, inverse } = &mut e.action {
+                retarget_patch(patch, old_v, new_v);
+                for p in inverse.iter_mut() {
+                    retarget_patch(p, old_v, new_v);
+                }
+            }
+            if let Some(k) = &mut e.merge_key {
+                if k.starts_with(&old_prefix) {
+                    *k = k.replacen(&old_prefix, &new_prefix, 1);
+                }
+            }
+        }
     }
 
     /// **撤销栈顶那一条**：标签 + 它改了几处字段。
@@ -415,8 +483,13 @@ fn merge_fields(into: &mut Vec<super::txn::FieldEntry>, more: Vec<super::txn::Fi
 }
 
 /// 一条历史条目**改了几处**（去处重后还剩几个字段）。就是页头那个 N 的原料。
+///
+/// **没有字段账的条目各算一处**：新建 / 删除 / 复制 / 移动这类一次性动作在
+/// 「一格字段」这把尺子上量不出东西，可它们确实改了文件。漏掉这一段，
+/// 界面上就是「灯亮着、未保存 0」（作者 2026-11-11 报的那一幕）。
 pub fn dirty_fields(entries: &[Entry]) -> usize {
-    dirty_field_entries(entries).len()
+    let one_shots = entries.iter().filter(|e| e.fields.is_empty()).count();
+    dirty_field_entries(entries).len() + one_shots
 }
 
 /// 跨条目合并后的字段账 —— 「改了什么」逐条列的就是这一份。

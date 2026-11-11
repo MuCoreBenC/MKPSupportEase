@@ -178,7 +178,7 @@ export default function SelectField({
                     onClick={() => pick(o.value)}
                   >
                     <span className={s.check} aria-hidden>
-                      {on ? '✓' : ''}
+                      {on ? <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg> : null}
                     </span>
                     {/* 已弃用的那一档划一条线（C13）：与分段选择器同一个信号 */}
                     <span className={s.optLabel} data-dep={o.deprecated ? '' : undefined}>

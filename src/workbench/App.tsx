@@ -78,7 +78,7 @@ interface NavItem {
   id: PageId
   label: string
   icon: ReactNode
-  badge?: 'dirty' | 'build'
+  badge?: 'build'
 }
 
 const NAV: NavItem[] = [
@@ -105,7 +105,6 @@ const NAV: NavItem[] = [
   {
     id: 'params',
     label: '参数台',
-    badge: 'dirty',
     icon: (
       <>
         <path d="M4 8h16M4 16h16" />
@@ -195,7 +194,8 @@ type NavId = NavItem['id']
  *
  * 判据 = 这一页会不会往参数草稿里放东西（`wb.applyDraft` 那一路）：
  * 机型（先落盘再生成）、参数台、资产库（交付身份改了先进草稿）、生成与发布（同上）。
- * 其余：套餐页是即时落盘、设置页只读、开发台不落盘 ⇒ 页头不摆这一槽。
+ * 其余：设置页只读、开发台不落盘 ⇒ 页头不摆这一槽（套餐页改过之后草稿就不空了，
+ * 会走下面第 ③ 条照样摆出来）。
  * ★ 草稿非空时**无论在哪一页都摆**（见 `headOpsVisible` 的 ③）—— 别让改动存不下去。
  */
 const DRAFT_PAGES: ReadonlySet<NavId> = new Set<NavId>([
@@ -861,7 +861,8 @@ export function WorkbenchApp() {
   }, [report])
 
   const badgeOf = (b?: NavItem['badge']): { n: number; block: boolean } => {
-    if (b === 'dirty') return { n: dirty ? 1 : 0, block: false }
+    // 「有未保存改动」不进导航：它是全工作台一个数，由状态栏那一条说
+    // （挂在某一页图标上会被读成"那一页有改动"，作者 2026-11-11 报的）
     if (b === 'build') return buildBadge
     return { n: 0, block: false }
   }
@@ -977,6 +978,7 @@ export function WorkbenchApp() {
             tick={tick}
             initialSel={bundleSel}
             onGoto={goto}
+            onBookRefresh={refreshBook}
           />
         )
       case 'assets':
@@ -988,6 +990,7 @@ export function WorkbenchApp() {
             initialSel={assetSel}
             initialAssign={assetAssign}
             onGoto={goto}
+            onBookRefresh={refreshBook}
             onApply={async (label, patches, opts) => {
               await run(label, patches, undefined, opts)
             }}

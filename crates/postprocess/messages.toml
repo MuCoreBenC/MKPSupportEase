@@ -5423,6 +5423,24 @@ text_ja = "この実行ではどの動作を試しますか？"
 params = []
 note = "调试模式下开跑前那一问的正文"
 
+["hook.debug_plan_summary"]
+code = "Q_DEBUG_PLAN_006"
+text = "驻点 X{wait} · 落笔 {mw} → {mx} · 收笔 {uw} → {ux} · {speed} mm/min"
+text_en = "Park X{wait} · pen-down {mw} → {mx} · pen-up {uw} → {ux} · {speed} mm/min"
+text_zh_tw = "駐點 X{wait} · 落筆 {mw} → {mx} · 收筆 {uw} → {ux} · {speed} mm/min"
+text_ja = "待機位置 X{wait} · 着座 {mw} → {mx} · 離座 {uw} → {ux} · {speed} mm/min"
+params = ["wait", "mw", "mx", "uw", "ux", "speed"]
+note = "调试开跑前那一问的坐标概要：两段各报「等待位 → 目标位」"
+
+["hook.debug_plan_summary_repeat"]
+code = "Q_DEBUG_PLAN_007"
+text = "驻点 X{wait} · 落笔 {mw} → {mx} · 收笔 {uw} → {ux} · {speed} mm/min · 测 {repeat} 遍"
+text_en = "Park X{wait} · pen-down {mw} → {mx} · pen-up {uw} → {ux} · {speed} mm/min · repeated {repeat} times"
+text_zh_tw = "駐點 X{wait} · 落筆 {mw} → {mx} · 收筆 {uw} → {ux} · {speed} mm/min · 測 {repeat} 遍"
+text_ja = "待機位置 X{wait} · 着座 {mw} → {mx} · 離座 {uw} → {ux} · {speed} mm/min · {repeat} 回繰り返し"
+params = ["wait", "mw", "mx", "uw", "ux", "speed", "repeat"]
+note = "同上，末尾多一句测几遍（只有 repeat > 1 时用这条）"
+
 ["hook.choice_debug_mount"]
 code = "Q_DEBUG_PLAN_002"
 text = "只测落笔"

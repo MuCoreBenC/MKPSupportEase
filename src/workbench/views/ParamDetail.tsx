@@ -213,7 +213,7 @@ interface Props {
   onPick?: (key: string) => void
   /**
    * 「编辑定义」（2026-10-03）：名称 / 单位 / 值类型 / 范围 / 前置条件 / 弃用
-   * 那些只读格子如今有一条改的路 —— 弹出定义编辑模态框（即时落盘）
+   * 那些只读格子如今有一条改的路 —— 弹出定义编辑模态框（走草稿（保存后写入））
    */
   onEditDef?: () => void
   /** 某一层那枚「打开编辑器」按钮 —— 每层各一枚，开的都是自己那层 */
@@ -566,7 +566,7 @@ export default function ParamDetail({
         )}
         {!hideClose && (
           <button type="button" className={s.pCardX} onClick={onClose} aria-label="收起">
-            ×
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
           </button>
         )}
       </div>
@@ -586,7 +586,7 @@ export default function ParamDetail({
         </section>
 
         {/* 基本信息：说明书该有的几行，没有键名。标题行右侧挂「编辑定义」——
-            那些格子从这里从只读变成可改（即时落盘，判据见 ParamDefModal） */}
+            那些格子从这里从只读变成可改（走草稿（保存后写入），判据见 ParamDefModal） */}
         <section className={s.pDSection}>
           <div className={s.pDSecTitleRow}>
             <span className={s.pDSecTitle}>基本信息</span>
@@ -594,7 +594,7 @@ export default function ParamDetail({
               <button
                 type="button"
                 className={s.pDefEdit}
-                title="改名称、单位、值类型、范围、出厂默认、前置条件、弃用 —— 即时落盘，不进草稿"
+                title="改名称、单位、值类型、范围、出厂默认、前置条件、弃用 —— 先进草稿，保存后写入"
                 onClick={onEditDef}
               >
                 编辑定义

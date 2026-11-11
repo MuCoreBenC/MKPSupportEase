@@ -10,8 +10,8 @@
  *
  * `presets/bundles.toml`（Task 13.6：发布 manifest v3 删掉了上游透传的 bundles，
  * 交付侧 `content/bundles.json` 由这里直出）。列表 / 内容 / 指向读它，
- * 内容编辑写它（`wb.setBundleRefs`，即时落盘）；改指向走 `wb.setVersionField`
- * （同样即时落盘）—— 两类都是清单编辑，不走参数草稿（同机型页的取舍）。
+ * 内容编辑写它（`wb.setBundleRefs`，走草稿（保存后写入））；改指向走 `wb.setVersionField`
+ * （同样走草稿（保存后写入））—— 两类都是清单编辑，不走参数草稿（同机型页的取舍）。
  *
  * # 与原型的差别 —— 每一条都是真后端决定的
  *
@@ -24,7 +24,7 @@
  *    BBS 一侧的「至少一条」不因此放松（MKP 与 BBS 成套配发）。
  *  - **指向分两档报**：版本层（users，改指向动的是它）与机型默认
  *    （defaultFor，生成侧的回退）分开列 —— 混在一起的话「改套餐会动到谁」数不清。
- *  - **没有跨页撤销**：清单编辑即时落盘，Ctrl+Z 只管参数草稿（机型页同款文案）。
+ *  - **没有跨页撤销**：清单编辑走草稿（保存后写入），Ctrl+Z 只管参数草稿（机型页同款文案）。
  *  - **行上的数是后端算的**：每行自己的指向数（C05 那个「读错 users」的坑
  *    在产品侧不存在 —— 判据根本不在前端）。
  */
@@ -58,6 +58,13 @@ interface Props {
   /** 跨页定位带来的预选（机型页 ④ 关联的「选择套餐…」跳过来就是用这个） */
   initialSel?: string | null
   onGoto: (view: string, focus?: GotoFocus) => void
+  /**
+   * 写完一笔就重取外壳的整本与事务状态。
+   *
+   * 这一页的编辑**进的是结构草稿**（`wb_set_bundle_refs` 等走 `with_struct_ctx`），
+   * 只 `setList` 的话页头「未保存 N」要等 800ms 轮询才跟上 —— 用户先看到的是 0。
+   */
+  onBookRefresh: () => void
 }
 
 /**
@@ -90,7 +97,7 @@ function refFileName(assets: AssetList | null, r: BundleRefView): string {
   return base !== '' ? base : r.name || r.id
 }
 
-export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) {
+export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRefresh }: Props) {
   const [list, setList] = useState<BundleList | null>(null)
   const [machines, setMachines] = useState<MachineList | null>(null)
   const [assets, setAssets] = useState<AssetList | null>(null)
@@ -184,28 +191,30 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
   const bundleOf = (uid: string): string =>
     allUids.find((x) => x.uid === uid)?.bundle ?? ''
 
-  /** 解除一个指向 = 清掉版本自己的 `recommendedBundle`（回到机型默认）。即时落盘 */
+  /** 解除一个指向 = 清掉版本自己的 `recommendedBundle`（回到机型默认）。走草稿（保存后写入） */
   const unassign = async (machineId: string, versionId: string) => {
     try {
       setMachines(await wb.setVersionField(machineId, versionId, 'recommendedBundle', null))
       toasts.push(
-        `已取消 ${machineId}/${versionId} 自己的指向 —— 它回到机型默认（清单改动即时落盘）`,
+        `已取消 ${machineId}/${versionId} 自己的指向 —— 它回到机型默认（已进草稿）`,
       )
+      onBookRefresh()
       load(filter)
     } catch (e) {
       say(e)
     }
   }
 
-  /** 把选中的版本指到这份套餐。**即时落盘**（清单编辑，不进参数草稿） */
+  /** 把选中的版本指到这份套餐。**走草稿（保存后写入）**（清单编辑，不进参数草稿） */
   const assign = async (bundleId: string, uids: string[]) => {
     try {
       setList(await wb.assignBundleVersions(bundleId, uids))
-      toasts.push(`已让 ${uids.join('、')} 改用 ${bundleId}（清单改动即时落盘）`)
+      toasts.push(`已让 ${uids.join('、')} 改用 ${bundleId}（已进草稿）`)
       setAssignPicks([])
       setAssignConfirm(false)
       setMachines(await wb.machines())
       load(filter)
+      onBookRefresh()
     } catch (e) {
       say(e)
     }
@@ -216,22 +225,24 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
     try {
       setList(await wb.setBundleRefs(bundleId, ids))
       toasts.push(done)
+      onBookRefresh()
     } catch (e) {
       say(e)
     }
   }
 
-  /* —— 套餐 CRUD 的动作（全部即时落盘；后端校验不过整次拒绝） —— */
+  /* —— 套餐 CRUD 的动作（全部走草稿（保存后写入）；后端校验不过整次拒绝） —— */
   const run = useCallback(
     async (doIt: () => Promise<BundleList>, done: string) => {
       try {
         setList(await doIt())
         toasts.push(done)
+        onBookRefresh()
       } catch (e) {
         say(e)
       }
     },
-    [say],
+    [say, onBookRefresh],
   )
 
   const create = () => {
@@ -621,7 +632,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                   >
                     改套餐内容…
                   </button>
-                  <HelpDot text="一个框里两个页签（MKP 预设 / 切片器）—— 和机型页那颗「改套餐内容…」打开的是同一个框。改动即时落盘（updatedAt 会盖上今天）；存一条 BBS 都没有的套餐存不进去 —— MKP 与 BBS 必须成套配发。" />
+                  <HelpDot text="一个框里两个页签（MKP 预设 / 切片器）—— 和机型页那颗「改套餐内容…」打开的是同一个框。改动先进草稿，保存后才写进仓库（updatedAt 会盖上今天）；存一条 BBS 都没有的套餐存不进去 —— MKP 与 BBS 必须成套配发。" />
                 </div>
               </div>
 
@@ -706,7 +717,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                             aria-label={`从这次选择里去掉 ${uid}`}
                             onClick={() => setAssignPicks(assignPicks.filter((x) => x !== uid))}
                           >
-                            ✕
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                           </button>
                         </span>
                       )
@@ -730,7 +741,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                   >
                     确认指向
                   </button>
-                  <HelpDot text="「确认指向」先给你看影响预览（哪些版本会被改、原来指着谁），确认之后才落盘 —— 即时生效、没有草稿、没有撤销。" />
+                  <HelpDot text="「确认指向」先给你看影响预览（哪些版本会被改、原来指着谁），确认后进草稿，保存才写进仓库。" />
                 </div>
               </div>
             </div>
@@ -1034,7 +1045,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
               )
               return noop.length > 0 ? `（其中 ${noop.length} 个已经指着它，不算改动）` : ''
             })()}
-            <HelpDot text="确认之后即时落盘（没有草稿、没有撤销）；要撤就把这些版本改指回原来的套餐。" />
+            <HelpDot text="确认后进草稿，撤销能整条退回来。" />
           </span>
         </div>
         <div className={s.chips} style={{ marginTop: 8 }}>

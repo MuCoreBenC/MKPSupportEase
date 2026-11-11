@@ -1471,6 +1471,137 @@ impl ParamRegistry {
         Ok(())
     }
 
+    /// 删掉某个 owner（`机型:版本`）在**四张表**里的全部记录，返回动过的字段 key。
+    ///
+    /// 只有「删版本」会调它：版本没了，这些键就指向一个不存在的对象，而
+    /// [`super::Presets::check_cross_consistency`] 下一次加载会把整份数据判成
+    /// `Corrupted`（整个工作台起不来）。四张表必须一起清 —— 漏一张就等于没删干净：
+    ///
+    /// | 表 | 装什么 |
+    /// |---|---|
+    /// | `machineVariants` | 这一版钉过的值 |
+    /// | `machineMinVariants` / `machineMaxVariants` | 范围的机型特化 |
+    /// | `follows` | 这一版跟不跟基底 |
+    ///
+    /// 删空的表连表头一起删，与 [`Self::clear_variant`] / [`Self::set_following`]
+    /// 同一口径（留一个空表读起来像"这里有记录"）。
+    pub fn drop_owner(&mut self, owner: &str) -> Result<Vec<String>, AppError> {
+        let mut touched = Vec::new();
+        for at in 0..self.params.len() {
+            let p = &self.params[at];
+            let had = p.machine_variants.contains_key(owner)
+                || p.machine_min_variants.contains_key(owner)
+                || p.machine_max_variants.contains_key(owner)
+                || p.follows.contains_key(owner);
+            if !had {
+                continue;
+            }
+            let key = p.key.clone();
+
+            let t = self.param_table_mut(at, &key)?;
+            for field in [
+                "machineVariants",
+                "machineMinVariants",
+                "machineMaxVariants",
+                "follows",
+            ] {
+                /* **两种形状都要认**：`machineVariants` / `follows` 是真表
+                （`[params.machineVariants]`），min/max 在源文件里是**内联表**
+                （`machineMinVariants = { "A1:FAST" = 10.0 }`）。只处理前者的话，
+                删完 `A1:FAST` 在 min 里还留着，下一次加载照样判 Corrupted。 */
+                let empty = match t.get_mut(field) {
+                    Some(item) => {
+                        if let Some(tbl) = item.as_table_mut() {
+                            tbl.remove(owner);
+                            tbl.is_empty()
+                        } else if let Some(inline) = item.as_inline_table_mut() {
+                            inline.remove(owner);
+                            inline.is_empty()
+                        } else {
+                            false
+                        }
+                    }
+                    None => false,
+                };
+                if empty {
+                    t.remove(field);
+                }
+            }
+
+            let p = &mut self.params[at];
+            p.machine_variants.remove(owner);
+            p.machine_min_variants.remove(owner);
+            p.machine_max_variants.remove(owner);
+            p.follows.remove(owner);
+            touched.push(key);
+        }
+        Ok(touched)
+    }
+
+    /// 把一个 owner（`机型:版本`）在**四张表**里的键改名，返回动过的字段 key。
+    ///
+    /// 给「改版本 id」用：`A1:FAST` 要跟着搬成 `A1:NEW1`，否则那几项值会指向
+    /// 一个不存在的版本 —— 下一次加载 [`super::Presets::check_cross_consistency`]
+    /// 当场判 `Corrupted`，与 [`Self::drop_owner`] 那条注释是同一类事故。
+    ///
+    /// 表与内联表两种形状都要认（min / max 在源文件里是 `machineMinVariants = { ... }`）。
+    /// 新键追加在该表的末尾：`toml_edit` 的 `Table` 保序但换不了键位，一次改名把那一行
+    /// 挪到同字段的末尾可以接受（改主键本来就是大动）。
+    pub fn rename_owner(
+        &mut self,
+        old_owner: &str,
+        new_owner: &str,
+    ) -> Result<Vec<String>, AppError> {
+        let mut touched = Vec::new();
+        for at in 0..self.params.len() {
+            let p = &self.params[at];
+            let had = p.machine_variants.contains_key(old_owner)
+                || p.machine_min_variants.contains_key(old_owner)
+                || p.machine_max_variants.contains_key(old_owner)
+                || p.follows.contains_key(old_owner);
+            if !had {
+                continue;
+            }
+            let key = p.key.clone();
+
+            let t = self.param_table_mut(at, &key)?;
+            for field in [
+                "machineVariants",
+                "machineMinVariants",
+                "machineMaxVariants",
+                "follows",
+            ] {
+                if let Some(item) = t.get_mut(field) {
+                    if let Some(tbl) = item.as_table_mut() {
+                        if let Some(v) = tbl.remove(old_owner) {
+                            tbl[new_owner] = v;
+                        }
+                    } else if let Some(inline) = item.as_inline_table_mut() {
+                        if let Some(v) = inline.remove(old_owner) {
+                            inline.insert(new_owner, v);
+                        }
+                    }
+                }
+            }
+
+            let p = &mut self.params[at];
+            if let Some(v) = p.machine_variants.remove(old_owner) {
+                p.machine_variants.insert(new_owner.to_owned(), v);
+            }
+            if let Some(v) = p.machine_min_variants.remove(old_owner) {
+                p.machine_min_variants.insert(new_owner.to_owned(), v);
+            }
+            if let Some(v) = p.machine_max_variants.remove(old_owner) {
+                p.machine_max_variants.insert(new_owner.to_owned(), v);
+            }
+            if let Some(v) = p.follows.remove(old_owner) {
+                p.follows.insert(new_owner.to_owned(), v);
+            }
+            touched.push(key);
+        }
+        Ok(touched)
+    }
+
     /* ---------- 定义编辑（2026-10-03，作者：「弃用是谁决定的？我没办法改」） ---------- */
 
     /// 改一条参数的**定义**（名称 / 说明 / 单位 / 值类型 / 控件 / 范围 / 步进 /

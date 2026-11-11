@@ -52,7 +52,7 @@ use crate::presetdata::{ValueAction, ValueEdit};
 use crate::workbench::clock;
 use crate::workbench::domain::layer::Level;
 use crate::workbench::domain::patch::{
-    BuiltRecord, BundleEdit, CatalogMachine, Committed, CommittedVersion, Draft, Visibility,
+    BuiltRecord, BundleEdit, Committed, CommittedVersion, Draft, Visibility,
 };
 
 use crate::workbench::presets::Presets;
@@ -117,18 +117,11 @@ impl std::fmt::Debug for Loaded {
 pub fn load(store: &Store, presets: &Presets) -> Result<Loaded, AppError> {
     let notices = Vec::new();
     let mut versions: BTreeMap<String, CommittedVersion> = BTreeMap::new();
-    let mut catalog: Vec<CatalogMachine> = Vec::new();
+    // 清单的构造只有一个实现（`Book` 也用它）—— 两处各写一遍的话，
+    // 「界面看得见哪些机型/版本」与「已落盘清单里有谁」迟早分叉
+    let catalog = crate::workbench::domain::patch::catalog_machines_of(presets);
 
     for m in presets.catalog.machines() {
-        catalog.push(CatalogMachine {
-            id: m.id.clone(),
-            display: m.display.clone(),
-            icon: m.icon.clone(),
-            default_bundle: m.default_bundle.clone(),
-            has_dimensions: m.has_dimensions,
-            version_ids: m.versions.iter().map(|v| v.id.clone()).collect(),
-        });
-
         // 清单里的每一版都建一条记录。**不可以只给"有文件的版本"建** ——
         // 那样干净仓库里 `Committed.versions` 是空的，`patch::validate`
         // 会把「改 A1/STANDARD 的某一项」判成"版本不存在"，而那一版明明在清单里

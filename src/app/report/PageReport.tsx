@@ -121,6 +121,7 @@ import { POSTPROCESS_FINISHED, POSTPROCESS_PRINT_TIME } from '../postprocess/eve
 import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
 import { Btn } from '../ui/Controls'
+import WriteBackPresetModal from './WriteBackPresetModal'
 import Icon from '../shell/icons'
 import ui from '../ui/ui.module.css'
 import ExportModal from './ExportModal'
@@ -404,6 +405,13 @@ const GROUP_SHAPES: Record<string, ReactNode> = {
     </>
   ),
   glue: <path d="M12 3.5c3.5 4 6 7.2 6 10a6 6 0 0 1-12 0c0-2.8 2.5-6 6-10z" />,
+  /* 调试＝准星：对的是「工具头有没有走到那个位置」，不是印出来的东西 */
+  debug: (
+    <>
+      <circle cx="12" cy="12" r="6" />
+      <path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4" />
+    </>
+  ),
   tower: (
     <>
       <rect x="6.5" y="4" width="11" height="16" rx="1.5" />
@@ -524,6 +532,8 @@ interface Group {
   /** 组名后面那句摘要（横线上跟在标题后） */
   sum: string
   cells: [string, string][]
+  /** 组标题行右端那颗动作（目前只有「调试」用它带「写回预设」） */
+  action?: ReactNode
   /**
    * **组内小节**（2026-11-04）。
    *
@@ -900,7 +910,7 @@ function calibrationGroup(tr: Tr, c: ReportCalibrationFacts): Group | null {
  * 与「涂胶 / 擦料塔 / 校准」同构：四格指标 + 一句「本次为调试模式」。
  * 普通那一趟后端不写这一格 ⇒ 旧记录读到 `null` ⇒ 整组不摆。
  */
-function debugGroup(tr: Tr, d: ReportDebugFacts): Group | null {
+function debugGroup(tr: Tr, d: ReportDebugFacts, onWrite: () => void): Group | null {
   const waitY = d.waitY !== 0 ? ` / ${fmtNum(d.waitY)}` : ''
   const actions = [
     d.testMount ? tr('report.debug.actMount') : null,
@@ -909,10 +919,20 @@ function debugGroup(tr: Tr, d: ReportDebugFacts): Group | null {
     .filter((x): x is string => x !== null)
     .join(' → ')
 
+  /*
+   * 「等待位 → 目标位」：调试时等待位可以跟随驻点位（`null`），
+   * 也可能这份记录早于那个功能（缺键）。三种情况各说各的，不拿驻点位回填。
+   */
+  const withWait = (wait: number | null | undefined, target: number): string => {
+    if (typeof wait === 'number') return `${fmtNum(wait)} → ${fmtNum(target)} mm`
+    if (wait === null) return `${tr('report.debug.follow')} → ${fmtNum(target)} mm`
+    return `${fmtNum(target)} mm`
+  }
+
   const cells: [string, string][] = [
     [tr('report.debug.wait'), `${fmtNum(d.waitX)}${waitY} mm`],
-    [tr('report.debug.mount'), `${fmtNum(d.mountX)} mm`],
-    [tr('report.debug.unmount'), `${fmtNum(d.unmountX)} mm`],
+    [tr('report.debug.mount'), withWait(d.mountWaitX, d.mountX)],
+    [tr('report.debug.unmount'), withWait(d.unmountWaitX, d.unmountX)],
     [tr('report.debug.speed'), `${fmtNum(d.speed)} mm/min`],
     [tr('report.debug.actions'), actions === '' ? '—' : actions],
   ]
@@ -921,6 +941,11 @@ function debugGroup(tr: Tr, d: ReportDebugFacts): Group | null {
     title: tr('report.debug.title'),
     sum: tr('report.debug.summary'),
     cells,
+    action: (
+      <Btn size="sm" onClick={onWrite}>
+        {tr('report.debug.writeOpen')}
+      </Btn>
+    ),
   }
 }
 
@@ -939,6 +964,7 @@ function buildGroups(
   tr: Tr,
   detail: ReportDetail,
   onOpenSettings?: (target: SettingsTargetId) => void,
+  onWriteDebug?: (d: ReportDebugFacts) => void,
 ): Group[] {
   const st = detail.summary
   const stats = detail.stats ?? {}
@@ -1042,7 +1068,7 @@ function buildGroups(
 
   /* 调试那一趟：普通记录没有这一格 ⇒ 整组不摆 */
   if (detail.debug != null) {
-    const g = debugGroup(tr, detail.debug)
+    const g = debugGroup(tr, detail.debug, () => onWriteDebug?.(detail.debug!))
     if (g !== null) groups.push(g)
   }
 
@@ -1718,6 +1744,12 @@ export default function PageReport({
   const [, setNarrow] = useState(false)
 
   const pageRef = useRef<HTMLDivElement>(null)
+  /* 写回窗的遮罩宿主 = 报告页本体（`.page` 是 relative）。
+     挂 document.body 的话，切到「设置」页它还浮在别的页面上 —— 作者截图里就是这样。 */
+  const [pageEl, setPageEl] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    setPageEl(pageRef.current)
+  }, [])
   const sideRef = useRef<HTMLElement>(null)
   /*
    * 浮层判据 = **真的浮着**（`position:absolute`），不是窄档这个布尔值。
@@ -2012,7 +2044,17 @@ export default function PageReport({
     })
   }
 
-  const groups = detail === null ? [] : buildGroups(tr, detail, onOpenSettings)
+  /* 「写回预设」那一扇：只有调试组的按钮能开，带上这条记录的机型 */
+  const [writeBack, setWriteBack] = useState<{
+    machine: string | null
+    facts: ReportDebugFacts
+  } | null>(null)
+
+  const groups = detail === null
+    ? []
+    : buildGroups(tr, detail, onOpenSettings, (d) =>
+        setWriteBack({ machine: detail.summary.machineType, facts: d }),
+      )
   const activeTab = groups.some((g) => g.id === tab) ? tab : TAB_ALL
   const sel = (rows ?? []).find((r) => r.id === selId) ?? null
 
@@ -2375,6 +2417,9 @@ export default function PageReport({
                               </span>
                               <b>{g.title}</b>
                               {g.sum !== '' && <span className={s.grpSum}>{g.sum}</span>}
+                              {g.action !== undefined && (
+                                <span className={s.grpAction}>{g.action}</span>
+                              )}
                             </p>
                             {g.lines !== undefined ? (
                               <WarnLines lines={g.lines} />
@@ -2546,6 +2591,17 @@ export default function PageReport({
             quietUntil: null,
           }}
           onOpenReport={() => setReplay(null)}
+        />
+      )}
+      {/* 写回预设那扇窗：只有「调试」组那颗按钮能开它 */}
+      {writeBack !== null && pageEl !== null && (
+        <WriteBackPresetModal
+          host={pageEl}
+          open
+          onClose={() => setWriteBack(null)}
+          machine={writeBack.machine}
+          facts={writeBack.facts}
+          onDone={() => {}}
         />
       )}
     </section>

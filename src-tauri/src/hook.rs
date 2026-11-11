@@ -109,11 +109,11 @@ pub(crate) mod keys {
     pub const CHOICE_TOWER_RELOCATE_HINT: &str = "hook.choice_tower_relocate_hint";
     pub const CHOICE_TOWER_MODEL: &str = "hook.choice_tower_model";
     pub const CHOICE_TOWER_MODEL_HINT: &str = "hook.choice_tower_model_hint";
-    pub const QUESTION_DEBUG_PLAN: &str = "hook.question_debug_plan";
     pub const DEBUG_PLAN_STOPPED: &str = "hook.debug_plan_stopped";
-    pub const CHOICE_DEBUG_MOUNT: &str = "hook.choice_debug_mount";
-    pub const CHOICE_DEBUG_UNMOUNT: &str = "hook.choice_debug_unmount";
-    pub const CHOICE_DEBUG_BOTH: &str = "hook.choice_debug_both";
+    /// 调试那一问的坐标概要（两段「等待位 → 目标位」）
+    pub const DEBUG_PLAN_SUMMARY: &str = "hook.debug_plan_summary";
+    /// 同上，末尾多一句「测 N 遍」（`repeat > 1` 时才用这条）
+    pub const DEBUG_PLAN_SUMMARY_REPEAT: &str = "hook.debug_plan_summary_repeat";
     pub const CHOICE_CALIB_PRINT: &str = "hook.choice_calib_print";
     pub const CHOICE_CALIB_PRINT_HINT: &str = "hook.choice_calib_print_hint";
     pub const CHOICE_CALIB_DIRECT: &str = "hook.choice_calib_direct";
@@ -176,6 +176,8 @@ const ALL_KEYS: &[&str] = &[
     keys::LINE_STOPPED,
     keys::LINE_CANCELLED,
     keys::LOG_PATH,
+    keys::DEBUG_PLAN_SUMMARY,
+    keys::DEBUG_PLAN_SUMMARY_REPEAT,
 ];
 
 /// 一条「原因」：**文案键 + 具名参数**，句子按面现场渲染（界面 / 切片器 / 记录 / 日志）。
@@ -645,6 +647,58 @@ fn result_facts(done: &postprocess::pipeline::ProcessResult) -> crate::hook_ipc:
 /// 延后能省几百毫秒；但没人接手时传 `true` 会让那条记录永远停在"正在估算"。
 ///
 /// `ui`：只给界面看的那一条（开场那条 `Hello`，事实跟着它一起走），没有界面时传 [`UiLine::Silent`]。
+/// 调试那一问的正文：非高级模式报两段「等待位 → 目标位」与速度，
+/// 高级模式只报行数（代码本身太长，塞进提示卡会把那一屏撑爆，想看就在设置窗里看）。
+fn debug_plan_summary(d: &postprocess::ir::types::DebugIr) -> String {
+    if let Some(code) = &d.custom_gcode {
+        /* 高级模式：把那段代码原样摆出来（前端按 `\n` 拆行，卡里滚动）。
+           只报"共 N 行"的话，作者没法在动手前确认自己写的那几行对不对。 */
+        let body: Vec<&str> = code.lines().filter(|l| !l.trim().is_empty()).collect();
+        if !body.is_empty() {
+            return body.join("\n");
+        }
+    }
+    /*
+     * 两段各报「等待位 → 目标位」：等待位没单独定过（`None` = 跟随驻点位）时
+     * 就写驻点位那个数 —— 这一句说的是**这一趟会走到哪**，不是设置窗里的勾选状态。
+     */
+    let wait = if d.move_y {
+        format!("{} Y{}", num_or_int(d.wait_x), num_or_int(d.wait_y))
+    } else {
+        num_or_int(d.wait_x)
+    };
+    let mount_wait = num_or_int(d.mount_wait_x.unwrap_or(d.wait_x));
+    let mount = num_or_int(d.mount_x);
+    let unmount_wait = num_or_int(d.unmount_wait_x.unwrap_or(d.wait_x));
+    let unmount = num_or_int(d.unmount_x);
+    let speed = num_or_int(d.speed);
+    let args = [
+        ("wait", wait.as_str()),
+        ("mw", mount_wait.as_str()),
+        ("mx", mount.as_str()),
+        ("uw", unmount_wait.as_str()),
+        ("ux", unmount.as_str()),
+        ("speed", speed.as_str()),
+    ];
+    if d.repeat > 1 {
+        let repeat = d.repeat.to_string();
+        let mut with_repeat = args.to_vec();
+        with_repeat.push(("repeat", repeat.as_str()));
+        messages::text(keys::DEBUG_PLAN_SUMMARY_REPEAT, &with_repeat)
+    } else {
+        messages::text(keys::DEBUG_PLAN_SUMMARY, &args)
+    }
+}
+
+/// 整数不带小数点（与内核 `num()` 同一口径）
+fn num_or_int(v: f64) -> String {
+    if v.fract().abs() < 1e-9 {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
+    }
+}
+
 pub fn run(
     job: &HookJob,
     sink: &mut dyn ProgressSink,
@@ -1081,23 +1135,13 @@ pub fn run(
      * 没界面 / 超时（`None`）就不拦，按偏好跑：调试是自己人用，不该卡住。
      * 位置必须在 `ir` 被搬进管线**之前**（下面那段 `pipeline::process_with_ir…` 按值搬）。
      */
-    if let Some(dbg) = ir.debug.as_mut() {
+    if let Some(dbg) = ir.debug.as_ref() {
         if let Some(client) = ui.client() {
             let mut asker = ChannelAsker { client };
-            match asker.ask_debug_plan(&Reason::new(keys::QUESTION_DEBUG_PLAN).text()) {
-                Some(id) if id == crate::hook_ipc::CHOICE_DEBUG_MOUNT => {
-                    dbg.test_mount = true;
-                    dbg.test_unmount = false;
-                }
-                Some(id) if id == crate::hook_ipc::CHOICE_DEBUG_UNMOUNT => {
-                    dbg.test_mount = false;
-                    dbg.test_unmount = true;
-                }
-                Some(id) if id == crate::hook_ipc::CHOICE_DEBUG_BOTH => {
-                    dbg.test_mount = true;
-                    dbg.test_unmount = true;
-                }
-                /* 超时（`stop`）或认不出的答复：**直接终止**，不替用户决定 */
+            match asker.ask_debug_plan(&debug_plan_summary(dbg)) {
+                /* 继续：**原样按 IR 跑**（动作用户自己定，界面不替他挑） */
+                Some(id) if id == crate::hook_ipc::CHOICE_KEEP => {}
+                /* 停止 / 超时 / 认不出的答复：这一趟不跑 */
                 _ => {
                     return Err(HookError::stopped(Reason::new(keys::DEBUG_PLAN_STOPPED)));
                 }
@@ -1491,6 +1535,9 @@ fn archive_success(
         debug: done.debug.as_ref().map(|d| crate::archive::DebugFacts {
             wait_x: d.wait_x,
             wait_y: d.wait_y,
+            /* 两组等待位：`None` = 跟随驻点位，报告里写 `null`，写回据此跳过 */
+            mount_wait_x: d.mount_wait_x,
+            unmount_wait_x: d.unmount_wait_x,
             mount_x: d.mount_x,
             unmount_x: d.unmount_x,
             speed: d.speed,
@@ -2210,41 +2257,16 @@ impl Asker for ChannelAsker<'_> {
         )
     }
 
-    /// 调试那一问：三颗按钮（只测落笔 / 只测收笔 / 两个都测），主按钮在最右。
+    /// 调试那一问：**只展示、不选择**（2026-11-11 作者第二版）。
     ///
-    /// 不设超时（`0`）：调试是自己人坐在机器边上，等着就行；
-    /// 没界面时才落到 `None`（调用方按偏好跑）。
+    /// 作者：「不需要这 3 个按钮了，它就是按照我输入的代码去测试的，没必要，
+    /// 但还是要弹出这个窗口让用户看一下」—— 于是问题正文里带上这一趟要跑的
+    /// 坐标 / 动作概要，按钮回到默认那两颗（继续 / 停下）。
     fn ask_debug_plan(&mut self, question: &str) -> Option<String> {
-        use crate::hook_ipc::{
-            QuestionChoice, CHOICE_DEBUG_BOTH, CHOICE_DEBUG_MOUNT, CHOICE_DEBUG_UNMOUNT,
-            QKIND_DEBUG_PLAN,
-        };
-        let choices = vec![
-            QuestionChoice {
-                id: CHOICE_DEBUG_MOUNT.to_owned(),
-                label: Reason::new(keys::CHOICE_DEBUG_MOUNT).text(),
-                hint: None,
-                accent: false,
-            },
-            QuestionChoice {
-                id: CHOICE_DEBUG_UNMOUNT.to_owned(),
-                label: Reason::new(keys::CHOICE_DEBUG_UNMOUNT).text(),
-                hint: None,
-                accent: false,
-            },
-            QuestionChoice {
-                id: CHOICE_DEBUG_BOTH.to_owned(),
-                label: Reason::new(keys::CHOICE_DEBUG_BOTH).text(),
-                hint: None,
-                accent: true,
-            },
-        ];
-        /* 超时 = **终止这一趟**（作者 2026-11-11：「超时行为直接终止处理呀」）：
-        调试是拿真机去撞，没人确认就别动。 */
         self.client.ask(
-            QKIND_DEBUG_PLAN,
+            crate::hook_ipc::QKIND_DEBUG_PLAN,
             question,
-            choices,
+            Vec::new(),
             crate::hook_ipc::CHOICE_STOP,
         )
     }
@@ -3702,6 +3724,39 @@ mod tests {
         assert!(
             still.collision().is_some(),
             "事实要跟着错误一起出门（报告页据此画图）"
+        );
+    }
+
+    /// 调试那一问的正文：两段各报「等待位 → 目标位」，跟随时取驻点位。
+    #[test]
+    fn debug_plan_summary_reports_both_wait_points() {
+        let mut d = postprocess::ir::types::DebugIr {
+            wait_x: 20.0,
+            mount_x: 267.0,
+            unmount_x: 276.0,
+            speed: 10_000.0,
+            ..Default::default()
+        };
+        assert_eq!(
+            debug_plan_summary(&d),
+            "驻点 X20 · 落笔 20 → 267 · 收笔 20 → 276 · 10000 mm/min"
+        );
+
+        /* P 系列：两个等待位与驻点位都不同，各走各的 */
+        d.mount_wait_x = Some(20.0);
+        d.unmount_wait_x = Some(246.0);
+        d.mount_x = 1.0;
+        d.unmount_x = 256.0;
+        assert_eq!(
+            debug_plan_summary(&d),
+            "驻点 X20 · 落笔 20 → 1 · 收笔 246 → 256 · 10000 mm/min"
+        );
+
+        /* 测两遍：换第二条模板，末尾多一句（四语各有自己的说法） */
+        d.repeat = 2;
+        assert!(
+            debug_plan_summary(&d).ends_with("测 2 遍"),
+            "repeat > 1 要走带遍数的那条文案"
         );
     }
 

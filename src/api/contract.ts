@@ -329,6 +329,15 @@ export interface ReportSlicerFacts {
 export interface ReportDebugFacts {
   waitX: number
   waitY: number
+  /**
+   * 落笔等待位 X。`null` = 跟随驻点位；**缺键 = 旧记录没记这一项**。
+   *
+   * 两者不能混：跟随是该位置没定过，没记是当时还没有这个概念 ——
+   * 写回时都不写，但界面上要分得开。
+   */
+  mountWaitX?: number | null
+  /** 收笔等待位 X。`null` = 跟随驻点位（同上） */
+  unmountWaitX?: number | null
   mountX: number
   unmountX: number
   speed: number
@@ -2286,14 +2295,22 @@ export interface ResolvedPostprocPrefs {
   /** 调试模式：切片只产出「只跑落笔/收笔」的骨架 */
   debugModeEnabled: boolean
   debugWaitX: number
+  /** 落笔等待位 X；`null` = 跟随驻点位 */
+  debugMountWaitX: number | null
   debugMountX: number
+  /** 收笔等待位 X；`null` = 跟随驻点位 */
+  debugUnmountWaitX: number | null
   debugUnmountX: number
   debugSpeed: number
   /** 调试时动不动 Y 轴（A 系列只走 X；P 系列要站到 Y 才有得撞） */
   debugWaitY: number
-  /** 落笔位的 Y；`null` = 跟随驻点 */
+  /** 落笔等待位 Y；`null` = 跟随驻点位 */
+  debugMountWaitY: number | null
+  /** 落笔位的 Y；`null` = 跟随落笔等待位 */
   debugMountY: number | null
-  /** 收笔位的 Y；`null` = 跟随驻点 */
+  /** 收笔等待位 Y；`null` = 跟随驻点位 */
+  debugUnmountWaitY: number | null
+  /** 收笔位的 Y；`null` = 跟随收笔等待位 */
   debugUnmountY: number | null
   debugMoveY: boolean
   /** 这一趟重复几遍（1 = 一遍） */
@@ -2327,11 +2344,15 @@ export interface PostprocPrefsWire {
   beginStageRetractZLiftMm?: number | null
   debugModeEnabled?: boolean | null
   debugWaitX?: number | null
+  debugMountWaitX?: number | null
   debugMountX?: number | null
+  debugUnmountWaitX?: number | null
   debugUnmountX?: number | null
   debugSpeed?: number | null
   debugWaitY?: number | null
+  debugMountWaitY?: number | null
   debugMountY?: number | null
+  debugUnmountWaitY?: number | null
   debugUnmountY?: number | null
   debugMoveY?: boolean | null
   debugRepeat?: number | null

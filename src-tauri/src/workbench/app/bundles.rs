@@ -406,6 +406,26 @@ pub fn wb_copy_bundle(
     })
 }
 
+/// 指派版本会改哪些文件：**每个 uid 的机型文件**。
+///
+/// 这一条曾经写的是 `["bundles.toml"]` —— 而指派改的是机型文件里的
+/// `recommendedBundle`，套餐内容一个字都不动。清单写错的后果不是报错，
+/// 是 `run_struct` 拍不到被改的那几份：撤销撤不回去、未保存数也不涨
+/// （作者 2026-11-12：「还有哪些没用草稿的」）。
+pub(super) fn assign_files_of(uids: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for uid in uids {
+        let Some((mid, _)) = uid.trim().split_once('/') else {
+            continue;
+        };
+        let rel = format!("machines/{mid}.toml");
+        if !out.contains(&rel) {
+            out.push(rel);
+        }
+    }
+    out
+}
+
 /// **把一批版本指到这份套餐**（作者 2026-10-03：多选 + 确认）。
 /// 回一份新的清单；改动细节（哪些真的变了）在 toasts 里说 —— 界面在确认前
 /// 已经用预览框把影响摆出来
@@ -417,7 +437,7 @@ pub fn wb_assign_bundle_versions(
     traced("wb_assign_bundle_versions", |_| {
         with_struct_ctx(
             "members",
-            |_| vec!["bundles.toml".to_owned()],
+            |_| assign_files_of(&uids),
             |ctx| {
                 ctx.presets.assign_versions(&bundle_id, &uids)?;
                 let (committed, draft, _) = state(ctx)?;

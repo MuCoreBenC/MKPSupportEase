@@ -246,6 +246,27 @@ pub struct AssetUsage {
     pub bundles: Vec<String>,
 }
 
+/// 改一个版本的 id 时，跟着搬到新 uid 的那批记录。
+#[derive(Debug, Clone, Default)]
+pub struct VersionRenamed {
+    /// 搬到新 uid 的参数记录（字段 key）—— 参数四张表里的 `A1:OLD`
+    pub params: Vec<String>,
+    /// 归属跟着搬的资产 id（`mkPreset` 的 `versionId`）
+    pub assets: Vec<String>,
+}
+
+/// 删一个版本时，它那批资产记录的去向。
+///
+/// 返回"摘了谁的引用、删了谁"两件事：日志与界面提示要能说清这一趟动了什么，
+/// 而不是只报一个数量。
+#[derive(Debug, Clone, Default)]
+pub struct VersionAssetsRemoved {
+    /// 真删掉的资产 id
+    pub removed: Vec<String>,
+    /// 从套餐里摘掉的引用：`(套餐 id, 资产 id)`
+    pub detached: Vec<(String, String)>,
+}
+
 /// 一次加载的全部预设数据。
 ///
 /// 现在是机型目录 + 资产定义 + 套餐定义 + 字段定义 + 界面布局。还没搬的只有
@@ -1184,30 +1205,174 @@ impl Presets {
         Ok(AssetUsage { machines, bundles })
     }
 
+    /// 反查这个资产还有谁在用；有人用就拒绝，并说出是谁（b05 Task 9.5）
+    fn refuse_if_used(&self, id: &str) -> Result<(), AppError> {
+        let usage = self.asset_usage(id)?;
+        if usage.machines.is_empty() && usage.bundles.is_empty() {
+            return Ok(());
+        }
+        Err(
+            AppError::invalid_argument(format!("资产 {id} 还被引用着，不能删")).with_detail(
+                format!(
+                    "引用它的机型：{}；套餐：{}",
+                    if usage.machines.is_empty() {
+                        "（无）".to_owned()
+                    } else {
+                        usage.machines.join("、")
+                    },
+                    if usage.bundles.is_empty() {
+                        "（无）".to_owned()
+                    } else {
+                        usage.bundles.join("、")
+                    }
+                ),
+            ),
+        )
+    }
+
     /// 删一条资产，**先反查**（b05 Task 9.5）：有人引用就拒绝，并说出是谁
     pub fn remove_asset(&mut self, id: &str) -> Result<(), AppError> {
-        let usage = self.asset_usage(id)?;
-        if !usage.machines.is_empty() || !usage.bundles.is_empty() {
-            return Err(
-                AppError::invalid_argument(format!("资产 {id} 还被引用着，不能删")).with_detail(
-                    format!(
-                        "引用它的机型：{}；套餐：{}",
-                        if usage.machines.is_empty() {
-                            "（无）".to_owned()
-                        } else {
-                            usage.machines.join("、")
-                        },
-                        if usage.bundles.is_empty() {
-                            "（无）".to_owned()
-                        } else {
-                            usage.bundles.join("、")
-                        }
-                    ),
-                ),
-            );
-        }
+        self.refuse_if_used(id)?;
         self.assets.remove(id)?;
         self.assets.write()
+    }
+
+    /// 归属这一版的资产 id（`mkPreset` 那类，靠「机型 + 版本」定位产物）。
+    ///
+    /// 与 [`Self::remove_assets_of_version`] 同一个筛选口 —— 确认框列出来的那一批
+    /// 必须就是删除时真会动的那一批，两处各写一遍迟早会分叉。
+    pub fn assets_of_version(&self, machine_id: &str, version_id: &str) -> Vec<String> {
+        self.assets
+            .items()
+            .iter()
+            .filter(|a| a.kind == AssetKind::MkPreset)
+            .filter(|a| {
+                a.machine_id.as_deref().map(str::trim) == Some(machine_id.trim())
+                    && a.version_id.as_deref().map(str::trim) == Some(version_id.trim())
+            })
+            .map(|a| a.id.clone())
+            .collect()
+    }
+
+    /// 删掉归属这一版的资产记录（**删版本时的连带**）：先从套餐里摘掉引用，再删记录。
+    ///
+    /// 版本没了，这些记录就指着一个不存在的对象 —— [`Self::check_cross_consistency`]
+    /// 会把整份数据判成 Corrupted，工作台下次启动直接起不来。所以不能留在盘上。
+    ///
+    /// # 为什么先摘套餐的引用
+    ///
+    /// 套餐的 `assetRefs` 指向这一版的 MKP 预设。版本一删那条引用就指向空气，
+    /// 加载期 [`Self::check_bundle_refs`] 当场判错。让用户自己去套餐页摘，
+    /// 是把一次删除拆成两次体力活；这里替他摘掉，确认框已经列给用户看过。
+    ///
+    /// 摘引用走 [`Self::set_bundle_refs`]，所以「至少一条 BBS」（10.8 成套配发）
+    /// 那道闸照样生效：**摘成空套餐时整次拒绝** —— 那条套餐该由人去处理，
+    /// 不是这里替它决定留一份没有 BBS 的套餐。
+    ///
+    /// 仍被机型引用的**不删**：与 [`Self::remove_asset`] 同一道闸（MKP 预设
+    /// 不会被机型直接引用，留着这条是为了"归属 ≠ 引用"两种关系不混）。
+    ///
+    /// 这一版本来就没有归属资产时返回空结果（不是错误）。
+    pub fn remove_assets_of_version(
+        &mut self,
+        machine_id: &str,
+        version_id: &str,
+        now_iso8601: &str,
+    ) -> Result<VersionAssetsRemoved, AppError> {
+        let owned = self.assets_of_version(machine_id, version_id);
+        if owned.is_empty() {
+            return Ok(VersionAssetsRemoved::default());
+        }
+
+        /* ① 先把要摘的套餐算清楚，再动手：中途失败会留下"套餐改了一半、资产还在" */
+        let mut plan: Vec<(String, Vec<String>)> = Vec::new();
+        let mut detached: Vec<(String, String)> = Vec::new();
+        for b in self.bundles.items() {
+            let dropped: Vec<String> = owned
+                .iter()
+                .filter(|o| {
+                    b.asset_refs
+                        .iter()
+                        .any(|r| r.trim().eq_ignore_ascii_case(o))
+                })
+                .cloned()
+                .collect();
+            if dropped.is_empty() {
+                continue;
+            }
+            let next: Vec<String> = b
+                .asset_refs
+                .iter()
+                .filter(|r| !owned.iter().any(|o| r.trim().eq_ignore_ascii_case(o)))
+                .cloned()
+                .collect();
+            for a in dropped {
+                detached.push((b.id.clone(), a));
+            }
+            plan.push((b.id.clone(), next));
+        }
+        for (bid, refs) in plan {
+            self.set_bundle_refs(&bid, &refs, now_iso8601)?;
+        }
+
+        /* ② 摘完之后还会被机型引用的不删（与 remove_asset 同一道闸） */
+        for id in &owned {
+            self.refuse_if_used(id)?;
+        }
+        for id in &owned {
+            self.assets.remove(id)?;
+        }
+        self.assets.write()?;
+        Ok(VersionAssetsRemoved {
+            removed: owned,
+            detached,
+        })
+    }
+
+    /// 删掉这个版本在所有参数表里的记录（值 / 范围 / 跟随），返回动过的字段 key。
+    ///
+    /// 与 [`Self::remove_assets_of_version`] 同一条理由：版本没了，`A1:FAST` 这样的键
+    /// 就指向不存在的对象，下一次加载判 Corrupted。写盘由调用方做 ——
+    /// 删版本要一次提交三个文件（机型 / 参数注册表 / 资产台账）。
+    pub fn drop_version_overrides(
+        &mut self,
+        machine_id: &str,
+        version_id: &str,
+    ) -> Result<Vec<String>, AppError> {
+        self.registry
+            .drop_owner(&format!("{machine_id}:{version_id}"))
+    }
+
+    /// 改一个版本的 id：机型文件那一格 + 参数四张表的键 + 归属资产的 `versionId`。
+    ///
+    /// 三处必须一起改：`A1:OLD` 这种键散在参数表与资产归属里，漏一处下一次加载
+    /// [`Self::check_cross_consistency`] 就判 `Corrupted`（整个工作台起不来）。
+    /// 写盘由调用方做 —— 一条命令三份文件，失败由 `run_struct` 按 before 回滚。
+    ///
+    /// 顺序是先过机型那一关（主键合法性、机型内重名）：它不合法就一个字节都不动。
+    /// 参数与资产只是"跟着搬"，不会反过来让 id 变合法。
+    pub fn rename_version_uid(
+        &mut self,
+        machine_id: &str,
+        old_version_id: &str,
+        new_version_id: &str,
+    ) -> Result<VersionRenamed, AppError> {
+        let old_vid = old_version_id.trim();
+        let new_vid = new_version_id.trim();
+        self.catalog
+            .machine_mut(machine_id)?
+            .rename_version(old_vid, new_vid)?;
+
+        if old_vid == new_vid {
+            return Ok(VersionRenamed::default());
+        }
+        let old_uid = format!("{machine_id}:{old_vid}");
+        let new_uid = format!("{machine_id}:{new_vid}");
+        let params = self.registry.rename_owner(&old_uid, &new_uid)?;
+        let assets = self
+            .assets
+            .rename_version_owner(machine_id, old_vid, new_vid)?;
+        Ok(VersionRenamed { params, assets })
     }
 
     /// 跨文件那一条：`machineVariants` 的键必须是真的机型或真的机型版本。
@@ -1308,7 +1473,7 @@ impl Presets {
         Ok(())
     }
 
-    /// 删掉这个版本之后，`param_registry.toml` 里哪些字段会留下孤儿引用。
+    /// 删掉这个版本会**一起清掉**哪些参数记录。
     ///
     /// # 为什么这件事必须跨层问
     ///
@@ -1316,16 +1481,23 @@ impl Presets {
     /// 后者指向一个具体版本 —— **版本删了，键还在**，于是它成了指向不存在对象的引用。
     ///
     /// 这种损坏的恶性在于它**不报错**：解析照样通过，只是那一项在那台机器上悄悄不生效了。
-    /// 所以删之前要先问一遍并把结果摆给人看，而不是删完再让他自己发现。
+    /// 但真到了删的时候，这些键**必须一起删掉**（见 [`Self::drop_version_overrides`]）——
+    /// 留着它们下一次加载会判 Corrupted。所以这里返回的是"会跟着消失的那几项"，
+    /// 删之前先摆给人看：那是他钉在这一版上的参数值。
     ///
-    /// 返回的是**字段的 key**（`wiping.wiper_x` 这种），因为那是用户能据以行动的单位：
-    /// 他要去那一页把那几项清掉或改掉。
+    /// 返回的是**字段的 key**（`wiping.wiper_x` 这种），因为那是用户能据以行动的单位。
+    /// 判据与 [`Self::drop_version_overrides`] 同一套（四张表）。
     pub fn orphans_if_version_removed(&self, machine_id: &str, version_id: &str) -> Vec<String> {
         let needle = format!("{machine_id}:{version_id}");
         self.registry
             .params()
             .iter()
-            .filter(|p| p.machine_variants.contains_key(&needle) || p.follows.contains_key(&needle))
+            .filter(|p| {
+                p.machine_variants.contains_key(&needle)
+                    || p.machine_min_variants.contains_key(&needle)
+                    || p.machine_max_variants.contains_key(&needle)
+                    || p.follows.contains_key(&needle)
+            })
             .map(|p| p.key.clone())
             .collect()
     }
@@ -1334,6 +1506,21 @@ impl Presets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 把真 `presets/` 整棵复制到临时目录 —— **要写盘的测试一律先复制**，
+    /// 不许在仓库数据上做删除 / 改 id 这类演练。
+    fn copy_tree(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for e in std::fs::read_dir(from).unwrap().flatten() {
+            let p = e.path();
+            let target = to.join(e.file_name());
+            if p.is_dir() {
+                copy_tree(&p, &target);
+            } else {
+                std::fs::copy(&p, &target).unwrap();
+            }
+        }
+    }
 
     /// 真数据上的对齐检查。定位不到就**说清楚这条没执行**，不当成通过 ——
     /// 静默 skip 是这个项目里反复踩过的坑
@@ -2004,6 +2191,217 @@ mod tests {
         assert!(
             again.assets.get("a1-icon").is_some(),
             "别的条目一个都不许少"
+        );
+    }
+
+    /// **删版本要把 `A1:FAST` 的参数记录一起清掉**（2026-11-11）。
+    ///
+    /// 不清会怎样：`machineVariants` 里那个键指向一个不存在的版本，
+    /// 下一次 `load_from` 判 Corrupted —— 真机上的样子就是"删版本报错，
+    /// 机型文件已经被改了一半"（写盘在校验之前）。
+    #[cfg(feature = "workbench")]
+    #[test]
+    fn dropping_a_version_clears_its_param_records_and_still_loads() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut presets = f.presets;
+        let listed = presets.orphans_if_version_removed("A1", "FAST");
+        assert!(!listed.is_empty(), "夹具里 A1/FAST 该有钉过的参数");
+
+        let dropped = presets
+            .drop_version_overrides("A1", "FAST")
+            .expect("清记录");
+        assert_eq!(dropped, listed, "确认框列出来的与真删的是同一批");
+        presets.registry.write_back().expect("写参数注册表");
+        presets
+            .catalog
+            .machine_mut("A1")
+            .expect("A1 在")
+            .remove_version("FAST")
+            .expect("删版本");
+        presets.catalog.write_machine("A1").expect("写机型");
+
+        let again = Presets::load_from(presets.root()).expect("清干净之后必须读得回来");
+        assert!(
+            again
+                .catalog
+                .machine("A1")
+                .expect("A1 在")
+                .versions
+                .iter()
+                .all(|v| v.id != "FAST"),
+            "版本真的没了"
+        );
+        assert!(
+            again.orphans_if_version_removed("A1", "FAST").is_empty(),
+            "四张表里的 A1:FAST 都要清干净"
+        );
+    }
+
+    /// **真数据上的删版本演练**（2026-11-11）。
+    ///
+    /// A1/FAST 是作者撞上的那一版：14 项参数记录、一条归属资产 `a1-fast`，
+    /// 而 `a1-fast` 还被 `A1_FAST` 套餐引用着。这条钉三件事：
+    ///
+    /// 1. 套餐里那条引用**自动摘掉**（不用人先去套餐页）；
+    /// 2. 摘完之后套餐还剩它的 BBS（10.8 成套配发）；
+    /// 3. 三份文件一起清干净，`load_from` 还能读回来。
+    ///
+    /// 拿真数据是为了让"14 项"这种数字跟着真仓走；写的是临时副本。
+    #[test]
+    fn removing_a1_fast_on_a_copy_of_the_real_data_also_detaches_it_from_bundles() {
+        let Some(src) = repo_presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("presets");
+        copy_tree(&src, &root);
+
+        let mut p = Presets::load_from(&root).expect("真数据读得通");
+        assert_eq!(
+            p.assets_of_version("A1", "FAST"),
+            vec!["a1-fast".to_owned()],
+            "A1/FAST 该有一条归属资产"
+        );
+
+        let out = p
+            .remove_assets_of_version("A1", "FAST", "2026-11-11")
+            .expect("归属资产跟着版本一起删");
+        assert_eq!(out.removed, vec!["a1-fast".to_owned()]);
+        assert_eq!(
+            out.detached,
+            vec![("A1_FAST".to_owned(), "a1-fast".to_owned())],
+            "要摘掉套餐里那条引用，而不是留着指向空气"
+        );
+        assert_eq!(
+            p.bundles.get("A1_FAST").expect("套餐还在").asset_refs,
+            vec!["a1-bbs-04-020".to_owned()],
+            "摘掉 a1-fast 之后还剩它的 BBS"
+        );
+
+        let dropped = p.drop_version_overrides("A1", "FAST").expect("清参数记录");
+        assert!(
+            dropped.len() >= 10,
+            "真数据里 A1/FAST 钉过十几项，实测 {}",
+            dropped.len()
+        );
+        p.registry.write_back().expect("写参数注册表");
+        p.catalog
+            .machine_mut("A1")
+            .expect("A1 在")
+            .remove_version("FAST")
+            .expect("删版本");
+        p.catalog.write_machine("A1").expect("写机型");
+
+        // ③ 重读：清干净了才读得回来（少清一张表就是 Corrupted）
+        let again = Presets::load_from(&root).expect("清干净之后必须读得回来");
+        assert!(
+            again
+                .catalog
+                .machine("A1")
+                .expect("A1 在")
+                .versions
+                .iter()
+                .all(|v| v.id != "FAST"),
+            "版本真没了"
+        );
+        assert!(again.assets.get("a1-fast").is_none(), "归属资产也删了");
+        assert!(
+            again.orphans_if_version_removed("A1", "FAST").is_empty(),
+            "参数记录一条都不剩"
+        );
+    }
+
+    /// **真数据上的改版本 id 演练**（2026-11-12）。
+    ///
+    /// `A1/FAST` 有 14 项参数记录与一条归属资产 `a1-fast`。改 id 时两样都得跟着搬，
+    /// 否则 `A1:FAST` 成了指向不存在版本的键、资产指向不存在的版本 ——
+    /// 下一次 `load_from` 判 Corrupted。这条同时钉住"名字与写法"：
+    /// 新 id 大小写原样、机型文件里只改那一格。
+    #[test]
+    fn renaming_a1_fast_moves_its_param_records_and_assets() {
+        let Some(src) = repo_presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("presets");
+        copy_tree(&src, &root);
+
+        let mut p = Presets::load_from(&root).expect("真数据读得通");
+        let before = p.orphans_if_version_removed("A1", "FAST");
+        assert!(before.len() >= 10, "A1/FAST 该有十几项参数记录");
+
+        let out = p
+            .rename_version_uid("A1", "FAST", "FAST_NEW")
+            .expect("改 id");
+        assert_eq!(out.params, before, "四张表里的键要原样搬过去");
+        assert_eq!(out.assets, vec!["a1-fast".to_owned()], "归属资产跟着搬");
+
+        p.registry.write_back().expect("写参数注册表");
+        p.assets.write().expect("写资产台账");
+        p.catalog.write_machine("A1").expect("写机型");
+
+        let again = Presets::load_from(&root).expect("改完必须读得回来");
+        let versions = &again.catalog.machine("A1").expect("A1 在").versions;
+        assert!(
+            versions.iter().any(|v| v.id == "FAST_NEW"),
+            "新 id 在机型文件里"
+        );
+        assert!(
+            versions.iter().all(|v| v.id != "FAST"),
+            "旧 id 不能同时留着"
+        );
+        assert!(
+            again.orphans_if_version_removed("A1", "FAST").is_empty(),
+            "旧 uid 的参数记录一条不剩"
+        );
+        assert!(
+            !again
+                .orphans_if_version_removed("A1", "FAST_NEW")
+                .is_empty(),
+            "参数记录搬到了新 uid 上"
+        );
+        assert_eq!(
+            again
+                .assets
+                .get("a1-fast")
+                .expect("资产还在")
+                .version_id
+                .as_deref(),
+            Some("FAST_NEW"),
+            "资产归属也要跟着改"
+        );
+    }
+
+    /// 改 id 撞上同一台机型里已有的版本必须拒绝，且文件一个字节都不动
+    #[test]
+    fn renaming_a_version_onto_an_existing_id_is_refused() {
+        let Some(src) = repo_presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("presets");
+        copy_tree(&src, &root);
+
+        let mut p = Presets::load_from(&root).expect("真数据读得通");
+        let err = p
+            .rename_version_uid("A1", "FAST", "STANDARD")
+            .expect_err("STANDARD 已经有了");
+        assert!(
+            err.message.contains("STANDARD") || err.message.contains("已存在"),
+            "要说出撞的是哪个 id，实测：{}",
+            err.message
+        );
+        assert!(
+            p.catalog
+                .machine("A1")
+                .expect("A1 在")
+                .versions
+                .iter()
+                .any(|v| v.id == "FAST"),
+            "被拒之后旧 id 一个都不该动"
         );
     }
 

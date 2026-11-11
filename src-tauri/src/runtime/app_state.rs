@@ -301,25 +301,37 @@ pub struct PostprocPrefs {
     /// **调试模式**：切片只产出「只跑落笔/收笔」的骨架，不打印模型。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_mode_enabled: Option<bool>,
-    /// 调试动作的驻点 X。`None` = 出厂 20（喷嘴待命位）。
+    /// 调试动作的驻点位 X。`None` = 出厂 20（喷嘴待命位）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_wait_x: Option<f64>,
+    /// 落笔等待位 X。`None` = 跟随驻点位。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_mount_wait_x: Option<f64>,
     /// 调试动作的落笔位 X。`None` = 出厂 267（A1 系列）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_mount_x: Option<f64>,
+    /// 收笔等待位 X。`None` = 跟随驻点位。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_unmount_wait_x: Option<f64>,
     /// 调试动作的收笔位 X。`None` = 出厂 276（A1 系列）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_unmount_x: Option<f64>,
     /// 调试动作的移动速度（mm/min）。`None` = 出厂 10000。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_speed: Option<f64>,
-    /// 驻点的 Y 坐标。只有勾了「移动 Y」才进产物。
+    /// 驻点位的 Y 坐标。只有勾了「移动 Y」才进产物。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_wait_y: Option<f64>,
-    /// 落笔位的 Y。`None` = 跟随驻点。
+    /// 落笔等待位的 Y。`None` = 跟随驻点位。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_mount_wait_y: Option<f64>,
+    /// 落笔位的 Y。`None` = 跟随落笔等待位。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_mount_y: Option<f64>,
-    /// 收笔位的 Y。`None` = 跟随驻点。
+    /// 收笔等待位的 Y。`None` = 跟随驻点位。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_unmount_wait_y: Option<f64>,
+    /// 收笔位的 Y。`None` = 跟随收笔等待位。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_unmount_y: Option<f64>,
     /// **高级模式：整段动作块自己写**。`None` = 按字段生成。
@@ -444,11 +456,15 @@ impl PostprocPrefs {
                 ),
             debug_mode_enabled: self.debug_mode_enabled.unwrap_or(false),
             debug_wait_x: self.debug_wait_x.unwrap_or(DEBUG_WAIT_X_DEFAULT),
+            debug_mount_wait_x: self.debug_mount_wait_x,
             debug_mount_x: self.debug_mount_x.unwrap_or(DEBUG_MOUNT_X_DEFAULT),
+            debug_unmount_wait_x: self.debug_unmount_wait_x,
             debug_unmount_x: self.debug_unmount_x.unwrap_or(DEBUG_UNMOUNT_X_DEFAULT),
             debug_speed: self.debug_speed.unwrap_or(DEBUG_SPEED_DEFAULT),
             debug_wait_y: self.debug_wait_y.unwrap_or(0.0),
+            debug_mount_wait_y: self.debug_mount_wait_y,
             debug_mount_y: self.debug_mount_y,
+            debug_unmount_wait_y: self.debug_unmount_wait_y,
             debug_unmount_y: self.debug_unmount_y,
             debug_custom_gcode: self.debug_custom_gcode.clone(),
             debug_travel_speed: self.debug_travel_speed.unwrap_or(30000.0),
@@ -549,11 +565,21 @@ pub struct ResolvedPostprocPrefs {
     pub begin_stage_retract_z_lift_mm: i64,
     pub debug_mode_enabled: bool,
     pub debug_wait_x: f64,
+    /// `None` = 跟随驻点位
+    pub debug_mount_wait_x: Option<f64>,
     pub debug_mount_x: f64,
+    /// `None` = 跟随驻点位
+    pub debug_unmount_wait_x: Option<f64>,
     pub debug_unmount_x: f64,
     pub debug_speed: f64,
     pub debug_wait_y: f64,
+    /// `None` = 跟随驻点位
+    pub debug_mount_wait_y: Option<f64>,
+    /// `None` = 跟随落笔等待位
     pub debug_mount_y: Option<f64>,
+    /// `None` = 跟随驻点位
+    pub debug_unmount_wait_y: Option<f64>,
+    /// `None` = 跟随收笔等待位
     pub debug_unmount_y: Option<f64>,
     pub debug_custom_gcode: Option<String>,
     pub debug_travel_speed: f64,
