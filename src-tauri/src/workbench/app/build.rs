@@ -3163,10 +3163,19 @@ mod tests {
     fn pruning_removes_only_orphans_and_keeps_them_recoverable() {
         let dir = tempfile::tempdir().expect("临时目录");
         let trash = tempfile::tempdir().expect("临时目录");
-        std::fs::write(dir.path().join("A1-standard.toml"), "标准版").unwrap();
-        std::fs::write(dir.path().join("A1-fast260326.toml"), "快拆版").unwrap();
-        std::fs::write(dir.path().join("A1-fastv3.3.toml"), "旧名").unwrap();
-        std::fs::write(dir.path().join("README.md"), "不是产物").unwrap();
+        /* 测试夹具也走 `atomic_write`：本仓禁止 `std::fs::write`
+         * （clippy 的 `disallowed_methods`，理由是"先截断再写，崩了留半个文件"）。 */
+        crate::fsx::atomic::atomic_write(&dir.path().join("A1-standard.toml"), "标准版".as_bytes())
+            .unwrap();
+        crate::fsx::atomic::atomic_write(
+            &dir.path().join("A1-fast260326.toml"),
+            "快拆版".as_bytes(),
+        )
+        .unwrap();
+        crate::fsx::atomic::atomic_write(&dir.path().join("A1-fastv3.3.toml"), "旧名".as_bytes())
+            .unwrap();
+        crate::fsx::atomic::atomic_write(&dir.path().join("README.md"), "不是产物".as_bytes())
+            .unwrap();
 
         let expected: BTreeSet<String> = ["A1-standard.toml", "A1-fast260326.toml"]
             .into_iter()
