@@ -192,10 +192,11 @@ function printVerdict(result, choice) {
     ok('这一版真的生效了：客户端点「重新检查」就能看到')
     return
   }
-  bad('还没生效 —— 别以为发了。缺的那一步就是清单 PR：')
+  bad('还没生效 —— 别以为发了。本命令以失败退出，不许当成成功')
   info(`清单文件：${choice.key === 'stable' ? 'presets/delivery/release.json' : 'presets/delivery/release-preview.json'}`)
   info('去看有没有开着的清单 PR：npm run pr -- --list')
   info('合并它之后重跑：npm run ship -- --check')
+  exit(1)
 }
 
 /* ---------- 主流程 ---------- */
