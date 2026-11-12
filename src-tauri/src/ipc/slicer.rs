@@ -420,10 +420,7 @@ pub fn running_pids(kind: SlicerKind) -> Vec<u32> {
 pub fn wait_new_pid(before: &[u32], kind: SlicerKind) -> Option<u32> {
     for _ in 0..6 {
         std::thread::sleep(std::time::Duration::from_millis(250));
-        if let Some(pid) = running_pids(kind)
-            .into_iter()
-            .find(|p| !before.contains(p))
-        {
+        if let Some(pid) = running_pids(kind).into_iter().find(|p| !before.contains(p)) {
             return Some(pid);
         }
     }

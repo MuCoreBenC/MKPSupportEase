@@ -281,7 +281,7 @@ pub fn decide_calibration(
     size: Option<(f64, f64)>,
     profiles: &[ModelProfile],
 ) -> CalibVerdict {
-    use crate::postproc::calibration::{is_any, Mode};
+    use crate::postproc::calibration::{Mode, is_any};
 
     let by_shape = size.and_then(|(w, h)| detect_mode_by_size(profiles, w, h));
 

@@ -415,10 +415,7 @@ pub fn open_model(
          * 记 PID 而不是按名字找：用户可能同时开着几个切片器，按名字那个接口只会拉起
          * "主"实例；而用户自己从程序坞开的那个也不会被我们认领 —— 这一格只写我们启的。
          */
-        let trackable = matches!(
-            kind,
-            slicer::SlicerKind::Bambu | slicer::SlicerKind::Orca
-        );
+        let trackable = matches!(kind, slicer::SlicerKind::Bambu | slicer::SlicerKind::Orca);
         if trackable {
             if let Some(root) = crate::fsx::paths::internal_root_headless() {
                 if let Ok(Some(pid)) = crate::runtime::app_state::slicer_window_pid(&root) {
