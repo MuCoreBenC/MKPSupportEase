@@ -253,7 +253,53 @@ PR 正文由 `origin/main..HEAD` 的提交列表自动生成 —— 手写正文
 
 ## 5. 发版
 
-一条命令：`npm run release`（`scripts/release.mjs`）。它串起：
+**先跑 `npm run ship`，不要直接 `npm run release`。**
+
+`ship` 用中文问「这次发什么」，四选一，把影响范围复述一遍再要你敲 yes，
+发完用**可核对的事实**回答「到底生效没有」。
+
+| 选 | 实际做什么 | 谁能看到 | tag |
+| --- | --- | --- | --- |
+| 1 只在本机看 | `tauri build` + `local-release` | 只有带 `--local-release` 的本地服务 | 无 |
+| 2 发预览版 | `release --channel preview` | 主动点「检查更新」的人 | 有 |
+| 3 发正式版 | `release --channel stable` | 所有客户端 | 有 |
+| 4 只发预设数据 | `presets publish` | 所有人（下次检查预设时） | 无 |
+
+### 最容易「以为发了其实没发」的地方
+
+发版会写 `release.json` / `release-preview.json`，**那一笔要开第二个 PR**，
+合并之后客户端才读得到（客户端只读 main）。所以「打了 tag」不等于「别人看得到」。
+
+`ship` 结束时会核三件事，缺哪一步就用红字点名：
+
+```
+✓ tag v0.0.12-preview.1 在远端
+✓ Release v0.0.12-preview.1 已建
+✗ main 上的清单还是 0.0.11-preview.2
+⇒ 还没生效 —— 别以为发了
+```
+
+随时回看现在发到哪一步：
+
+```bash
+npm run ship -- --check
+```
+
+### 人指挥 AI 发的时候
+
+AI 只许跑 `npm run ship -- --what <local|preview|stable|presets>`，并且：
+
+- `--what` **必须由人在当次对话里指定** —— AI 不得自己判断该发哪一档
+  （「发预览版」和「发正式版」的差别是谁会收到通知，这不该由它替你想）；
+- 发版那两档必须带 `--confirm`，代表人的当次授权（AGENTS §5.5）；
+- 跑完必须把 `ship` 的核对结果原样贴出来，**尤其"还没生效"那一段**。
+
+`ship` 自己会拦：版本号形状与通道不匹配（`-preview.N` 不能按正式版发）、
+工作区脏（本地包那次）、没敲 yes / 没带 `--confirm`。
+
+### `npm run release` 的细节
+
+`npm run release`（`scripts/release.mjs`）是内核的壳，`ship` 最终调它。它串起：
 
 1. 前置检查：不在 main 上、工作区干净、闸门已生效、`origin` 已配置、复述 `bypass.log` 里
    上次 tag 之后的绕过记录；
