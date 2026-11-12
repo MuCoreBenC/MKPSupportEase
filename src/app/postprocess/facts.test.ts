@@ -7,9 +7,19 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { estimatedPrintTimeSeconds, showsPostProcessChip } from './facts'
-import type { ChipState } from './facts'
-import type { PostProcessFinished, PostProcessRun } from '../../api/contract'
+import {
+  SETTINGS_FOLD_MS,
+  estimatedPrintTimeSeconds,
+  postProcessScene,
+  postProcessSettingsFold,
+  showsPostProcessChip,
+} from './facts'
+import type { ChipState, SettingsFoldInput } from './facts'
+import type {
+  PostProcessFinished,
+  PostProcessQuestion,
+  PostProcessRun,
+} from '../../api/contract'
 
 function finished(over: Partial<PostProcessFinished>): PostProcessFinished {
   return {
@@ -99,5 +109,63 @@ describe('后处理胶囊', () => {
 
   it('用户点「关闭」 ⇒ 停驻标志清掉，胶囊真消失', () => {
     expect(showsPostProcessChip(state({ parked: false }))).toBe(false)
+  })
+})
+
+/* 设置页上「完成」折成胶囊的时机（2026-11-13） */
+describe('设置页上的后处理那一屏', () => {
+  const fold = (over: Partial<SettingsFoldInput> = {}) =>
+    postProcessSettingsFold({
+      scene: 'finished',
+      dismissed: false,
+      succeeded: true,
+      onSettings: true,
+      prevOnSettings: true,
+      prevScene: 'opening',
+      ...over,
+    })
+
+  it('人停在设置页、成功刚出来 ⇒ 先摆 10 秒再折', () => {
+    expect(fold()).toBe('grace')
+    expect(SETTINGS_FOLD_MS).toBe(10_000)
+  })
+
+  it('失败 / 取消刚出来 ⇒ 只有成功有宽限，当场折', () => {
+    expect(fold({ succeeded: false })).toBe('now')
+  })
+
+  it('失败那屏点开看错误码 ⇒ 一直开着，不许又被折回去', () => {
+    expect(fold({ succeeded: false, prevScene: 'finished' })).toBe('none')
+  })
+
+  it('从别的页切进设置页 ⇒ 立刻折', () => {
+    expect(fold({ prevOnSettings: false, prevScene: 'finished' })).toBe('now')
+  })
+
+  it('折了之后点胶囊打开 ⇒ 一直开着，不再计时', () => {
+    /* 点开胶囊不换幕（上一帧已经是 finished），不许重新数那 10 秒 */
+    expect(fold({ prevScene: 'finished' })).toBe('none')
+  })
+
+  it('跑着 / 机型不匹配 / 点位测试 ⇒ 不动它（照常盖在设置页上）', () => {
+    expect(fold({ scene: 'opening' })).toBe('none')
+    expect(fold({ scene: 'question' })).toBe('none')
+  })
+
+  it('已经收起 / 不在设置页 ⇒ 不动它', () => {
+    expect(fold({ dismissed: true })).toBe('none')
+    expect(fold({ onSettings: false, prevOnSettings: false })).toBe('none')
+  })
+
+  it('幕的判据：跑着 / 等答复 / 完成', () => {
+    const run = (over: Partial<PostProcessRun>): PostProcessRun =>
+      ({ finished: null, question: null, ...over }) as PostProcessRun
+    const q = { questionKind: 'machine-mismatch' } as PostProcessQuestion
+    expect(postProcessScene(run({}))).toBe('opening')
+    expect(postProcessScene(run({ question: q }))).toBe('question')
+    expect(
+      postProcessScene(run({ finished: { ok: true } as PostProcessFinished })),
+    ).toBe('finished')
+    expect(postProcessScene(null)).toBeNull()
   })
 })
