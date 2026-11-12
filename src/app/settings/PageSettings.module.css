@@ -673,10 +673,12 @@
   background-image: url('../assets/hero/update_art_app_light.svg');
 }
 
-/* 悬停别用 filter / opacity：那一类会在祖先链上摊平 3D，背面遮挡就失效了 */
+/* 悬停别用 filter / opacity：那一类会在祖先链上摊平 3D，背面遮挡就失效了。
+ * 焦点环用 `box-shadow` 做外扩，不用 `outline-offset` —— 那一格是定位高亮的判据词，
+ * 而这条是键盘焦点，两件事不该互相绊住。 */
 .updArt:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 6px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
   border-radius: 28px;
 }
 
