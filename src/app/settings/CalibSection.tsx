@@ -1,7 +1,17 @@
 /*
  * 设置页「校准与补偿」那一块（2026-10-17）。
  *
- * 五行：跳过震动校准检测 / 开始阶段收笔 / 收笔抬升高度 / Z 轴停留时间 / XY 轴停留时间。
+ * 顺序按**优先级**排（2026-11-12 作者：「按下优先级去排序，像这些文本框可能放到后面
+ * 也无所谓」）：
+ *
+ *   1. 收落笔点位测试   —— 这一趟真跑还是只跑落笔与收笔（总开关，最优先）
+ *   2. 强制校准模式     —— 这一趟认不认得出校准件
+ *   3. 跳过震动校准检测 —— 要不要省掉开场那次震动检测
+ *   4. 开始阶段收笔（+ 收笔抬升高度，跟着它缩进）
+ *   5. Z 轴停留时间 / 6. XY 轴停留时间 —— 数值框排最后
+ *
+ * 一句话：**模式 → 行为开关 → 数值**。前两行都是"这一趟怎么跑"，所以排在一起放上面；
+ * 收落笔点位测试压过别的开关（它一开，本区其它项全不生效），因此排第一。
  *
  * ★★ 这几行**真的改变切出来的 G-code**（2026-10-17 之前它们是写死在管线里的常量，
  * 设置页改不动）。现在它们经 `runtime::postproc_prefs::apply_to_ir` 写进 `ir.prefs`，
@@ -24,6 +34,8 @@ import { Switch } from '../../components/switch'
 import { Tip } from '../../components/tooltip'
 import DebugPrefsModal from './DebugPrefsModal'
 import { SectionHead } from './SectionHead'
+import { Btn } from '../ui/Controls'
+import { SETTINGS_TARGET_FORCE_CALIB } from './targets'
 import s from './PageSettings.module.css'
 
 /**
@@ -34,7 +46,7 @@ export default function CalibSection({ nested = false }: { nested?: boolean }) {
   const tr = useT()
   const { prefs, set } = usePostprocPrefs()
   const [err, setErr] = useState<string | null>(null)
-  /** 调试模式那扇窗开着没 */
+  /** 收落笔点位测试那扇窗开着没 */
   const [debugOpen, setDebugOpen] = useState(false)
 
   const on = (why: string) => setErr(why)
@@ -63,6 +75,40 @@ export default function CalibSection({ nested = false }: { nested?: boolean }) {
   return (
     <section className={s.section} aria-label={tr('settings.calib.title')}>
       {head}
+
+      {/* 头两行是**模式**：它们决定这一趟怎么工作，所以排最上面。
+
+          收落笔点位测试：产物里只留落笔与收笔，用来在真机上试位置 —— 打开之后本区其它项
+          全部不生效，所以它排在所有开关之前（先决定"这一趟要不要真跑"）。 */}
+      <div className={`${s.field} ${s.fieldRow}`}>
+        <div className={s.fieldText}>
+          <div className={s.fieldTitle}>
+            {tr('settings.calib.debugMode')}
+            <span className={s.badge} data-on={r.debugModeEnabled}>
+              {tr(r.debugModeEnabled ? 'settings.calib.debugOn' : 'settings.calib.debugOff')}
+            </span>
+            <Tip text={tr('settings.calib.debugModeNote')} />
+          </div>
+        </div>
+        <Btn onClick={() => setDebugOpen(true)}>{tr('settings.calib.debugOpen')}</Btn>
+      </div>
+
+      {/* 强制校准：只看外形认校准件 —— 给"手上只有模型文件、3MF 里没有身份"那一类。
+          认不出就停下（不会静默当普通模型跑），所以它必须显式打开。
+          ★ 「这一盘不是校准件」那条失败跳的就是这一行（落点见 settings/targets.ts）。 */}
+      <div className={`${s.field} ${s.fieldRow}`} id={SETTINGS_TARGET_FORCE_CALIB}>
+        <div className={s.fieldText}>
+          <div className={s.fieldTitle}>
+            {tr('settings.calib.forceCalib')}
+            <Tip text={tr('settings.calib.forceCalibNote')} />
+          </div>
+        </div>
+        <Switch
+          checked={r.forceCalibrationMode}
+          ariaLabel={tr('settings.calib.forceCalib')}
+          onChange={(next) => void set({ forceCalibrationMode: next }, on)}
+        />
+      </div>
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
@@ -120,30 +166,6 @@ export default function CalibSection({ nested = false }: { nested?: boolean }) {
         </div>
       )}
 
-      {/* 调试模式：这一行只显示开关状态，点它进那扇窗改细节。
-          选项只会越来越多（驻点、落笔位、收笔位、速度、测哪个…），
-          摊在设置页会把这一屏撑满，而它是偶尔用一次的临时状态。 */}
-      <div className={`${s.field} ${s.fieldRow}`}>
-        <div className={s.fieldText}>
-          <div className={s.fieldTitle}>
-            {tr('settings.calib.debugMode')}
-            <Tip text={tr('settings.calib.debugModeNote')} />
-          </div>
-        </div>
-        <button type="button" className={s.textBtn} onClick={() => setDebugOpen(true)}>
-          {tr(r.debugModeEnabled ? 'settings.calib.debugOn' : 'settings.calib.debugOff')}
-        </button>
-      </div>
-
-      {/* `key` 跟着开/关走：每次打开都是新实例，`panel` 自然回到编辑那一屏。
-          之前靠 `useEffect` 里 `setPanel('edit')`，要等 prefs 异步回来那一帧才生效，
-          作者看到的就是「打开是记录页、点返回没反应、几秒后才好」 */}
-      <DebugPrefsModal
-        key={debugOpen ? 'open' : 'closed'}
-        open={debugOpen}
-        onClose={() => setDebugOpen(false)}
-      />
-
       {/* 停留时间是并列的参数（不是哪一行的派生值）⇒ 不缩进 */}
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
@@ -184,6 +206,15 @@ export default function CalibSection({ nested = false }: { nested?: boolean }) {
           />
         </span>
       </div>
+
+      {/* `key` 跟着开/关走：每次打开都是新实例，`panel` 自然回到编辑那一屏。
+          之前靠 `useEffect` 里 `setPanel('edit')`，要等 prefs 异步回来那一帧才生效，
+          作者看到的就是「打开是记录页、点返回没反应、几秒后才好」 */}
+      <DebugPrefsModal
+        key={debugOpen ? 'open' : 'closed'}
+        open={debugOpen}
+        onClose={() => setDebugOpen(false)}
+      />
 
       {err !== null && <p className={`${s.note} ${s.noteBad}`}>{err}</p>}
     </section>

@@ -19,6 +19,7 @@ import { detectPlatform } from '../hooks/usePlatform'
 import ResizeEdges from './components/ResizeEdges'
 import BreezeBackdrop from './components/BreezeBackdrop'
 import { useUnsavedDraft } from './state/useUnsavedDraft'
+import { installUiTracking, setUiPage, track } from './log/track'
 /* 提示气泡（2026-10-30）：全站唯一一份，挂在根上认 `data-tip` */
 import { TipLayer } from '../components/tooltip'
 import TopTabs from './components/TopTabs'
@@ -276,6 +277,17 @@ export default function App() {
   }, [pin, tab])
 
   /*
+   * 界面动作记录（2026-11-12）：全局点击捕获装一次；页签变化也记一笔 ——
+   * 切页的入口有五六处（顶栏、跨页跳转、开发台），都改同一个 `tab`，
+   * 所以一条 effect 就够，不必逐处埋点（与上面置顶那条同一个理由）。
+   */
+  useEffect(() => installUiTracking(), [])
+  useEffect(() => {
+    setUiPage(tab)
+    track('tab', { to: tab })
+  }, [tab])
+
+  /*
    * **关窗 / 刷新前拦一下**（2026-10-31）：只有**参数草稿**会拦。
    *
    * 改名 / 删除 / 复制 / 备注 / 归属是立即执行的，它们不会留下"未保存"状态，
@@ -418,6 +430,23 @@ export default function App() {
   const silentPostproc = postprocPrefs?.resolved.uiMode === 'silent'
   const postProcess = usePostProcessRun(silentPostproc)
 
+  /*
+   * **设置页不摆后处理那一屏**（2026-11-12 作者：「它可以在很多页面都出现，但是在设置页面
+   * 就让它不要出现」「跳转过去才不会被挡住」）。
+   *
+   * 两种进入方式都收在这一条：
+   *   · 从失败那屏跳进来 / 点右上角胶囊 ⇒ 一进来就收成胶囊（结论不丢，回来还能看）；
+   *   · 后台跑完那一刻人正好停在设置页 ⇒ 同样只留胶囊，不许弹出来盖住开关。
+   * ★ 渲染那一格也有同一个判据（见下面 `PostProcessModal`）：只靠 effect 的话，
+   *   切页签那一帧还是会压在设置页上。
+   */
+  const parkPostProcess = postProcess.park ?? postProcess.dismiss
+  useEffect(() => {
+    if (tab !== 'settings') return
+    if (postProcess.run === null || postProcess.dismissed) return
+    parkPostProcess()
+  }, [tab, postProcess.run, postProcess.dismissed, parkPostProcess])
+
   return (
     <div ref={rootRef} className={s.shell} data-density={density} data-tab={tab}>
       <BreezeBackdrop />
@@ -438,8 +467,10 @@ export default function App() {
             platform={PLATFORM}
             fluid
             /* 后台跑着的那一趟：喂给标题栏那枚小胶囊（**不再是页签下面一条横条**，
-               那条一出现就把整页往下推 —— 作者 2026-10-17 否了它的位置） */
-            postProcess={postProcess}
+               那条一出现就把整页往下推 —— 作者 2026-10-17 否了它的位置）。
+               ★ 设置页不给它：那一页连胶囊也不摆（点开也只会被下面那条 effect 收回去，
+               摆一颗点了没反应的钮比不摆更糟）。离开设置页它自己回来。 */
+            postProcess={tab === 'settings' ? undefined : postProcess}
           />
 
           {/* 导入结果条（in-flow，标签栏下面一条）：有结果才出现，不是会自己消失的提示 */}
@@ -476,11 +507,14 @@ export default function App() {
               <PageSettings target={settingsTarget} />
             </PageSlot>
           </main>
-          <PostProcessModal
-            view={postProcess}
-            onOpenReport={openReport}
-            onOpenSettings={openSettings}
-          />
+          {/* 设置页不摆这一屏（判据见上面那条 effect）：跳过来改设置的人要看得见那一行开关 */}
+          {tab !== 'settings' && (
+            <PostProcessModal
+              view={postProcess}
+              onOpenReport={openReport}
+              onOpenSettings={openSettings}
+            />
+          )}
         </FieldLayer>
       </FileImportProvider>
       </DevPreviewProvider>

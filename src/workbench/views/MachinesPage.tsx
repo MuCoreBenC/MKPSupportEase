@@ -27,6 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
 import type {
+  AppError,
   AssetList,
   BookView,
   BundleList,
@@ -36,6 +37,7 @@ import type {
   RegistryView,
   VersionAssetRef,
   VersionField,
+  VersionNode,
   VersionView,
   Words,
 } from '../api'
@@ -43,6 +45,7 @@ import { ContextMenu } from '../components/menu'
 import type { ContextMenuEntry } from '../components/menu/types'
 import { useContextMenu } from '../components/menu/useContextMenu'
 import AssetPicker, { AssetField } from '../c14/AssetPicker'
+import ErrorDialog from '../c14/ErrorDialog'
 import FieldMark, { TodoValue } from '../c14/FieldMark'
 import ModalC14 from '../c14/ModalC14'
 import PickOrType from '../c14/PickOrType'
@@ -58,11 +61,24 @@ import s from '../c14.module.css'
 interface Props {
   book: BookView
   words: Words
+  /**
+   * 外壳的「工作区换代」计数（保存 / 放弃 / 撤销 / 重做 / 重载 / 生成之后 +1）。
+   *
+   * 这一页自己持有 `wb_machines` 那一份清单，挂在挂载时读一次；页面又常驻不卸载
+   * （外壳 `held` 保留节点），不跟着它重取的话，「放弃改动」之后已经被丢弃的版本
+   * 还会留在列表与详情里（作者 2026-11-12 报的那个）。
+   */
+  tick: number
   onGoto: (view: string, focus?: GotoFocus) => void
   /** 外壳的保存。生成按钮在草稿脏时给的「先落盘再生成」就是它 */
   onSave: () => Promise<boolean>
   /** 结构性写（建 / 删 / 复制）之后让外壳重取整本 —— 徽章的机型版本数跟着走 */
   onBookRefresh: () => void
+  /**
+   * 只刷整本、**不拨 `tick`**。改 id / 改一格字段时用：页面已经拿着命令返回的新清单，
+   * 不该再整机重取把正在编辑的详情卡刷掉。
+   */
+  onBookRefreshQuiet: () => void
 }
 
 /** 版本行选中标记：`机型id/版本id`。只在本页内当 key 用，不是后端的 uid */
@@ -157,7 +173,15 @@ const I18N_FIELDS = [
 ] as const
 type I18nKey = `${(typeof I18N_FIELDS)[number]['suffix']}${(typeof I18N_LANGS)[number]['suffix']}`
 
-export default function MachinesPage({ book, words, onGoto, onSave, onBookRefresh }: Props) {
+export default function MachinesPage({
+  book,
+  words,
+  tick,
+  onGoto,
+  onSave,
+  onBookRefresh,
+  onBookRefreshQuiet,
+}: Props) {
   /** 左栏宽度可拖（作者 2026-10-03，同参数台） */
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const rail = useSplitRail('machines', bodyRef)
@@ -189,6 +213,15 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
   const [copyId, setCopyId] = useState('')
   const [copyName, setCopyName] = useState('')
   const [withRecipe, setWithRecipe] = useState(true)
+  /** 「复制参数」补入入口：`null` = 关着；非空 = 给这一版补参数 */
+  const [recipePick, setRecipePick] = useState<string | null>(null)
+  const [recipeTpl, setRecipeTpl] = useState('')
+  /** 失败弹框：标题 + 一句后果 + 原始错误（带码与请求号） */
+  const [errDialog, setErrDialog] = useState<{
+    title: string
+    lead: string
+    error: AppError
+  } | null>(null)
   /** 删除版本的两步：`null` = 没开；`{vid}` = 第一步；orphans 与 assets 都回来 = 第二步 */
   const [del, setDel] = useState<{
     vid: string
@@ -249,7 +282,9 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       }
     })()
   }, [])
-  useEffect(loadAll, [loadAll])
+  /* `tick` 变了 = 工作区换代（保存 / 放弃 / 撤销 / 重做 / 重载）—— 清单必须重取，
+  否则本页常驻不卸载，放弃掉的版本会一直留在列表里（见 Props.tick 的注） */
+  useEffect(loadAll, [loadAll, tick])
 
   /** 每次写完都重取检查报告 —— 阻断集合变了，生成按钮的门禁跟着走 */
   const refreshReport = useCallback(() => {
@@ -258,11 +293,23 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       .catch(() => undefined)
   }, [])
 
-  /** 结构性写之后：外壳的整本（徽章、构建行）也要跟上 */
-  const afterStructural = useCallback(() => {
-    onBookRefresh()
-    refreshReport()
-  }, [onBookRefresh, refreshReport])
+  /**
+   * 结构性写之后：外壳的整本（徽章、构建行）也要跟上。
+   *
+   * `quiet = true` 用于「页面自己已经拿着命令返回的新清单」的编辑（改 id、
+   * 改套餐指向）：只刷整本、不拨 `tick`，免得整机重取把正在编辑的详情卡刷掉。
+   */
+  const afterStructural = useCallback(
+    (quiet = false) => {
+      if (quiet) {
+        onBookRefreshQuiet()
+        return
+      }
+      onBookRefresh()
+      refreshReport()
+    },
+    [onBookRefresh, onBookRefreshQuiet, refreshReport],
+  )
 
   const m: MachineView | undefined = list?.machines.find((x) => x.id === machineId)
 
@@ -392,7 +439,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     if (!m) return
     try {
       setList(await wb.setVersionField(m.id, versionId, field, value))
-      if (field === 'recommendedBundle') onBookRefresh()
+      if (field === 'recommendedBundle') afterStructural(true)
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
     }
@@ -417,7 +464,8 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       setList(await wb.setVersionId(m.id, oldId, want))
       setPickedVid(vidOf(m.id, want))
       toasts.push(`已把 ${m.id}/${oldId} 改成 ${m.id}/${want} —— 保存后写入`)
-      afterStructural()
+      /* 只刷整本、不拨 tick：详情卡要留在原地，好接着改 id 或别的字段 */
+      afterStructural(true)
       return true
     } catch (e) {
       failToast(e)
@@ -546,6 +594,15 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
   /* —— 弹窗公共的提交失败出口 —— */
   const failToast = (e: unknown) => toasts.push(isAppError(e) ? e.message : String(e))
 
+  /**
+   * **已经产生了现场**的失败走模态框：版本建好了、参数没抄过来 —— 人得盯着那句
+   * 原因决定下一步，toast 转眼就没（作者 2026-11-12）。没产生现场的那类仍走 toast。
+   */
+  const showError = (title: string, lead: string, e: unknown) => {
+    if (isAppError(e)) setErrDialog({ title, lead, error: e })
+    else failToast(e)
+  }
+
   if (pageErr !== null) {
     return (
       <p className="wb-todo" data-tone="danger">
@@ -588,7 +645,32 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     pickedVidParts && pickedVidParts[0] === m.id
       ? m.versions.find((v) => v.id === pickedVidParts[1])
       : undefined
-  const pickedNode = picked ? nodeOf(m.id, picked.id) : undefined
+  /*
+   * 详情卡不许因为外壳的 book 慢一拍就整块消失。
+   *
+   * 改版本 id / 新增版本时，`wb_machines` 已经返回新清单（`picked` 有值），
+   * 而外壳那份 `book` 是异步重取的 —— 这一帧 `nodeOf` 按新 uid 找不到节点，
+   * `picked && pickedNode` 就为假，详情卡被卸载。作者遇到的就是「改完 id
+   * 立马刷新、详情展开不了、打错字想再改一次都没地方点」。
+   *
+   * book 里还没有这一版时，按清单合成一个最小节点过渡：身份 / 参数 / 关联
+   * 那些格子读的都是 `picked` 与 `list`，不靠这个节点；等 book 到了自然换真值。
+   */
+  const pickedNode: VersionNode | undefined = picked
+    ? (nodeOf(m.id, picked.id) ?? {
+        uid: vidOf(m.id, picked.id),
+        versionId: picked.id,
+        name: picked.name,
+        tag: picked.tag ?? null,
+        items: 0,
+        build: 'neverBuilt',
+        bbsSource: 'inheritedFromMachine',
+        bbsCount: 0,
+        recipeEmpty: !picked.hasRecipe,
+        lastBuild: null,
+        orphanKeys: [],
+      })
+    : undefined
   const pickedRow = pickedNode ? rowOf(pickedNode.uid) : undefined
   const todo = todoOf(m)
   const visibleCount = registry.params.filter(
@@ -657,8 +739,8 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
           const n = await wb.copyRecipe(m.id, avTpl.id, newId)
           note = `照抄自 ${avTpl.id}（参数正文 ${n} 项，独立快照）`
         } catch (e) {
-          failToast(e)
-          note = `照抄自 ${avTpl.id}，但参数正文没抄过来 —— 可以在参数台补`
+          showError('复制配方失败', `版本 ${newId} 已建好，参数没有抄过来。`, e)
+          note = `照抄自 ${avTpl.id}，参数正文没抄过来`
         }
         toasts.push(`已新增版本 ${m.id}/${newId} —— ${note}（已进草稿）`)
       }
@@ -694,8 +776,12 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
           const n = await wb.copyRecipe(m.id, templateId, copyId.trim())
           recipeNote = `参数正文已复制（${n} 项，独立快照）`
         } catch (e) {
-          failToast(e)
-          recipeNote = '版本定义已建，但参数正文复制失败 —— 可以在参数台重试'
+          showError(
+            '复制配方失败',
+            `版本 ${copyId.trim()} 已建好，参数没有抄过来。`,
+            e,
+          )
+          recipeNote = '版本定义已建，参数正文没抄过来'
         }
       }
       toasts.push(`已复制为 ${m.id}/${copyId.trim()} —— ${recipeNote}（已进草稿）`)
@@ -704,6 +790,26 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       afterStructural()
     } catch (e) {
       failToast(e)
+    }
+  }
+
+  /**
+   * 「复制参数」补入入口（2026-11-12）：给一个**参数源待补**的版本补一份独立快照。
+   *
+   * `hasRecipe` 不会随 `afterStructural()` 翻 —— 那是外壳的整本；这一页读的是
+   * `wb_machines`，得自己 `loadAll()` 重取一次，卡片才会从「参数源待补」变成
+   * 「本版本覆盖 N 项」。
+   */
+  const submitRecipeCopy = async () => {
+    if (recipePick === null || recipeTpl === '' || !m) return
+    try {
+      const n = await wb.copyRecipe(m.id, recipeTpl, recipePick)
+      setRecipePick(null)
+      loadAll()
+      afterStructural(true)
+      toasts.push(`参数已复制（${n} 项，独立快照）`)
+    } catch (e) {
+      showError('复制配方失败', `版本 ${recipePick} 的参数没有抄过来。`, e)
     }
   }
 
@@ -786,8 +892,16 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     if (!picked.hasRecipe)
       return {
         label: '补参数源',
-        hint: '这个版本还是纯继承基线（参数源待补）—— 去参数台把它的参数正文钉下来。',
-        run: () => onGoto('params', { machineId: m.id, uid, key: null }),
+        hint: '这一版还没有自己的参数正文 —— 选一个模板版本抄一份进来。',
+        run: () => {
+          /* 只有这一版时没有模板可抄，退回参数台逐格填 */
+          if (m.versions.length > 1) {
+            setRecipeTpl('')
+            setRecipePick(picked.id)
+          } else {
+            onGoto('params', { machineId: m.id, uid, key: null })
+          }
+        },
       }
     const blocks = myBlocks(uid)
     if (blocks.length > 0)
@@ -1405,7 +1519,16 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                 >
                   <span className={`${s.mono} ${s.rowMeta}`}>{v.id}</span>
                   <span className={s.rowName}>{v.name}</span>
-                  <span className={s.rowMeta}>{v.recommendedBundle ?? placeholderText.noBundle}</span>
+                  <span
+                    className={s.rowMeta}
+                    data-tip={
+                      v.recommendedBundle
+                        ? `套餐 ${v.recommendedBundle}`
+                        : '没指套餐，生成时用机型默认'
+                    }
+                  >
+                    {v.recommendedBundle ?? placeholderText.noBundle}
+                  </span>
                   {!v.hasRecipe && (
                     <span className={s.todo} title="纯继承机型基线，还没有自己的参数正文（14.4）">
                       参数源待补
@@ -1644,6 +1767,19 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                   </span>
                 </div>
                 <div className={s.sectOps}>
+                  {!picked.hasRecipe && m.versions.length > 1 && (
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnSm}`}
+                      title="从另一版抄一份完整参数（独立快照，之后各改各的）"
+                      onClick={() => {
+                        setRecipeTpl('')
+                        setRecipePick(picked.id)
+                      }}
+                    >
+                      复制参数
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={`${s.btn} ${s.btnSm}`}
@@ -2218,7 +2354,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
           <HelpDot
             text={
               avTpl
-                ? `照抄 ${avTpl.id} 的定义与参数，之后两边各改各的；id 与名字是新填的。`
+                ? `照抄 ${avTpl.id} 的定义、套餐与参数，之后两边各改各的；id 与名字是新填的。`
                 : '新版本的标签、说明、套餐是空的，参数纯继承机型基线，卡片上标「参数源待补」。'
             }
           />
@@ -2278,6 +2414,9 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             <HelpDot text="拷出来是独立快照 —— 之后改模板、改基线都传不到它身上。不勾就是一个纯继承基线的空壳版本（标「参数源待补」）。" />
           </span>
         </label>
+        <p className={s.cardNoteDim} style={{ margin: '6px 0 0' }}>
+          套餐一并复制，新版本指过去
+        </p>
       </ModalC14>
 
       {/* —— 编辑版本（name / tag / description 三格一次提交） —— */}
@@ -2455,6 +2594,56 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
           </>
         )}
       </ModalC14>
+
+      {/* —— 复制参数（「参数源待补」的补入入口，2026-11-12） —— */}
+      <ModalC14
+        open={recipePick !== null}
+        title={`复制参数 · ${recipePick ?? ''}`}
+        size="md"
+        closeOnScrim={false}
+        onClose={() => setRecipePick(null)}
+        footer={
+          <>
+            <span className={s.grow} />
+            <button type="button" className={s.btn} onClick={() => setRecipePick(null)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnPrimary}`}
+              disabled={recipeTpl === ''}
+              onClick={() => void submitRecipeCopy()}
+            >
+              复制
+            </button>
+          </>
+        }
+      >
+        <div className={s.kv} style={{ display: 'grid' }}>
+          <span className={s.kvKey}>模板版本</span>
+          <SelectField
+            label="模板版本"
+            size="sm"
+            value={recipeTpl}
+            placeholder="选一个版本"
+            options={(m?.versions ?? [])
+              .filter((v) => v.id !== recipePick)
+              .map((v) => ({ value: v.id, label: v.name || v.id, note: v.id }))}
+            onChange={setRecipeTpl}
+          />
+        </div>
+        <p className={s.cardNoteDim}>抄的是模板的完整有效配方，之后两边各改各的。</p>
+      </ModalC14>
+
+      {/* 错误弹框：复制失败时把码、请求号与字段级原因一起摆出来 */}
+      <ErrorDialog
+        open={errDialog !== null}
+        title={errDialog?.title ?? '操作失败'}
+        lead={errDialog?.lead ?? ''}
+        error={errDialog?.error ?? null}
+        onClose={() => setErrDialog(null)}
+      />
+
       {rail.handle}
     </div>
   )

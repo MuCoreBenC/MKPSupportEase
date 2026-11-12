@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::ipc::traced;
+use crate::workbench::clock;
 use crate::workbench::load_session_presets;
 use crate::workbench::presets::{
     BrandField, Dimensions, MachineField, Presets, VersionField, Zone,
@@ -180,7 +181,7 @@ pub fn wb_add_version(
 ///
 /// # 「多个地方」都要跟着搬
 ///
-/// 主键换了，指着它的东西一共四处，一条都不能漏：
+/// 主键换了，指着它的东西一共五处，一条都不能漏：
 ///
 /// | 在哪 | 怎么搬 |
 /// |---|---|
@@ -188,10 +189,15 @@ pub fn wb_add_version(
 /// | 参数四张表（值 / 范围 / 跟随） | 同上（表与内联表两种形状） |
 /// | 资产归属 `versionId` | 同上 |
 /// | **还没保存的值草稿与字段账** | `Ctx::retarget_version_uid` |
+/// | 它独占的套餐 id（`{机型}_{版本 id}`） | `Presets::rename_version_bundle` |
 ///
 /// 第四处是"先改了几格参数、再改 id"的那条路：只改前三处的话，那几格还挂在
 /// 旧 uid 上，保存时写进一个不存在的版本。所以这里**不拒绝带草稿的改名**，
 /// 而是把草稿一起搬过去（作者 2026-11-12）。
+///
+/// 第五处是 2026-11-12 补的：`FASTV3.3` 改成 `FAST260628` 之后版本行还显示
+/// `A1_FASTV3.3` —— 套餐 id 没跟着版本走。只改**这一版独占**的套餐；
+/// 多版共用的不碰（那会把别人的指向一起改掉）。
 #[tauri::command]
 pub fn wb_set_version_id(
     machine_id: String,
@@ -201,12 +207,20 @@ pub fn wb_set_version_id(
     traced("wb_set_version_id", |_| {
         with_struct_ctx(
             "",
-            |_| {
-                vec![
-                    format!("machines/{machine_id}.toml"),
-                    "registry/param_registry.toml".to_owned(),
-                    "assets.toml".to_owned(),
-                ]
+            |ctx| {
+                /* 套餐改名会重指**所有**机型文件里指向它的那几处（`rename_bundle`），
+                所以快照要覆盖全部机型文件 —— 只列当前这台会漏掉撤销点 */
+                let mut files: Vec<String> = ctx
+                    .presets
+                    .catalog
+                    .machines()
+                    .iter()
+                    .map(|m| format!("machines/{}.toml", m.id))
+                    .collect();
+                files.push("registry/param_registry.toml".to_owned());
+                files.push("assets.toml".to_owned());
+                files.push("bundles.toml".to_owned());
+                files
             },
             |ctx| {
                 let old_vid = old_version_id.trim();
@@ -218,6 +232,12 @@ pub fn wb_set_version_id(
                 ctx.presets.registry.write_back()?;
                 ctx.presets.assets.write()?;
                 ctx.presets.catalog.write_machine(&machine_id)?;
+                let bundle_moved = ctx.presets.rename_version_bundle(
+                    &machine_id,
+                    old_vid,
+                    new_vid,
+                    &clock::now_iso8601(),
+                )?;
                 /* 草稿里那些格子还挂在旧 uid 上 —— 一起搬到新 uid，
                 保存时才写得回去。比这一笔更早的文件字节不动：撤销是后进先出，
                 这一条会先被撤掉，id 退回旧值之后那些字节又是对的 */
@@ -229,7 +249,8 @@ pub fn wb_set_version_id(
                     to = %new_vid,
                     params = moved.params.len(),
                     assets = moved.assets.len(),
-                    "改了一个版本的 id（参数记录、资产归属与草稿一起搬）"
+                    bundle = bundle_moved.as_ref().map(|(a, b)| format!("{a}→{b}")).unwrap_or_default(),
+                    "改了一个版本的 id（参数记录、资产归属、独占套餐与草稿一起搬）"
                 );
                 Ok(list_of(&ctx.presets.reload()?))
             },
@@ -238,11 +259,18 @@ pub fn wb_set_version_id(
 }
 
 /// **复制已有版本**（b05 Task 14.3 / doc §4.3 第 2–5 步）：选一个模板版本，
-/// 填新 id / 名称，保存时**只写版本定义** —— 不碰参数正文
-/// （那是 [`super::wb_copy_recipe`] 的独立动作，两步分离让每次写只落一个文件）。
+/// 填新 id / 名称，落盘版本定义 + 它指向的套餐 —— 不碰参数正文
+/// （那是 [`super::wb_copy_recipe`] 的独立动作）。
 ///
-/// 除 id 与名称外各格**逐格照抄模板**（套餐指向、三册译名、角标、说明、备注、版图）；
+/// 除 id 与名称外各格**逐格照抄模板**（三册译名、角标、说明、备注、版图）；
 /// `tag` / `description` 给了就是改写那两格。
+///
+/// # 套餐为什么跟着走（2026-11-12）
+///
+/// 作者把 `FASTV3.3` 改名成 `FAST260628`、又复制出 `FAST261111` 之后，两行版本
+/// 都显示 `A1_FASTV3.3`：复制把指针照抄了，而「一版一套」要求每版有自己的套餐。
+/// 现在复制版本时一并建 `{机型}_{新版本 id}` 的套餐（内容拷自模板，MKP 登记换成
+/// 新版本自己的那份），新版本指过去；模板那份不动。
 #[tauri::command]
 pub fn wb_copy_version(
     machine_id: String,
@@ -255,21 +283,35 @@ pub fn wb_copy_version(
     traced("wb_copy_version", |_| {
         with_struct_ctx(
             "",
-            |_| vec![format!("machines/{machine_id}.toml")],
+            |_| {
+                vec![
+                    format!("machines/{machine_id}.toml"),
+                    "bundles.toml".to_owned(),
+                    "assets.toml".to_owned(),
+                ]
+            },
             |ctx| {
-                ctx.presets.catalog.machine_mut(&machine_id)?.copy_version(
+                let copied = ctx.presets.copy_version_with_bundle(
+                    &machine_id,
                     &template_version_id,
                     &id,
                     &name,
                     tag.as_deref(),
                     description.as_deref(),
+                    &clock::now_iso8601(),
                 )?;
                 ctx.presets.catalog.write_machine(&machine_id)?;
+                if copied.is_some() {
+                    ctx.presets.bundles.write()?;
+                    ctx.presets.assets.write()?;
+                }
                 tracing::info!(
                     machine = %machine_id,
                     template = %template_version_id,
                     version = %id,
-                    "从模板复制了一个版本（只写版本定义）"
+                    bundle = copied.as_ref().map(|c| c.bundle_id.as_str()).unwrap_or_default(),
+                    asset = copied.as_ref().and_then(|c| c.asset_id.as_deref()).unwrap_or_default(),
+                    "从模板复制了一个版本（定义 + 套餐；参数正文是下一条命令）"
                 );
                 // 从盘上重读再返回：**界面看到的应该是落盘的结果**
                 Ok(list_of(&ctx.presets.reload()?))

@@ -95,6 +95,8 @@ import { HeadNote, Modal, PageToggle, useModalHeadNoteSlot } from '../../compone
 import { Switch } from '../../components/switch'
 import { useStickyState } from '../../hooks/useStickyState'
 import { useT, type StringKey } from '../../i18n'
+import PathPill from '../shared/PathPill'
+import { joinExportPath } from '../shared/pathPillText'
 import { Btn } from '../ui/Controls'
 import s from './ExportModal.module.css'
 
@@ -223,47 +225,6 @@ function HeadBadge({ label }: { label: string }) {
   const slot = useModalHeadNoteSlot()
   if (slot === null) return null
   return createPortal(<span className={s.badge}>{label}</span>, slot)
-}
-
-/**
- * 路径胶囊里的那串字：`<父目录><分隔符><基名><分隔符>` 拆两段 ——
- * 前段自己收省略号、**尾两段钉住不缩**（"往哪个盘哪个文件夹里导"永远看得见）。
- *
- * 分隔符按父目录里用的那个认（Windows 收到的是 `\`，macOS 是 `/`）；
- * 段数少到没有"尾两段"可言时整条当前段，不分。
- *
- * `zipped` = 压缩导出：落点是一个 `<基名>.zip` **文件**，尾巴上不再带分隔符 ——
- * 胶囊里显示的就是"会落在哪个包"，读起来与散着导出那一档同一种语法。
- */
-function pathPill(
-  dir: string,
-  base: string,
-  zipped: boolean,
-): { folder: string; full: string; head: string; tail: string } {
-  const sep = dir.includes('\\') ? '\\' : '/'
-  const name = zipped ? `${base}.zip` : base
-  const folder = `${dir.replace(/[\\/]+$/, '')}${sep}${name}`
-  const full = zipped ? folder : `${folder}${sep}`
-  const lead = full.startsWith(sep) ? sep : ''
-  const parts = full.split(/[\\/]/).filter((x) => x !== '')
-  if (parts.length <= 2) return { folder, full, head: '', tail: full }
-  return {
-    folder,
-    full,
-    head: lead + parts.slice(0, -2).join(sep) + sep,
-    tail: parts.slice(-2).join(sep) + (zipped ? '' : sep),
-  }
-}
-
-/**
- * 归档路径拆成「目录 + 文件名」两段（信息页那一行用）。
- *
- * 与保存位置胶囊同一条理由：**尾那个文件名钉住不缩**，长的部分由前面的目录自己收省略号。
- * 只收成一条"从左边截断的路径"会把文件名截没 —— 那一行要回答的正是"这是哪个文件"。
- */
-function splitPath(full: string): { dir: string; base: string } {
-  const at = Math.max(full.lastIndexOf('/'), full.lastIndexOf('\\'))
-  return at < 0 ? { dir: '', base: full } : { dir: full.slice(0, at + 1), base: full.slice(at + 1) }
 }
 
 export interface ExportModalProps {
@@ -410,7 +371,10 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
 
   const dir = picked === '' ? (plan?.defaultDir ?? '') : picked
   /* 压缩开着时落点是一个 `<基名>.zip`（胶囊里就得这么写，别写成"某个文件夹"） */
-  const path = plan === null || dir === '' ? null : pathPill(dir, plan.base, zip)
+  const path =
+    plan === null || dir === ''
+      ? null
+      : joinExportPath(dir, zip ? `${plan.base}.zip` : plan.base, !zip)
 
   /**
    * 「这一次导出去的是哪一档」—— 成功之后要记住，不能跟着开关飘（作者 2026-11-04）：
@@ -565,12 +529,9 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
   const exported = done !== null
 
   /** 成功之后胶囊上写哪个落点：这一趟真导出去的那个（开关后来的改动不回溯） */
-  const shownPath = exported && last !== null ? last.path : (path?.full ?? '')
-  /** 胶囊里那两段字：成功态按"真落点"拆，其余按"待导出的落点"拆 */
-  const shown: { dir: string; tail: string } =
-    exported && last !== null
-      ? { dir: splitPath(last.path).dir, tail: splitPath(last.path).base }
-      : { dir: path?.head ?? '', tail: path?.tail ?? '' }
+  const shownPath = exported && last !== null ? last.path : (path ?? '')
+  /** 那颗胶囊当前说的是文件夹还是文件（散导出 = 文件夹，zip = 文件） */
+  const shownFolder = exported && last !== null ? !last.zip : !zip
 
   /**
    * **一行文件** —— 两页共用这一个（作者 2026-11-04 第三件事：信息页要和文件页一样，
@@ -682,41 +643,15 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
         {path !== null && (
           /*
            * 整条是**显示**不是按钮：只有右边那颗改位置 / 开位置（作者 2026-10-11）。
-           * 路径正文因此还能拖选、误点一下也不会弹系统框。
+           * 形状与日志导出那扇框共用同一件（`app/shared/PathPill`）。
            */
-          <div className={s.pathPill} data-tip={shownPath}>
-            <svg
-              className={s.pathIcon}
-              width={15}
-              height={15}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.7}
-              aria-hidden="true"
-            >
-              <path d="M3.5 6.5A2 2 0 0 1 5.5 4.5h4l2 2.5h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
-            </svg>
-            <span className={s.pathText}>
-              <span className={s.pathHead} data-tip={shown.dir}>
-                {shown.dir}
-              </span>
-              <span className={s.pathTail}>{shown.tail}</span>
-            </span>
-            {/*
-             * ★ 成了之后这一颗**就地翻成「打开位置」**（作者：都导出成功了，
-             *   位置已经定了，那一刻要的是"去那儿看看"）—— 同一格、同一尺寸，
-             *   框的宽窄一动不动。
-             */}
-            <button
-              type="button"
-              className={s.pathEdit}
-              data-open={exported}
-              onClick={exported ? openFolder : changeDir}
-            >
-              {exported ? tr('report.export.open') : tr('report.export.change')}
-            </button>
-          </div>
+          <PathPill
+            path={shownPath}
+            folder={shownFolder}
+            opened={exported}
+            action={exported ? tr('report.export.open') : tr('report.export.change')}
+            onAction={exported ? openFolder : changeDir}
+          />
         )}
       </div>
     )
@@ -867,12 +802,7 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
               </span>
               <span className={s.zipKnob} />
             </div>
-            <div className={s.pathPill}>
-              <span className={s.pathText}>
-                <span className={s.pathTail}>{NBSP}</span>
-              </span>
-              <span className={s.pathEdit}>{NBSP}</span>
-            </div>
+            <PathPill gauge />
           </div>
         </div>
 

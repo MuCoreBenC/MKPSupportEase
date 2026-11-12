@@ -38,8 +38,6 @@ pub mod generate;
 pub mod model;
 pub mod provenance;
 pub mod read;
-pub mod recipe;
-pub mod recipe_edit;
 pub mod registry;
 /// 改注册表的区间与步进（**只在开发态有意义**：注册表编进二进制，见模块头）。
 pub mod registry_edit;
@@ -78,64 +76,19 @@ pub use write::{Edit, EditValue, KeySnapshot, apply_edits, snapshot};
 /// 消费方：`build()` 的零值默认与范围校验、弃用参数检查。
 pub const PARAM_REGISTRY_TOML: &str = include_str!("../../../presets/registry/param_registry.toml");
 
-/// 配方正文真源（`preset_recipes.toml`，方案甲 / G-1：6 台机型集中一个文件）。
-///
-/// `include_str!` 编进二进制，与 [`PARAM_REGISTRY_TOML`] 同一条路。**公开它**是为了
-/// 让工作台的校验层（`wb_preflight`，b05 Task 11.4/11.5/11.6）能做「机型清单 ↔ 配方」
-/// 的对齐检查 —— 那是 §5.1「可检测的不一致」的检测那一半（修复入口归 Task 16.2）。
-/// 在此之前它只活在 `gen-presets` 的 bin 里（那边原来自己 include 了一份），
-/// 两处字面量指同一文件全靠人眼盯着，公开一份让编译器保证。
-pub const PRESET_RECIPES_TOML: &str = include_str!("../assets/preset_recipes.toml");
-
-/// **内置预设**：由配方生成、随版本走的那 9 份（文件名 + 内容）。
-///
-/// `include_str!` 编进二进制、**不走任何分发管线**（与参数注册表同一条路：
-/// 换预设 = 出新版本，零网络）。消费方是 `src-tauri` 的 `builtin::sync_builtin_presets`，
-/// 它把这些内容铺到 `<数据根>/presets/builtin/` —— 那是只读目录，整体覆盖是安全的。
-///
-/// **这张表是手写的**（`include_str!` 的路径必须是字面量），漏一份不会报错。
-/// 2026-11-04 起 `gen-presets` 退役，正式产物由工作台生成并由 `presets diff` /
-/// `check:artifacts` 守；这里靠 `tests/builtin_presets_match_dir.rs` 咬两头：
-/// 这张表与入库目录**一份不差**（名字集合 + 逐字节内容 + 无重名），
-/// 且每一份都能被客户端读取面按新头部解析。
-pub const BUILTIN_PRESETS: &[(&str, &str)] = &[
-    (
-        "A1-standard.toml",
-        include_str!("../assets/presets/A1-standard.toml"),
-    ),
-    (
-        "A1-fast.toml",
-        include_str!("../assets/presets/A1-fast.toml"),
-    ),
-    (
-        "A1-fastv3.3.toml",
-        include_str!("../assets/presets/A1-fastv3.3.toml"),
-    ),
-    (
-        "A1_MINI-standard.toml",
-        include_str!("../assets/presets/A1_MINI-standard.toml"),
-    ),
-    (
-        "A1_MINI-fast.toml",
-        include_str!("../assets/presets/A1_MINI-fast.toml"),
-    ),
-    (
-        "A1_MINI-fastv3.3.toml",
-        include_str!("../assets/presets/A1_MINI-fastv3.3.toml"),
-    ),
-    (
-        "P1S-lite.toml",
-        include_str!("../assets/presets/P1S-lite.toml"),
-    ),
-    (
-        "P2S-standard.toml",
-        include_str!("../assets/presets/P2S-standard.toml"),
-    ),
-    (
-        "X1C-lite.toml",
-        include_str!("../assets/presets/X1C-lite.toml"),
-    ),
-];
+// **内置预设**：由工作台生成、随版本走的那几份（文件名 + 内容）。
+//
+// `include_str!` 编进二进制、**不走任何分发管线**（与参数注册表同一条路：
+// 换预设 = 出新版本，零网络）。
+//
+// 2026-11-12 起这张表**不再手写**：`build.rs` 扫 `assets/presets/` 生成到 `OUT_DIR`，
+// 目录里有什么表里就有什么。改版本 id 之后，工作台 `wb_generate` 写出新名产物、
+// 清掉旧名，下一次编译自动跟上 —— 不会再出现「清单已是新 id、随包表还停在旧名」
+// 这种编译期一声不响的分叉。
+//
+// 双向一致性仍由 `tests/builtin_presets_match_dir.rs` 咬住：表与入库目录
+// 一份不差（名字集合 + 逐字节内容 + 无重名），且每份都能被客户端读取面按新头部解析。
+include!(concat!(env!("OUT_DIR"), "/builtin_presets.rs"));
 
 /// 预设 TOML → **可以直接喂 `pipeline::process_with_ir` 的 IR**。
 ///

@@ -332,6 +332,16 @@ text_ja = "停止しました（{kind}のキャリブレーション造形、実
 slicer = "校准件没有选校准方式，按你的选择停下：原文件没有被改动"
 params = ["kind"]
 
+["hook.calib_not_recognized"]
+code = "E_CALIB_UNRECOGNIZED_001"
+text = "这一盘不是校准件：外形对不上任何一块校准板。请在设置里关掉「强制校准模式」，再正常后处理。"
+text_en = "This plate isn't a calibration part — its shape doesn't match any calibration plate. Turn off “Force calibration mode” in the settings, then post-process normally."
+text_zh_tw = "這一盤不是校準件：外形對不上任何一塊校準板。請在設定裡關掉「強制校準模式」，再正常後處理。"
+text_ja = "このプレートはキャリブレーション造形ではありません（形状がどのキャリブレーション板とも一致しません）。設定で「強制キャリブレーションモード」をオフにしてから、通常の後処理を行ってください。"
+slicer = "不是校准件 —— 请在设置里关闭强制校准模式，再正常后处理"
+params = []
+note = "2026-11-12：**强制校准模式**（设置页开关）开着、而这一盘的实测外形对不上任何一块校准板时报这一条。此时**停下、原文件不动** —— 静默降级成普通模型会把校准板当模型打出来。句子写两件事：不是校准件 + 下一步（去关开关）；不写包围盒、footprint 这些内部判据"
+
 ["hook.calib_done_print"]
 code = "N_CALIB_PRINT_001"
 text = "打印件保留，只加了涂胶与擦料 —— 处理完成"
@@ -846,6 +856,44 @@ text_en = "Unknown restore scope: {v1}"
 text_zh_tw = "不認識的還原範圍：{v1}"
 text_ja = "不明な復元範囲：{v1}"
 params = ["v1"]
+
+["ui.ipc.log.001"]
+text = "日志包没打成"
+text_en = "Couldn't build the log bundle"
+text_zh_tw = "日誌包沒打成"
+text_ja = "ログのまとめを作成できませんでした"
+
+["ui.ipc.log.002"]
+text = "还没有日志可以导出"
+text_en = "There are no logs to export yet"
+text_zh_tw = "還沒有日誌可以匯出"
+text_ja = "書き出せるログがまだありません"
+
+["ui.ipc.log.003"]
+text = "这个位置写不进去（{v1}）"
+text_en = "Can't write to this location ({v1})"
+text_zh_tw = "這個位置寫不進去（{v1}）"
+text_ja = "この場所に書き込めません（{v1}）"
+params = ["v1"]
+
+["ui.ipc.log.004"]
+text = "定位日志包要给一个 zip 文件的绝对路径"
+text_en = "Locating the log bundle needs an absolute path to a zip file"
+text_zh_tw = "定位日誌包要給一個 zip 檔案的絕對路徑"
+text_ja = "ログのまとめを開くには zip ファイルの絶対パスが必要です"
+
+["ui.ipc.log.005"]
+text = "日志包不在了（{v1}）"
+text_en = "That log bundle is gone ({v1})"
+text_zh_tw = "日誌包不在了（{v1}）"
+text_ja = "そのログのまとめは存在しません（{v1}）"
+params = ["v1"]
+
+["ui.ipc.log.006"]
+text = "打不开那个文件夹"
+text_en = "Couldn't open that folder"
+text_zh_tw = "打不開那個資料夾"
+text_ja = "そのフォルダーを開けませんでした"
 
 ["ui.ipc.bbs.041"]
 text = "{v1} —— 先在 Bambu Studio 里另存一份工艺预设，再回来重扫"
@@ -4014,6 +4062,18 @@ text_ja = "ダウンロード完了後に改名できませんでした"
 
 # ── 校准页那几张模型卡（`src-tauri/src/ipc/mod.rs` 的 `MODEL_DEFS`）──────────────
 # 名称与说明直接显示在校准页；这三张卡是预设的一部分，不是日志。
+
+["ui.ipc.calib_models.combined.name"]
+text = "校准模型（二合一）"
+text_en = "Calibration models (two-in-one)"
+text_zh_tw = "校準模型（二合一）"
+text_ja = "キャリブレーションモデル（2-in-1）"
+
+["ui.ipc.calib_models.combined.desc"]
+text = "一个文件装下 Z 与 XY 两块校准板；切哪一盘就按那一盘校准"
+text_en = "One file holds both the Z and the XY calibration plate — each plate runs its own calibration"
+text_zh_tw = "一個檔案裝下 Z 與 XY 兩塊校準板；切哪一盤就按那一盤校準"
+text_ja = "Z と XY のキャリブレーション板を 1 ファイルに収録。切ったプレートごとにその校正を実行します"
 
 ["ui.ipc.calib_models.z.name"]
 text = "Z 轴校准"

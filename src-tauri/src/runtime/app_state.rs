@@ -362,6 +362,16 @@ pub struct PostprocPrefs {
     /// 热床涂胶是**只涂擦料塔位置**（`false`，出厂）还是**所有模型首层都涂**（`true`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bed_glue_all_models: Option<bool>,
+    /// **强制校准模式**（2026-11-12）：不看 3MF 里那条身份，只按模型实测外形认校准件。
+    ///
+    /// 用途是"手上只有模型文件、不是从我们这里下的"那一类 —— 3MF 里没有
+    /// `MKPSE:Calibration`，但有对应的 STL/3MF。打开后：
+    /// - 外形命中某块校准板 ⇒ 按那一档跑；
+    /// - 几块都对不上 ⇒ **停下**（原文件不动），报「不是校准件」并提示关掉这个开关。
+    ///
+    /// ★ 出厂 `false`：普通模型永远不该被外形猜成校准件，所以必须用户显式打开。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force_calibration_mode: Option<bool>,
     /// **智能塔位置**（2026-10-18 引入，2026-11-04 改成三档）：模型与擦料塔相撞时怎么办。
     ///
     /// | 档 | 撞了之后 | 用户看到 |
@@ -481,6 +491,7 @@ impl PostprocPrefs {
                 .clamp(XY_DWELL_MIN, XY_DWELL_MAX),
             bed_glue_enabled: self.bed_glue_enabled.unwrap_or(false),
             bed_glue_all_models: self.bed_glue_all_models.unwrap_or(false),
+            force_calibration_mode: self.force_calibration_mode.unwrap_or(false),
             auto_tower_position: self.auto_tower_position.unwrap_or_default(),
         }
     }
@@ -590,8 +601,24 @@ pub struct ResolvedPostprocPrefs {
     pub xy_calibration_dwell_sec: i64,
     pub bed_glue_enabled: bool,
     pub bed_glue_all_models: bool,
+    /// **强制校准模式**：只看外形认校准件（见 [`PostprocPrefs::force_calibration_mode`]）
+    pub force_calibration_mode: bool,
     /// 撞塔三档（见 [`TowerRelocateMode`]）：`Off` / `Auto` / `Ask`
     pub auto_tower_position: TowerRelocateMode,
+}
+
+/// **上一次由我们拉起来的切片器窗口**（2026-11-12）。
+///
+/// 为什么要记 PID 而不是按名字找：用户可能同时开着几个切片器，按名字激活会拉到
+/// 别人的那一个。只在"我们启的那个还活着"时才有意义 —— 它关掉之后这一格清掉，
+/// 下次照常启动。
+///
+/// ★ 只记**我们启的**：用户自己从程序坞开的那个不进这一格（那正是作者要求的
+///   「如果是用户自己手动从其他地方打开的，我们就不要拿其他那个新的」）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlicerWindow {
+    pub pid: u32,
 }
 
 /// 一次窗口几何（**逻辑点**，左上角 + 宽高）：`run/app-state.json` 的 `lastWindowBox` 格。
@@ -709,6 +736,11 @@ pub struct AppStateFile {
     /// 读它的只有"退出窄窗"那一下。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_window_box: Option<WindowBox>,
+    /// 上一次由**我们**拉起来的切片器窗口（见 [`SlicerWindow`]）。
+    ///
+    /// 只用来回答一件事："点打开模型时，要不要把那个窗口拉到前台（而不是重新打开文件）"。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slicer_window: Option<SlicerWindow>,
     /// **进窄窗之前用户自己选的那一档置顶**（2026-10-17）。
     ///
     /// 窄窗会替用户打开置顶（作者：「点击窄窗的时候自动置顶」），退出时要把置顶
@@ -748,6 +780,7 @@ impl Default for AppStateFile {
             pin: None,
             compact: None,
             last_window_box: None,
+            slicer_window: None,
             pin_before_compact: None,
             postproc: None,
             presets: None,
@@ -933,6 +966,8 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         pin: None,
         compact: None,
         last_window_box: None,
+        /* 切片器窗口这一格是 2026-11-12 才有的：旧档里本来就没有它（没记过 = None） */
+        slicer_window: None,
         pin_before_compact: None,
         /* 后处理偏好这一格是 2026-10-17 才有的：旧档里本来就没有它（没动过 = 出厂档） */
         postproc: None,
@@ -1405,6 +1440,21 @@ pub fn set_postproc_prefs(root: &Path, prefs: PostprocPrefs) -> Result<PostprocP
     with_state(root, |state| {
         state.postproc = Some(prefs.clone());
         Ok(prefs)
+    })
+}
+
+/* ---------- 切片器窗口：我们启的那一个（2026-11-12） ---------- */
+
+/// 上一次由我们拉起来的切片器 PID（`None` = 没记过）。
+pub fn slicer_window_pid(root: &Path) -> Result<Option<u32>, AppError> {
+    Ok(load(root)?.slicer_window.map(|w| w.pid))
+}
+
+/// 记下 / 清掉那个 PID（整份状态原子替换，别的格一个不动）。
+pub fn set_slicer_window_pid(root: &Path, pid: Option<u32>) -> Result<(), AppError> {
+    with_state(root, |state| {
+        state.slicer_window = pid.map(|pid| SlicerWindow { pid });
+        Ok(())
     })
 }
 

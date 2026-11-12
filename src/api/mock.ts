@@ -1882,6 +1882,44 @@ export const mockApi: MkpApi = {
     throw new Error(t('mock.reveal.finder', { path }))
   },
 
+  /* ——— 交互记录 + 导出日志（2026-11-12）———
+     浏览器里没有 `ui.log`，也没有盘上的日志目录：清单给一份**看得出是演示**的
+     假数据（最近三天、三条流各一份），导出照常走完流程，落点还是那个假桌面。 */
+  async logUiEvents() {},
+
+  async logExportPlan() {
+    const day = (offset: number) => {
+      const d = new Date(Date.now() - offset * 86_400_000)
+      return d.toISOString().slice(0, 10)
+    }
+    const files = [2, 1, 0].flatMap((offset) =>
+      (['app', 'ui', 'hook'] as const).map((stream) => ({
+        name: `${stream === 'app' ? 'supportease.log' : `${stream}.log`}.${day(offset)}`,
+        stream,
+        day: day(offset),
+        bytes: stream === 'hook' ? 4_096 : 18_432,
+      })),
+    )
+    return {
+      files,
+      bytes: files.reduce((sum, f) => sum + f.bytes, 0),
+      from: day(2),
+      to: day(0),
+    }
+  },
+
+  async defaultLogDir() {
+    return '/Users/wzy/Desktop'
+  },
+
+  async exportLogs(dir) {
+    return { path: `${dir}/MKP-Logs-demo.zip`, files: 9, bytes: 122_880 }
+  },
+
+  async revealLogExport(path) {
+    throw new Error(t('mock.reveal.finder', { path }))
+  },
+
   /** 云端线：另存成 `presets-local/<原名>（已修改）.toml`（与 Rust 侧 `local::edited_name` 同一条规则） */
   async commitPresetDraft() {
     if (mockDraft === null) throw new Error(t('mock.edit.noneToSave'))
@@ -2926,6 +2964,7 @@ export const mockApi: MkpApi = {
       xyCalibrationDwellSec: mockPostproc.xyCalibrationDwellSec ?? 3,
       bedGlueEnabled: mockPostproc.bedGlueEnabled ?? false,
       bedGlueAllModels: mockPostproc.bedGlueAllModels ?? false,
+      forceCalibrationMode: mockPostproc.forceCalibrationMode ?? false,
       autoTowerPosition: mockPostproc.autoTowerPosition ?? 'ask',
     }
     return {

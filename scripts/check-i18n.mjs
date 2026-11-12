@@ -6,6 +6,7 @@
  *   ① 两本字典**键集完全一致**（漏翻 / 多写都红）；
  *   ② 值**不许为空**；
  *   ③ `{占位符}` 集合两边一致（少一个变量 = 句子里永远留着 `{name}`）；
+ *   ⑤ **不许把 `tr()` 的结果存进 state**（2026-11-12）：存进去就是快照，切语言不跟着翻；
  *   ④ 英文表里**不许出现中文**（唯一白名单：语言名 `settings.locale.zh`，
  *      它本来就该用中文写自己）。
  *
@@ -19,7 +20,7 @@
  * 真值：`src/i18n/zh-CN.ts`（源语言）+ `src/i18n/en.ts`。
  */
 
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -94,6 +95,44 @@ for (const { file, dict, cjk } of OTHERS) {
 
     if (cjk && hasCjk(value) && !CJK_ALLOWED.has(key)) {
       problems.push(`${file} 里还有中文：${key} = ${value}`)
+    }
+  }
+}
+
+/*
+ * ⑤ **不许把 `tr()` 的结果存进 state**（2026-11-12）。
+ *
+ * 存进去就是一张快照 —— 切语言时它不跟着翻，屏幕上会留上一种语言
+ * （作者截图：界面已经是中文，弹窗里那行还是日语）。要存就存两样之一：
+ *   · `msg(key, vars)`（`Text`）—— 渲染时 `useText` / `say`；
+ *   · 只存字典键（`StringKey`）—— 渲染时 `tr(key)`。
+ *
+ * 只认两种零误报的形状：`setXxx(tr(` 与 `useState(tr(`。渲染期算的 `tr()` 不在内
+ * （`topAction={{ label: tr(...) }}` 那种每次渲染都会重算，本来就是对的）。
+ */
+const STATE_SNAPSHOT = [
+  /set[A-Z][A-Za-z]*\(\s*tr\(/g,
+  /useState(?:<[^>]*>)?\(\s*tr\(/g,
+]
+
+async function* tsxFiles(dir) {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) yield* tsxFiles(full)
+    else if (entry.name.endsWith('.tsx')) yield full
+  }
+}
+
+const srcRoot = join(here, '..', 'src')
+for await (const file of tsxFiles(srcRoot)) {
+  const source = await readFile(file, 'utf8')
+  for (const re of STATE_SNAPSHOT) {
+    for (const m of source.matchAll(re)) {
+      const line = source.slice(0, m.index).split('\n').length
+      problems.push(
+        `${file.slice(srcRoot.length + 1)}:${line} 把 tr() 的结果存进了 state —— ` +
+          `切语言不会跟着翻（改存 msg(key) 或字典键，渲染时再翻）`,
+      )
     }
   }
 }

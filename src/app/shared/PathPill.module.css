@@ -1,0 +1,85 @@
+/*
+ * 路径胶囊（`app/shared/PathPill.tsx`）。
+ *
+ * 形状是从报告页那扇「导出执行报告」逐字搬过来的 —— 两扇导出框里的"保存位置"
+ * 必须是同一件东西：胶囊 + 等宽路径 + 右边一颗动作。
+ *
+ * 整条是**显示**不是按钮：没有 hover、不是按钮，路径正文还能拖选。
+ */
+
+.pill {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  text-align: left;
+}
+
+.icon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+/* 路径文本：前段自己收省略号、**尾两段钉住不缩**（"往哪个文件夹里导"永远看得见） */
+.text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+  white-space: nowrap;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tail {
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+/*
+ * 右边那颗：**整条里唯一可点的地方**（字体从等宽换回正文）。
+ * 导出之前是「更改位置」；成了之后就地翻成「打开位置」（同一个元素、同一尺寸），
+ * 配色跟着换成强调色。
+ */
+.edit {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  /* 实的白走 --surface-solid（浅色 = #fff，深色 = 面板那一档） */
+  background: var(--surface-solid);
+  font-family: Inter, sans-serif;
+  color: var(--text-1);
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.edit:hover {
+  border-color: var(--text-3);
+}
+
+.edit[data-open='true'] {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-weight: 600;
+}

@@ -522,7 +522,8 @@ impl Catalog {
          * 那份期望值注定与云端不同步、下载必 `SHA_MISMATCH`。
          *
          * 于是走 `FileHashes::None`：条目照出（`get_version_files` 要用），`sha256`/`size`
-         * 留 `None` —— 期望值归 OTA 目录。产物存在性另有判据守着（`gen-presets --check`）。
+         * 留 `None` —— 期望值归 OTA 目录。产物存在性由 `tests/builtin_presets_match_dir.rs`
+         * 与工作台 `presets/rendered` 判据守着（旧 `gen-presets --check` 已退役）。
          */
         let (catalog, missing) = Self::collect(&presets, &assets, FileHashes::None);
         if let Some(first) = missing.first() {
@@ -1031,14 +1032,15 @@ mod tests {
         );
         assert_eq!(
             catalog.assets.len(),
-            32,
-            "实测 32 条（8 MKP 预设 + 5 整机图 + 1 品牌字标 + 8 BBS + 3 图标 + 5 模型 + 2 引导图）——
+            33,
+            "实测 33 条（8 MKP 预设 + 5 整机图 + 1 品牌字标 + 8 BBS + 3 图标 + 6 模型 + 2 引导图）——
              2026-11-07：P2S 停用，归它的三条（p2s-image / P2S BBS / P2S MKP 预设）退出目录；
              2026-10-03 三类进台账（mkPreset / bundled image / 品牌图）、2026-10-16 加了引导图
              （`type = 'guide'`，bundled）、2026-10-18 加了 Z 校准加长版
              （`zoffset-calibration-ext`）、2026-10-19 加了 XY 校准加长版
              （`precise-calibration-ext`）、2026-10-30 加了 P2S / X1C 外观图
-             （`p2s-image` / `x1c-image`，bundled）——条数变了要核对台账再改这里的期望"
+             （`p2s-image` / `x1c-image`，bundled）、2026-11-12 加了**整体版**校准模型
+             （`calibration-combined`，Z 与 XY 合在一个 3MF）——条数变了要核对台账再改这里的期望"
         );
 
         // 文件条目与命名规则对得上：A1 + FASTV3.3 → A1-fastv3.3.toml
@@ -1281,14 +1283,15 @@ mod tests {
         assert_eq!(catalog.brands.len(), 1, "实测 1 个品牌");
         assert_eq!(
             catalog.assets.len(),
-            32,
-            "实测 32 条资产定义（8 MKP 预设 + 5 整机图 + 1 品牌字标 + 8 BBS + 3 图标 + 5 模型
+            33,
+            "实测 33 条资产定义（8 MKP 预设 + 5 整机图 + 1 品牌字标 + 8 BBS + 3 图标 + 6 模型
              + 2 引导图）——
              2026-11-07：P2S 停用 ⇒ 归它的三条（外观图 / BBS / MKP 预设）一起退出目录；
              2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类、
              登记归属不登记路径；两者都不进 files[]）；2026-10-16：引导图进台账（guide 类、bundled）；
              2026-10-18：Z 校准加长版进台账（model 类）；2026-10-19：XY 校准加长版进台账（model 类）；
-             2026-10-30：P2S / X1C 外观图进台账（image 类、bundled）"
+             2026-10-30：P2S / X1C 外观图进台账（image 类、bundled）；
+             2026-11-12：整体版校准模型进台账（model 类，Z 与 XY 合在一个 3MF）"
         );
         assert_eq!(
             catalog.bundles.len(),

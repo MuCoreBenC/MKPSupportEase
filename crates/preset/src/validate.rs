@@ -427,11 +427,13 @@ mod tests {
         );
 
         // **按机型收紧的那一条**：同样的 200 在 A1 上合法、在 A1_MINI 上越界（上限 150）
+        // 变体名要跟着 `presets/machines/*.toml` 的版本 id 走：改名后 `rename_version_uid`
+        // 会把 `machineMaxVariants` 的键一起搬，写旧名就查不到那条收紧区间了。
         let mut cfg = cfg_from("");
         cfg.wiping.wiper_x = 200.0;
-        validate_against_registry(&cfg, &reg, "A1", Some("fast")).expect("A1 上 200 合法");
+        validate_against_registry(&cfg, &reg, "A1", Some("fast260326")).expect("A1 上 200 合法");
         assert_eq!(
-            msg(validate_against_registry(&cfg, &reg, "A1_MINI", Some("fastv3.3")).unwrap_err()),
+            msg(validate_against_registry(&cfg, &reg, "A1_MINI", Some("fast260326")).unwrap_err()),
             "param wiping.wiper_x value 200 is out of range [10, 150]"
         );
     }
@@ -539,13 +541,22 @@ mod tests {
         );
     }
 
-    /// 回归判据：9 份真实预设两层全过（不许为过校验改 fixture）。
+    /// 回归判据：真预设两层全过（不许为过校验改 fixture）。
+    ///
+    /// 份数**不写死**：版本增删本来由清单决定，这里只咬「基线与入库产物一份不差」，
+    /// 免得改一次版本 id 就要来改一次断言（作者 2026-11-12 要的就是这个）。
+    /// IR 判据的冻结输入已搬到 `fixtures/ir/presets/`，基线目录不再兼作他用。
     #[test]
     fn nine_real_presets_pass_both_layers() {
         let reg = load_param_registry();
         // 预设 fixture 在**内核那份**里（crates/postprocess/tests/fixtures/presets），
         // 不在本 crate 下 —— 判据资产只留一份，路径只认 `generate::fixtures_dir()`。
         let dir = crate::generate::fixtures_dir();
+        let expected: usize = std::fs::read_dir(crate::generate::assets_dir())
+            .expect("入库产物目录应存在")
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|x| x == "toml"))
+            .count();
         let mut count = 0;
         for entry in std::fs::read_dir(&dir).expect("fixtures 目录应存在") {
             let path = entry.unwrap().path();
@@ -561,6 +572,10 @@ mod tests {
                 .unwrap_or_else(|e| panic!("第二层拦了 {}：{e:?}", path.display()));
             count += 1;
         }
-        assert_eq!(count, 9, "9 份真实预设必须全数参与");
+        assert!(count > 0, "一份真预设都没读到 —— 判据在空转");
+        assert_eq!(
+            count, expected,
+            "对照基线与入库产物份数不同 —— 改了版本 id 没重新生成？"
+        );
     }
 }

@@ -372,6 +372,91 @@ pub fn launch(kind: SlicerKind, file: &Path) -> Result<(), AppError> {
     launch_with(&target, &kind.label(), file)
 }
 
+/* ---------- 「我们启的那一个窗口」（2026-11-12） ---------- */
+
+/// 把**那一个**进程拉到前台的那段 AppleScript（PID 走末尾 argv，不拼进字符串）。
+///
+/// 为什么按 unix id 找而不是按应用名：用户可能同时开着几个切片器，按名字那个接口
+/// 只会拉起"主"实例，与作者要的「精确到我们自己启的那个」不是一回事。
+///
+/// 与 `FINDER_INFORMATION_WINDOW_SCRIPT` 同一个写法（三段 `-e` + argv），
+/// 那条要过一次「自动化 → 控制访达」的授权，这条要过一次「控制 System Events」——
+/// 拒绝时 `osascript` 返回非 0，[`activate_pid`] 给 `false`，调用方退回去正常启动文件。
+#[cfg(any(target_os = "macos", test))]
+const ACTIVATE_PROCESS_SCRIPT: [&str; 3] = [
+    "on run argv",
+    "tell application \"System Events\" to set frontmost of (first process whose unix id is (item 1 of argv as integer)) to true",
+    "end run",
+];
+
+/// 这台机器上正在跑的、从那个 `.app` 包里起的切片器 PID。
+///
+/// 它**分不出"谁启的"** —— 用户从程序坞开的也是同一个可执行物；"是不是我们启的"
+/// 由调用方记下的那个 PID 回答（`runtime::app_state::slicer_window_pid`）。
+#[cfg(target_os = "macos")]
+pub fn running_pids(kind: SlicerKind) -> Vec<u32> {
+    let Some(target) = locate(kind) else {
+        return Vec::new();
+    };
+    let marker = target.join("Contents/MacOS");
+    let Ok(out) = std::process::Command::new("/usr/bin/pgrep")
+        .arg("-f")
+        .arg(marker.display().to_string())
+        .output()
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.trim().parse::<u32>().ok())
+        .collect()
+}
+
+/// 等一个新的 PID 出现（我们刚把它拉起来）：最多 1.5 秒。
+///
+/// `None` = 没等到（启动慢 / 系统交给了已运行实例）—— 那就不记，下次照常打开文件。
+/// 上限刻意压得短：这条命令是同步的，等太久会把界面卡住。
+#[cfg(target_os = "macos")]
+pub fn wait_new_pid(before: &[u32], kind: SlicerKind) -> Option<u32> {
+    for _ in 0..6 {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        if let Some(pid) = running_pids(kind)
+            .into_iter()
+            .find(|p| !before.contains(p))
+        {
+            return Some(pid);
+        }
+    }
+    None
+}
+
+/// 把**那一个**进程拉到前台。`false` = 它已经不在（或授权被拒）⇒ 调用方正常启动文件。
+#[cfg(target_os = "macos")]
+pub fn activate_pid(pid: u32) -> bool {
+    std::process::Command::new("/usr/bin/osascript")
+        .args(ACTIVATE_PROCESS_SCRIPT.iter().flat_map(|s| ["-e", s]))
+        .arg(pid.to_string())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/* 其余平台：不记窗口、不激活 —— 与从前一字不差（打开文件那条路照旧）。 */
+#[cfg(not(target_os = "macos"))]
+pub fn running_pids(_kind: SlicerKind) -> Vec<u32> {
+    Vec::new()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn wait_new_pid(_before: &[u32], _kind: SlicerKind) -> Option<u32> {
+    None
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn activate_pid(_pid: u32) -> bool {
+    false
+}
+
 /// Windows 上起那个应用时要给 `CreateProcessW` 的 `dwCreationFlags`（2026-10-20）。
 ///
 /// # 为什么一个位都不能省
@@ -1024,6 +1109,22 @@ fn windows_open_default_app_settings(file: &Path) -> Result<String, AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 激活窗口那段脚本：PID 走**末尾 argv**，不拼进字符串（与 Finder 那条同一个理由）。
+    #[test]
+    fn activate_script_passes_the_pid_as_argv() {
+        assert_eq!(ACTIVATE_PROCESS_SCRIPT.len(), 3);
+        assert_eq!(ACTIVATE_PROCESS_SCRIPT[0], "on run argv");
+        assert!(
+            ACTIVATE_PROCESS_SCRIPT[1].contains("item 1 of argv"),
+            "PID 必须从 argv 取"
+        );
+        assert!(
+            ACTIVATE_PROCESS_SCRIPT[1].contains("unix id"),
+            "要按进程 id 找，不按应用名找 —— 多实例时按名字只会拉起主实例"
+        );
+        assert_eq!(ACTIVATE_PROCESS_SCRIPT[2], "end run");
+    }
 
     #[test]
     fn unknown_ids_are_rejected_instead_of_falling_back() {

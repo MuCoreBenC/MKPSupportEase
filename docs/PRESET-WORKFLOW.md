@@ -125,7 +125,7 @@ publishSerial 单调序号（只增不减；回滚也 +1）。**从 1 开始**�
 - 判的是 **ref**，不是整串 `平台#仓库@ref`；`source-ledger` 里没记地址（文件搬到
   另一台机器）时退回只按发布线判 —— "不知道"不等于"不同"，不据此下结论。
 
-`publishedAt` 与 `# release_time` 只做展示。唯一实现：`runtime::local::based_on`。
+`publishedAt` 与来源文件头的 `# release_time` 只做展示（后者只出现在历史来源记录里，现役产物头已不写这一行；`preset_recipes.toml` 于 2026-11-12 整链退役）。唯一实现：`runtime::local::based_on`。
 
 ## 6. 基线规则（下载 ≠ 接受版本）
 
@@ -133,7 +133,7 @@ publishSerial 单调序号（只增不减；回滚也 +1）。**从 1 开始**�
 
 ```text
 # based_on:              我从哪一份拷的（发布根相对路径）
-# history[].at: 来源文件头的 release_time（配方的写作日期，只做展示）
+# history[].at: 来源文件头的 release_time（历史配方的写作日期，只做展示）
 # history[].sha256:       来源那一刻的全文摘要
 # based_on_catalog:      来源属于哪条发布线
 # based_on_serial:       来源是那条线的第几号

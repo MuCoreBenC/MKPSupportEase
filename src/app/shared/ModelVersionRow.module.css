@@ -1,0 +1,17 @@
+/*
+ * 「模型版本」那一行（2026-11-12，从 `PageCalib.module.css` 挪过来 —— 首页也要用）。
+ */
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.label {
+  font-size: calc(var(--fs-label) + 1px);
+  line-height: 1.5;
+  color: var(--text-3);
+  white-space: nowrap;
+}

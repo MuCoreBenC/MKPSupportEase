@@ -170,11 +170,7 @@ pub async fn restore_backup(
 #[tauri::command]
 pub fn default_backup_dir(app: AppHandle) -> Result<String, AppError> {
     crate::ipc::traced("defaultBackupDir", |_| {
-        let desktop = app.path().desktop_dir().ok().filter(|d| d.is_absolute());
-        let dir: PathBuf = match desktop {
-            Some(d) => d,
-            None => crate::fsx::paths::user_root(&app)?.join(crate::fsx::paths::EXPORTS_DIR),
-        };
+        let dir = default_export_dir(&app)?;
         std::fs::create_dir_all(&dir).map_err(|e| {
             AppError::io(messages::text(
                 "ui.ipc.backup.044",
@@ -184,6 +180,18 @@ pub fn default_backup_dir(app: AppHandle) -> Result<String, AppError> {
         })?;
         Ok(dir.display().to_string())
     })
+}
+
+/// 导出类动作的**默认落点**：桌面 → 桌面问不到就退数据根 `exports/`。
+///
+/// 备份与「导出日志」共用这一处：两处各算一遍"桌面在哪"，迟早给出两个不同的落点。
+/// **只算不建** —— 建目录失败时该说哪句话由各自的命令决定（备份与日志的说法不一样）。
+pub(crate) fn default_export_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
+    let desktop = app.path().desktop_dir().ok().filter(|d| d.is_absolute());
+    match desktop {
+        Some(d) => Ok(d),
+        None => Ok(crate::fsx::paths::user_root(app)?.join(crate::fsx::paths::EXPORTS_DIR)),
+    }
 }
 
 /// **在系统文件管理器里选中那份备份**（备份框成功之后那颗「打开位置」）。

@@ -27,10 +27,12 @@
 
 use std::path::{Path, PathBuf};
 
-use tracing_appender::rolling;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
+
+use super::rotation;
 
 /// 日志文件前缀。按天滚动 ⇒ 实际落点 `hook.log.2026-10-11`
 /// （日期那一段由 `tracing_appender` 自己拼，与 [`today_suffix`] 是同一个格式）。
@@ -46,8 +48,22 @@ pub fn init(log_dir: &Path) -> Option<PathBuf> {
     }
 
     /* 同步写、不引 WorkerGuard：这一趟进程活得很短，丢日志的风险（进程被杀时缓冲没落盘）
-    比阻塞的代价更值钱。`rolling::daily` 自己就是 `MakeWriter`，不需要包 non_blocking。 */
-    let appender = rolling::daily(log_dir, PREFIX);
+    比阻塞的代价更值钱。appender 自己就是 `MakeWriter`，不需要包 non_blocking。
+
+    份数上限与界面那两条流同一档（见 `obs::rotation`）—— 原来这里是无限份，
+    钩子那一路攒久了没人清。 */
+    let appender = match RollingFileAppender::builder()
+        .rotation(Rotation::DAILY)
+        .filename_prefix(PREFIX)
+        .max_log_files(rotation::KEEP_DAYS)
+        .build(log_dir)
+    {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("[hook_log] 日志文件建不出来，这一趟不写日志：{log_dir:?} {e}");
+            return None;
+        }
+    };
     let layer = tracing_subscriber::fmt::layer()
         .with_ansi(false)
         .with_writer(appender);

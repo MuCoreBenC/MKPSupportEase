@@ -2,6 +2,7 @@ import { invoke, Channel } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
 import { armedFaultFor } from '../app/dev/fault'
+import { track } from '../app/log/track'
 import { t } from '../i18n'
 import { isAppError, type AppError, type MkpApi, type MkpApiMethod } from './contract'
 
@@ -84,10 +85,16 @@ async function call<T>(method: MkpApiMethod, command: string, args?: Record<stri
   try {
     const injected = armedFaultFor(method)
     if (injected !== null) throw injected
-    return await invoke<T>(command, args)
+    const out = await invoke<T>(command, args)
+    /* 每一次命令都留一笔（成功只记方法名 —— 参数里可能是预设名或路径）。
+       上报日志自己那条不记：它是每 400 ms 一次的搬运工，记了等于自己刷自己。 */
+    if (method !== 'logUiEvents') track('api.ok', method)
+    return out
   } catch (err) {
     const app = normalizeError(err, method)
     console.error(`[api] ${method} 失败`, app)
+    /* 失败连同错误码与 traceId 一起进日志：用户截图里的那一串，就是按它去捞 */
+    track('api.fail', `${method} ${app.code} ${app.traceId}`)
     throw app
   }
 }
@@ -479,4 +486,11 @@ export const bridgeApi: MkpApi = {
     })
     return typeof picked === 'string' ? picked : null
   },
+
+  /* ——— 交互记录 + 导出日志（2026-11-12）——— */
+  logUiEvents: (events) => call('logUiEvents', 'log_ui_events', { events }),
+  logExportPlan: () => call('logExportPlan', 'log_export_plan'),
+  defaultLogDir: () => call('defaultLogDir', 'default_log_dir'),
+  exportLogs: (destDir) => call('exportLogs', 'export_logs', { destDir }),
+  revealLogExport: (path) => call<void>('revealLogExport', 'reveal_log_export', { path }),
 }

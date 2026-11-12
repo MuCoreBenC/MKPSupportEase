@@ -358,6 +358,46 @@ pub fn catalog_machines_of(presets: &crate::workbench::presets::Presets) -> Vec<
         .collect()
 }
 
+/// **校验与值编辑要看的「当前清单」**：机型与版本取**编辑态**（`presets`），
+/// `visibility` / `bundles` / `built` 仍是已落盘基线。
+///
+/// # 为什么不能直接用 `Committed`
+///
+/// `Committed` 是「打开工作台那一刻 / 上次保存后」的那一份。新建版本、改版本 id
+/// **只改 `presets` 与影子树**（保存才写真源）—— 拿旧清单去校验，本会话里新建或
+/// 改过 id 的版本一写值就报「版本不存在」，撤销/重做更是静默什么都不做
+/// （作者 2026-11-12 报的「改了 id 参数全没了」与「撤了没反应」）。
+///
+/// 三格不能一起换：`visibility` / `bundles` 的"改回已落盘那一档"要拿真基线比，
+/// 换掉的话同一格会被记成"没改"。
+pub fn live_committed(
+    presets: &crate::workbench::presets::Presets,
+    committed: &Committed,
+) -> Committed {
+    Committed {
+        versions: presets
+            .catalog
+            .machines()
+            .iter()
+            .flat_map(|m| {
+                m.versions.iter().map(move |v| {
+                    (
+                        format!("{}/{}", m.id, v.id),
+                        CommittedVersion {
+                            machine_id: m.id.clone(),
+                            version_id: v.id.clone(),
+                            name: v.name.clone(),
+                            tag: v.tag.clone(),
+                        },
+                    )
+                })
+            })
+            .collect(),
+        catalog: catalog_machines_of(presets),
+        ..committed.clone()
+    }
+}
+
 /// 应用的结果
 #[derive(Debug, Clone)]
 pub struct Applied {
@@ -506,6 +546,7 @@ fn validate(committed: &Committed, registry: &Registry, patches: &[Patch]) -> Re
             Ok(())
         } else {
             Err(AppError::not_found(format!("版本 {uid} 不存在"))
+                .with_message_code("E_WB_VERSION_MISSING_001")
                 .with_detail("整批改动已拒绝，草稿没有变"))
         }
     };

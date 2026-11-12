@@ -330,7 +330,7 @@ struct PublishAudit {
 
 **设计要点**：加一条检查 = 加一个 `AuditItem`，**不改流程**。这是你要的"以后扩展不用重设计"。
 
-### 5.2 检查清单（十五项 + ⑯；⑯ 为 2026-10-05 寻址改造新增，见 §6 判据 10）
+### 5.2 检查清单（①–⑲；⑯ 为 2026-10-05 寻址改造新增，见 §6 判据 10；⑰ 2026-10-19、⑱⑲ 2026-11-12 新增）
 
 | # | id | 检查什么 | 现状 |
 | --- | --- | --- | --- |
@@ -350,6 +350,9 @@ struct PublishAudit {
 | ⑭ | `manifest/correct` | manifest 与交付集合一致 —— **预检 = 提示（Warning）**：manifest 是**上一版发布**写下的账本（只有发布事务定稿会重写它），「生成过、还没发」的落后是常规状态，拦了就是「manifest 不一致 → 不许发布 → 无法通过发布修 manifest」的死循环（2026-10-05 真机踩过）。**严格的逐条核对移到发布事务定稿之后、commit 之前**（§7.1 的 3½ 步） | ✅ 第二刀 / 2026-10-05 改两层 |
 | ⑮ | `git/clean` | Git 工作区状态正确（无未提交的无关改动 / 在正确分支） | ✅ 第二刀（★ `presets/delivery/` **排除在外**） |
 | ⑯ | `client/url-reconciliation` | **客户端视角 URL 对账**：从 `workbench/bootstrap.json` 反推交付根，用生产 Resolver 把 catalog 全量条目 + catalog/release/manifest/content 逐条拼 URL，折回仓库相对路径与磁盘对账 —— 跨端锚点错位（`dist/dist` 事故）在发布前就红 | ✅ 2026-10-05 寻址改造（纯读不发网络；Golden Fixture 在 `runtime::resolver::tests`） |
+| ⑰ | `assets/calibration-identity` | 校准素材的文件里真有台账声明的身份标记 | ✅ 2026-10-19（与 `npm run check:calibration-assets` 同一实现；缺标记 = Blocker） |
+| ⑱ | `params/typed` | `int` 参数的 `defaultValue` / `machineVariants` / `choices` **在原文里写成整数**（带小数点 = Blocker） | ✅ 2026-11-12（模型读入会归一成整数，所以这一项只看**原文 token**；修法 `npm run presets -- normalize`，真小数得先改数值） |
+| ⑲ | `kernel/presets-aligned` | `crates/preset/assets/presets/` 的**文件名集合**与清单该有的产物名逐份对齐（缺新名 / 多旧名 = Blocker） | ✅ 2026-11-12（改版本 id 后没重新生成，编进安装包的还是旧名且编译期无声；`BUILTIN_PRESETS` 已改由 `crates/preset/build.rs` 按目录生成，`wb_generate` 负责清旧名） |
 
 **⑮ 为什么把 `presets/delivery/` 排除在外**：`dist/` 就是这次要提交的产物本身 ——
 拿它的未跟踪状态去拦自己的发布是个死锁（`scripts/check-artifact-boundary.mjs` 也是同一条口径：

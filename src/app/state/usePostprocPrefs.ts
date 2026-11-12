@@ -172,6 +172,8 @@ export function usePostprocPrefs(): PostprocPrefsApi {
             wire.xyCalibrationDwellSec ?? before.resolved.xyCalibrationDwellSec,
           bedGlueEnabled: wire.bedGlueEnabled ?? before.resolved.bedGlueEnabled,
           bedGlueAllModels: wire.bedGlueAllModels ?? before.resolved.bedGlueAllModels,
+          forceCalibrationMode:
+            wire.forceCalibrationMode ?? before.resolved.forceCalibrationMode,
           autoTowerPosition: wire.autoTowerPosition ?? before.resolved.autoTowerPosition,
         },
       }

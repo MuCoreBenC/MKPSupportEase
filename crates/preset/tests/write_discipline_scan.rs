@@ -51,8 +51,8 @@ const ALLOWED: &[(&str, &str)] = &[
     (
         "preset/src/generate.rs",
         "工作台 `wb_generate` / `wb_sync_baseline` 走这里的 sync_baseline 写内核判据夹具\
-         （落点断言只允许真基线目录或临时目录）；write_all 只剩测试与只读诊断用，\
-         旧 gen-presets bin 已于 2026-11-04 退役",
+         （落点断言只允许真基线目录或临时目录）；旧 gen-presets bin 已于 2026-11-04 退役,\
+         配方渲染 write_all 于 2026-11-12 随整链删掉，这里只剩新链的路径助手与基线同步",
     ),
     (
         "postprocess/src/pipeline/mod.rs",
@@ -362,9 +362,9 @@ fn the_generator_stays_pure() {
     let path = crates_root().join("preset/src/generate.rs");
     let src = std::fs::read_to_string(&path).expect("读得到 generate.rs");
     let prod = production_part(&src);
-    // 反空转：切完之后还得剩下正文（`render` / `write_all` 那些都在里面）
+    // 反空转：切完之后还得剩下正文（新链的 sync_baseline 在里面）
     assert!(
-        prod.contains("pub fn write_all"),
+        prod.contains("pub fn sync_baseline"),
         "generate.rs 的生产部分被切空了 —— 这条判据在空转"
     );
     for bad in IMPURE {

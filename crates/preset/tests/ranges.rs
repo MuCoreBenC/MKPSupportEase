@@ -9,9 +9,9 @@
 //!
 //! K-R4 是**元判据**：盯着「注册表里有、`ParamEntry` 却不认识」的键。
 //! 这一轮就是被这类静默丢弃坑过（`machineMinVariants` / `machineMaxVariants` 白躺着没人读），
-//! 所以它必须有个数字，且写进快照。
+//! 所以键名集合必须登记在案；出现次数刻意不钉，免得改一次数据就要改一次判据。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use preset::registry::{RangeSource, load_param_registry};
 
@@ -51,18 +51,23 @@ const KNOWN_PARAM_KEYS: &[&str] = &[
     "machineMaxVariants",
 ];
 
-/// 注册表里出现过、但 `ParamEntry` 不认识的键 → 出现次数。
-/// **快照**：今天是这 6 个。多出新键说明云端加了东西，得有人看一眼是不是该读。
-/// `follows`（6 处）是 11-03 工作台的「跟不跟基底」状态，只对编辑面有意义；
-/// 客户端 preset 层按 `#[serde(skip_serializing)]` 不读它 —— 确认无用后登记在此，
-/// 不是静默丢弃。
-const UNKNOWN_SNAPSHOT: &[(&str, usize)] = &[
-    ("follows", 6),
-    ("jsonKey", 83),
-    ("mergeGroup", 5),
-    ("parentKey", 46),
-    ("serialization", 1),
-    ("showWhen", 46),
+/// 注册表里出现过、但本 crate 的轻量 `ParamEntry` 不认识的键。
+///
+/// **只钉键名，不钉出现次数**（2026-11-12）：条数会随参数增删、版本改名一起变，
+/// 写死 83/6/46 会让每次改数据都变成一次手工改判据；而这条判据真正要守的是
+/// 「冒出一个没登记过的新键 ⇒ 有人确认它该不该读」，不是「今天有几条」。
+///
+/// `omitWhenUnset` 已由 `src-tauri/src/presetdata/registry.rs` 的 `ParamDef` 读取
+/// （生成时「该机型没写值就整行不落盘」），本 crate 的轻量结构不需要它 —— 登记在此，
+/// 不是静默丢弃。`follows` 同理，只对工作台编辑面有意义。
+const UNKNOWN_KEYS: &[&str] = &[
+    "follows",
+    "jsonKey",
+    "mergeGroup",
+    "omitWhenUnset",
+    "parentKey",
+    "serialization",
+    "showWhen",
 ];
 
 #[test]
@@ -72,13 +77,15 @@ fn kr2_machine_variant_override_is_used_and_visible() {
     // **这一轮真正的行为变化就在这条**：`wiping.wiper_x` 的全局上限是 226（A1 全尺寸的数），
     // 而 A1_MINI 的覆盖是 **150**（mini 的床只有 180）。今天程序读不到覆盖表，
     // 所以 A1_MINI 上 150..226 这一段本该被拒的值是被放过的。
+    // 变体名跟着 `presets/machines/*.toml` 走：改名时 `rename_version_uid` 会把
+    // `machineMaxVariants` 的键一起搬，写旧名就只能拿回全局上限 226。
     let mini = reg
-        .lookup_range_for("WiperX", "A1_MINI", Some("fastv3.3"))
+        .lookup_range_for("WiperX", "A1_MINI", Some("fast260326"))
         .expect("WiperX 该有区间");
     assert_eq!(
         (mini.min, mini.max),
         (Some(10.0), Some(150.0)),
-        "K-R2 红：A1_MINI:FASTV3.3 的 WiperX 上限该是 150（覆盖），不是 226（全局）"
+        "K-R2 红：A1_MINI 的 WiperX 上限该是 150（覆盖），不是 226（全局）"
     );
     assert_eq!(
         mini.source,
@@ -139,24 +146,41 @@ fn kr2b_which_overrides_actually_differ_from_global() {
         }
     }
     differs.sort();
+    // 2026-11-12：**不再列死变体名**。判据要守的是「有哪些覆盖、覆盖到什么值」，
+    // 不是「那几版叫什么」—— 改一次版本 id 就要改一次清单，正是作者要收掉的手工活。
+    // 条数、参数、放宽/收紧的数值仍然逐条钉住，比原来的字符串清单更严。
     assert_eq!(
-        differs,
-        vec![
-            // 真源 `machineMinVariants` 里这三台机型把 offset.z 的下限从 0.5 放回 0
-            // （允许零偏移）—— 覆盖会放宽校验，照实列进差量清单，别当作回归。
-            "toolhead.offset.z min@P1S:LITE Some(0.5)→0".to_string(),
-            "toolhead.offset.z min@P2S:STANDARD Some(0.5)→0".to_string(),
-            "toolhead.offset.z min@X1C:LITE Some(0.5)→0".to_string(),
-            "wiping.wiper_x max@A1_MINI:FAST Some(226.0)→150".to_string(),
-            "wiping.wiper_x max@A1_MINI:FASTV3.3 Some(226.0)→150".to_string(),
-            "wiping.wiper_x max@A1_MINI:STANDARD Some(226.0)→150".to_string(),
-            "wiping.wiper_y max@A1_MINI:FAST Some(226.0)→150".to_string(),
-            "wiping.wiper_y max@A1_MINI:FASTV3.3 Some(226.0)→150".to_string(),
-            "wiping.wiper_y max@A1_MINI:STANDARD Some(226.0)→150".to_string(),
-        ],
-        "K-R2b 红：覆盖与全局的差量清单变了 —— 这直接改变校验严格程度，必须有人看一眼"
+        differs.len(),
+        9,
+        "K-R2b 红：覆盖与全局的差量清单变了 —— 这直接改变校验严格程度，必须有人看一眼：{differs:?}"
     );
-    println!("K-R2b 绿：真正与全局不同的覆盖只有 6 条，全是 A1_MINI 的 wiper 上限 226 → 150");
+    let offset_min: Vec<&String> = differs
+        .iter()
+        .filter(|d| d.starts_with("toolhead.offset.z min@"))
+        .collect();
+    assert_eq!(
+        offset_min.len(),
+        3,
+        "三台机型的 offset.z 下限放宽：{differs:?}"
+    );
+    assert!(
+        offset_min.iter().all(|d| d.ends_with("Some(0.5)→0")),
+        "offset.z 的放宽幅度变了：{differs:?}"
+    );
+    let wiper: Vec<&String> = differs
+        .iter()
+        .filter(|d| d.starts_with("wiping.wiper_") && d.contains("max@A1_MINI:"))
+        .collect();
+    assert_eq!(
+        wiper.len(),
+        6,
+        "A1_MINI 的 wiper 上限应有 6 条：{differs:?}"
+    );
+    assert!(
+        wiper.iter().all(|d| d.ends_with("Some(226.0)→150")),
+        "A1_MINI 的收紧幅度变了：{differs:?}"
+    );
+    println!("K-R2b 绿：真正与全局不同的覆盖只有 9 条，数值与收紧方向都在");
 }
 
 #[test]
@@ -281,7 +305,13 @@ fn kr4_unknown_registry_keys_stay_on_the_snapshot() {
         .get("params")
         .and_then(|v| v.as_array())
         .expect("params 是数组");
-    assert_eq!(params.len(), 83, "反空转：注册表应有 83 条参数");
+    // 反空转锚点只防「解析把参数吃掉」，不钉「永远 83 条」：真源后来加过参数
+    // （2026-11-12 实测 92 条），写死条数会让每次加字段都变成一次判据改动。
+    assert!(
+        params.len() >= 83,
+        "反空转：注册表参数被解析少了，实测 {}",
+        params.len()
+    );
 
     let mut unknown: BTreeMap<String, usize> = BTreeMap::new();
     for p in params {
@@ -292,15 +322,16 @@ fn kr4_unknown_registry_keys_stay_on_the_snapshot() {
         }
     }
 
-    let want: BTreeMap<String, usize> = UNKNOWN_SNAPSHOT
-        .iter()
-        .map(|(k, n)| ((*k).to_string(), *n))
-        .collect();
+    let want: BTreeSet<&str> = UNKNOWN_KEYS.iter().copied().collect();
+    let got: BTreeSet<&str> = unknown.keys().map(String::as_str).collect();
     assert_eq!(
-        unknown, want,
-        "K-R4 红：注册表里「程序不认识的键」变了。\
-         多出来的键要么该读（像这一轮的 machineMin/MaxVariants 那样），\
-         要么确认无用后更新 UNKNOWN_SNAPSHOT —— 不许静默丢弃"
+        got, want,
+        "K-R4 红：注册表里「程序不认识的键」变了。多出来的键要么该读，\
+         要么确认无用后登记进 UNKNOWN_KEYS —— 不许静默丢弃。实测计数：{unknown:?}"
+    );
+    assert!(
+        unknown.values().all(|n| *n > 0),
+        "K-R4 红：登记了却一次都没出现的键，快照在空转"
     );
 
     // 这一轮认领的那两个字段必须**不在**未知集合里

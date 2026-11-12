@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "79c6a6ff17d648b3",
+  "revision": "ef289a2e6ee64a15",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -83,34 +83,34 @@
           "image": null
         },
         {
-          "id": "FAST",
-          "name": "快拆版6月以前",
+          "id": "FAST260326",
+          "name": "快拆版260326",
           "nameEn": "Quick-release (before June)",
           "nameTw": "快拆版（6月以前）",
           "nameJa": "クイックリリース版（6月以前）",
-          "recommendedBundle": "A1_FAST",
-          "tag": "热门",
+          "recommendedBundle": "A1_FAST260326",
+          "tag": "旧版",
           "tagEn": "Popular",
           "tagTw": "熱門",
           "tagJa": "人気",
-          "description": "支持快拆配件的改装配置",
+          "description": "很久之前的，暂时保留预设，建议打印新版",
           "descriptionEn": "Modded setup for quick-release parts",
           "descriptionTw": "支援快拆配件的改裝配置",
           "descriptionJa": "クイックリリースパーツに対応した改造構成",
           "image": null
         },
         {
-          "id": "FASTV3.3",
-          "name": "快拆版260628",
+          "id": "FAST261111",
+          "name": "快拆版261111",
           "nameEn": "Quick-release 260628",
           "nameTw": "快拆版260628",
           "nameJa": "クイックリリース版260628",
-          "recommendedBundle": "A1_FASTV3.3",
+          "recommendedBundle": "A1_FAST261111",
           "tag": "最新",
           "tagEn": "Newest",
           "tagTw": "最新",
           "tagJa": "最新",
-          "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本",
+          "description": "v3.3.7的，兼容260628",
           "descriptionEn": "For units bought after June, plus the open-sourced 260628 quick-release design",
           "descriptionTw": "6月以後在閒魚購買的機器，以及6月28開源的快拆260628版本",
           "descriptionJa": "6月以降にフリマアプリで購入した機体、および6月28日に公開されたクイックリリース260628に対応",
@@ -195,34 +195,34 @@
           "image": null
         },
         {
-          "id": "FAST",
-          "name": "快拆版6月以前",
+          "id": "FAST260326",
+          "name": "快拆版260326",
           "nameEn": "Quick-release (before June)",
           "nameTw": "快拆版（6月以前）",
           "nameJa": "クイックリリース版（6月以前）",
-          "recommendedBundle": "A1_MINI_FAST",
-          "tag": "热门",
+          "recommendedBundle": "A1_MINI_FAST260326",
+          "tag": "旧版",
           "tagEn": "Popular",
           "tagTw": "熱門",
           "tagJa": "人気",
-          "description": "支持快拆配件的改装配置",
+          "description": "很久之前的，暂时保留预设，建议打印新版",
           "descriptionEn": "Modded setup for quick-release parts",
           "descriptionTw": "支援快拆配件的改裝配置",
           "descriptionJa": "クイックリリースパーツに対応した改造構成",
           "image": null
         },
         {
-          "id": "FASTV3.3",
-          "name": "快拆版260628",
+          "id": "FAST261111",
+          "name": "快拆版261111",
           "nameEn": "Quick-release 260628",
           "nameTw": "快拆版260628",
           "nameJa": "クイックリリース版260628",
-          "recommendedBundle": "A1_MINI_FASTV3.3",
+          "recommendedBundle": "A1_MINI_FAST261111",
           "tag": "最新",
           "tagEn": "Newest",
           "tagTw": "最新",
           "tagJa": "最新",
-          "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本",
+          "description": "v3.3.7的，兼容260628",
           "descriptionEn": "For units bought after June, plus the open-sourced 260628 quick-release design",
           "descriptionTw": "6月以後在閒魚購買的機器，以及6月28開源的快拆260628版本",
           "descriptionJa": "6月以降にフリマアプリで購入した機体、および6月28日に公開されたクイックリリース260628に対応",
@@ -548,7 +548,7 @@
       "machineId": "A1",
       "name": "A1 高速版预设",
       "path": "",
-      "versionId": "FAST",
+      "versionId": "FAST260326",
       "delivery": "download"
     },
     {
@@ -557,7 +557,7 @@
       "machineId": "A1",
       "name": "A1 快拆版 260628 预设",
       "path": "",
-      "versionId": "FASTV3.3",
+      "versionId": "FAST261111",
       "delivery": "download"
     },
     {
@@ -575,7 +575,7 @@
       "machineId": "A1_MINI",
       "name": "A1 mini 高速版预设",
       "path": "",
-      "versionId": "FAST",
+      "versionId": "FAST260326",
       "delivery": "download"
     },
     {
@@ -584,7 +584,7 @@
       "machineId": "A1_MINI",
       "name": "A1 mini 快拆版 260628 预设",
       "path": "",
-      "versionId": "FASTV3.3",
+      "versionId": "FAST261111",
       "delivery": "download"
     },
     {
@@ -667,6 +667,14 @@
       "path": "models/ZOffset_Calibration_ext.3mf",
       "delivery": "download",
       "calibration": "ZOffset"
+    },
+    {
+      "id": "calibration-combined",
+      "type": "model",
+      "name": "校准模型（整体版 · Z + XY）",
+      "path": "models/Calibration_Combined.3mf",
+      "delivery": "download",
+      "calibration": "Combined"
     },
     {
       "id": "a1-bbs-02-010",
@@ -791,24 +799,24 @@
       "updatedAt": "2026-10-16"
     },
     {
-      "id": "A1_FAST",
+      "id": "A1_FAST260326",
       "display": "A1 快拆版6月以前",
       "machineId": "A1",
       "assetRefs": [
         "a1-fast",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-10-16"
+      "updatedAt": "2026-11-12"
     },
     {
-      "id": "A1_FASTV3.3",
+      "id": "A1_FAST261111",
       "display": "A1 快拆版260628",
       "machineId": "A1",
       "assetRefs": [
         "a1-fastv3.3",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-10-16"
+      "updatedAt": "2026-11-12"
     },
     {
       "id": "A1_MINI_STANDARD",
@@ -821,24 +829,24 @@
       "updatedAt": "2026-10-16"
     },
     {
-      "id": "A1_MINI_FAST",
+      "id": "A1_MINI_FAST260326",
       "display": "A1 mini 快拆版6月以前",
       "machineId": "A1_MINI",
       "assetRefs": [
         "a1_mini-fast",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-10-16"
+      "updatedAt": "2026-11-12"
     },
     {
-      "id": "A1_MINI_FASTV3.3",
+      "id": "A1_MINI_FAST261111",
       "display": "A1 mini 快拆版260628",
       "machineId": "A1_MINI",
       "assetRefs": [
         "a1_mini-fastv3.3",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-10-16"
+      "updatedAt": "2026-11-12"
     },
     {
       "id": "P1S_default",
@@ -986,12 +994,12 @@
         "deprecated": false,
         "machineVariants": {
           "A1": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
-          "A1:FAST": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
-          "A1:FASTV3.3": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
+          "A1:FAST260326": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
+          "A1:FAST261111": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
           "A1:STANDARD": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
           "A1_MINI": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
-          "A1_MINI:FAST": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
-          "A1_MINI:FASTV3.3": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
+          "A1_MINI:FAST260326": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
+          "A1_MINI:FAST261111": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
           "A1_MINI:STANDARD": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
           "P1S:LITE": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000",
           "P2S:STANDARD": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000",
@@ -1045,12 +1053,12 @@
         "deprecated": false,
         "machineVariants": {
           "A1": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000",
-          "A1:FAST": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000",
-          "A1:FASTV3.3": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000",
+          "A1:FAST260326": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000",
+          "A1:FAST261111": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000",
           "A1:STANDARD": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000",
           "A1_MINI": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000",
-          "A1_MINI:FAST": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000",
-          "A1_MINI:FASTV3.3": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000",
+          "A1_MINI:FAST260326": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000",
+          "A1_MINI:FAST261111": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000",
           "A1_MINI:STANDARD": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000",
           "P1S:LITE": "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 F30000\nM106 P1 S[AUTO] ; 风扇",
           "P2S:STANDARD": "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 F30000\nM106 P1 S[AUTO] ; 风扇",
@@ -1104,12 +1112,12 @@
         "deprecated": false,
         "machineVariants": {
           "A1": 256.0,
-          "A1:FAST": 256.0,
-          "A1:FASTV3.3": 256.0,
+          "A1:FAST260326": 256.0,
+          "A1:FAST261111": 256.0,
           "A1:STANDARD": 256.0,
           "A1_MINI": 168.0,
-          "A1_MINI:FAST": 168.0,
-          "A1_MINI:FASTV3.3": 168.0,
+          "A1_MINI:FAST260326": 168.0,
+          "A1_MINI:FAST261111": 168.0,
           "A1_MINI:STANDARD": 168.0,
           "P1S": 20.0,
           "P1S:LITE": 20.0,
@@ -1220,12 +1228,12 @@
         "deprecated": false,
         "machineVariants": {
           "A1": 267.0,
-          "A1:FAST": 267.0,
-          "A1:FASTV3.3": 267.0,
+          "A1:FAST260326": 267.0,
+          "A1:FAST261111": 267.0,
           "A1:STANDARD": 267.0,
-          "A1_MINI": 185.0,
-          "A1_MINI:FAST": 185.0,
-          "A1_MINI:FASTV3.3": 185.0,
+          "A1_MINI": 182.0,
+          "A1_MINI:FAST260326": 185.0,
+          "A1_MINI:FAST261111": 182.0,
           "A1_MINI:STANDARD": 185.0,
           "P1S": 1.0,
           "P1S:LITE": 1.0,
@@ -1282,12 +1290,12 @@
         "deprecated": false,
         "machineVariants": {
           "A1": 10000.0,
-          "A1:FAST": 10000.0,
-          "A1:FASTV3.3": 10000.0,
+          "A1:FAST260326": 10000.0,
+          "A1:FAST261111": 10000.0,
           "A1:STANDARD": 10000.0,
           "A1_MINI": 10000.0,
-          "A1_MINI:FAST": 10000.0,
-          "A1_MINI:FASTV3.3": 10000.0,
+          "A1_MINI:FAST260326": 10000.0,
+          "A1_MINI:FAST261111": 10000.0,
           "A1_MINI:STANDARD": 10000.0,
           "P1S": 300.0,
           "P1S:LITE": 300.0,
@@ -1344,12 +1352,12 @@
         "deprecated": false,
         "machineVariants": {
           "A1": 256.0,
-          "A1:FAST": 256.0,
-          "A1:FASTV3.3": 256.0,
+          "A1:FAST260326": 256.0,
+          "A1:FAST261111": 256.0,
           "A1:STANDARD": 256.0,
           "A1_MINI": 168.0,
-          "A1_MINI:FAST": 168.0,
-          "A1_MINI:FASTV3.3": 168.0,
+          "A1_MINI:FAST260326": 168.0,
+          "A1_MINI:FAST261111": 168.0,
           "A1_MINI:STANDARD": 168.0,
           "P1S": 246.0,
           "P1S:LITE": 246.0,
@@ -1459,13 +1467,13 @@
         ],
         "deprecated": false,
         "machineVariants": {
-          "A1": 271.0,
-          "A1:FAST": 271.0,
-          "A1:FASTV3.3": 273.0,
+          "A1": 274.0,
+          "A1:FAST260326": 271.0,
+          "A1:FAST261111": 274.0,
           "A1:STANDARD": 271.0,
           "A1_MINI": 189.0,
-          "A1_MINI:FAST": 189.0,
-          "A1_MINI:FASTV3.3": 189.0,
+          "A1_MINI:FAST260326": 189.0,
+          "A1_MINI:FAST261111": 189.0,
           "A1_MINI:STANDARD": 189.0,
           "P1S": 256.0,
           "P1S:LITE": 256.0,
@@ -1522,12 +1530,12 @@
         "deprecated": false,
         "machineVariants": {
           "A1": 10000.0,
-          "A1:FAST": 10000.0,
-          "A1:FASTV3.3": 10000.0,
+          "A1:FAST260326": 10000.0,
+          "A1:FAST261111": 10000.0,
           "A1:STANDARD": 10000.0,
           "A1_MINI": 10000.0,
-          "A1_MINI:FAST": 10000.0,
-          "A1_MINI:FASTV3.3": 10000.0,
+          "A1_MINI:FAST260326": 10000.0,
+          "A1_MINI:FAST261111": 10000.0,
           "A1_MINI:STANDARD": 10000.0,
           "P1S": 6000.0,
           "P1S:LITE": 6000.0,
@@ -1682,11 +1690,11 @@
         ],
         "deprecated": false,
         "machineVariants": {
-          "A1:FAST": -0.7,
-          "A1:FASTV3.3": -0.7,
+          "A1:FAST260326": -0.7,
+          "A1:FAST261111": -0.7,
           "A1:STANDARD": -1.0,
-          "A1_MINI:FAST": -0.5,
-          "A1_MINI:FASTV3.3": -0.9,
+          "A1_MINI:FAST260326": -0.5,
+          "A1_MINI:FAST261111": -0.9,
           "A1_MINI:STANDARD": -0.3,
           "P1S": -25.9,
           "P1S:LITE": -25.9,
@@ -1756,11 +1764,11 @@
         ],
         "deprecated": false,
         "machineVariants": {
-          "A1:FAST": 26.3,
-          "A1:FASTV3.3": 24.4,
+          "A1:FAST260326": 26.3,
+          "A1:FAST261111": 24.4,
           "A1:STANDARD": 18.6,
-          "A1_MINI:FAST": 24.0,
-          "A1_MINI:FASTV3.3": 23.0,
+          "A1_MINI:FAST260326": 24.0,
+          "A1_MINI:FAST261111": 23.0,
           "A1_MINI:STANDARD": 18.1,
           "P1S": 14.0,
           "P1S:LITE": 14.0,
@@ -1825,12 +1833,12 @@
         "deprecated": false,
         "machineVariants": {
           "A1": 3.9,
-          "A1:FAST": 3.9,
-          "A1:FASTV3.3": 3.9,
+          "A1:FAST260326": 3.9,
+          "A1:FAST261111": 3.9,
           "A1:STANDARD": 3.9,
           "A1_MINI": 3.9,
-          "A1_MINI:FAST": 3.9,
-          "A1_MINI:FASTV3.3": 3.9,
+          "A1_MINI:FAST260326": 3.9,
+          "A1_MINI:FAST261111": 3.9,
           "A1_MINI:STANDARD": 3.9,
           "P1S": 1.1,
           "P1S:LITE": 1.1,
@@ -2465,7 +2473,7 @@
         "tomlComment": "涂胶次数 范围:1~10",
         "valueType": "int",
         "uiComponent": "number",
-        "defaultValue": 1.0,
+        "defaultValue": 1,
         "scope": "universal",
         "section": "wiping",
         "layout": {
@@ -3724,9 +3732,9 @@
         "deprecated": false,
         "machineVariants": {
           "A1": "auto",
-          "A1:FASTV3.3": "auto",
+          "A1:FAST261111": "auto",
           "A1:STANDARD": "auto",
-          "A1_MINI:FASTV3.3": "auto"
+          "A1_MINI:FAST261111": "auto"
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -4233,7 +4241,7 @@
         "tomlComment": "预涂触发层数 范围:0~999",
         "valueType": "int",
         "uiComponent": "number",
-        "defaultValue": 30.0,
+        "defaultValue": 30,
         "scope": "universal",
         "section": "wiping",
         "layout": {
@@ -4458,7 +4466,7 @@
         "tomlComment": "鞘收敛层数 范围:1~200",
         "valueType": "int",
         "uiComponent": "number",
-        "defaultValue": 50.0,
+        "defaultValue": 50,
         "scope": "universal",
         "section": "wiping",
         "layout": {
@@ -4811,12 +4819,12 @@
         "deprecated": false,
         "machineVariants": {
           "A1": 1.2,
-          "A1:FAST": 1.2,
-          "A1:FASTV3.3": 1.2,
+          "A1:FAST260326": 1.2,
+          "A1:FAST261111": 1.2,
           "A1:STANDARD": 1.2,
           "A1_MINI": 1.2,
-          "A1_MINI:FAST": 1.2,
-          "A1_MINI:FASTV3.3": 1.2,
+          "A1_MINI:FAST260326": 1.2,
+          "A1_MINI:FAST261111": 1.2,
           "A1_MINI:STANDARD": 1.2,
           "P1S": 1.2,
           "P1S:LITE": 1.2,
@@ -5308,7 +5316,7 @@
         "tomlComment": "额外干燥时间",
         "valueType": "int",
         "uiComponent": "number",
-        "defaultValue": 0.0,
+        "defaultValue": 0,
         "scope": "universal",
         "section": "wiping",
         "layout": {
@@ -5372,20 +5380,20 @@
         "deprecated": false,
         "machineVariants": {},
         "machineMinVariants": {
-          "A1:FAST": 10.0,
+          "A1:FAST260326": 10.0,
           "A1:STANDARD": 10.0,
-          "A1_MINI:FAST": 10.0,
-          "A1_MINI:FASTV3.3": 10.0,
+          "A1_MINI:FAST260326": 10.0,
+          "A1_MINI:FAST261111": 10.0,
           "A1_MINI:STANDARD": 10.0,
           "P1S:LITE": 10.0,
           "P2S:STANDARD": 10.0,
           "X1C:LITE": 10.0
         },
         "machineMaxVariants": {
-          "A1:FAST": 226.0,
+          "A1:FAST260326": 226.0,
           "A1:STANDARD": 226.0,
-          "A1_MINI:FAST": 150.0,
-          "A1_MINI:FASTV3.3": 150.0,
+          "A1_MINI:FAST260326": 150.0,
+          "A1_MINI:FAST261111": 150.0,
           "A1_MINI:STANDARD": 150.0,
           "P1S:LITE": 226.0,
           "P2S:STANDARD": 226.0,
@@ -5435,18 +5443,18 @@
         "deprecated": false,
         "machineVariants": {},
         "machineMinVariants": {
-          "A1:FAST": 10.0,
-          "A1_MINI:FAST": 10.0,
-          "A1_MINI:FASTV3.3": 10.0,
+          "A1:FAST260326": 10.0,
+          "A1_MINI:FAST260326": 10.0,
+          "A1_MINI:FAST261111": 10.0,
           "A1_MINI:STANDARD": 10.0,
           "P1S:LITE": 10.0,
           "P2S:STANDARD": 10.0,
           "X1C:LITE": 10.0
         },
         "machineMaxVariants": {
-          "A1:FAST": 226.0,
-          "A1_MINI:FAST": 150.0,
-          "A1_MINI:FASTV3.3": 150.0,
+          "A1:FAST260326": 226.0,
+          "A1_MINI:FAST260326": 150.0,
+          "A1_MINI:FAST261111": 150.0,
           "A1_MINI:STANDARD": 150.0,
           "P1S:LITE": 226.0,
           "P2S:STANDARD": 226.0,
@@ -6520,17 +6528,17 @@
     },
     {
       "kind": "mkp_preset",
-      "fileName": "A1-fast.toml",
-      "path": "delivery/mkp/presets/A1-fast.toml",
+      "fileName": "A1-fast260326.toml",
+      "path": "delivery/mkp/presets/A1-fast260326.toml",
       "machineId": "A1",
-      "versionId": "FAST"
+      "versionId": "FAST260326"
     },
     {
       "kind": "mkp_preset",
-      "fileName": "A1-fastv3.3.toml",
-      "path": "delivery/mkp/presets/A1-fastv3.3.toml",
+      "fileName": "A1-fast261111.toml",
+      "path": "delivery/mkp/presets/A1-fast261111.toml",
       "machineId": "A1",
-      "versionId": "FASTV3.3"
+      "versionId": "FAST261111"
     },
     {
       "kind": "mkp_preset",
@@ -6541,17 +6549,17 @@
     },
     {
       "kind": "mkp_preset",
-      "fileName": "A1_MINI-fast.toml",
-      "path": "delivery/mkp/presets/A1_MINI-fast.toml",
+      "fileName": "A1_MINI-fast260326.toml",
+      "path": "delivery/mkp/presets/A1_MINI-fast260326.toml",
       "machineId": "A1_MINI",
-      "versionId": "FAST"
+      "versionId": "FAST260326"
     },
     {
       "kind": "mkp_preset",
-      "fileName": "A1_MINI-fastv3.3.toml",
-      "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
+      "fileName": "A1_MINI-fast261111.toml",
+      "path": "delivery/mkp/presets/A1_MINI-fast261111.toml",
       "machineId": "A1_MINI",
-      "versionId": "FASTV3.3"
+      "versionId": "FAST261111"
     },
     {
       "kind": "mkp_preset",
@@ -6620,6 +6628,13 @@
       "kind": "model",
       "fileName": "ZOffset_Calibration_ext.3mf",
       "path": "assets/models/ZOffset_Calibration_ext.3mf",
+      "machineId": "",
+      "versionId": ""
+    },
+    {
+      "kind": "model",
+      "fileName": "Calibration_Combined.3mf",
+      "path": "assets/models/Calibration_Combined.3mf",
       "machineId": "",
       "versionId": ""
     },

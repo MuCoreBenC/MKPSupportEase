@@ -32,6 +32,9 @@ pub mod backup;
 /// —— 试验场那个 dev 端点在桌面版里的等价物。
 pub mod bbs;
 pub mod catalog;
+/// **交互记录 + 导出日志**（2026-11-12）：界面动作进 `ui.log`；设置页那一行把三条日志流
+/// 脱敏后打成一个 zip（附 `summary.txt`）交给开发者排查。见模块头。
+pub mod diagnostics;
 /// **屏幕引导**（2026-10-15）：改了参数之后，把"回切片器换一下板子类型"那一步
 /// **指给用户看**（只读坐标 + 引导窗口）。不替用户点、不改切片器任何参数。
 pub mod guide;
@@ -257,7 +260,15 @@ fn traced_with_req<T>(
 /// `xy-ext` 与 `xy` 并列；后处理侧认这两版靠同一份表里的 `xy-square-50` / `xy-square-55`。
 /// 校准模型清单：`(id, 名称键, 说明键, 文件名)` —— 名称与说明是 `messages.toml` 的键，
 /// 因为这两句直接显示在校准页（切片器那一框里也是人话）。
-const MODEL_DEFS: [(&str, &str, &str, &str); 5] = [
+const MODEL_DEFS: [(&str, &str, &str, &str); 6] = [
+    /* 2026-11-12：**整体版** —— Z 板与 XY 板合在同一个 3MF 里（两盘各一块）。
+     * 校准页那个「模型版本」下拉默认选它：一块文件覆盖两种校准。 */
+    (
+        "combined",
+        "ui.ipc.calib_models.combined.name",
+        "ui.ipc.calib_models.combined.desc",
+        "Calibration_Combined.3mf",
+    ),
     (
         "z",
         "ui.ipc.calib_models.z.name",
@@ -397,6 +408,34 @@ pub fn open_model(
             )));
         };
         let kind = slicer::SlicerKind::parse(slicer.as_deref())?;
+        /*
+         * 我们之前拉起过那个窗口、而且它还活着 ⇒ **只把它拉到前台**，不重新打开文件
+         * （作者 2026-11-12：「不用动文件啊，就是把窗口拉起来」）。
+         *
+         * 记 PID 而不是按名字找：用户可能同时开着几个切片器，按名字那个接口只会拉起
+         * "主"实例；而用户自己从程序坞开的那个也不会被我们认领 —— 这一格只写我们启的。
+         */
+        let trackable = matches!(
+            kind,
+            slicer::SlicerKind::Bambu | slicer::SlicerKind::Orca
+        );
+        if trackable {
+            if let Some(root) = crate::fsx::paths::internal_root_headless() {
+                if let Ok(Some(pid)) = crate::runtime::app_state::slicer_window_pid(&root) {
+                    if slicer::activate_pid(pid) {
+                        tracing::info!(model_id = id, pid, "已有的切片器窗口已拉到前台");
+                        return Ok(());
+                    }
+                    /* 那个窗口已经关了 ⇒ 清掉记录，往下走正常启动 */
+                    let _ = crate::runtime::app_state::set_slicer_window_pid(&root, None);
+                }
+            }
+        }
+        let running_before = if trackable {
+            slicer::running_pids(kind)
+        } else {
+            Vec::new()
+        };
         if kind == slicer::SlicerKind::System {
             /* ★ 2026-10-20：这一档原来**只**走 opener（Windows 上就是 ShellExecute），
             起出来的进程挂在我们的控制台上 —— 终端一关就把别人的窗口带走了。
@@ -432,6 +471,15 @@ pub fn open_model(
             slicer::launch_with(target, &kind.label(), &path)?;
         } else {
             slicer::launch(kind, &path)?;
+        }
+        /* 记下**我们刚启的那个** PID（下次打开就只拉它，不重开文件）。
+         * 等不到就不记 —— 下次照常打开文件，不会拿错窗口。 */
+        if trackable {
+            if let Some(pid) = slicer::wait_new_pid(&running_before, kind) {
+                if let Some(root) = crate::fsx::paths::internal_root_headless() {
+                    let _ = crate::runtime::app_state::set_slicer_window_pid(&root, Some(pid));
+                }
+            }
         }
         tracing::info!(
             model_id = id,
@@ -691,8 +739,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn calib_models_have_five_entries() {
-        assert_eq!(MODEL_DEFS.len(), 5);
+    fn calib_models_have_six_entries() {
+        assert_eq!(MODEL_DEFS.len(), 6);
     }
 
     /// 界面发的五个 id 就是契约 —— 换名字要两处一起改，判据钉在这里
@@ -701,7 +749,10 @@ mod tests {
     #[test]
     fn model_ids_match_the_pages() {
         let ids: Vec<&str> = MODEL_DEFS.iter().map(|(id, ..)| *id).collect();
-        assert_eq!(ids, ["z", "z-ext", "xy", "xy-ext", "test-models"]);
+        assert_eq!(
+            ids,
+            ["combined", "z", "z-ext", "xy", "xy-ext", "test-models"]
+        );
     }
 
     #[test]

@@ -2324,6 +2324,14 @@ export interface ResolvedPostprocPrefs {
   xyCalibrationDwellSec: number
   bedGlueEnabled: boolean
   bedGlueAllModels: boolean
+  /**
+   * **强制校准模式**：不看 3MF 里那条身份，只按模型实测外形认校准件。
+   *
+   * 给"手上只有模型文件、3MF 里没有 `MKPSE:Calibration`"那一类用。
+   * 打开后外形对不上任何一块校准板 ⇒ 这一趟**停下**（原文件不动），
+   * 报「不是校准件」并提示关掉这个开关。
+   */
+  forceCalibrationMode: boolean
   /** **智能塔位置**（2026-11-04 三档）：撞了是停下、直接挪、还是问一句 */
   autoTowerPosition: TowerRelocateMode
 }
@@ -2363,6 +2371,8 @@ export interface PostprocPrefsWire {
   xyCalibrationDwellSec?: number | null
   bedGlueEnabled?: boolean | null
   bedGlueAllModels?: boolean | null
+  /** **强制校准模式**：`null` = 回到出厂档（关） */
+  forceCalibrationMode?: boolean | null
   /** **智能塔位置**（2026-11-04 三档）：`null` = 回到出厂档（`off`） */
   autoTowerPosition?: TowerRelocateMode | null
 }
@@ -2784,6 +2794,43 @@ export interface PostProcessResult {
    */
   layerHeightMin?: number
   layerHeightMax?: number
+  /**
+   * **调试那一趟的动作参数**（正常那一趟是 `null`）。
+   *
+   * 结果页要摆的正是问句里那行概要（驻点 / 落笔 / 收笔 / 速度）——
+   * 有它的时候「预估打印时间」「涂胶总长」**不摆**：那两个数是从原文件算的，
+   * 而这份产物只跑笔的动作（作者 2026-11-12：「把那些对应的坐标也显示出来」、
+   * 「预估打印时间、胶总长这些就是不要了」）。
+   */
+  debug?: DebugPlan | null
+}
+
+/**
+ * 调试动作参数（Rust `postprocess::ir::types::DebugIr` 的镜像）。
+ *
+ * ★ 字段名是 **snake_case**：那个结构没有 `rename_all`，序列化出来就是 Rust 的字段名
+ *   （与 `_meta.json` 的 `detail.debug` 同一份形状）。
+ */
+export interface DebugPlan {
+  /** 驻点位：调试循环从这里出发，收口也回到这里 */
+  wait_x: number
+  wait_y: number
+  /** 落笔等待位 X。`null` = 跟随驻点位 */
+  mount_wait_x?: number | null
+  mount_x: number
+  /** 收笔等待位 X。`null` = 跟随驻点位 */
+  unmount_wait_x?: number | null
+  unmount_x: number
+  /** 动作行的移动速度（mm/min） */
+  speed: number
+  test_mount: boolean
+  test_unmount: boolean
+  /** 这一趟重复几遍（`0` 与 `1` 等价） */
+  repeat: number
+  /** 要不要动 Y 轴 */
+  move_y: boolean
+  /** 高级模式：整段动作块由用户写。非空时上面的坐标不作数 */
+  custom_gcode?: string | null
 }
 
 /**
@@ -4265,6 +4312,71 @@ export interface MkpApi {
     path: string,
     decisions: ParamDecision[],
   ): Promise<PresetParamSync>
+
+  /* ---------- 交互记录 + 导出日志（2026-11-12） ---------- */
+
+  /**
+   * **记一批界面动作**（进 `ui.log`）。
+   *
+   * 调用方是 `src/app/log/track.ts` 的批量队列（400 ms 一批），不是页面 ——
+   * 页面只调 `track()`。失败一律吞掉：日志写不出去不该影响任何操作。
+   */
+  logUiEvents(events: UiEvent[]): Promise<void>
+
+  /**
+   * 打开导出框时读一次：包里会有什么（哪几份、多大、覆盖哪几天）。
+   * **不打包、不写盘**，只读 `logs/` 目录。
+   */
+  logExportPlan(): Promise<LogPlan>
+
+  /** 导出框的默认落点（桌面；问不到桌面时退数据根 `exports/`） */
+  defaultLogDir(): Promise<string>
+
+  /**
+   * **打一份日志包**：三条日志流逐行脱敏后进 zip，外加一份 `summary.txt`。
+   *
+   * 没有日志可导出时如实报 `E_LOG_EXPORT_002`，不产空包。
+   */
+  exportLogs(destDir: string): Promise<LogExport>
+
+  /** 在文件管理器里选中那份日志包（导出成功之后那颗「打开位置」） */
+  revealLogExport(path: string): Promise<void>
+}
+
+/** 一条界面动作。事件名是内部标识（`click` / `tab` / `api.fail`…），不进界面。 */
+export interface UiEvent {
+  event: string
+  /** 发生这件事时在哪一页（页签 id） */
+  page?: string
+  /** 细节，序列化后 ≤512 字 */
+  detail?: string
+}
+
+/** 导出清单里的一份日志。 */
+export interface LogFileInfo {
+  name: string
+  /** 哪一条流 */
+  stream: 'app' | 'ui' | 'hook'
+  /** `YYYY-MM-DD` */
+  day: string
+  bytes: number
+}
+
+/** 打开导出框时读到的清单。 */
+export interface LogPlan {
+  files: LogFileInfo[]
+  bytes: number
+  /** 有日志覆盖的第一天 / 最后一天；一份都没有时都是 `null` */
+  from: string | null
+  to: string | null
+}
+
+/** 一份打好的日志包。 */
+export interface LogExport {
+  /** zip 的绝对路径 */
+  path: string
+  files: number
+  bytes: number
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */

@@ -1,0 +1,112 @@
+/*
+ * 「导出日志」框里那几样（2026-11-12）。
+ *
+ * 框本身是全站那唯一一套居中模态框（`components/modal`）；这一份只管框里：
+ * 保存位置胶囊、两份清单（将打包 / 隐私处理）与那两句状态字。
+ *
+ * 尺寸纪律与报告页那扇导出框一致：**成功前后不许多出一条行** ——
+ * 胶囊里那颗按钮就地换字，页脚左边那句占的是本来就有的那一格。
+ */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/*
+ * 保存位置那一块：胶囊本身的形状在共用件里（`app/shared/PathPill.module.css`）。
+ * 这里只给它一点上下的呼吸 —— 它钉在框身下沿，与上面两块清单拉开一档。
+ */
+.foot {
+  margin-top: 2px;
+}
+
+/* ---- 两块清单 ---- */
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.blockHead {
+  margin: 0;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--hairline);
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+.row:first-child {
+  border-top: 0;
+}
+
+.rowName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rowMeta {
+  flex: none;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.privacy {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.privacy li::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--accent);
+}
+
+.note {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+.noteBad {
+  color: #8a5a20;
+}
+
+[data-theme='dark'] .noteBad {
+  color: var(--warn-ink);
+}
+
+/* 页脚左边那句「已打包 N 份」：占页脚本来就有的那一格，不改高度 */
+.footNote {
+  margin-right: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}

@@ -41,6 +41,7 @@ pub mod parser;
 pub mod postprocess;
 pub mod range_check;
 pub mod support_fallback;
+pub mod virtual_extrude;
 
 pub use coord::{XyzeValues, extract_coord, format_xyze_string, parse_xyze, replace_axis_value};
 pub use format::{
@@ -63,6 +64,7 @@ pub use postprocess::{
 };
 pub use range_check::{MachineMovementRange, RangeViolation, check_xy_range};
 pub use support_fallback::detect_support_fallback;
+pub use virtual_extrude::{E as VIRTUAL_EXTRUDE_E, TAG as VIRTUAL_EXTRUDE_TAG};
 
 /// Go `strconv.ParseFloat` 的接受面镜像。
 ///

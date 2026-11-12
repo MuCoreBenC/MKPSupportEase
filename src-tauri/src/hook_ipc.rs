@@ -339,6 +339,13 @@ pub struct ResultFacts {
     pub layer_height_min: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layer_height_max: Option<f64>,
+    /// **调试那一趟的动作参数**（2026-11-12 作者：「把那些对应的坐标也显示出来」）。
+    ///
+    /// 结果页要摆的正是问句里那行概要（驻点 / 落笔 / 收笔 / 速度）——
+    /// 从前只有问句带它，跑完那一屏就只剩机型与耗材，用户回头看记录时不知道这一趟
+    /// 到底跑去了哪几个坐标。正常那一趟是 `null`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<postprocess::ir::types::DebugIr>,
 }
 
 /// 钩子 → 界面。

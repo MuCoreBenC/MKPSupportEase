@@ -311,7 +311,7 @@ use crate::workbench::domain::derive::{Book, BookView, ColRef, Desk, Matrix};
 use crate::workbench::domain::history as edit_history;
 
 use crate::workbench::domain::layer::Layers;
-use crate::workbench::domain::patch::{apply as apply_patches, Draft, Patch};
+use crate::workbench::domain::patch::{apply as apply_patches, live_committed, Draft, Patch};
 use crate::workbench::domain::preview::{AttachPreview, BulkPreview};
 use crate::workbench::domain::shadow_diff;
 use crate::workbench::domain::txn::{self, Op, Txn};
@@ -2799,12 +2799,10 @@ pub fn wb_apply_draft(
                 }] => format!("{} · {}", value_target(ctx, *level, owner), what_of(key)),
                 _ => label,
             };
-            let out = apply_patches(
-                &mut ctx.draft,
-                &ctx.committed,
-                &ctx.presets.registry,
-                &patches,
-            )?;
+            /* 校验看**编辑态**清单：本会话里新建 / 改过 id 的版本也要写得进去
+            （`ctx.committed` 还停在开会话那一刻，见 `live_committed` 的注） */
+            let live = live_committed(&ctx.presets, &ctx.committed);
+            let out = apply_patches(&mut ctx.draft, &live, &ctx.presets.registry, &patches)?;
             /*
              * ★★ **2026-11-03：值编辑只落内存，一个字节都不写文件**。
              *
@@ -2824,7 +2822,7 @@ pub fn wb_apply_draft(
              * ②必须夹在①③之间：撤销要知道"这一笔改了什么"，而③之后就问不到了
              * （值已经是新的）。合并时反向沿用最早那条（见 `history::History::record`）。
              */
-            let staged = storage::stage_value_edits(&ctx.presets, &ctx.committed, &ctx.draft);
+            let staged = storage::stage_value_edits(&ctx.presets, &live, &ctx.draft);
             let fields = value_field_entries(ctx, &staged.changes);
             /*
              * 一次调用 = **一条命令**：单 patch 用它自己的 `EditKey`（允许按时间合并）；
@@ -2995,7 +2993,7 @@ pub fn wb_copy_recipe(
         /* ★ 改**会话里那一份**（影子树），不是 `load_presets()`（真仓库）。
          * 这两条路以前各走各的：命令登记在 `EDIT_COMMANDS` 里、事务拍的是影子，
          * 而写盘却落在真仓库 —— 和 22:17 那桩案子同一种病（2026-11-01）。 */
-        with_struct_ctx(
+        let done = with_struct_ctx(
             "",
             |_| {
                 vec![
@@ -3020,7 +3018,31 @@ pub fn wb_copy_recipe(
                 );
                 Ok(keys)
             },
-        )
+        );
+        /* **失败要能被界面讲清**（2026-11-12）：底下的错是字段级的
+        （`wiping.glue_pass_count 的值 1.0 …`），它答不出"这是哪一次复制"。
+        这里补上操作身份与该带的上下文，并盖一个稳定码给弹框显示。 */
+        done.map_err(|e| {
+            tracing::warn!(
+                machine = %machine_id,
+                template = %template_version_id,
+                version = %new_version_id,
+                error = %e.message,
+                "参数正文复制失败"
+            );
+            let context = format!(
+                "复制参数：{machine_id}/{new_version_id} ← 模板 {machine_id}/{template_version_id}"
+            );
+            let detail = match e.detail {
+                Some(d) if !d.is_empty() => format!("{context}；{d}"),
+                _ => context,
+            };
+            AppError {
+                detail: Some(detail),
+                ..e
+            }
+            .with_message_code("E_WB_COPY_RECIPE_001")
+        })
     })
 }
 
@@ -3302,8 +3324,24 @@ pub(super) fn undo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
         let use_history = ctx.undo_uses_history();
         if use_history {
             /* 反向是「一条命令」：先算它要写哪些行（**在撤销之前算**，
-            因为 `changes` 要的是"改前"），再应用 */
-            let staged = ctx.history.inverse_staged(&ctx.presets, &ctx.committed);
+            因为 `changes` 要的是"改前"），再应用。
+            ★ 算不出来就**报错、不出栈**：早先 `.ok()?` 吞掉之后照样 `undo()`，
+            界面上就是"点了撤销什么都没发生，那一笔却没了"（2026-11-12）。 */
+            let live = live_committed(&ctx.presets, &ctx.committed);
+            let staged = ctx.history.inverse_staged(&ctx.presets, &live)?;
+            let Some(top_is_value) = ctx
+                .history
+                .peek_undo()
+                .map(|e| matches!(&e.action, edit_history::Action::Value { .. }))
+            else {
+                return Ok(ctx.txn_state());
+            };
+            /* 值编辑必须有一份算好的行；到这里还是 None 说明算的与弹的不是同一条 */
+            if top_is_value && staged.is_none() {
+                return Err(AppError::internal(
+                    "值编辑的反向算不出来 —— 撤销没有写出任何一行".to_owned(),
+                ));
+            }
             let Some(entry) = ctx.history.undo() else {
                 return Ok(ctx.txn_state());
             };
@@ -3360,7 +3398,21 @@ pub(super) fn redo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
             _ => false,
         };
         if use_history {
-            let staged = ctx.history.redo_staged(&ctx.presets, &ctx.committed);
+            /* 同 `undo`：先算再出栈，算不出来报错、栈不动 */
+            let live = live_committed(&ctx.presets, &ctx.committed);
+            let staged = ctx.history.redo_staged(&ctx.presets, &live)?;
+            let Some(top_is_value) = ctx
+                .history
+                .peek_redo()
+                .map(|e| matches!(&e.action, edit_history::Action::Value { .. }))
+            else {
+                return Ok(ctx.txn_state());
+            };
+            if top_is_value && staged.is_none() {
+                return Err(AppError::internal(
+                    "值编辑的重做算不出来 —— 重做没有写出任何一行".to_owned(),
+                ));
+            }
             let Some(entry) = ctx.history.redo() else {
                 return Ok(ctx.txn_state());
             };
@@ -4834,6 +4886,207 @@ mod tests {
         drop(fx_dir);
     }
 
+    /// **本会话里新建的版本，参数台要写得进去**（2026-11-12）。
+    ///
+    /// `ctx.committed` 是"打开工作台那一刻"的清单：新 uid 只存在于 `presets` 里。
+    /// 校验拿旧清单就报「版本 A1/NEW1 不存在」—— 参数台一格都改不动，撤销也一样
+    /// （反向被 `.ok()?` 吞掉，点了没反应）。这里同时钉住"旧清单会拒"与"编辑态清单能写"。
+    #[test]
+    fn a_version_created_in_this_session_accepts_value_edits() {
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        run_struct(
+            &mut ctx,
+            "新增版本",
+            "",
+            |_| vec!["machines/A1.toml".to_owned()],
+            |ctx| {
+                ctx.presets
+                    .catalog
+                    .machine_mut("A1")?
+                    .add_version("NEW1", "新版本")?;
+                ctx.presets.catalog.write_machine("A1")
+            },
+        )
+        .unwrap();
+
+        let patch = Patch::SetValue {
+            level: Level::Version,
+            owner: "A1/NEW1".to_owned(),
+            key: "toolhead.offset.x".to_owned(),
+            value: Some(serde_json::json!(-0.7)),
+        };
+
+        /* 前提：旧清单确实会拒 —— 修之前作者看到的就是这一句 */
+        let stale = apply_patches(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.presets.registry,
+            std::slice::from_ref(&patch),
+        );
+        assert!(stale.is_err(), "前提：开会话那一刻的清单里没有 NEW1");
+
+        /* 编辑态清单：与 `wb_apply_draft` 同一条路 */
+        let live = live_committed(&ctx.presets, &ctx.committed);
+        let out = apply_patches(
+            &mut ctx.draft,
+            &live,
+            &ctx.presets.registry,
+            std::slice::from_ref(&patch),
+        )
+        .unwrap();
+        let staged = storage::stage_value_edits(&ctx.presets, &live, &ctx.draft);
+        assert!(!staged.is_empty(), "新版本上写值必须算出真实改动");
+        ctx.history.record(
+            "A1 · 新版本 · X 轴偏移".to_owned(),
+            edit_history::merge_key_of(&patch),
+            patch.clone(),
+            out.inverse,
+            Vec::new(),
+        );
+        storage::stage_into(&mut ctx.presets, &staged).unwrap();
+        ctx.draft = Draft::default();
+
+        assert_eq!(
+            ctx.presets
+                .registry
+                .param("toolhead.offset.x")
+                .unwrap()
+                .machine_variants
+                .get("A1:NEW1")
+                .cloned(),
+            Some(serde_json::json!(-0.7)),
+            "值要落在新版本自己的键上"
+        );
+
+        /* 撤销：反向同样要认得新 uid（旧清单会把反向拒掉、再被 `.ok()?` 吞掉）。
+        跟随状态的语义是"值同步回基底、状态置跟随"，所以这一格回到 0.0 而不是消失 */
+        let depth_before = ctx.history.undo_depth();
+        undo_in(&mut ctx).unwrap();
+        assert_eq!(
+            ctx.presets
+                .registry
+                .param("toolhead.offset.x")
+                .unwrap()
+                .machine_variants
+                .get("A1:NEW1")
+                .cloned(),
+            Some(serde_json::json!(0.0)),
+            "撤销把这一格同步回基底（跟随）"
+        );
+        assert!(
+            crate::presetdata::follows::is_following(
+                ctx.presets.registry.param("toolhead.offset.x").unwrap(),
+                "A1:NEW1"
+            ),
+            "撤销之后这一格要回到跟随"
+        );
+        assert_eq!(
+            ctx.history.undo_depth(),
+            depth_before - 1,
+            "那一笔真的退掉了，不是静默吞掉"
+        );
+
+        drop(fx_dir);
+    }
+
+    /// **改过 id 的版本，参数台同样写得进去**（2026-11-12）。
+    ///
+    /// 与上一条同源：改名之后新 uid 也只在 `presets` 里。
+    #[test]
+    fn a_renamed_version_accepts_value_edits() {
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        run_struct(
+            &mut ctx,
+            "改版本 id",
+            "",
+            |_| {
+                vec![
+                    "machines/A1.toml".to_owned(),
+                    "registry/param_registry.toml".to_owned(),
+                    "assets.toml".to_owned(),
+                ]
+            },
+            |ctx| {
+                ctx.presets.rename_version_uid("A1", "FAST", "FAST_NEW")?;
+                ctx.presets.registry.write_back()?;
+                ctx.presets.assets.write()?;
+                ctx.presets.catalog.write_machine("A1")?;
+                ctx.retarget_version_uid("A1", "FAST", "FAST_NEW");
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        let patch = Patch::SetValue {
+            level: Level::Version,
+            owner: "A1/FAST_NEW".to_owned(),
+            key: "toolhead.offset.x".to_owned(),
+            value: Some(serde_json::json!(6.5)),
+        };
+        let live = live_committed(&ctx.presets, &ctx.committed);
+        let out = apply_patches(
+            &mut ctx.draft,
+            &live,
+            &ctx.presets.registry,
+            std::slice::from_ref(&patch),
+        )
+        .expect("改过 id 的版本要写得进去 —— 新 uid 在编辑态清单里");
+        let staged = storage::stage_value_edits(&ctx.presets, &live, &ctx.draft);
+        storage::stage_into(&mut ctx.presets, &staged).unwrap();
+        ctx.history.record(
+            "A1 · 高速版 · X 轴偏移".to_owned(),
+            edit_history::merge_key_of(&patch),
+            patch.clone(),
+            out.inverse,
+            Vec::new(),
+        );
+        ctx.draft = Draft::default();
+
+        assert_eq!(
+            ctx.presets
+                .registry
+                .param("toolhead.offset.x")
+                .unwrap()
+                .machine_variants
+                .get("A1:FAST_NEW")
+                .cloned(),
+            Some(serde_json::json!(6.5))
+        );
+
+        /* 整本里必须能找到新 uid —— 机型页的详情卡按 `book.machines[].versions[].versionId`
+        找节点，找不到就整块不渲染（作者 2026-11-12：「改了 id 就展开不了详情」） */
+        let view = view_of(&ctx, &ctx.committed, &ctx.draft, Vec::new());
+        let node = view
+            .machines
+            .iter()
+            .find(|m| m.id == "A1")
+            .expect("A1 在")
+            .versions
+            .iter()
+            .find(|v| v.version_id == "FAST_NEW");
+        assert!(
+            node.is_some(),
+            "改名之后整本里必须有新 uid，实测：{:?}",
+            view.machines.iter().find(|m| m.id == "A1").map(|m| m
+                .versions
+                .iter()
+                .map(|v| v.version_id.clone())
+                .collect::<Vec<_>>())
+        );
+
+        drop(fx_dir);
+    }
+
     /// **先改了参数再改版本 id：草稿要跟着搬到新 uid**（2026-11-12）。
     ///
     /// 主键换了而草稿还挂着 `v:A1/FAST:key` 的话，保存那一刻那几格会被写进一个
@@ -5672,6 +5925,72 @@ mod tests {
             template_eff.len(),
             "复制的键数就是模板有效配方的键数，一个不多一个不少"
         );
+    }
+
+    /// **模板里有一个「int 写成 1.0」的参数，复制照样成功**（2026-11-12 真事故）。
+    ///
+    /// 复制走的是完整有效配方（含出厂默认）。`1.0` 交给 `to_toml_value` 时按
+    /// `int` 判类型不符，**整批**被拒、一项都写不进去 —— 作者看到的就是
+    /// 「勾了同时复制配方，卡片仍是参数源待补」。读入归一（1.0 → 1）之后这条才通。
+    #[test]
+    fn copying_a_recipe_survives_an_int_default_written_as_a_float() {
+        let (dir, _old) = Fixture::load().into_parts();
+        let root = dir.path().join("presets");
+
+        /* 往夹具里加一个 int 参数，默认值照真数据那样写成 `1.0` */
+        let reg = root.join("registry/param_registry.toml");
+        let mut text = std::fs::read_to_string(&reg).unwrap();
+        text.push_str(
+            "\n[[params]]\n\
+             key = 'copy.probe'\n\
+             label = '复制探针'\n\
+             desc = ''\n\
+             configKey = 'CopyProbe'\n\
+             tomlKey = 'copy_probe'\n\
+             jsonKey = 'copy_probe'\n\
+             tomlComment = ''\n\
+             valueType = 'int'\n\
+             uiComponent = 'number'\n\
+             defaultValue = 1.0\n\
+             section = 'wiping'\n\
+             scope = 'universal'\n\
+             \n\
+             [params.layout]\n\
+             sectionId = 'wipe'\n\
+             order = 99.0\n",
+        );
+        crate::fsx::atomic::atomic_write(&reg, text.as_bytes()).unwrap();
+        /* 布局里收下它 —— 否则一致性校验会拦「有参数没有被任何 section 收下」 */
+        let lay = root.join("layout_schema.toml");
+        let mut ltext = std::fs::read_to_string(&lay).unwrap();
+        ltext.push_str(
+            "\n[[tabs.sections.items]]\n\
+             id = 'copy.probe'\n\
+             key = 'copy.probe'\n\
+             paramKey = 'copy.probe'\n",
+        );
+        crate::fsx::atomic::atomic_write(&lay, ltext.as_bytes()).unwrap();
+
+        let mut p = crate::presetdata::Presets::load_from(&root).expect("加了参数也读得通");
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .add_version("SNAPSHOT", "快照版")
+            .unwrap();
+
+        let keys = copy_recipe(&mut p, "A1", "FAST", "SNAPSHOT")
+            .expect("int 参数写成 1.0 也要能复制 —— 否则整批被拒");
+        assert!(keys > 0);
+
+        let copied = p
+            .registry
+            .param("copy.probe")
+            .unwrap()
+            .machine_variants
+            .get("A1:SNAPSHOT")
+            .cloned()
+            .expect("探针参数要落进新版本");
+        assert!(copied.is_i64(), "写进文件的是整数，不是 1.0：{copied:?}");
     }
 
     fn cols(list: &[(&str, Option<&str>)]) -> Vec<ColRef> {

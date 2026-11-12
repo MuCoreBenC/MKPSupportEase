@@ -5,6 +5,14 @@
       "stamp": "2026-11-10T17:10:39Z",
       "fingerprint": "82cdf4a620674012d2687bf7508ba959cac33168da566970fcced9826eb7d410"
     },
+    "A1/FAST260326": {
+      "stamp": "2026-11-12T07:07:42Z",
+      "fingerprint": "34978c0167fae89cc44ae76b7f1860c9583cdb9954a3f62075aee4aaf9fc0a48"
+    },
+    "A1/FAST261111": {
+      "stamp": "2026-11-12T07:07:42Z",
+      "fingerprint": "bc713861d8f1498bcf2e9b15576959f20585841b7bd9cdd3d4d17c11181ebd01"
+    },
     "A1/FASTV3.3": {
       "stamp": "2026-11-10T17:10:39Z",
       "fingerprint": "fc2b49246447efe583801555532ef712ffec24a76b3508d272ec4c4faa9a054c"
@@ -16,6 +24,14 @@
     "A1_MINI/FAST": {
       "stamp": "2026-11-10T17:10:39Z",
       "fingerprint": "f231183b112aaebc20e4724784df56640f994656fab672d5010223ad2479fb6a"
+    },
+    "A1_MINI/FAST260326": {
+      "stamp": "2026-11-12T07:07:42Z",
+      "fingerprint": "57075d11a5451e45b88c201e4004ac927944ae7b7c5730a996300e55caa54c50"
+    },
+    "A1_MINI/FAST261111": {
+      "stamp": "2026-11-12T07:07:42Z",
+      "fingerprint": "95cef103bebf09caa6b6850337d736a4844a2e14701bf4c15af08c373734e868"
     },
     "A1_MINI/FASTV3.3": {
       "stamp": "2026-11-10T17:10:39Z",

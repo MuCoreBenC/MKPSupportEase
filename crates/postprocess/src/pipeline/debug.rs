@@ -1,7 +1,9 @@
 //! 调试模式：只产出「文件头 → 抬 Z 段 → 落笔/收笔动作 → 文件尾」的骨架 G-code。
 //!
 //! 不预热、不清嘴、不打印模型、不做 Z 归零 —— 目的是把笔装上/收回去，
-//! 让人在真机上试位置。既然不加热也不挤出，回抽与挤出在这里一律不写。
+//! 让人在真机上试位置。回抽与真挤出一律不写；**收口之后补一条 E0.001 的虚拟挤出**
+//! （[`crate::gcode::virtual_extrude`]）—— BBS 判「这一盘能不能发打印」靠产物里的
+//! 挤出点合成路径包围盒，一条挤出都没有会被判成路径在床外，切片完成那一屏全灰。
 //!
 //! # 为什么不能删太狠
 //!
@@ -137,6 +139,39 @@ fn action_block(d: &DebugIr) -> Vec<String> {
     out.push("G28 X".to_string());
     out.push("G28 Y".to_string());
 
+    /* ★ 2026-11-12 探针版：**先挤出，再走动作**（作者：「应该先有挤出，再有移动调试」）。
+     *
+     * 位置就在驻点旁边（往外 0.1 mm），不另挑坐标 —— 那是用户自己填的合法位。
+     * 顺序按涂胶锚点那套：到位 → 挤 0.1 mm → 回驻点，然后再跑动作块。
+     * `; CHANGE_LAYER` + `; LAYER_HEIGHT` 是 BBS 的保留标记（`GCodeProcessor::ReservedTags`）：
+     * 有了它们，这条挤出才算「某一层上的一条路径」，文件也能被拖进切片器打开。
+     * 测完就整体撤掉这一段。 */
+    out.push(if d.move_y {
+        format!("G0 X{} Y{} F{}", num(wait.x), num(wait.y), travel)
+    } else {
+        format!("G0 X{} F{}", num(wait.x), travel)
+    });
+    /* `; FEATURE:` 一定要是**非 Custom** 的角色：切片器把 `erCustom` 的挤出从
+     * 路径包围盒里整个排除（`LegacyRenderer` / `BuildVolume::all_paths_inside` 的
+     * `role != erCustom`），于是包围盒是空的、这一盘按"路径在床外"被禁掉。
+     * 调试产物开头那段 `; FEATURE: Custom` 会让它后面所有移动都继承 erCustom，
+     * 所以这一行必须写在探针之前。 */
+    out.push("; FEATURE: Outer wall".to_string());
+    out.push("; CHANGE_LAYER".to_string());
+    out.push("; LAYER_HEIGHT: 0.2".to_string());
+    let probe_xy = if d.move_y {
+        format!("X{} Y{}", num(wait.x + 0.1), num(wait.y))
+    } else {
+        format!("X{}", num(wait.x + 0.1))
+    };
+    out.push(crate::gcode::virtual_extrude::line(&probe_xy, &travel));
+    out.push("; FEATURE: Custom".to_string());
+    out.push(if d.move_y {
+        format!("G0 X{} Y{} F{}", num(wait.x), num(wait.y), travel)
+    } else {
+        format!("G0 X{} F{}", num(wait.x), travel)
+    });
+
     let mut at: Option<At> = None;
     push_move(&mut out, d, &mut at, wait, &travel);
     /* 落笔、收笔各自的「去 → 回」整段按 `repeat` 跑几遍 */
@@ -154,6 +189,14 @@ fn action_block(d: &DebugIr) -> Vec<String> {
     }
     /* 收口：回到驻点位（上一段已经停在这里就不重复写） */
     push_move(&mut out, d, &mut at, wait, &travel);
+
+    /* 收口之后补一条**虚拟挤出**：在驻点往外走 0.1 mm（E0.001）再回来。
+     *
+     * 为什么调试产物也要它：BBS 判「这盘能不能发打印」靠产物里的挤出点合成路径
+     * 包围盒；一条挤出都没有的话盒子是空的，会被判成「路径在床外」，切片完成那一屏
+     * 的打印 / 发送全灰。补这一条撑住那个判据，真机几乎不出料。
+     * 位置就在驻点旁边 —— 那是用户自己填的合法位，不另挑坐标。
+     * 拼法见 `crate::gcode::virtual_extrude`（E 值与标记文本只有那一处）。 */
     out.push(";===== debug actions end ==============".to_string());
     out
 }
@@ -250,6 +293,9 @@ mod tests {
             "M201 X20000 Y20000",
             "M104 S220",
             "; EXECUTABLE_BLOCK_START",
+            /* 真实产物里必然有这一行：BBS 的 start gcode 是 `; FEATURE: Custom` 起头的，
+             * 它后面所有移动的挤出角色都是 Custom —— 夹具少了它，闸就测不到那个坑。 */
+            "; FEATURE: Custom",
             ";=====avoid end stop =================",
             "G91",
             "G380 S2 Z40 F1200",
@@ -288,7 +334,8 @@ mod tests {
         let out = build_debug_gcode(&startup(), &params());
         let seq: Vec<&String> = out
             .iter()
-            .filter(|l| l.starts_with("G1 X") && !l.contains('Y'))
+            /* 虚拟挤出那一行也是 `G1 X…`，这里只看动作行（动作行不带 E） */
+            .filter(|l| l.starts_with("G1 X") && !l.contains('Y') && !l.contains('E'))
             .collect();
         let want = vec![
             "G1 X256 F10000",
@@ -315,7 +362,7 @@ mod tests {
         let out = build_debug_gcode(&startup(), &d);
         let seq: Vec<&str> = out
             .iter()
-            .filter(|l| l.starts_with("G1 X"))
+            .filter(|l| l.starts_with("G1 X") && !l.contains('E'))
             .map(|s| s.as_str())
             .collect();
         assert_eq!(
@@ -347,7 +394,7 @@ mod tests {
         let out = build_debug_gcode(&startup(), &d);
         let seq: Vec<&str> = out
             .iter()
-            .filter(|l| l.starts_with("G1 X"))
+            .filter(|l| l.starts_with("G1 X") && !l.contains('E'))
             .map(|s| s.as_str())
             .collect();
         assert_eq!(
@@ -377,7 +424,12 @@ mod tests {
         none.test_mount = false;
         none.test_unmount = false;
         let out = build_debug_gcode(&startup(), &none);
-        assert_eq!(out.iter().filter(|l| l.starts_with("G1 X")).count(), 1);
+        assert_eq!(
+            out.iter()
+                .filter(|l| l.starts_with("G1 X") && !l.contains('E'))
+                .count(),
+            1
+        );
     }
 
     /// 带 Y 的机型（P1/X1）：驻点走两轴，两个动作之间也回两轴。
@@ -408,6 +460,48 @@ mod tests {
         let out = build_debug_gcode(&startup(), &d);
         assert!(out.iter().any(|l| l == "G1 X256 Y0 F10000"));
         assert!(out.iter().any(|l| l == "G28 Y"));
+    }
+
+    /// 收口之后**有且只有一条**虚拟挤出，而且落在可执行块里。
+    ///
+    /// BBS 只认 `; EXECUTABLE_BLOCK_START` 之后的内容；这条要是跑到块外就等于没写。
+    #[test]
+    fn carries_exactly_one_virtual_extrusion_inside_the_block() {
+        let out = build_debug_gcode(&startup(), &params());
+        let hits: Vec<usize> = out
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| crate::gcode::virtual_extrude::is_tagged(l))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(hits.len(), 1, "{out:?}");
+
+        let i = hits[0];
+        assert_eq!(
+            out[i],
+            "G1 X256.1 E0.001 F10000 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility"
+        );
+        /* 角色换回来，再回驻点：这一条是「假动作」，不该把笔留在 +0.1 上 */
+        assert_eq!(out[i + 1], "; FEATURE: Custom");
+        assert_eq!(out[i + 2], "G0 X256 F10000");
+
+        let start = out
+            .iter()
+            .position(|l| l.contains("; EXECUTABLE_BLOCK_START"))
+            .expect("可执行块起点");
+        let end = out
+            .iter()
+            .position(|l| l.contains("; EXECUTABLE_BLOCK_END"))
+            .expect("可执行块终点");
+        assert!(start < i && i < end, "{out:?}");
+
+        /* ★ 这条是 2026-11-12 那个坑的闸：整份产物里必须有一条**切片器认得**的挤出。
+         * 只看"有没有 E"不够 —— 角色是 `Custom` 的挤出会被切片器的包围盒整个排除，
+         * 于是第一盘之外全被判"路径在床外"。判据见 `postproc::bbs_viewer`。 */
+        assert!(
+            crate::postproc::bbs_viewer::has_countable_extrude(&out),
+            "产物里没有一条切片器认得的挤出（角色是 Custom？），会在切片器里被判路径越界：{out:?}"
+        );
     }
 
     /// 进度推到 100，否则 BBS 显示成没打完。

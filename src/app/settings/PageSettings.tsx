@@ -93,6 +93,8 @@ import { msg, useLocale, useText, useT, type StringKey, type Text } from '../../
 import { deliveryMutated, sourceMutated, useSourceRevision } from '../state/deliveryState'
 /* AppState 客户端：主题 / 语言这两格从它读；写完再兜底刷一次（浏览器 mock 没有事件通道） */
 import { appStateMutated, useLocalePref, useThemePref } from '../state/appState'
+/* 界面动作记录：开关 / 主题 / 语言 / 更新渠道与那枚翻转插画（2026-11-12） */
+import { track } from '../log/track'
 import {
   SLICER_CHOOSE,
   slicerOptionsOf,
@@ -940,6 +942,7 @@ export default function PageSettings({
     if (themeBusy) return
     setThemeBusy(true)
     setThemeErr(null)
+    track('theme', { to: next })
     try {
       await api.setTheme(next)
       appStateMutated()
@@ -961,6 +964,7 @@ export default function PageSettings({
     if (localeBusy) return
     setLocaleBusy(true)
     setLocaleErr(null)
+    track('locale', { to: next })
     try {
       await api.setLocale(next)
       appStateMutated()
@@ -979,6 +983,7 @@ export default function PageSettings({
     if (autoCleanBusy) return
     setAutoCleanBusy(true)
     setAutoCleanErr(null)
+    track('autoCleanHistory', { on: next })
     try {
       setAutoClean(await api.setAutoCleanHistory(next))
     } catch (e) {
@@ -993,6 +998,7 @@ export default function PageSettings({
     if (autoCheckBusy) return
     setAutoCheckBusy(true)
     setAutoCheckErr(null)
+    track('update.autoCheck', { on: next })
     try {
       setAutoCheckUpdate(await api.setAutoCheckUpdate(next))
     } catch (e) {
@@ -1625,7 +1631,10 @@ export default function PageSettings({
                   type="button"
                   role="radio"
                   aria-checked={(picked?.channel ?? channelPick) === c.id}
-                  onClick={() => setChannelPick(c.id)}
+                  onClick={() => {
+                    track('update.channel', { to: c.id })
+                    setChannelPick(c.id)
+                  }}
                 >
                   {tr(c.label)}
                 </button>
@@ -2148,6 +2157,8 @@ function UpdateArt() {
     const from = angle.current
     const to = from + 180
     angle.current = to
+    /* 作者点名要看的那一件事：这枚插画的翻转也要在日志里（2026-11-12） */
+    track('update.flip', { face: to % 360 === 0 ? 'front' : 'back' })
     const anim = el.animate(
       [{ transform: `rotateY(${from}deg)` }, { transform: `rotateY(${to}deg)` }],
       { duration: 640, easing: 'cubic-bezier(.22,.68,.2,1)' },

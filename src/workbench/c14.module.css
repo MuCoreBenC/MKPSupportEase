@@ -5970,3 +5970,33 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/*
+ * 错误弹框（2026-11-12）：错误码那一行 + 可滚动的原文块。
+ *
+ * 原文块要**能选中、能复制**（详情里带 `req=`，作者/客服按它去捞日志），
+ * 所以等宽 + `user-select: text`；高度封顶，长 trace 不把框撑出屏幕。
+ */
+.errorMeta {
+  margin: 0 0 8px;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  user-select: text;
+}
+
+.errorDetail {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}

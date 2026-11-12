@@ -35,6 +35,8 @@
 //! 写下的账本，落后于 delivery 是「生成过、还没发」的常规状态，拦了就是
 //! 「manifest 不一致 → 不许发布 → 无法通过发布修 manifest」的死循环。
 
+use std::collections::BTreeSet;
+
 use serde::Serialize;
 
 use super::build::Scope;
@@ -210,7 +212,7 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
     // 不该顺手造出一个目录
     let asset_root = paths::assets_root_at(ctx.real_root());
 
-    let mut items: Vec<AuditItem> = Vec::with_capacity(17);
+    let mut items: Vec<AuditItem> = Vec::with_capacity(19);
 
     /* ① 源数据完整 —— 能走到这里就说明 `presets/` 整套读得出来（加载期校验过） */
     items.push(sources_complete(&book));
@@ -274,6 +276,16 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
      * （`postprocess::calibration_asset::read_identity`）—— 两边各写一套的话，
      * 迟早出现"脚本说合格、工作台说没标记"。 */
     items.push(calibration_identities(&book, &asset_root));
+
+    /* ⑱ 参数值与 `valueType` 的写法一致（2026-11-12）：`int` 不许写成小数。
+     *
+     * 模型读入时会把 `1.0` 归一成 `1`，但源文件仍该写整数 —— 否则复制配方那条
+     * 路会因为"值类型对不上"整批被拒，而文件里看不出来。 */
+    items.push(params_typed(&ctx.presets.registry));
+
+    /* ⑲ 清单 ↔ 随包内置预设（2026-11-12）：改了版本 id 没重新生成，
+     * 编进安装包的就还是旧名 —— 编译期一声不响，只能靠这条闸点出来。 */
+    items.push(kernel_presets_aligned(&book));
 
     let can_publish = items
         .iter()
@@ -489,6 +501,57 @@ fn sources_complete(book: &Book<'_>) -> AuditItem {
         "机型 {machines} 台 · 版本 {versions} 个 · 资产 {assets} 条 · 套餐 {bundles} 套，\
          加载期校验全过"
     ))
+}
+
+/// ⑱ **参数值与它的 `valueType` 写法一致**（2026-11-12）：`int` 参数不许写成小数。
+///
+/// 判据从**原文 token** 上扫（[`crate::presetdata::ParamRegistry::raw_int_literals`]）：
+/// 模型读入时已经把 `1.0` 归一成 `1`，只看模型永远发现不了"文件里写的是 1.0"。
+///
+/// 为什么是 Blocker：`1.0` 交给写值层会被判类型不符，一次复制配方整批被拒、
+/// 一项都写不进去 —— 而这在文件里看不出来，只有到第一次写值才炸。
+fn params_typed(registry: &crate::presetdata::ParamRegistry) -> AuditItem {
+    let item = AuditItem::base(
+        "params/typed",
+        "参数值与类型写法一致",
+        AuditSeverity::Blocker,
+        "整值浮点跑 `npm run presets -- normalize` 写正；真小数得先改数值",
+    );
+    let bad = registry.raw_int_literals();
+    if bad.is_empty() {
+        return item.pass("int 参数的默认值、机型变体与选项值都写成了整数");
+    }
+    let integral = bad.iter().all(|b| b.integral);
+    /* 一条一行会把详情撑爆：列前六条，其余只报总数 */
+    let shown: Vec<String> = bad
+        .iter()
+        .take(6)
+        .map(|b| {
+            if b.owner.is_empty() {
+                format!("{} = {}", b.key, b.literal)
+            } else {
+                format!("{} [{}] = {}", b.key, b.owner, b.literal)
+            }
+        })
+        .collect();
+    let more = if bad.len() > shown.len() {
+        format!("；等 {} 处", bad.len())
+    } else {
+        String::new()
+    };
+    let what = if integral {
+        "写成了小数（整值，可自动写正）"
+    } else {
+        "写成了小数，其中有不整的值（得先改数值）"
+    };
+    item.fail(
+        format!(
+            "{} 处 int 参数{what}：{}{more}",
+            bad.len(),
+            shown.join("、")
+        ),
+        vec!["presets/registry/param_registry.toml".to_owned()],
+    )
 }
 
 /// 引用能不能落地。**大小写不敏感**（与 `runtime::catalog::Catalog::asset` 同一口径）
@@ -727,6 +790,68 @@ fn presets_rendered(book: &Book<'_>, delivery_root: &std::path::Path) -> AuditIt
         missing.sort();
         item.fail(format!("{} 份产物还没生成", missing.len()), missing)
     }
+}
+
+/// ⑲ **随包内置预设的文件名集合 == 当前清单该有的产物名集合**（2026-11-12）。
+///
+/// 这一层以前没人守：`BUILTIN_PRESETS` 是手写表、`wb_generate` 只写不清，
+/// 于是改了版本 id 之后，清单已是新名、编进安装包的还是旧名，而编译期一声不响
+/// （作者踩到的就是它）。现在表由 `crates/preset/build.rs` 按目录生成、
+/// 生成器负责清旧名，这条闸则把「清单 ↔ 目录」的双向比对摆进发布检查：
+/// 少一份、多一份、名字写岔了都红并点名。
+fn kernel_presets_aligned(book: &Book<'_>) -> AuditItem {
+    let item = AuditItem::base(
+        "kernel/presets-aligned",
+        "随包内置预设与清单对齐",
+        AuditSeverity::Blocker,
+        "在生成视角里生成一次（生成器写出新名产物并把旧名移入回收站）",
+    );
+    let prefix = format!("{}/", delivery::MKP_PRESETS_DIR);
+    let expected: BTreeSet<String> = delivery::expected_products(book)
+        .iter()
+        .filter_map(|rel| rel.strip_prefix(&prefix))
+        .map(str::to_owned)
+        .collect();
+
+    let dir = preset::generate::assets_dir();
+    let mut on_disk: BTreeSet<String> = BTreeSet::new();
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            return item.fail(
+                format!("读不到内核产物目录 {}：{e}", dir.display()),
+                vec![dir.display().to_string()],
+            )
+        }
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.ends_with(".toml") {
+            on_disk.insert(name);
+        }
+    }
+
+    let bad = presets_alignment(&expected, &on_disk);
+    if bad.is_empty() {
+        item.pass(format!(
+            "清单该有的 {} 份随包预设一份不差、没有旧名残留",
+            expected.len()
+        ))
+    } else {
+        item.fail(format!("清单与随包预设对不上（{} 处）", bad.len()), bad)
+    }
+}
+
+/// 「清单该有」与「盘上真有」的双向差量，排序后逐条点名。
+/// 纯函数：读盘与报告拼装留在 [`kernel_presets_aligned`]，判据好单测。
+fn presets_alignment(expected: &BTreeSet<String>, on_disk: &BTreeSet<String>) -> Vec<String> {
+    let mut bad: Vec<String> = expected
+        .difference(on_disk)
+        .map(|n| format!("缺 {n}"))
+        .chain(on_disk.difference(expected).map(|n| format!("多 {n}")))
+        .collect();
+    bad.sort();
+    bad
 }
 
 /// ⑦ 目录登记的每一条，`发布根 + catalog.path` 处都取得到。
@@ -1472,6 +1597,116 @@ fn git(repo: &std::path::Path, args: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// 最小注册表（一个 int 参数）→ `ParamRegistry`。`defaultValue` 由调用方决定写
+    /// `1.0` 还是 `1` —— 这一项验的就是**原文写法**。
+    fn registry_with_int_default(literal: &str) -> crate::presetdata::ParamRegistry {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("registry")).unwrap();
+        let registry = format!(
+            "[[params]]\n\
+             key = 'a.b'\n\
+             label = 'B'\n\
+             desc = ''\n\
+             configKey = 'B'\n\
+             tomlKey = 'b'\n\
+             jsonKey = 'b'\n\
+             tomlComment = ''\n\
+             valueType = 'int'\n\
+             uiComponent = 'number'\n\
+             defaultValue = {literal}\n\
+             section = 'motion'\n\
+             scope = 'universal'\n\
+             \n\
+             [params.layout]\n\
+             sectionId = 'motion'\n\
+             order = 0.0\n"
+        );
+        crate::fsx::atomic::atomic_write(
+            &root.join("registry/param_registry.toml"),
+            registry.as_bytes(),
+        )
+        .unwrap();
+        crate::fsx::atomic::atomic_write(
+            &root.join("layout_schema.toml"),
+            b"[[tabs]]\n\
+              id = 't'\n\
+              label = 'T'\n\
+              \n\
+              [[tabs.sections]]\n\
+              id = 'motion'\n\
+              label = 'Motion'\n\
+              \n\
+              [[tabs.sections.items]]\n\
+              id = 'a.b'\n\
+              key = 'a.b'\n\
+              paramKey = 'a.b'\n",
+        )
+        .unwrap();
+        crate::presetdata::ParamRegistry::load_from(root).expect("最小注册表要读得通")
+    }
+
+    /// **⑱ `int` 参数写成小数 ⇒ Blocker 红，并点名是哪一项**（2026-11-12）。
+    ///
+    /// 模型读入时会归一成 `1`，所以这一项必须看原文 token —— 只看模型的话它永远是绿的，
+    /// 而复制配方会在第一次写值时整批被拒。
+    #[test]
+    fn an_int_default_written_as_a_float_is_a_blocker() {
+        let reg = registry_with_int_default("1.0");
+        let item = params_typed(&reg);
+        assert_eq!(item.status, AuditStatus::Fail);
+        assert_eq!(item.severity, AuditSeverity::Blocker);
+        assert!(
+            item.details.contains("a.b = 1.0"),
+            "详情要点名哪一项、原文写成什么：{}",
+            item.details
+        );
+    }
+
+    /// 写成整数 ⇒ 绿。
+    #[test]
+    fn an_int_default_written_as_an_integer_passes() {
+        let reg = registry_with_int_default("1");
+        let item = params_typed(&reg);
+        assert_eq!(item.status, AuditStatus::Pass, "{}", item.details);
+    }
+
+    /// **⑲ 清单 ↔ 随包预设：缺一份、多一份旧名都要点名**（2026-11-12）。
+    ///
+    /// 改了版本 id 之后，生成器只写新名、不清旧名，就是「缺新的 + 多旧的」同时出现 ——
+    /// 这条判据要能一次把两头都报出来。
+    #[test]
+    fn presets_alignment_names_both_missing_and_orphaned() {
+        let want: BTreeSet<String> = ["A1-standard.toml", "A1-fast260326.toml"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let same = want.clone();
+        assert!(presets_alignment(&want, &same).is_empty(), "全对齐不该报");
+
+        let old: BTreeSet<String> = ["A1-standard.toml", "A1-fastv3.3.toml"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(
+            presets_alignment(&want, &old),
+            vec![
+                "多 A1-fastv3.3.toml".to_owned(),
+                "缺 A1-fast260326.toml".to_owned()
+            ],
+            "少的新名与多的旧名都要点出来"
+        );
+
+        let only_one: BTreeSet<String> = ["A1-standard.toml"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        assert_eq!(
+            presets_alignment(&want, &only_one),
+            vec!["缺 A1-fast260326.toml".to_owned()]
+        );
+    }
+
     /// **⑰ 校准素材身份：真文件缺标记就必须红**（2026-10-19）。
     ///
     /// 这是这次改造最要紧的一条：没有标记的校准件在客户端就是普通模型 ——
@@ -1541,7 +1776,7 @@ mod tests {
 
     /// 发布闸的编号清单 —— **与 `docs/PUBLISH-ARCHITECTURE.md` §5.2 那张表同一个契约**。
     /// 改编号要连文档一起改，所以这里把它钉死。
-    const IDS: [&str; 17] = [
+    const IDS: [&str; 19] = [
         "sources/complete",
         "refs/resolve",
         "assets/exist",
@@ -1559,11 +1794,13 @@ mod tests {
         "git/clean",
         "client/url-reconciliation",
         "assets/calibration-identity",
+        "params/typed",
+        "kernel/presets-aligned",
     ];
 
     /// **发布闸的形状与闸门**（第二刀的主判据）。
     ///
-    /// 它咬三件事：① 十六项一项不少、顺序照契约；② 每一行都有名有结论有「去修」；
+    /// 它咬三件事：① 十九项一项不少、顺序照契约；② 每一行都有名有结论有「去修」；
     /// ③ **`can_publish` 与"有没有 Blocker 红"严格等价** —— 这是"任何一项红
     /// 就不许进 commit / push / PR"那条规矩在代码里的唯一落点。
     ///
@@ -1576,7 +1813,7 @@ mod tests {
         let got: Vec<&str> = audit.items.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(
             got, IDS,
-            "十七项一项不少、顺序照 §5.2（⑰ 为 2026-10-19 校准素材身份新增）"
+            "十九项一项不少、顺序照 §5.2（⑰ 校准素材身份；⑱ 参数写法；⑲ 随包预设对齐）"
         );
 
         for i in &audit.items {

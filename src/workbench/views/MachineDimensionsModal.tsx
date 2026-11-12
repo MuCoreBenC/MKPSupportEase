@@ -29,7 +29,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { isAppError, wb } from '../api'
 import type { MachineDimensions, MachineView } from '../api'
-import { NumberField } from '../components/field'
+import { NumberField, SelectField } from '../components/field'
 import ModalC14 from '../c14/ModalC14'
 import { toasts } from '../c14/toast'
 import s from './MachineDimensionsModal.module.css'
@@ -287,25 +287,26 @@ export default function MachineDimensionsModal({
         <div className={s.groupHead}>
           标定点 (calibration)
           {/* 十格实测值谁都记不住 —— 给一条"从别台机器整组拷"的路（旧面板同一颗） */}
-          <select
-            className={s.copyFrom}
-            value=""
-            aria-label="从相似机型复制标定点"
-            title="选一台已经配好的机器，整组标定点拷过来"
-            onChange={(e) => {
-              const from = donors.find((x) => x.id === e.target.value)
-              if (!from?.dimensions) return
-              edit((d) => (d.calibration = { ...from.dimensions!.calibration }))
-              toasts.push(`标定点已从 ${from.id} 拷过来（还没落盘 —— 记得点保存）`)
-            }}
-          >
-            <option value="">从相似机型复制标定点…</option>
-            {donors.map((x) => (
-              <option key={x.id} value={x.id}>
-                {x.display || x.id}
-              </option>
-            ))}
-          </select>
+          {/* 2026-11-12：原生 `<select>` 换成共用件 `SelectField`（一个原生下拉不留）。
+              `value` 恒空 = **命令语义**：选一项执行一次，触发器永远停在「从…复制」那句上
+              （与原来那颗原生下拉同一种行为）。 */}
+          <span className={s.copyFrom} title="选一台已经配好的机器，整组标定点拷过来">
+            <SelectField
+              label="从相似机型复制标定点"
+              size="sm"
+              value=""
+              options={[
+                { value: '', label: '从相似机型复制标定点…' },
+                ...donors.map((x) => ({ value: x.id, label: x.display || x.id })),
+              ]}
+              onChange={(id) => {
+                const from = donors.find((x) => x.id === id)
+                if (!from?.dimensions) return
+                edit((d) => (d.calibration = { ...from.dimensions!.calibration }))
+                toasts.push(`标定点已从 ${from.id} 拷过来（还没落盘 —— 记得点保存）`)
+              }}
+            />
+          </span>
         </div>
         <div className={s.grid}>
           <Field

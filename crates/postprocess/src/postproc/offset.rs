@@ -282,15 +282,20 @@ pub fn process_gcode_offset(
             }
         }
 
-        if let Some(be) = boundary_err {
-            let _ = (be.direction(), be.required_move_x, be.required_move_y);
-            /* 码随 `be` 走，正文（从句）由表渲染 —— 这里不再有字符串比较，也不再有
-            `E_…: ` 那一截自我引用（旧形态：`InvalidConfig` 里塞一句带码的正文，
-            于是外层码 "配置无效" 在说假话，见 `diag/error.rs` 的 `Boundary` 文档） */
-            return Err(PostprocError::Boundary {
-                code: be.code,
-                sides: be.sides(),
-            });
+        /* 调试那一趟整段产物都要被替换掉（只剩动作），模型越不越界与它无关；
+         * 而且调试动作本身就走床外（落笔 267 / 收笔 276），拿模型的边界去卡它
+         * 只会把这一趟白挡掉（2026-11-12 作者：调试模式优先，这些都不用管）。 */
+        if ir_data.debug.is_none() {
+            if let Some(be) = boundary_err {
+                let _ = (be.direction(), be.required_move_x, be.required_move_y);
+                /* 码随 `be` 走，正文（从句）由表渲染 —— 这里不再有字符串比较，也不再有
+                `E_…: ` 那一截自我引用（旧形态：`InvalidConfig` 里塞一句带码的正文，
+                于是外层码 "配置无效" 在说假话，见 `diag/error.rs` 的 `Boundary` 文档） */
+                return Err(PostprocError::Boundary {
+                    code: be.code,
+                    sides: be.sides(),
+                });
+            }
         }
     }
 

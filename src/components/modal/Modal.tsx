@@ -34,6 +34,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from '../Icon'
 import { useT } from '../../i18n'
+import { track } from '../../app/log/track'
 import { ModalHeadNoteSlotContext, ModalHeadSlotContext } from './modalHeadSlot'
 import s from './Modal.module.css'
 
@@ -158,6 +159,18 @@ export default function Modal({
 
   /* 这一层在 Esc 栈里的身份（见文件头 `openLayers`）：一个实例一个，重渲染不换 */
   const layerId = useRef(Symbol('modal-layer'))
+
+  /*
+   * 弹框开关进交互日志（2026-11-12）：全站几扇框都过这一处，收口比每处埋点可靠。
+   * 标题用 ref 读 —— 它不该让"开一次"因为文案变化被记成两次开。
+   */
+  const titleRef = useRef(title)
+  titleRef.current = title
+  useEffect(() => {
+    if (!open) return
+    track('modal.open', titleRef.current)
+    return () => track('modal.close', titleRef.current)
+  }, [open])
 
   useEffect(() => {
     if (!open) {

@@ -445,6 +445,11 @@ pub fn run() {
             let clean_handle = handle.clone();
             std::thread::spawn(move || crate::retention::prune_if_enabled_app(&clean_handle));
 
+            /* 日志轮转（2026-11-12）：14 天 + 总 20 MiB 双限，见 `obs::rotation`。
+             * 与执行记录同一处、同一个后台节奏 —— 都是"启动别等它"的活。 */
+            let log_handle = handle.clone();
+            std::thread::spawn(move || crate::obs::rotation::prune_app(&log_handle));
+
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -656,6 +661,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::update::cancel_update,
         ipc::update::install_update,
         ipc::update::open_url,
+        // 交互记录 + 导出日志（2026-11-12）：点击进 `ui.log`；设置页那一行打 zip
+        ipc::diagnostics::log_ui_events,
+        ipc::diagnostics::log_export_plan,
+        ipc::diagnostics::default_log_dir,
+        ipc::diagnostics::export_logs,
+        ipc::diagnostics::reveal_log_export,
     ])
 }
 
@@ -999,6 +1010,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::update::cancel_update,
         ipc::update::install_update,
         ipc::update::open_url,
+        // 交互记录 + 导出日志（2026-11-12）：与客户端那份清单一字不差
+        ipc::diagnostics::log_ui_events,
+        ipc::diagnostics::log_export_plan,
+        ipc::diagnostics::default_log_dir,
+        ipc::diagnostics::export_logs,
+        ipc::diagnostics::reveal_log_export,
         // ★ **发布软件版本**（第四刀）：闸 / 事务 / 历史各一条 —— 与 CLI 同一个内核
         app::release_tx::wb_release_preflight,
         app::release_tx::wb_release_software,

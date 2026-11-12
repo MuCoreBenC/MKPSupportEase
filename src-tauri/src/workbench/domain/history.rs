@@ -41,7 +41,7 @@ use crate::workbench::presets::ParamRegistry as Registry;
 
 use crate::error::AppError;
 
-use super::patch::{self, Committed, CommittedVersion, Draft, Patch};
+use super::patch::{self, Committed, Draft, Patch};
 
 /// 同一条 `EditKey` 的两笔之间，超过这个间隔就**另起一条**。
 ///
@@ -165,29 +165,8 @@ impl History {
          * `committed` 是"打开工作台那一刻"的清单：新建版本、改版本 id 之后，
          * 新 uid 只存在于 `presets` 里。拿旧清单校验会把整批重放拒掉
          * （`版本 A1/FAST_NEW 不存在`）—— 界面上看就是"改了 id，参数全没了"。
-         * 新建版本后补参数同理。 */
-        let live = Committed {
-            versions: presets
-                .catalog
-                .machines()
-                .iter()
-                .flat_map(|m| {
-                    m.versions.iter().map(move |v| {
-                        (
-                            format!("{}/{}", m.id, v.id),
-                            CommittedVersion {
-                                machine_id: m.id.clone(),
-                                version_id: v.id.clone(),
-                                name: v.name.clone(),
-                                tag: v.tag.clone(),
-                            },
-                        )
-                    })
-                })
-                .collect(),
-            catalog: patch::catalog_machines_of(presets),
-            ..committed.clone()
-        };
+         * 新建版本后补参数同理。唯一实现在 `patch::live_committed`。 */
+        let live = patch::live_committed(presets, committed);
         for e in self.undo.iter() {
             /* 结构编辑写的是影子文件（`reload` 会读回来），只有值编辑需要重放 */
             let fwd = match &e.action {
@@ -196,7 +175,7 @@ impl History {
             };
             let mut d = Self::baseline_draft();
             patch::apply(&mut d, &live, &presets.registry, std::slice::from_ref(fwd))?;
-            let staged = crate::workbench::app::storage::stage_value_edits(presets, committed, &d);
+            let staged = crate::workbench::app::storage::stage_value_edits(presets, &live, &d);
             crate::workbench::app::storage::stage_into(presets, &staged)?;
         }
         Ok(())
@@ -415,40 +394,61 @@ impl History {
         Draft::default()
     }
 
+    /// 栈顶那一条（**不弹**）。撤销要"先算再出栈"：算不出来时栈一格都不能动。
+    pub fn peek_undo(&self) -> Option<&Entry> {
+        self.undo.back()
+    }
+
+    /// 重做栈顶那一条（**不弹**）。同 [`Self::peek_undo`]。
+    pub fn peek_redo(&self) -> Option<&Entry> {
+        self.redo.last()
+    }
+
     /// **撤销栈顶那条**要写的行（在真的撤销之前算 —— `changes` 要的是"改前"的值）。
     ///
     /// 走的是与正向**同一条管线**：把那条的反向应用到一个空草稿上，
     /// 再 `stage_value_edits`。于是撤销不会长出第二套"归并连带 / 跟随状态"的规则。
+    ///
+    /// # 为什么是 `Result<Option<_>>` 而不是 `Option<_>`
+    ///
+    /// 早先算不出来就 `.ok()?` 返回 `None`，调用方照样 `undo()` 出栈 ——
+    /// 界面上就是「点了撤销，什么都没发生，但那一笔已经没了」（作者 2026-11-12）。
+    /// 现在算不出来是**错误**：调用方先算、算出错就原样报错，栈一格不动。
+    /// `Ok(None)` 只表示"这一条是结构编辑，不走值管线"。
     pub fn inverse_staged(
         &self,
         presets: &crate::workbench::presets::Presets,
         committed: &Committed,
-    ) -> Option<crate::workbench::app::storage::StagedEdits> {
-        let e = self.undo.back()?;
+    ) -> Result<Option<crate::workbench::app::storage::StagedEdits>, AppError> {
+        let Some(e) = self.undo.back() else {
+            return Ok(None);
+        };
         let inverse = match &e.action {
             Action::Value { inverse, .. } => inverse,
             /* 结构编辑的撤销是"把 before 字节写回文件"，不走值管线 */
-            Action::Struct(_) => return None,
+            Action::Struct(_) => return Ok(None),
         };
         let mut d = Self::baseline_draft();
         if !inverse.is_empty() {
-            patch::apply(&mut d, committed, &presets.registry, inverse).ok()?;
+            patch::apply(&mut d, committed, &presets.registry, inverse)?;
         }
-        Some(crate::workbench::app::storage::stage_value_edits(
+        Ok(Some(crate::workbench::app::storage::stage_value_edits(
             presets, committed, &d,
-        ))
+        )))
     }
 
-    /// **重做栈顶那条**要写的行（正向）
+    /// **重做栈顶那条**要写的行（正向）。返回值的道理同 [`Self::inverse_staged`]。
     pub fn redo_staged(
         &self,
         presets: &crate::workbench::presets::Presets,
         committed: &Committed,
-    ) -> Option<crate::workbench::app::storage::StagedEdits> {
-        let e = self.redo.last()?;
+    ) -> Result<Option<crate::workbench::app::storage::StagedEdits>, AppError> {
+        let Some(e) = self.redo.last() else {
+            return Ok(None);
+        };
         let fwd = match &e.action {
             Action::Value { patch, .. } => patch,
-            Action::Struct(_) => return None,
+            Action::Struct(_) => return Ok(None),
         };
         let mut d = Self::baseline_draft();
         patch::apply(
@@ -456,11 +456,10 @@ impl History {
             committed,
             &presets.registry,
             std::slice::from_ref(fwd),
-        )
-        .ok()?;
-        Some(crate::workbench::app::storage::stage_value_edits(
+        )?;
+        Ok(Some(crate::workbench::app::storage::stage_value_edits(
             presets, committed, &d,
-        ))
+        )))
     }
 }
 

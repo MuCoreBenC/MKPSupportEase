@@ -1597,7 +1597,34 @@
   padding-right: 4px;
 }
 
-/* 行尾那颗「已开启 / 未开启」：文本按钮，点开设置窗 —— 不跟开关抢，只报告状态 */
+/*
+ * 行标题后面的**状态徽章**（2026-11-12 作者：「这个已开启应该是作为徽章吧」）。
+ *
+ * 它只说"现在是不是开着"，**不承担点击** —— 点击的活由右边那颗与别处同尺寸的按钮干。
+ * 把徽章做成按钮会两头不讨好：看着像可点的，体量又比「打开 / 导出 / 清理」小一大截。
+ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  /* 与 `?` 那颗圆点同一档间距（Tip 的 `.dot` 是 margin-left: 6px），同一行才排得齐 */
+  margin-left: 6px;
+  vertical-align: middle;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.badge[data-on='true'] {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+/* 行尾那颗文本按钮：只做"打开某一扇窗"，不跟开关抢 */
 .textBtn {
   padding: 4px 10px;
   border: 1px solid var(--line);

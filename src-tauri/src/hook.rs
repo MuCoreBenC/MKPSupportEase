@@ -95,6 +95,8 @@ pub(crate) mod keys {
     pub const MACHINE_DISABLED: &str = "hook.machine_disabled";
     pub const CALIB_MODE_QUESTION: &str = "hook.calib_mode_question";
     pub const CALIB_STOPPED: &str = "hook.calib_stopped";
+    /// 强制校准模式开着、但外形对不上任何一块校准板 ⇒ 停下（原文件不动）
+    pub const CALIB_NOT_RECOGNIZED: &str = "hook.calib_not_recognized";
     /* 挪塔那一问（2026-10-18）：设置页「智能塔位置」开着且真撞了才问 */
     pub const TOWER_RELOCATION_QUESTION: &str = "hook.tower_relocation_question";
     /// 挪完了、复检通过（成功句）
@@ -158,6 +160,7 @@ const ALL_KEYS: &[&str] = &[
     keys::MACHINE_DISABLED,
     keys::CALIB_MODE_QUESTION,
     keys::CALIB_STOPPED,
+    keys::CALIB_NOT_RECOGNIZED,
     keys::CALIB_DONE_PRINT,
     keys::CALIB_DONE_DIRECT,
     keys::CANCELLED,
@@ -634,6 +637,8 @@ fn result_facts(done: &postprocess::pipeline::ProcessResult) -> crate::hook_ipc:
             .then_some(done.stats.pass1.layer_height_min),
         layer_height_max: (done.stats.pass1.layer_height_max > 0.0)
             .then_some(done.stats.pass1.layer_height_max),
+        /* 调试那一趟的坐标概要：结果页要摆，正常那一趟是 `None`（那一行不出现） */
+        debug: done.debug.clone(),
     }
 }
 
@@ -824,10 +829,12 @@ pub fn run(
      *   缺了它按出厂档跑仍然是对的 —— 与 `usage` 那个账同一个口径（提示而非用户资产）。
      *   记录也照落，只是那几档是出厂值。
      */
-    if let Some(root) = crate::fsx::paths::internal_root_headless() {
-        if let Ok(prefs) = crate::runtime::app_state::resolved_postproc_prefs(&root) {
-            crate::runtime::postproc_prefs::apply_to_ir(&mut ir, &prefs);
-        }
+    /* ★ 读一次、留着：后面「强制校准模式」那一档也要它（原来它只活在 `if let` 里，
+     *   判定点拿不到）。读不出来不阻断这一趟 —— 缺了它按出厂档跑仍然是对的。 */
+    let postproc_prefs = crate::fsx::paths::internal_root_headless()
+        .and_then(|root| crate::runtime::app_state::resolved_postproc_prefs(&root).ok());
+    if let Some(prefs) = &postproc_prefs {
+        crate::runtime::postproc_prefs::apply_to_ir(&mut ir, prefs);
     }
 
     /*
@@ -1026,7 +1033,77 @@ pub fn run(
      * **不猜**：不看正文里的旧注释、不看尺寸、不看文件名（2026-10-18 删掉的那条
      * G-code 标记链就是"看了会给出错答案"的例子）。
      */
-    let calib_mode = mode_of(&identity_probe);
+    /* 身份定案的三条口径（2026-11-12 加第三档）：
+     *
+     *   ① 调试在跑 ⇒ 一律普通模型（`Mode::None`）：调试那一趟只跑动作，跟校准无关，
+     *      否则会先弹校准那一问、再弹调试那一问（要答两次），碰撞还会在调试之前把这一趟掐掉；
+     *   ② 强制校准模式（设置页开关）⇒ **不看 3MF 身份**，只按实测外形认；对不上就停下
+     *      （原文件不动），提示用户去关掉开关；
+     *   ③ 出厂档 ⇒ 3MF 有身份才认，并用外形纠正合并文件里读错的那一盘（见 `decide_calibration`）。
+     */
+    let calib_mode = if ir.debug.is_some() {
+        calibration::Mode::None
+    } else {
+        let force = postproc_prefs
+            .as_ref()
+            .is_some_and(|p| p.force_calibration_mode);
+        let verdict = match postprocess::postproc::machine_dims::tables().calibration_models() {
+            Some(profiles) => postprocess::postproc::calib_models::decide_calibration(
+                force,
+                mode_of(&identity_probe),
+                calibration_size(&content),
+                profiles,
+            ),
+            /* 档表没装载（预设目录缺）：强制模式下无从判断 ⇒ 与「对不上」同一条路；
+             * 出厂档下保持 3MF 那条原判。 */
+            None if force => postprocess::postproc::calib_models::CalibVerdict::Unrecognized,
+            None => postprocess::postproc::calib_models::decide_calibration(
+                false,
+                mode_of(&identity_probe),
+                None,
+                &[],
+            ),
+        };
+        match verdict {
+            postprocess::postproc::calib_models::CalibVerdict::Calibration(m) => m,
+            postprocess::postproc::calib_models::CalibVerdict::NotCalibration => {
+                calibration::Mode::None
+            }
+            /* 强制模式下认不出 ⇒ **停下**：静默降级成普通模型会把校准板当模型打出来。
+             * 出口与"校准那一问答了停止"同一条（归档 + 原文件不动）。 */
+            postprocess::postproc::calib_models::CalibVerdict::Unrecognized => {
+                let err = HookError::bad_input(Reason::new(keys::CALIB_NOT_RECOGNIZED));
+                let ff = FailureFacts::capture(
+                    &ir,
+                    &content,
+                    &raw,
+                    job,
+                    "",
+                    &opening_slicer,
+                    opening_layer_height,
+                    opening_nozzle,
+                );
+                archive_failure(
+                    &archived,
+                    job,
+                    &preset_machine,
+                    &err,
+                    true,
+                    raw.len() as u64,
+                    started_at,
+                    started,
+                    /* 管线还没进（判在读身份这一步），没有步骤账 */
+                    Vec::new(),
+                    None,
+                    Some(&ff),
+                    relocation.as_ref(),
+                    model_map_from(&content, Some(&ir)),
+                    &identity_probe,
+                );
+                return Err(err);
+            }
+        }
+    };
     if let (true, Some(client)) = (
         postprocess::postproc::calibration::is_any(calib_mode),
         ui.client(),
@@ -1826,6 +1903,15 @@ fn mode_of(identity: &postprocess::gcode::IdentityProbe) -> calibration::Mode {
         .as_deref()
         .and_then(calibration::parse_mode_id)
         .unwrap_or(calibration::Mode::None)
+}
+
+/// 实测外形（宽, 高）：`compute_bbox` 的挤出包围盒；算不出来 = `None`。
+///
+/// 强制校准模式下 `None` 与「对不上任何一块板」同一条路 —— 没有外形就没有依据，不猜。
+fn calibration_size(content: &[String]) -> Option<(f64, f64)> {
+    postprocess::postproc::disk::compute_bbox(content)
+        .ok()
+        .map(|b| (b.x_max - b.x_min, b.y_max - b.y_min))
 }
 
 /// 校准件验收那一组（`detail.calibration`）—— **只搬运，不判定**。
@@ -3018,10 +3104,13 @@ mod tests {
         assert_eq!(bare.slicer_print_time_seconds, None);
     }
 
-    /// 仓库里那份夹具预设（与内置产物同构）—— 机型 A1 / 变体 fast
+    /// 仓库里那份**冻结的夹具预设**（与内置产物同构）—— 机型 A1 / 变体 fast。
+    ///
+    /// 2026-11-12：从 `fixtures/ir/presets/` 取，不再从 `crates/preset/assets/presets/`
+    /// 取。后者是随包产物，会随版本 id 改名而增删；夹具是判据资产，不该被生成动作搬走。
     fn fixture_preset(dest: &std::path::Path) {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../crates/preset/assets/presets/A1-fast.toml");
+            .join("../crates/postprocess/tests/fixtures/ir/presets/A1-fast.toml");
         std::fs::copy(&src, dest).expect("拷一份夹具预设");
     }
 
@@ -3205,7 +3294,7 @@ mod tests {
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let toml = d.path().join("A1_MINI-fast.toml");
         std::fs::copy(
-            manifest.join("../crates/preset/assets/presets/A1_MINI-fast.toml"),
+            manifest.join("../crates/postprocess/tests/fixtures/ir/presets/A1_MINI-fast.toml"),
             &toml,
         )
         .expect("拷一份 A1 mini 预设");
@@ -3581,7 +3670,7 @@ mod tests {
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let toml = d.path().join("A1_MINI-fast.toml");
         std::fs::copy(
-            manifest.join("../crates/preset/assets/presets/A1_MINI-fast.toml"),
+            manifest.join("../crates/postprocess/tests/fixtures/ir/presets/A1_MINI-fast.toml"),
             &toml,
         )
         .expect("拷一份预设");

@@ -13,6 +13,7 @@
 //! `mkp_gcode::` → `crate::gcode::`、`mkp_ir::` → `crate::ir::`、`mkp_diag::` → `crate::diag::`），
 //! 算法一行未动。证据是 G1/G2/G3 三份字节判据在接上的**第一次运行就全绿**。
 
+pub mod bbs_viewer;
 pub mod calib_models;
 pub mod calibration;
 pub mod cancel;

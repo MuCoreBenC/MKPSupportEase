@@ -58,6 +58,7 @@ import { usePageActions } from '../pageActions'
 import Icon from '../../app/shell/icons'
 import ui from '../../app/ui/ui.module.css'
 import s from './AnnotatePage.module.css'
+import { SelectField } from '../components/field'
 
 /** 网格步长：作者量坐标时用的就是「每 50px 一条线」 */
 const GRID = 50
@@ -1416,13 +1417,34 @@ export default function AnnotatePage() {
     <div className={s.wrap} tabIndex={-1} ref={wrapRef} onKeyDown={onKey}>
       <div className={s.bar}>
         <span className={s.lbl}>图</span>
-        <select
-          className={`${c.sel} ${s.sel}`}
-          value={src?.key ?? ''}
-          onChange={(e) => {
-            const id = e.target.value
-            const a = imgAssets.find((x) => x.id === id)
-            if (a !== undefined) {
+        {/* 2026-11-12：原生 `<select>` 换成共用件 `SelectField`（工作台也照客户端那条规矩，
+            一个原生下拉不留）。原来的 `<optgroup>` 分组改写成 `组名 / 图名` 前缀，
+            组信息没丢；「一组 = 共用一份标注」那句挂在选项右侧的 `note` 上。 */}
+        <span
+          className={s.sel}
+          title="资产根里的图（台账登记过的都在）—— 同一组 = 共用一份标注，切过去框原样在"
+        >
+          <SelectField
+            label="图"
+            size="sm"
+            value={src?.key ?? ''}
+            options={[
+              ...(src !== null && !imgAssets.some((a) => a.id === src.key)
+                ? [{ value: src.key, label: src.label }]
+                : []),
+              ...groups.flatMap((g) =>
+                g.items.map((a) => ({
+                  value: a.id,
+                  label: g.items.length === 1 ? a.display : `${g.name} / ${a.display}`,
+                  ...(g.items.length === 1
+                    ? {}
+                    : { note: `一组 ${g.items.length} 张 · 共用一份标注` }),
+                })),
+              ),
+            ]}
+            onChange={(id) => {
+              const a = imgAssets.find((x) => x.id === id)
+              if (a === undefined) return
               pick({
                 key: a.id,
                 groupId: a.groupId,
@@ -1434,32 +1456,9 @@ export default function AnnotatePage() {
                 w: 0,
                 h: 0,
               })
-            }
-          }}
-          title="资产根里的图（台账登记过的都在）—— 同一组 = 共用一份标注，切过去框原样在"
-        >
-          {src !== null && !imgAssets.some((a) => a.id === src.key) && <option value={src.key}>{src.label}</option>}
-          {/* 单张的那些（组里只有它自己）平摆 */}
-          {groups
-            .filter((g) => g.items.length === 1)
-            .map((g) => (
-              <option key={g.items[0].id} value={g.items[0].id}>
-                {g.items[0].display}
-              </option>
-            ))}
-          {/* 成组的那些收进 `<optgroup>` 里 —— **一组的名字写在组头上**，一眼看出"这两张是一套" */}
-          {groups
-            .filter((g) => g.items.length > 1)
-            .map((g) => (
-              <optgroup key={g.key} label={`${g.name}（一组 ${g.items.length} 张 · 共用一份标注）`}>
-                {g.items.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.display}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-        </select>
+            }}
+          />
+        </span>
         <button type="button" className={`${c.btn} ${c.btnSm}`} onClick={() => fileRef.current?.click()}>
           本地文件…
         </button>

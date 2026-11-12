@@ -181,7 +181,6 @@
 /* SVG 是几何图形，在 flex 里天然正中，不吃字体基线 */
 .skipBtn {
   display: inline-flex;
-  padding: 0;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
@@ -193,10 +192,6 @@
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
-}
-
-.valueLabelWrap {
-  align-items: center;
 }
 
 .skipBtn svg {

@@ -30,6 +30,7 @@ import Modal from '../../components/modal/Modal'
 import { Tip } from '../../components/tooltip'
 import { Switch } from '../../components/switch'
 import { SectionHead } from './SectionHead'
+import LogExportModal from './LogExportModal'
 import s from './PageSettings.module.css'
 
 /**
@@ -48,6 +49,8 @@ export default function DataSection({
   const tr = useT()
   const say = useText()
   const [folderBusy, setFolderBusy] = useState(false)
+  /* 导出日志那一扇（2026-11-12）：框自己读清单、自己打包，这一页只负责开关它 */
+  const [logOpen, setLogOpen] = useState(false)
   /** 成功时是**落点路径原样**（不翻），失败时是存键的那句话 —— 两种都住 [`Text`] */
   const [folderNote, setFolderNote] = useState<Text | null>(null)
 
@@ -165,8 +168,24 @@ export default function DataSection({
 
         {children}
 
+        {/*
+         * 导出日志（2026-11-12）：与上面两行同一类 —— 这块盘怎么维护。
+         * 说明只写后果（打包给谁、干什么用），机制（三条流、轮转）不进版面。
+         */}
+        <div className={`${s.field} ${s.fieldRow}`}>
+          <div className={s.fieldText}>
+            <div className={s.fieldTitle}>
+              {tr('settings.data.logs')}
+              <Tip text={tr('settings.data.logsNote')} />
+            </div>
+          </div>
+          <Btn onClick={() => setLogOpen(true)}>{tr('settings.data.logsAction')}</Btn>
+        </div>
+
         <p className={s.noteHint}>{tr('settings.data.privacy')}</p>
       </section>
+
+      <LogExportModal open={logOpen} host={host} onClose={() => setLogOpen(false)} />
 
       {/*
        * 「清理与卸载」是**类目里的一段**（2026-11-09）：它挂在「数据与维护」底下，

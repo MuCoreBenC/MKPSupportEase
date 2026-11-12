@@ -1185,30 +1185,37 @@ mod tests {
         assert!((ir.ironing.coverage_threshold - 55.0).abs() < f64::EPSILON);
     }
 
-    /// 9 份真实预设在**嵌入注册表**分支下 build 也必须成功（弃用/范围不误伤）。
+    /// 冻结的 IR 判据预设在**嵌入注册表**分支下 build 也必须成功（弃用/范围不误伤）。
     ///
-    /// 名单是 `{机型 id}-{版本 id 小写}` 那套规则算出来的（b05 Task 5 统一命名）；
-    /// 写死成字面量是刻意的 —— 名字集合本身是要盯的东西。
+    /// 2026-11-12：输入从 `fixtures/ir/presets/` 取，那是与 `ir/build9/*.json`
+    /// 一对一冻结的资产；`generate::fixtures_dir()` 是工作台产物的对照基线，
+    /// 会随版本 id 改名而增删，不该拿来当这条判据的输入。
+    /// 名单改成遍历目录：新增预设自动进入覆盖面，删掉一份也不会悄悄少测。
     #[test]
     fn nine_presets_build_with_embedded_registry() {
         let reg = crate::load_param_registry();
-        for name in [
-            "A1-standard",
-            "A1-fast",
-            "A1-fastv3.3",
-            "A1_MINI-standard",
-            "A1_MINI-fast",
-            "A1_MINI-fastv3.3",
-            "P1S-lite",
-            "P2S-standard",
-            "X1C-lite",
-        ] {
-            // 同上：预设 fixture 只在内核那一份里，路径只认 `generate::fixtures_dir()`。
-            let path = crate::generate::fixtures_dir().join(format!("{name}.toml"));
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../postprocess/tests/fixtures/ir/presets");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(&dir)
+            .expect("IR 判据预设目录应存在")
+            .flatten()
+        {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let file = crate::read_preset(&path).unwrap();
             build(&file.config, Some(&reg), CalibrationExecMode::Fallback)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
+            seen += 1;
         }
+        assert!(seen >= 9, "反空转：IR 判据预设被读漏了，实测 {seen} 份");
     }
 
     /// NumStrip：孤立 -/. 不算、多数字提取按序。

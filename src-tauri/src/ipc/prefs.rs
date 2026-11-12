@@ -364,6 +364,8 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "xyCalibrationDwellSec": r.xy_calibration_dwell_sec,
                 "bedGlueEnabled": r.bed_glue_enabled,
                 "bedGlueAllModels": r.bed_glue_all_models,
+                /* 强制校准模式（2026-11-12）：只按外形认校准件，认不出就停下 */
+                "forceCalibrationMode": r.force_calibration_mode,
                 /* 智能塔位置三档（2026-11-04）：`off` / `auto` / `ask` */
                 "autoTowerPosition": r.auto_tower_position.wire(),
                 /* 调试模式（2026-11-11）：开关 + 四个动作坐标。

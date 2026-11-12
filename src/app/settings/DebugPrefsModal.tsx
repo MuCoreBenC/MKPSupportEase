@@ -26,7 +26,7 @@ import {
 import s from './PageSettings.module.css'
 
 /**
- * 调试模式的设置窗。
+ * 收落笔点位测试（设置页那一格）的设置窗。
  *
  * ★ 尺寸 `size="lg"`：`sm` / `md` 的框身是 `overflow: visible`，内容一高就被
  *   `.box` 裁掉。`lg` 的框身本来就会滚。

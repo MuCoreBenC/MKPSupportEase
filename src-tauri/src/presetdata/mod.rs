@@ -69,8 +69,8 @@ pub use catalog::{
     PlateFrame, VersionField, Zone,
 };
 pub use registry::{
-    LayoutTab, ParamDef, ParamRegistry, SectionMeta, ShowOp, ShowWhen, TabMeta, UiComponent,
-    ValueType,
+    LayoutTab, ParamDef, ParamRegistry, RawIntLiteral, SectionMeta, ShowOp, ShowWhen, TabMeta,
+    UiComponent, ValueType,
 };
 pub use resolve::{no_overrides, Layers, Level, Origin, Overrides, ValueOrigin};
 
@@ -367,6 +367,16 @@ impl From<(String, String, Option<serde_json::Value>)> for ValueEdit {
             follows: None,
         }
     }
+}
+
+/// [`Presets::copy_version_with_bundle`] 建出来的两样东西。
+///
+/// 只给日志 / 调用方回执用；**界面读的是清单里的值**，不靠这份回执。
+pub struct CopiedVersionBundle {
+    /// 新套餐 id（`{机型}_{新版本 id}`）
+    pub bundle_id: String,
+    /// 新登记的 MKP 预设资产 id；模板套餐本来就没有 MKP 登记时为 `None`
+    pub asset_id: Option<String>,
 }
 
 pub struct Presets {
@@ -1024,6 +1034,211 @@ impl Presets {
         Ok(())
     }
 
+    /// **复制版本时顺手复制它指向的套餐**（2026-11-12，作者定「一版一套」）。
+    ///
+    /// 三步，任何一步失败整笔拒绝（内存改了一半的由命令层 `run_struct` 回滚）：
+    ///
+    /// 1. 版本定义照抄（[`Catalog::copy_version`]，行为不变，指针先照抄）；
+    /// 2. 模板套餐复制一份，id = `{机型}_{新版本 id}`；
+    /// 3. 套餐里**属于模板版本**的 `mkPreset` 登记换成本版本自己的
+    ///    （新 id = `{机型小写}-{新版本小写}`，与现有 `a1-fastv3.3` 同形），
+    ///    新版本 `recommendedBundle` 指过去。
+    ///
+    /// 模板没有套餐时什么都不建（`Ok(None)`）；模板套餐本来就没有 MKP 登记时照抄引用、
+    /// 不造第二份（历史数据允许这种形状）；有登记但**不属于模板版本**时整笔拒绝 ——
+    /// 把别的版本的登记挂到新版本上是错归属，不能猜。
+    #[allow(clippy::too_many_arguments)]
+    pub fn copy_version_with_bundle(
+        &mut self,
+        machine_id: &str,
+        template_version_id: &str,
+        new_version_id: &str,
+        name: &str,
+        tag: Option<&str>,
+        description: Option<&str>,
+        now_iso8601: &str,
+    ) -> Result<Option<CopiedVersionBundle>, AppError> {
+        let machine_id = machine_id.trim();
+        let template_vid = template_version_id.trim();
+        let new_vid = new_version_id.trim();
+
+        /* 模板指着哪份套餐 —— 必须在写版本之前读：`copy_version` 会把它照抄到新版本上 */
+        let template_bundle = self
+            .catalog
+            .machine(machine_id)
+            .ok_or_else(|| AppError::not_found(format!("没有机型 {machine_id}")))?
+            .versions
+            .iter()
+            .find(|v| v.id == template_vid)
+            .and_then(|v| v.recommended_bundle.clone())
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
+
+        self.catalog.machine_mut(machine_id)?.copy_version(
+            template_vid,
+            new_vid,
+            name,
+            tag,
+            description,
+        )?;
+
+        let Some(src_bundle_id) = template_bundle else {
+            return Ok(None);
+        };
+        let src = self.bundles.get(&src_bundle_id).cloned().ok_or_else(|| {
+            AppError::corrupted(format!(
+                "版本 {machine_id}/{template_vid} 的 recommendedBundle 指向一个不存在的套餐：{src_bundle_id}"
+            ))
+        })?;
+
+        let bundle_id = format!("{machine_id}_{new_vid}");
+        let new_asset_id = format!("{}-{}", machine_id.to_lowercase(), new_vid.to_lowercase());
+        if self.bundles.get(&bundle_id).is_some() {
+            return Err(AppError::invalid_argument(format!(
+                "套餐 id 已经存在：{bundle_id}"
+            )));
+        }
+        if self.assets.get(&new_asset_id).is_some() {
+            return Err(AppError::invalid_argument(format!(
+                "资产 id 已经存在：{new_asset_id}"
+            )));
+        }
+
+        /* 模板套餐里的 MKP 登记：只认 `mkPreset`；有一条不属于模板版本就拒绝 */
+        let mk_refs: Vec<&str> = src
+            .asset_refs
+            .iter()
+            .map(String::as_str)
+            .filter(|r| {
+                self.assets
+                    .get(r)
+                    .is_some_and(|a| a.kind == AssetKind::MkPreset)
+            })
+            .collect();
+        if !mk_refs.is_empty() {
+            let all_belong = mk_refs.iter().all(|r| {
+                self.assets.get(r).is_some_and(|a| {
+                    a.version_id
+                        .as_deref()
+                        .is_some_and(|v| v.trim().eq_ignore_ascii_case(template_vid))
+                })
+            });
+            if !all_belong {
+                return Err(AppError::invalid_argument(format!(
+                    "模板套餐 {src_bundle_id} 里有不属于版本 {template_vid} 的 MKP 登记"
+                ))
+                .with_detail(
+                    "一版一套：套餐的 mkPreset 应当只归属模板版本 —— 换一份套餐再复制".to_owned(),
+                ));
+            }
+        }
+
+        let asset_id = if mk_refs.is_empty() {
+            None
+        } else {
+            self.assets.add(Asset {
+                id: new_asset_id.clone(),
+                kind: AssetKind::MkPreset,
+                machine_id: Some(machine_id.to_owned()),
+                name: format!("{machine_id} {} 预设", name.trim()),
+                path: String::new(),
+                version_id: Some(new_vid.to_owned()),
+                slicer: None,
+                profile: None,
+                delivery: Default::default(),
+                calibration: String::new(),
+            })?;
+            Some(new_asset_id)
+        };
+
+        let refs: Vec<String> = src
+            .asset_refs
+            .iter()
+            .map(|r| match &asset_id {
+                Some(new_asset)
+                    if self
+                        .assets
+                        .get(r)
+                        .is_some_and(|a| a.kind == AssetKind::MkPreset) =>
+                {
+                    new_asset.clone()
+                }
+                _ => r.clone(),
+            })
+            .collect();
+        self.bundles.add(Bundle {
+            id: bundle_id.clone(),
+            display: format!("{machine_id} {}", name.trim()),
+            machine_id: machine_id.to_owned(),
+            asset_refs: refs,
+            updated_at: Some(now_iso8601.get(..10).unwrap_or(now_iso8601).to_owned()),
+        })?;
+        self.catalog.machine_mut(machine_id)?.set_version_field(
+            new_vid,
+            VersionField::RecommendedBundle,
+            Some(&bundle_id),
+        )?;
+
+        Ok(Some(CopiedVersionBundle {
+            bundle_id,
+            asset_id,
+        }))
+    }
+
+    /// **改版本 id 之后，把它独占的套餐一起改名**（2026-11-12）。
+    ///
+    /// 三条同时成立才动手，否则原样返回 `None`：
+    ///
+    /// 1. 这一版指着套餐（`recommendedBundle`）；
+    /// 2. 套餐 id 就是 `{机型}_{旧版本 id}` 这个约定形状；
+    /// 3. **只有这一版**指着它 —— 共用的套餐不跟着改，否则会把别的版本的指向一起改掉。
+    ///
+    /// 改名走 [`Self::rename_bundle`]：套餐 id 与机型文件里那几处引用一起换。
+    pub fn rename_version_bundle(
+        &mut self,
+        machine_id: &str,
+        old_vid: &str,
+        new_vid: &str,
+        now_iso8601: &str,
+    ) -> Result<Option<(String, String)>, AppError> {
+        let machine_id = machine_id.trim();
+        let new_vid = new_vid.trim();
+        let current = self
+            .catalog
+            .machine(machine_id)
+            .ok_or_else(|| AppError::not_found(format!("没有机型 {machine_id}")))?
+            .versions
+            .iter()
+            .find(|v| v.id == new_vid)
+            .and_then(|v| v.recommended_bundle.clone())
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
+        let Some(bundle_id) = current else {
+            return Ok(None);
+        };
+        let want = format!("{machine_id}_{}", old_vid.trim());
+        if !bundle_id.eq_ignore_ascii_case(&want) {
+            return Ok(None);
+        }
+        let users = self
+            .catalog
+            .machines()
+            .iter()
+            .flat_map(|m| m.versions.iter())
+            .filter(|v| {
+                v.recommended_bundle
+                    .as_deref()
+                    .is_some_and(|b| b.trim().eq_ignore_ascii_case(&bundle_id))
+            })
+            .count();
+        if users != 1 {
+            return Ok(None);
+        }
+        let new_id = format!("{machine_id}_{new_vid}");
+        self.rename_bundle(&bundle_id, &new_id, None, now_iso8601)?;
+        Ok(Some((bundle_id, new_id)))
+    }
+
     /// **删一条套餐**。被机型默认或任何版本指着时**整次拒绝**并点名 ——
     /// 静默删掉会让那些版本生成时一条 BBS 都拿不到（10.8 的静默漏洞）。
     /// 出路：去套餐页把指向逐个取消（版本回到机型默认），或改指别的套餐
@@ -1665,6 +1880,163 @@ mod tests {
                 .is_err(),
             "撞 id 拒"
         );
+    }
+
+    /// 给夹具里的 `A1/FAST` 造一份**它自己的套餐**：BBS + 属于它自己的 MKP 登记。
+    /// 形状照真数据（`A1_FASTV3.3` = `a1-fastv3.3` + `a1-bbs-04-020`）。
+    #[cfg(feature = "workbench")]
+    fn give_a1_fast_its_own_bundle(p: &mut Presets) {
+        p.assets
+            .add(Asset {
+                id: "a1-fast".to_owned(),
+                kind: AssetKind::MkPreset,
+                machine_id: Some("A1".to_owned()),
+                name: "A1 高速版 预设".to_owned(),
+                path: String::new(),
+                version_id: Some("FAST".to_owned()),
+                slicer: None,
+                profile: None,
+                delivery: Default::default(),
+                calibration: String::new(),
+            })
+            .expect("mkPreset 登记");
+        p.bundles
+            .add(Bundle {
+                id: "A1_FAST".to_owned(),
+                display: "A1 高速版".to_owned(),
+                machine_id: "A1".to_owned(),
+                asset_refs: vec!["a1-fast".to_owned(), "a1-bbs-04-020".to_owned()],
+                updated_at: Some("2026-07-12".to_owned()),
+            })
+            .expect("套餐");
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .set_version_field("FAST", VersionField::RecommendedBundle, Some("A1_FAST"))
+            .expect("指向");
+    }
+
+    /// **复制版本时顺手复制它的套餐**（2026-11-12，「一版一套」）。
+    ///
+    /// 新套餐 id = `{机型}_{新版本}`，MKP 登记换成本版本自己的（`{机型小写}-{版本小写}`），
+    /// 模板那份一个字节不动。写回去还要能读回来 —— `mkPreset` 带 `path` 会被加载期拦住。
+    #[cfg(feature = "workbench")]
+    #[test]
+    fn copying_a_version_also_copies_its_bundle_and_mkp_registration() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut p = f.presets;
+        give_a1_fast_its_own_bundle(&mut p);
+
+        let copied = p
+            .copy_version_with_bundle("A1", "FAST", "COPYTEST", "复制测试", None, None, &now())
+            .expect("复制")
+            .expect("模板有套餐 → 必须建一份");
+
+        assert_eq!(copied.bundle_id, "A1_COPYTEST");
+        assert_eq!(copied.asset_id.as_deref(), Some("a1-copytest"));
+
+        let v = p
+            .catalog
+            .machine("A1")
+            .unwrap()
+            .versions
+            .iter()
+            .find(|v| v.id == "COPYTEST")
+            .expect("新版本在");
+        assert_eq!(v.recommended_bundle.as_deref(), Some("A1_COPYTEST"));
+
+        let b = p.bundles.get("A1_COPYTEST").expect("新套餐在");
+        assert_eq!(b.display, "A1 复制测试");
+        assert_eq!(
+            b.asset_refs,
+            vec!["a1-copytest".to_owned(), "a1-bbs-04-020".to_owned()],
+            "BBS 照抄；MKP 登记换成新版本自己的"
+        );
+
+        let a = p.assets.get("a1-copytest").expect("新登记在");
+        assert_eq!(a.kind, AssetKind::MkPreset);
+        assert_eq!(a.version_id.as_deref(), Some("COPYTEST"));
+        assert_eq!(a.path, "", "mkPreset 不写 path");
+
+        /* 模板那份不动 */
+        assert_eq!(
+            p.bundles.get("A1_FAST").unwrap().asset_refs,
+            vec!["a1-fast".to_owned(), "a1-bbs-04-020".to_owned()]
+        );
+        assert_eq!(
+            p.assets.get("a1-fast").unwrap().version_id.as_deref(),
+            Some("FAST")
+        );
+
+        /* 写回去再读：`mkPreset` 的 `path` / `versionId` 形状由加载期判据钉着 */
+        p.catalog.write_machine("A1").unwrap();
+        p.bundles.write().unwrap();
+        p.assets.write().unwrap();
+        let again = Presets::load_from(p.root()).expect("写回去要还能读回来");
+        assert_eq!(
+            again
+                .assets
+                .get("a1-copytest")
+                .and_then(|a| a.version_id.clone())
+                .as_deref(),
+            Some("COPYTEST")
+        );
+    }
+
+    /// **改版本 id 时，它独占的套餐跟着改名**（2026-11-12）；多版共用的不碰。
+    #[cfg(feature = "workbench")]
+    #[test]
+    fn renaming_a_version_renames_only_its_own_bundle() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut p = f.presets;
+        give_a1_fast_its_own_bundle(&mut p);
+
+        p.rename_version_uid("A1", "FAST", "FAST_NEW").unwrap();
+        let moved = p
+            .rename_version_bundle("A1", "FAST", "FAST_NEW", &now())
+            .expect("改名");
+        assert_eq!(
+            moved,
+            Some(("A1_FAST".to_owned(), "A1_FAST_NEW".to_owned()))
+        );
+        assert!(p.bundles.get("A1_FAST").is_none(), "旧 id 不该留着");
+        let v = p
+            .catalog
+            .machine("A1")
+            .unwrap()
+            .versions
+            .iter()
+            .find(|v| v.id == "FAST_NEW")
+            .expect("版本在");
+        assert_eq!(
+            v.recommended_bundle.as_deref(),
+            Some("A1_FAST_NEW"),
+            "机型文件里的指向要跟着换"
+        );
+
+        /* 再复制一版共用同一份套餐 → 改名不再动它（别人的指向不能被一起改掉） */
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .add_version("SHARE", "共用版")
+            .unwrap();
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .set_version_field(
+                "SHARE",
+                VersionField::RecommendedBundle,
+                Some("A1_FAST_NEW"),
+            )
+            .unwrap();
+        p.rename_version_uid("A1", "FAST_NEW", "FAST_NEW2").unwrap();
+        assert_eq!(
+            p.rename_version_bundle("A1", "FAST_NEW", "FAST_NEW2", &now())
+                .expect("共用时照样返回"),
+            None,
+            "两版共用的套餐不跟着改名"
+        );
+        assert!(p.bundles.get("A1_FAST_NEW").is_some());
     }
 
     /// 删除：被机型默认或版本指着时整次拒绝并点名；解除之后真删掉

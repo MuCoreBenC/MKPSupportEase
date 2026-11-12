@@ -208,6 +208,9 @@ mod tests {
             xy_calibration_dwell_sec: 9,
             bed_glue_enabled: true,
             bed_glue_all_models: true,
+            /* 强制校准模式**不进 IR**：它只在钩子那一步参与"这一盘是什么校准件"的定案
+             * （`decide_calibration`），管线里没有对应的格 —— 写进来是给人看的。 */
+            force_calibration_mode: false,
             auto_tower_position: TowerRelocateMode::Auto,
         };
         let mut ir = Ir::default();

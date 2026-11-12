@@ -406,8 +406,14 @@ export function WorkbenchApp() {
       .catch(() => undefined)
   }, [])
 
-  /** 整本重取。机型页的结构性写（建 / 删 / 复制版本）之后徽章的机型版本数要跟上 */
-  const refreshBook = useCallback(() => {
+  /**
+   * **只刷外壳那份整本**（不拨 `tick`）。
+   *
+   * 给「改版本 id / 改一格字段」这类**页面自己已经拿着新清单**的编辑用：
+   * `wb_set_*` 已经把新清单返回给调用页了，再拨 tick 让整机重取一遍只会把
+   * 正在编辑的详情卡刷掉（作者 2026-11-12：「改了 id 就展开不了详情」）。
+   */
+  const refreshBookQuiet = useCallback(() => {
     wb.book()
       .then(setBook)
       .catch(() => undefined)
@@ -419,16 +425,28 @@ export function WorkbenchApp() {
   }, [refreshReport])
 
   /**
+   * 整本重取。机型页的结构性写（建 / 删 / 复制版本）之后徽章的机型版本数要跟上。
+   *
+   * ★ **同时拨 `tick`**（2026-11-12）：整本变了说明编辑态真变了，各页读的**自己那份**
+   * 清单（机型页的 `wb_machines`、生成页的交付读数、参数台的 desk）都得重取。
+   * 早先只刷整本、不拨 tick：机型页只在挂载时读一次，于是「放弃改动」之后
+   * 那个已经丢弃的版本还留在列表里（作者报的「放弃后东西还在」）。
+   *
+   * 值编辑走的是 quiet 分支、不经过这里，所以连点步进器不会变成每敲一下重取四份清单。
+   */
+  const refreshBook = useCallback(() => {
+    refreshBookQuiet()
+    setTick((n) => n + 1)
+  }, [refreshBookQuiet])
+
+  /**
    * 生成 / 发布**写了盘上的产物**之后：整本、检查报告、交付读数一起重取。
    *
-   * `refreshBook` 只重取整本与报告，**不拨 `tick`**；而 ①生成卡那 9 行与交付明细挂在
-   * `tick` 上（`wb_delivery_files` 的 `useEffect` 依赖它）。只调 `refreshBook` 的话，
-   * 底栏已写「已生成」、检查卡待办已清零，右边那 9 行还是生成前的「待更新」与旧大小
-   * —— 同一屏两个时点，看起来就像"生成了但没刷新"。
+   * `refreshBook` 自己会拨 `tick`（①生成卡那 9 行与交付明细就挂在它上面，
+   * `wb_delivery_files` 的 `useEffect` 依赖它）—— 这里不必再拨一次。
    */
   const refreshAfterArtifacts = useCallback(() => {
     refreshBook()
-    setTick((n) => n + 1)
   }, [refreshBook])
 
   /**
@@ -943,9 +961,11 @@ export function WorkbenchApp() {
           <MachinesPage
             book={book}
             words={words}
+            tick={tick}
             onGoto={goto}
             onSave={save}
             onBookRefresh={refreshBook}
+            onBookRefreshQuiet={refreshBookQuiet}
           />
         )
       case 'params':

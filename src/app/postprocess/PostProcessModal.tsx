@@ -52,7 +52,7 @@ import { HeadNote, Modal, NoticeHero, PageToggle } from '../../components/modal'
 import { useTitlebarDrag } from '../useTitlebarDrag'
 import { questionUiState } from './questionUi'
 import { estimatedPrintTimeSeconds } from './facts'
-import { SETTINGS_TARGET_TOWER } from '../settings/targets'
+import { FAIL_FIX_TARGETS, SETTINGS_TARGET_TOWER } from '../settings/targets'
 import type { SettingsTargetId } from '../settings/targets'
 import { percentOf, stepName } from './steps'
 import { SETTLE_MS, useSmoothPercent } from './useSmoothPercent'
@@ -372,14 +372,45 @@ function doneGroup(tr: Tr, finished: PostProcessFinished, facts: PostProcessFact
   const res = finished.result
   const rows: FactRow[] = []
   /*
-   * 「预估打印时间」**行永远在**，右侧的值看结论（2026-11-04 作者两句话定的口径）：
-   * 先说「失败不显示」，后补「是那个预估打印时间字段还在，只是右侧的参数是用那个横杠-」。
+   * 调试那一趟只摆**这一趟真正跑过的坐标**（2026-11-12 作者：「把那些对应的坐标也显示出来」）。
    *
-   * 所以失败 / 取消那一趟右侧是「—」，**不拿**开场事实里切片器自报的时长顶上
-   * （原来那一退就是失败屏「1 小时 58 分」的来源）；成功那趟内核重算的优先，
-   * 还没算出来先摆切片器自报的。取值抽到 `./facts`（有回归测试），这里不再自己定。
+   * 「预估打印时间」「涂胶总长」这两格在调试这一趟是从**原文件**算出来的 ——
+   * 那份产物只跑笔的动作，既没有胶也没有模型，摆出来全是错的
+   * （作者：「预估打印时间、胶总长这些就是不要了」）。
    */
-  {
+  const dbg = res?.debug ?? null
+  if (dbg !== null) {
+    const custom = dbg.custom_gcode ?? ''
+    if (custom.trim() !== '') {
+      /* 高级模式：整段动作由用户写，坐标字段不作数 —— 只报行数 */
+      const n = custom.split('\n').filter((l) => l.trim() !== '').length
+      rows.push({
+        label: tr('postproc.facts.debugPlan'),
+        value: tr('postproc.facts.debugPlanCustom', { n: String(n) }),
+      })
+    } else {
+      /* 等待位没填就跟随驻点 —— 与内核 `action_block` 同一条规矩（`?? wait_x`） */
+      const mw = dbg.mount_wait_x ?? dbg.wait_x
+      const uw = dbg.unmount_wait_x ?? dbg.wait_x
+      const value = tr('postproc.facts.debugPlanValue', {
+        wait: String(dbg.wait_x),
+        mw: String(mw),
+        mx: String(dbg.mount_x),
+        uw: String(uw),
+        ux: String(dbg.unmount_x),
+        speed: String(dbg.speed),
+      })
+      rows.push({ label: tr('postproc.facts.debugPlan'), value, tip: value })
+    }
+  } else {
+    /*
+     * 「预估打印时间」**行永远在**，右侧的值看结论（2026-11-04 作者两句话定的口径）：
+     * 先说「失败不显示」，后补「是那个预估打印时间字段还在，只是右侧的参数是用那个横杠-」。
+     *
+     * 所以失败 / 取消那一趟右侧是「—」，**不拿**开场事实里切片器自报的时长顶上
+     * （原来那一退就是失败屏「1 小时 58 分」的来源）；成功那趟内核重算的优先，
+     * 还没算出来先摆切片器自报的。取值抽到 `./facts`（有回归测试），这里不再自己定。
+     */
     const printSec = estimatedPrintTimeSeconds({
       finished,
       resultSeconds: res?.printTimeSeconds,
@@ -389,11 +420,11 @@ function doneGroup(tr: Tr, finished: PostProcessFinished, facts: PostProcessFact
       label: tr('postproc.facts.printTime'),
       value: printSec === undefined ? '—' : printTimeText(printSec),
     })
+    rows.push({
+      label: tr('report.glue.total'),
+      value: res?.glueLengthMm === undefined ? '—' : mm2(res.glueLengthMm),
+    })
   }
-  rows.push({
-    label: tr('report.glue.total'),
-    value: res?.glueLengthMm === undefined ? '—' : mm2(res.glueLengthMm),
-  })
   /* 这一格真机现在就有：处理耗时 = finished.elapsedMs，大小 = 开场那几个事实里的字节数 */
   rows.push({
     label: tr('postproc.facts.elapsed'),
@@ -1265,6 +1296,26 @@ export default function PostProcessModal({
     !finished.cancelled &&
     finished.code === 'E_GCODE_COLLISION_001'
 
+  /**
+   * 这一趟失败得**去设置里改一项**吗 —— 按码查表（`FAIL_FIX_TARGETS`）。
+   *
+   * 有落点 ⇒ 页脚多一颗「去设置」：收掉这一屏、跳到设置页那一行并亮它。
+   * 表里没有的码不摆那颗钮（没有可去的地方就不给假出口）。
+   */
+  const failFixTarget: SettingsTargetId | null =
+    finished !== null && !finished.ok && !finished.cancelled && finished.code !== null
+      ? FAIL_FIX_TARGETS[finished.code] ?? null
+      : null
+  const canFixSetting = failFixTarget !== null && onOpenSettings !== undefined
+
+  /** 这一颗的收场是**真收**（不驻留胶囊）：跳过去是为了看/改那一行，改完会再跑一趟 */
+  const goFixSettings = () => {
+    const target = failFixTarget
+    if (target === null || onOpenSettings === undefined) return
+    finishForGood()
+    onOpenSettings(target)
+  }
+
   /** 这一趟带警告 ⇒ 结果屏多一页「警告」（见下面那张表） */
   const hasWarnings = warnings.length > 0
 
@@ -1740,7 +1791,7 @@ export default function PostProcessModal({
             <>
               <Btn onClick={finishForGood}>{tr('tabs.close')}</Btn>
               <Btn
-                variant="accent"
+                variant={canFixSetting ? 'default' : 'accent'}
                 onClick={() => {
                   finishForGood()
                   onOpenReport()
@@ -1748,6 +1799,11 @@ export default function PostProcessModal({
               >
                 {tr('postproc.openReport')}
               </Btn>
+              {canFixSetting && (
+                <Btn variant="accent" onClick={goFixSettings}>
+                  {tr('postproc.goSettings')}
+                </Btn>
+              )}
             </>
           )}
         </>

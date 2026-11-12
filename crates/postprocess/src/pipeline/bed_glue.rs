@@ -397,11 +397,9 @@ fn build_block(
         format_z(ay),
         anchor_feed
     ));
-    block.push(format!(
-        "G1 X{} Y{} E0.001 F{} ; MKPSE: virtual extrusion for BBS G-code viewer compatibility",
-        format_z(ax + 0.1),
-        format_z(ay),
-        anchor_feed
+    block.push(crate::gcode::virtual_extrude::line(
+        &format!("X{} Y{}", format_z(ax + 0.1), format_z(ay)),
+        &anchor_feed,
     ));
     /* 挤完往回退 0.1mm，把喷嘴放回原位 —— 下一步 `G0 Z{装笔高度}` 才是纯垂直抬升，
      * 不会顺带把喷嘴带偏；块尾的回位也因此能从同一个点出发（首尾一致）。 */

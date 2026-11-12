@@ -269,92 +269,10 @@
   color: var(--text-3);
 }
 
-/* ---- 保存位置：胶囊路径（1B） ---- */
-
 /*
- * ★ 2026-10-11 作者：**只有右边那颗「更改位置」改位置** —— 整条原来是 `<button>`
- *   （点哪儿都弹系统框），现在这一层只是**显示**：没有 hover、不是按钮、路径正文
- *   还能拖选（误点一下不会再弹框）。
+ * 保存位置那块胶囊的形状住在共用件里（`app/shared/PathPill.module.css`）——
+ * 两扇导出框（报告 / 日志）用它同一份，这里不再各留一套。
  */
-.pathPill {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0;
-  padding: 11px 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface-sunken);
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: var(--fs-label);
-  color: var(--text-2);
-  text-align: left;
-}
-
-.pathIcon {
-  flex-shrink: 0;
-  color: var(--text-3);
-}
-
-/*
- * 路径文本：前段自己收省略号、**尾两段钉住不缩**（"往哪个文件夹里导"永远看得见）。
- * 整条路径挂在 `title` 上 —— 悬停能看全。
- */
-.pathText {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  overflow: hidden;
-  white-space: nowrap;
-  user-select: text;
-  -webkit-user-select: text;
-}
-
-.pathHead {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pathTail {
-  flex-shrink: 0;
-  white-space: nowrap;
-  color: var(--text-1);
-  font-weight: 600;
-}
-
-/*
- * 保存位置右边那一颗：**整条里唯一可点的地方**（字体从等宽换回正文）。
- * 导出之前是「更改位置」；成了之后**就地翻成「打开位置」**（同一个元素、同一尺寸），
- * 配色跟着换成强调色 —— 那一刻它是这一屏最该点的一颗。
- */
-.pathEdit {
-  flex-shrink: 0;
-  padding: 4px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: 999px;
-  /* 实的白走 --surface-solid（浅色 = #fff，深色 = 面板那一档；2026-10-12 深色第二遍） */
-  background: var(--surface-solid);
-  font-family: Inter, sans-serif;
-  color: var(--text-1);
-  transition:
-    background 0.14s ease,
-    border-color 0.14s ease,
-    color 0.14s ease;
-}
-
-.pathEdit:hover {
-  border-color: var(--text-3);
-}
-
-.pathEdit[data-open='true'] {
-  border-color: transparent;
-  background: var(--accent-soft);
-  color: var(--accent-deep);
-  font-weight: 600;
-}
 
 /* ---- 「导出时启用压缩」+ 信息页（2026-11-03 · 开关 2026-11-04 搬回第一页） ---- */
 

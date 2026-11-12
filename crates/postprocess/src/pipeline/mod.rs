@@ -564,7 +564,9 @@ fn run(
     checkpoint(cancel)?;
     timer.begin(Step::Collision, "碰撞检测...");
     executed.push(Step::Collision);
-    if crate::postproc::calibration::need_collision_check(calib_mode) {
+    /* 调试那一趟整段产物都要被替换掉，碰撞结论没有去处；而且它会在调试之前
+     * 就把这一趟判成失败（作者 2026-11-12：调试模式下这些都别管）。 */
+    if ir.debug.is_none() && crate::postproc::calibration::need_collision_check(calib_mode) {
         let collision = crate::postproc::disk::detect_tower_collision(&content, &ir);
         if collision.has_collision {
             /* 码仍是 `E_GCODE_COLLISION_001`，句子在 `messages.toml`（旧形态把码拼进正文，

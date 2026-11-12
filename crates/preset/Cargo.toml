@@ -54,5 +54,6 @@ workspace = true
 # 它渲染的四行头带 `# uuid` / `# release_time`，而现役产物按 2026-10-05 / 11-01 的裁定
 # 只有 `# machine` / `# variant` / `# generated_at`；两个出口共写 assets/presets/ 会互相覆盖。
 # 现在这个目录的**唯一写入方**是工作台 `wb_generate` / `wb_sync_baseline`（走
-# `preset::generate::sync_baseline`）。配方正文 `PRESET_RECIPES_TOML` 仍被工作台预检使用，
-# 所以只删 bin，不动配方与读取面。
+# `preset::generate::sync_baseline`）。2026-11-12 起配方正文 `preset_recipes.toml` 与
+# `Recipe` / `recipe_edit` / `write_all` / 预检里的「清单 ↔ 配方对齐」一并退役：
+# `presets/*.toml` 是唯一权威源，产物由工作台渲染，两条数据源不再并存。

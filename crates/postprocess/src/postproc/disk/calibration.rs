@@ -16,13 +16,17 @@ use crate::postproc::calibration::CalibrationReceipt;
 use crate::postproc::machine_dims::{self, get_machine_dimensions};
 use crate::postproc::offset::{MM_PER_MINUTE, process_gcode_offset};
 
-/// home 行含 E0.001 虚拟挤出标记（BBS Viewer 兼容）。
-const CALIBRATION_HOME_LINE: &str =
-    "G1 X100 Y100 Z10 E0.001 F3000 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility";
+/// 校准块的 home 行：含一条虚拟挤出（E0.001），BBS 才认得出这盘有路径。
+///
+/// 拼法在 [`crate::gcode::virtual_extrude`] —— E 值与标记文本只有那一处，
+/// 别在这里再手拼一遍。
+fn calibration_home_line() -> String {
+    crate::gcode::virtual_extrude::line("X100 Y100 Z10", "3000")
+}
 
 /// 进校准块之前**单独抬 Z**的那一行。
 ///
-/// 为什么必须有它：`CALIBRATION_HOME_LINE` 把 XY 和 Z 写在同一句里，打印机按线性插值
+/// 为什么必须有它：`calibration_home_line` 把 XY 和 Z 写在同一句里，打印机按线性插值
 /// 执行 —— 于是「从当前 Z 平移 200mm 到 (100,100)」这一路是**贴着板面拖过去的**。
 /// 直接校准（不打印模型）时尤其明显：模型路径被删光之后喷嘴停在 Z0.2～0.3，
 /// 真机上就是喷嘴在板上刮一道（用户 2026-10-20 的录像逐帧确认）。
@@ -30,9 +34,16 @@ const CALIBRATION_HOME_LINE: &str =
 const CALIBRATION_PRELIFT: &str = "G1 Z10 F1200";
 
 /// 校准块的入口两步：抬 Z → 平移到位。**顺序不可合并、不可颠倒**（见 [`CALIBRATION_PRELIFT`]）。
+///
+/// 挤出那一行外面包了一层 `; FEATURE:`：切片器建路径包围盒时排除 `erCustom`，
+/// 而校准块整段都活在 start gcode 的 `; FEATURE: Custom` 之下 —— 不换角色，
+/// 这条虚拟挤出等于没写，`direct_calibrate`（模型路径被删光）那一支在第二盘起
+/// 会被判「路径在床外」。探针之后立刻换回来，校准图案的角色保持原样。
 fn push_calibration_home(output: &mut Vec<String>) {
     output.push(CALIBRATION_PRELIFT.to_string());
-    output.push(CALIBRATION_HOME_LINE.to_string());
+    output.push("; FEATURE: Outer wall".to_string());
+    output.push(calibration_home_line());
+    output.push("; FEATURE: Custom".to_string());
 }
 
 const CALIBE_SING: &str = "\
@@ -1376,31 +1387,36 @@ mod tests {
         // P1S 没有 CALIBE_SING，行数干净好数
         let out = xy_new("Precise", "P1S", &ir, &b);
 
-        assert_eq!(out.len(), 7 + 22 * 7 + 3, "行数不对: {}", out.len());
+        assert_eq!(out.len(), 9 + 22 * 7 + 3, "行数不对: {}", out.len());
         assert_eq!(out[0], "; XY Offset Calibration");
         // 先单独抬 Z，再平移 —— 同一句里带 Z 会贴着板面拖过去（见 CALIBRATION_PRELIFT）
         assert_eq!(out[1], CALIBRATION_PRELIFT);
-        assert_eq!(out[2], CALIBRATION_HOME_LINE);
-        assert_eq!(out[3], ";Rising nozzle to avoid collision");
-        assert_eq!(out[4], "G1 Z6.2"); // 0.2 + 0 + 6
-        assert_eq!(out[5], ";Mounting Toolhead");
-        assert_eq!(out[6], ";Toolhead Mounted");
+        assert_eq!(
+            out[2], "; FEATURE: Outer wall",
+            "虚拟挤出必须挂在非 Custom 的角色下"
+        );
+        assert_eq!(out[3], calibration_home_line());
+        assert_eq!(out[4], "; FEATURE: Custom", "探针之后角色换回来");
+        assert_eq!(out[5], ";Rising nozzle to avoid collision");
+        assert_eq!(out[6], "G1 Z6.2"); // 0.2 + 0 + 6
+        assert_eq!(out[7], ";Mounting Toolhead");
+        assert_eq!(out[8], ";Toolhead Mounted");
 
         // 第一轮横线：起点 X = x_min + 0.5，Y = y_min + 10.49 + cali(-1.0)
-        assert_eq!(out[7], "G1 F9000.0"); // travel 150 * 60
-        assert_eq!(out[8], "G1 X66.523 Y75.83");
-        assert_eq!(out[9], "G1 Z3.2"); // 0.2 + 0 + 3
-        assert_eq!(out[10], "G1 F300"); // max_speed > 10 走这条
-        assert_eq!(out[11], "G1 X76.523 Y75.83 Z0.2"); // 终点 X = x_min + 10.5
-        assert_eq!(out[12], "G4 P3000");
-        assert_eq!(out[13], "G1 Z3.2");
+        assert_eq!(out[9], "G1 F9000.0"); // travel 150 * 60
+        assert_eq!(out[10], "G1 X66.523 Y75.83");
+        assert_eq!(out[11], "G1 Z3.2"); // 0.2 + 0 + 3
+        assert_eq!(out[12], "G1 F300"); // max_speed > 10 走这条
+        assert_eq!(out[13], "G1 X76.523 Y75.83 Z0.2"); // 终点 X = x_min + 10.5
+        assert_eq!(out[14], "G4 P3000");
+        assert_eq!(out[15], "G1 Z3.2");
 
         // 第二轮：Y 再 +4.0（图案间距），cali 再 +0.2 ⇒ 净 +4.2
-        assert_eq!(out[15], "G1 X66.523 Y80.03");
+        assert_eq!(out[17], "G1 X66.523 Y80.03");
 
         // 第一轮竖线（第 12 轮，索引 7 + 11*7 = 84）：X = x_min + 10.5 + cali(-1.0)
-        assert_eq!(out[85], "G1 X75.523 Y66.83"); // Y = y_min + 0.49
-        assert_eq!(out[88], "G1 X75.523 Y76.83 Z0.2"); // 终点 Y = y_min + 10.49
+        assert_eq!(out[87], "G1 X75.523 Y66.83"); // Y = y_min + 0.49
+        assert_eq!(out[90], "G1 X75.523 Y76.83 Z0.2"); // 终点 Y = y_min + 10.49
 
         // 每轮都有停留 —— 这是 New 与经典分支最容易漏的差异（经典分支根本没有 G4）
         assert_eq!(out.iter().filter(|l| l.as_str() == "G4 P3000").count(), 22);
@@ -1416,8 +1432,8 @@ mod tests {
         let ir = test_ir();
         let b = xy_sample_bbox();
         let out = xy_new("Rough", "P1S", &ir, &b);
-        assert_eq!(out[8], "G1 X66.523 Y74.33"); // 76.83 − 2.5
-        assert_eq!(out[15], "G1 X66.523 Y78.83"); // +4.0 −0.5 ⇒ +3.5
+        assert_eq!(out[10], "G1 X66.523 Y74.33"); // 76.83 − 2.5
+        assert_eq!(out[17], "G1 X66.523 Y78.83"); // +4.0 −0.5 ⇒ +3.5
     }
 
     /// **XY 板有两档了**（2026-10-19：加长版把打印区右侧 / 上侧各加 5mm，50.5 → 55.5）。
@@ -1471,13 +1487,13 @@ mod tests {
         };
         let out_small = xy_new("Precise", "P1S", &ir, &small);
         let out_big = xy_new("Precise", "P1S", &ir, &big);
-        assert_eq!(out_small[8], "G1 X66.523 Y75.83", "旧档的落点不许动");
-        assert_eq!(out_small[85], "G1 X75.523 Y66.83", "旧档的落点不许动");
+        assert_eq!(out_small[10], "G1 X66.523 Y75.83", "旧档的落点不许动");
+        assert_eq!(out_small[87], "G1 X75.523 Y66.83", "旧档的落点不许动");
         assert_eq!(
-            out_big[8], "G1 X66.573 Y75.88",
+            out_big[10], "G1 X66.573 Y75.88",
             "加长版 = 旧档 + 0.05 / +0.05"
         );
-        assert_eq!(out_big[85], "G1 X75.573 Y66.88");
+        assert_eq!(out_big[87], "G1 X75.573 Y66.88");
 
         let mut receipt = CalibrationReceipt::default();
         generate_xy_calibration_new(
@@ -1621,7 +1637,7 @@ mod tests {
         let out = xy_new("Precise", "P1S", &ir, &xy_sample_bbox());
 
         let mounted = out.iter().position(|l| l == ";Toolhead Mounted").unwrap();
-        let mount_block = &out[6..mounted];
+        let mount_block = &out[8..mounted];
         assert_eq!(mount_block, ["M104 S200"], "带 E 的挂载行没被过滤掉");
 
         let unmounting = out
@@ -1719,14 +1735,14 @@ mod tests {
         let per_round = Z_OFFSET_SING_LINES.len() + 6;
         assert_eq!(
             out.len(),
-            7 + z_profile().square_count * per_round + 3,
+            9 + z_profile().square_count * per_round + 3,
             "行数不对: {}",
             out.len()
         );
         assert_eq!(out[0], "; ZOffset Calibration");
         assert_eq!(out[1], CALIBRATION_PRELIFT, "进块之前必须先单独抬 Z");
-        assert_eq!(out[4], "G1 Z6.2");
-        assert_eq!(out[6], ";Toolhead Mounted");
+        assert_eq!(out[6], "G1 Z6.2");
+        assert_eq!(out[8], ";Toolhead Mounted");
         assert!(
             !out.iter().any(|l| l == ";Floating Z Calibration"),
             "P1S 不该有 Floating Z"
@@ -1738,11 +1754,11 @@ mod tests {
             z_profile().square_count
         );
         // 第一个方块的层高：0.4 + z_offset + glue + z_accumulate(0.5) = 0.9
-        assert_eq!(out[10], "G1 Z0.9");
+        assert_eq!(out[12], "G1 Z0.9");
         // 第二个方块：z_accumulate 降到 0.4 ⇒ 0.8
-        assert_eq!(out[10 + per_round], "G1 Z0.8");
+        assert_eq!(out[12 + per_round], "G1 Z0.8");
         // 每轮抬回 z_offset + 6（`format_z` 对整数补 `.0`，所以是 `Z6.0` 不是 `Z6`）
-        assert_eq!(out[7 + per_round - 2], "G1 Z6.0");
+        assert_eq!(out[9 + per_round - 2], "G1 Z6.0");
 
         assert_eq!(out[out.len() - 1], "G1 X100 Y100 Z100");
     }

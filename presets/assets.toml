@@ -155,14 +155,14 @@ name = 'A1 标准版预设'
 id = 'a1-fast'
 type = 'mkPreset'
 machineId = 'A1'
-versionId = 'FAST'
+versionId = 'FAST260326'
 name = 'A1 高速版预设'
 
 [[assets]]
 id = 'a1-fastv3.3'
 type = 'mkPreset'
 machineId = 'A1'
-versionId = 'FASTV3.3'
+versionId = 'FAST261111'
 name = 'A1 快拆版 260628 预设'
 
 [[assets]]
@@ -176,14 +176,14 @@ name = 'A1 mini 标准版预设'
 id = 'a1_mini-fast'
 type = 'mkPreset'
 machineId = 'A1_MINI'
-versionId = 'FAST'
+versionId = 'FAST260326'
 name = 'A1 mini 高速版预设'
 
 [[assets]]
 id = 'a1_mini-fastv3.3'
 type = 'mkPreset'
 machineId = 'A1_MINI'
-versionId = 'FASTV3.3'
+versionId = 'FAST261111'
 name = 'A1 mini 快拆版 260628 预设'
 
 [[assets]]
@@ -280,6 +280,17 @@ type = 'model'
 name = 'Z 轴偏移校准模型（加长版）'
 path = 'models/ZOffset_Calibration_ext.3mf'
 calibration = 'ZOffset'
+
+# 2026-11-12：**二合一** —— 作者把 Z 板与 XY 板合进同一个 3MF（两盘各一块）。
+# 身份写 `Combined`：它只说"这一盘是校准件"，具体按哪种跑由后处理**按实测外形**定
+# （`calib_models::decide_calibration`）。所以两块板的 footprint 必须与
+# `presets/calibration_models.toml` 里的档位对得上 —— 改模型要两边一起改。
+[[assets]]
+id = 'calibration-combined'
+type = 'model'
+name = '校准模型（二合一 · Z + XY）'
+path = 'models/Calibration_Combined.3mf'
+calibration = 'Combined'
 
 # ---------------- 切片器预设（BBS） ----------------
 #

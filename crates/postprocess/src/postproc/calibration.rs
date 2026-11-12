@@ -48,6 +48,12 @@ pub enum Mode {
     XyPrecise,
     XyRough,
     Repetition,
+    /// **合体校准文件**（2026-11-12）：一个 3MF 里同时装着 Z 板与 XY 板。
+    ///
+    /// 它本身**不是**一种可执行的校准：哪一盘要按哪种跑，由那一盘的实测外形定
+    /// （`calib_models::decide_calibration`）。所以它**永远不会进管线** ——
+    /// 定案那一步会把它换成 `ZOffset` / `XyPrecise`，换不出来就停下报错。
+    Combined,
 }
 
 /// Z 校准的涂胶总长常量（mode.go:21）。
@@ -75,6 +81,9 @@ pub fn parse_mode_id(id: &str) -> Option<Mode> {
     if t.eq_ignore_ascii_case("Repetition") {
         return Some(Mode::Repetition);
     }
+    if t.eq_ignore_ascii_case("Combined") {
+        return Some(Mode::Combined);
+    }
     None
 }
 
@@ -92,6 +101,8 @@ pub fn mode_display_name(m: Mode) -> &'static str {
         Mode::XyPrecise => "XY 精度校准",
         Mode::XyRough => "XY 粗校准",
         Mode::Repetition => "重复性校准",
+        /* 合体文件本身不跑校准，这个名字只出现在"这一盘是什么"的说明里 */
+        Mode::Combined => "整体校准",
         Mode::None => "",
     }
 }
@@ -110,6 +121,8 @@ pub fn is_dynamic(m: Mode, ir_data: &Ir) -> bool {
         Mode::ZOffset => ir_data.safety.z_calibration == "new",
         Mode::XyPrecise | Mode::XyRough => ir_data.safety.xy_calibration == "new",
         Mode::Repetition => true,
+        /* 合体文件永远进不到管线（定案那一步就换成具体档了） */
+        Mode::Combined => false,
         Mode::None => false,
     }
 }
@@ -121,6 +134,7 @@ pub fn mode_to_calibration_string(m: Mode) -> &'static str {
         Mode::XyPrecise => "Precise",
         Mode::XyRough => "Rough",
         Mode::Repetition => "Repetition",
+        Mode::Combined => "Combined",
         Mode::None => "",
     }
 }

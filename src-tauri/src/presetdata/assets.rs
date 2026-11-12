@@ -434,8 +434,18 @@ impl Assets {
         if let Some(m) = &candidate.machine_id {
             t["machineId"] = super::literal_str(m);
         }
+        /* `mkPreset` 写 `versionId`、**不写 `path`**（见 [`AssetKind::MkPreset`] 与
+        `check_one`：文件是生成产物，路径由命名规则算出）；其余类反过来。
+        2026-11-12 之前这里无条件写 `path` —— 复制版本要顺手登记新版本的 MKP 预设，
+        那条路一上来就会被 `check_one` 判「mkPreset 不许有 path」。 */
+        if candidate.kind == AssetKind::MkPreset {
+            if let Some(v) = &candidate.version_id {
+                t["versionId"] = super::literal_str(v);
+            }
+        } else {
+            t["path"] = super::literal_str(&candidate.path);
+        }
         t["name"] = super::literal_str(&candidate.name);
-        t["path"] = super::literal_str(&candidate.path);
         if let Some(s) = &candidate.slicer {
             t["slicer"] = super::literal_str(s);
         }

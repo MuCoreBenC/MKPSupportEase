@@ -1,7 +1,7 @@
 {
   "manifestVersion": 3,
   "channel": "stable",
-  "updated": "2026-11-11T02:14:35Z",
+  "updated": "2026-11-12T07:07:51Z",
   "minimumClient": "0.0.6",
   "version": "",
   "assets": [
@@ -15,22 +15,22 @@
       "size": 5046
     },
     {
-      "id": "A1-fast.toml",
+      "id": "A1-fast260326.toml",
       "resourceType": "mkp_preset",
       "machineId": "A1",
-      "fileName": "A1-fast.toml",
-      "relativePath": "delivery/mkp/presets/A1-fast.toml",
-      "sha256": "94b35cd2f93419e3b9c06c0577bcb9dd2a1529adb5bff3ccbd6989a997d548b5",
-      "size": 5044
+      "fileName": "A1-fast260326.toml",
+      "relativePath": "delivery/mkp/presets/A1-fast260326.toml",
+      "sha256": "8862e1c950dc003aaffbc90722cfddf40f4224198b855786713ae11f17486e74",
+      "size": 5050
     },
     {
-      "id": "A1-fastv3.3.toml",
+      "id": "A1-fast261111.toml",
       "resourceType": "mkp_preset",
       "machineId": "A1",
-      "fileName": "A1-fastv3.3.toml",
-      "relativePath": "delivery/mkp/presets/A1-fastv3.3.toml",
-      "sha256": "4044aad41208c12ea53a36141ebe0d94b35f43cc0913f8d8380264a769d1dc3b",
-      "size": 5048
+      "fileName": "A1-fast261111.toml",
+      "relativePath": "delivery/mkp/presets/A1-fast261111.toml",
+      "sha256": "9e39c2102b66f00d72e2cea14f9beca6fd68167adef38e8a7d6ec83db1ea3ce8",
+      "size": 5050
     },
     {
       "id": "A1_MINI-standard.toml",
@@ -42,22 +42,22 @@
       "size": 5052
     },
     {
-      "id": "A1_MINI-fast.toml",
+      "id": "A1_MINI-fast260326.toml",
       "resourceType": "mkp_preset",
       "machineId": "A1_MINI",
-      "fileName": "A1_MINI-fast.toml",
-      "relativePath": "delivery/mkp/presets/A1_MINI-fast.toml",
-      "sha256": "b0a4b047ab40e557eb1e756ec48171791970962080a0bf12f06e1b3fdbfd594e",
-      "size": 5046
+      "fileName": "A1_MINI-fast260326.toml",
+      "relativePath": "delivery/mkp/presets/A1_MINI-fast260326.toml",
+      "sha256": "99b523e5885fac4920062e6a4df844c8291e0cbd9cc7e394e714c5479d0b5fdc",
+      "size": 5052
     },
     {
-      "id": "A1_MINI-fastv3.3.toml",
+      "id": "A1_MINI-fast261111.toml",
       "resourceType": "mkp_preset",
       "machineId": "A1_MINI",
-      "fileName": "A1_MINI-fastv3.3.toml",
-      "relativePath": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
-      "sha256": "38e1974577d8cb597dad93cdaf55e6fc2c02470d450d327e742153fc057c0b11",
-      "size": 5051
+      "fileName": "A1_MINI-fast261111.toml",
+      "relativePath": "delivery/mkp/presets/A1_MINI-fast261111.toml",
+      "sha256": "47dda75334f1c265c587d39f073aedabbc16c4980dd79270f98b4e2e396518ef",
+      "size": 5053
     },
     {
       "id": "P1S-lite.toml",

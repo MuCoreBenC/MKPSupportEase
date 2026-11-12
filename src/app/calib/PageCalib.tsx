@@ -27,6 +27,8 @@ import { StaleCatalogHelp } from '../shared/StaleCatalogHelp'
 import { isStaleCatalogError } from '../shared/staleCatalog'
 import { STORAGE } from '../../api/storageKeys'
 import { Btn } from '../ui/Controls'
+import ModelVersionRow from '../shared/ModelVersionRow'
+import { XY_VERSIONS, Z_VERSIONS } from '../shared/calibVersions'
 /* 模态框**只有一套**（2026-10-10 作者：两套"不行……强制去统一只能用一种"）——
    稿内那套 `ui/Modal` 退场，一律用通用居中框 */
 import { HeadNote, Modal } from '../../components/modal'
@@ -96,17 +98,16 @@ const PLATE = {
     title: 'calib.board.z',
     /* 2026-10-20 作者口径：现在只有「原版」与「加长版」两块，加长版是默认那块，
      * 所以它排第一、也是打开时预选的那一版。 */
-    calibId: 'z-ext',
+    calibId: 'combined',
     /*
-     * Z 板有两版 —— 原版（打印区深 13.063）与加长版（v2，实测 15.272）。
-     * 版式一样，板面预览共用现有那张（`src/calib/zoffset-calibration.generated.ts`），
+     * Z 板有三版：**整体版**（2026-11-12，Z 与 XY 合在一个 3mf 里，默认）、
+     * 加长版（v2，实测 15.272）与原版（打印区深 13.063）。
+     * 板面预览共用现有那张（`src/calib/zoffset-calibration.generated.ts`），
      * 选哪版只换**要打开的那份 3mf**（id → 交付文件名在 Rust 的 `MODEL_DEFS` 里），
-     * 校准流程与读数完全不变。后处理侧认这两版靠 `presets/calibration_models.toml`。
+     * 校准流程与读数完全不变。后处理侧认这几版靠 `presets/calibration_models.toml`；
+     * 整体版那一份的身份是 `Combined`，每盘按实测外形定到具体档。
      */
-    versions: [
-      { id: 'z-ext', label: 'calib.board.ext' },
-      { id: 'z', label: 'calib.board.orig' },
-    ],
+    versions: Z_VERSIONS,
     hitLabel: zHitLabel,
     mm: { w: Z_VIEW_BOX[2], h: Z_VIEW_BOX[3] },
   },
@@ -115,18 +116,15 @@ const PLATE = {
     model: 'precise',
     title: 'calib.board.xy',
     /* 与 Z 板同一口径（作者 2026-10-20）：加长版排第一、打开时预选它。 */
-    calibId: 'xy-ext',
+    calibId: 'combined',
     /*
-     * XY 板也有两版 —— 原版（打印区 50.5）与加长版（右侧 / 上侧各多 5mm ⇒ 55.5）。
+     * XY 板同样三版（默认整体版）：原版（打印区 50.5）、加长版（右侧 / 上侧各多 5mm ⇒ 55.5）
+     * 与 2026-11-12 的整体版（与 Z 板合在同一个 3mf）。
      * 刻度槽相对板子左下角的位置没动，所以板面预览仍共用这一张
-     * （`src/calib/precise-calibration.generated.ts`），选哪版只换要打开的那份 3mf
-     * （id → 交付文件名在 Rust 的 `MODEL_DEFS` 里）。后处理侧认这两版靠
-     * `presets/calibration_models.toml` 的 `xy-square-50` / `xy-square-55`。
+     * （`src/calib/precise-calibration.generated.ts`），选哪版只换要打开的那份 3mf。
+     * 后处理侧认它靠 `presets/calibration_models.toml` 的 `xy-square-50` / `xy-square-55`。
      */
-    versions: [
-      { id: 'xy-ext', label: 'calib.board.ext' },
-      { id: 'xy', label: 'calib.board.orig' },
-    ],
+    versions: XY_VERSIONS,
     hitLabel: xyHitLabel,
     mm: { w: XY_VIEW_BOX[2], h: XY_VIEW_BOX[3] },
   },
@@ -135,8 +133,15 @@ const PLATE = {
 /** 「打开模型」要开的那一份：`versions` 至少一条 —— 多于一条时模态框里给版本选择。 */
 type OpeningModel = {
   id: string
-  name: string
-  versions: readonly { id: string; label: StringKey }[]
+  /**
+   * 这一份的**字典键**（不是翻译好的句子）。
+   *
+   * ★ 存 `tr()` 的结果就是一张快照：日语时打开的那扇弹窗，切回中文还挂着日语
+   *   （2026-11-12 作者截图：「我换了语言之后还残留着之前的」）。渲染时才翻。
+   */
+  name: StringKey
+  /** `note` = 版本说明（下拉选项右侧那一列小字，`SelectField` 的 `FieldOption.note`） */
+  versions: readonly { id: string; label: StringKey; note?: StringKey }[]
 }
 
 const TEST_MODEL_ID = 'test-models'
@@ -323,8 +328,10 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
     opening === null
       ? ''
       : openingVersion === undefined
-        ? opening.name
-        : opening.name + tr('calib.opening', { version: openingVersion.label })
+        ? tr(opening.name)
+        /* ★ `label` 是字典键，**必须过 `tr`**：不过就是屏幕上那一串
+         * `calib.board.combined`（2026-11-12 作者截图里那行就是这么来的）。 */
+        : tr(opening.name) + tr('calib.opening', { version: tr(openingVersion.label) })
 
   /** 打开盘上那份（下载区或旧缓存）。没有缓存时按钮是灰的 —— 不给点了必报错的按钮 */
   const openCachedModel = () => {
@@ -424,7 +431,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
         onClick={() =>
           setOpening({
             id: plate.calibId,
-            name: tr(plate.title),
+            name: plate.title,
             versions: plate.versions,
           })
         }
@@ -771,11 +778,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
               <Btn
                 variant="accent"
                 onClick={() =>
-                  setOpening({
-                    id: TEST_MODEL_ID,
-                    name: tr('calib.tab.models'),
-                    versions: [],
-                  })
+                  setOpening({ id: TEST_MODEL_ID, name: 'calib.tab.models', versions: [] })
                 }
               >
                 {tr('calib.openModel')}
@@ -834,23 +837,12 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
             </>
           }
         >
-          {/* 模型版本（只有 Z 板有两版）：选它 = 换要打开的那份 3mf */}
-          {opening.versions.length > 1 && (
-            <div className={s.versionRow}>
-              <span className={s.versionLabel}>{tr('calib.board.modelVersion')}</span>
-              <span className={s.versionBtns}>
-                {opening.versions.map((v) => (
-                  <Btn
-                    key={v.id}
-                    variant={v.id === opening.id ? 'accent' : 'default'}
-                    onClick={() => setOpening({ ...opening, id: v.id })}
-                  >
-                    {tr(v.label)}
-                  </Btn>
-                ))}
-              </span>
-            </div>
-          )}
+          {/* 模型版本：选它 = 换要打开的那份 3mf（共用件，首页那颗也是它） */}
+          <ModelVersionRow
+            versions={opening.versions}
+            value={opening.id}
+            onChange={(next) => setOpening({ ...opening, id: next })}
+          />
           {/* 用哪个打开（默认在设置页「切片」那格；勾「仅这一次」就不写回） */}
           <SlicerPickView
             value={slicerPick.value}

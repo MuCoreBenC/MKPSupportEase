@@ -25,47 +25,38 @@ fn key_of(text: &str) -> PresetKey {
     PresetKey::of(&read_preset_from_bytes(text.to_string()).expect("预设能读"))
 }
 
-/// K-LC0：9 份 fixture 的钥匙与文件名逐份钉住。
+/// K-LC0：每一份 fixture 的钥匙与文件名逐份钉住。
 ///
 /// 这里同时钉住**文件名**：副本、内置产物、以及将来的任何产物都按它命名，
 /// 名字变了等于用户目录里多出一份看起来一样的东西。
 ///
-/// b05 Task 5 之前这张表是**四元组**（旧云端名 → 机型 → 变体 → 产物名），
-/// 因为两边命名不同；夹具改名之后那层映射没有了，剩下的就是
-/// 「钥匙 → 名字」——而名字由 `preset::preset_file_name` 算出，不是查表来的。
+/// 2026-11-12：**不再列死名单、也不写死 9 份**。原来那张四元组表每改一次版本 id
+/// 就要手改一次；现在遍历目录，逐份断言「文件头读出的 (机型, 变体) 算出的名字
+/// == 它自己的文件名」—— 新增版本、改 id 都在覆盖范围内，漏一份反倒会少一次校验。
 #[test]
 fn klc0_every_fixture_has_the_key_we_expect() {
-    let want: Vec<(&str, &str, Option<&str>)> = vec![
-        ("A1-standard.toml", "A1", Some("standard")),
-        ("A1-fast.toml", "A1", Some("fast")),
-        ("A1-fastv3.3.toml", "A1", Some("fastv3.3")),
-        ("A1_MINI-standard.toml", "A1_MINI", Some("standard")),
-        ("A1_MINI-fast.toml", "A1_MINI", Some("fast")),
-        ("A1_MINI-fastv3.3.toml", "A1_MINI", Some("fastv3.3")),
-        ("P1S-lite.toml", "P1S", Some("lite")),
-        ("P2S-standard.toml", "P2S", Some("standard")),
-        ("X1C-lite.toml", "X1C", Some("lite")),
-    ];
-    assert_eq!(fixtures().len(), 9);
+    let all = fixtures();
+    assert!(
+        all.len() >= 9,
+        "反空转：fixture 至少该有 9 份，实测 {}",
+        all.len()
+    );
 
-    for (name, machine, variant) in want {
-        let path = fixtures()
-            .into_iter()
-            .find(|p| p.file_name().unwrap() == name)
-            .unwrap_or_else(|| panic!("K-LC0 红：没有 fixture {name}"));
-        let key = key_of(&std::fs::read_to_string(&path).expect("读"));
-        assert_eq!(
-            (key.machine.as_str(), key.variant.as_deref()),
-            (machine, variant),
-            "K-LC0 红：{name} 的钥匙不对"
-        );
+    for path in &all {
+        let name = path
+            .file_name()
+            .expect("fixture 有文件名")
+            .to_string_lossy()
+            .to_string();
+        let key = key_of(&std::fs::read_to_string(path).expect("读"));
+        assert!(!key.machine.is_empty(), "K-LC0 红：{name} 没读出机型");
         assert_eq!(
             key.file_name(),
             name,
             "K-LC0 红：{name} 这个名字与钥匙算出来的不一样"
         );
     }
-    println!("K-LC0 绿：9 份 fixture 的钥匙与文件名逐份对上");
+    println!("K-LC0 绿：{} 份 fixture 的钥匙与文件名逐份对上", all.len());
 }
 
 /// 云端旧名与我们那套写法说的是**同一把钥匙**。
