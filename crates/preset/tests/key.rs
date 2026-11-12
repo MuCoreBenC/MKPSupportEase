@@ -3,14 +3,25 @@
 //! 这把钥匙决定三件事：列表里哪些条目该合成一条、副本叫什么名字、
 //! 副本的来源找不到时拿谁作对照。三处用同一把，所以它算错一次会同时错三处。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-// 基线目录只认 `generate::` 那一处（理由见 `tests/recipe.rs`）
-use preset::generate::fixtures_dir;
 use preset::{PresetKey, read_preset_from_bytes};
 
+/// 冻结的预设样本：与 `fixtures/ir/build9/*.json` 成对，不随业务命名漂移。
+///
+/// 判据要的**不是**「当前产物长什么样」，而是「一批合法预设各自的钥匙算得对不对」——
+/// 所以用冻结件，不用会跟着生成动作改名的对照基线。
+fn frozen_presets_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/ir/presets")
+}
+
+/// 契约夹具：自造，文件名与业务命名规则无关（业务改 id / 改名字，它不动）。
+fn contract_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/contract")
+}
+
 fn fixtures() -> Vec<PathBuf> {
-    let dir = fixtures_dir();
+    let dir = frozen_presets_dir();
     let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
         .expect("读 fixture 目录")
         .flatten()
@@ -61,17 +72,15 @@ fn klc0_every_fixture_has_the_key_we_expect() {
 
 /// 云端旧名与我们那套写法说的是**同一把钥匙**。
 ///
-/// 这条判据以前叫 `klc0_same_machine_and_variant_is_one_key_regardless_of_file_name`：
-/// 拿夹具里那份 `A1MF.toml` 与内置产物 `A1_MINI-fast.toml` 逐字节比，说明「同一份内容、
-/// 两个文件名 ⇒ 同一把钥匙」。b05 Task 5 把夹具也改名之后，「两个文件名」这个前提没了
-/// —— 内容相等由 `generate.rs` 的 `kg0p_products_match_the_baseline` 守。
-///
-/// 留下的真问题是：**旧名字还算不算同一把钥匙**。旧仓与用户目录里仍然是 `A1MF.toml`，
+/// 真问题是：**旧名字还算不算同一把钥匙**。旧仓与用户目录里仍然是 `A1MF.toml`，
 /// 它必须归到 `A1_MINI:fast` —— 归错了，同一个预设会被当成两台机器的两份参数。
+///
+/// 输入是契约夹具（自造、名字中性）：判据只关心**文件头读出的身份**，
+/// 与这份夹具自己叫什么无关。
 #[test]
 fn the_cloud_shorthand_is_the_same_key_as_our_own_spelling() {
-    let text = std::fs::read_to_string(fixtures_dir().join("A1_MINI-fast.toml"))
-        .expect("读夹具那份（A1_MINI 的 fast）");
+    let text =
+        std::fs::read_to_string(contract_dir().join("parse-write.toml")).expect("读契约夹具");
     let from_header = key_of(&text);
     // 旧名那套的简写：`M` = mini、`F` = 快拆（读法见 spec 的 `migration-map.md`）
     let from_shorthand = PresetKey::new("A1MF", Some("fast"));

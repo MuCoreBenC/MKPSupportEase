@@ -2827,32 +2827,36 @@ mod tests {
     /// 加载期同一道闸：**从盘上读出来的数据撞 id 也一样拦**（副本上改，不碰真数据）
     #[test]
     fn loading_a_directory_with_case_only_collisions_fails() {
-        let Some((root, _c)) = catalog() else {
-            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
-            return;
-        };
+        let tree = crate::presetdata::testdata::minimal_presets_tree();
 
-        // 机型 id 撞：文件名可以不同（Windows 允许），文件**里**的 id 只差大小写
-        let (tmp, _c) = copy_of(&root);
+        // 机型 id 撞：另写一个文件，里面的 id 只差大小写
+        let collide = tree.path().join("machines").join("TEST_COLLIDE.toml");
         crate::fsx::atomic::atomic_write(
-            &tmp.path().join("machines").join("TEST_LOWER.toml"),
-            "id = 'a1'\ndisplay = '小写撞名机'\nbrand = 'Bambu Lab'\n".as_bytes(),
+            &collide,
+            format!(
+                "id = '{}'\ndisplay = '撞名机'\nbrand = 'Bambu Lab'\n",
+                tree.machine.to_lowercase()
+            )
+            .as_bytes(),
         )
         .unwrap();
-        let err = Catalog::load_from(tmp.path()).expect_err("撞机型 id 必须整目录拒载");
+        let err = Catalog::load_from(tree.path()).expect_err("撞机型 id 必须整目录拒载");
         assert!(
             err.message.contains("机型 id 撞了"),
             "实测：{}",
             err.message
         );
+        std::fs::remove_file(&collide).unwrap();
 
-        // 版本 id 撞：往 A1.toml 尾部 append 一个 fast（A1 已有 FAST）
-        let (tmp, _c) = copy_of(&root);
-        let p = tmp.path().join("machines").join("A1.toml");
-        let mut text = std::fs::read_to_string(&p).unwrap();
-        text.push_str("\n[[versions]]\nid = 'fast'\nname = '撞名版'\n");
-        crate::fsx::atomic::atomic_write(&p, text.as_bytes()).unwrap();
-        let err = Catalog::load_from(tmp.path()).expect_err("机型内撞版本 id 必须整目录拒载");
+        // 版本 id 撞：往机型文件尾部 append 一个只差大小写的版本
+        let at = tree.machine_file();
+        let mut text = std::fs::read_to_string(&at).unwrap();
+        text.push_str(&format!(
+            "\n[[versions]]\nid = '{}'\nname = '撞名版'\n",
+            tree.version_with_assets.to_lowercase()
+        ));
+        crate::fsx::atomic::atomic_write(&at, text.as_bytes()).unwrap();
+        let err = Catalog::load_from(tree.path()).expect_err("机型内撞版本 id 必须整目录拒载");
         assert!(
             err.message.contains("版本 id 撞了"),
             "实测：{}",
@@ -2866,23 +2870,26 @@ mod tests {
     /// 说明、套餐指向都跟着走）。落盘后从盘上重读核对（副本上改，不碰真数据）
     #[test]
     fn copy_version_writes_the_definition_only() {
-        let Some((root, _c)) = catalog() else {
-            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
-            return;
-        };
-        let (tmp, mut c) = copy_of(&root);
-        let template = c.machine("A1").unwrap().versions[2].clone(); // FASTV3.3
-        assert_eq!(template.id, "FASTV3.3", "夹具前提：A1 第三版是快拆 6.28");
+        let tree = crate::presetdata::testdata::minimal_presets_tree();
+        let mut c = Catalog::load_from(tree.path()).expect("最小树读得通");
+        let template = c
+            .machine(&tree.machine)
+            .expect("机型在")
+            .versions
+            .iter()
+            .find(|v| v.id == tree.version_with_assets)
+            .expect("模板版本在")
+            .clone();
 
-        c.machine_mut("A1")
+        c.machine_mut(&tree.machine)
             .unwrap()
-            .copy_version("FASTV3.3", "COPYTEST", "复制测试", Some("新标签"), None)
+            .copy_version(&template.id, "COPYTEST", "复制测试", Some("新标签"), None)
             .expect("复制得出来");
-        c.write_machine("A1").expect("落盘");
+        c.write_machine(&tree.machine).expect("落盘");
 
-        let c2 = Catalog::load_from(tmp.path()).expect("重读");
-        let a1 = c2.machine("A1").unwrap();
-        let nv = a1
+        let c2 = Catalog::load_from(tree.path()).expect("重读");
+        let m2 = c2.machine(&tree.machine).unwrap();
+        let nv = m2
             .versions
             .iter()
             .find(|v| v.id == "COPYTEST")
@@ -2899,15 +2906,15 @@ mod tests {
         assert_eq!(nv.description.as_deref(), template.description.as_deref());
         assert_eq!(nv.description_ja, template.description_ja);
         assert_eq!(nv.image, template.image, "版图照抄");
-        assert_eq!(a1.versions.len(), 4, "原有三版一台不少");
+        assert_eq!(m2.versions.len(), 3, "原有两版一台不少");
 
         // 反向：重名、非法 id、模板不存在，一个都进不来
-        let m = c.machine_mut("A1").unwrap();
+        let m = c.machine_mut(&tree.machine).unwrap();
         assert!(m
-            .copy_version("FASTV3.3", "COPYTEST", "x", None, None)
+            .copy_version(&template.id, "COPYTEST", "x", None, None)
             .is_err());
         assert!(m
-            .copy_version("FASTV3.3", "bad-id", "x", None, None)
+            .copy_version(&template.id, "bad-id", "x", None, None)
             .is_err());
         assert!(m
             .copy_version("NO_SUCH", "COPYTEST2", "x", None, None)

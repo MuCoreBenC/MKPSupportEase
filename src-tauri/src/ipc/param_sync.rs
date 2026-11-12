@@ -853,6 +853,21 @@ mod tests {
             .to_vec()
     }
 
+    /// 交付目录里的一份预设：`(文件名, 正文)`。
+    ///
+    /// 按目录索取的**第一份**，不点名 —— 业务改版本 id、改产物文件名时这里跟着走。
+    /// 判据要的是「逐参数同步对一份真实交付预设算得对」，不是「它叫某个固定名字」。
+    fn a_delivery_preset(c: &Catalog) -> (String, String) {
+        let f = c
+            .files
+            .iter()
+            .find(|f| f.kind == runtime::catalog::kind::PRESET)
+            .expect("交付目录里至少一份预设");
+        let text =
+            std::fs::read_to_string(repo_root().join("presets").join(&f.path)).expect("读交付预设");
+        (f.file_name.clone(), text)
+    }
+
     /// 归属归一化：头里写小写 `fast`，目录里是 `FAST` —— 大小写无关地对上
     #[test]
     fn owner_normalizes_case_against_the_catalog() {
@@ -867,41 +882,79 @@ mod tests {
     #[test]
     fn owner_falls_back_to_the_source_record() {
         let c = catalog();
+        let (name, _) = a_delivery_preset(&c);
+        let f = c
+            .files
+            .iter()
+            .find(|f| f.file_name == name)
+            .expect("目录里有这份");
         let body = "[toolhead]\noffset_x = -1\n";
-        let text = runtime::provenance::commit_text(body, "delivery/mkp/presets/A1-fast.toml");
+        let text = runtime::provenance::commit_text(body, &format!("delivery/mkp/presets/{name}"));
         let source = runtime::provenance::parse(&text);
         let (m, v) = owner_of(&c, &text, source.as_ref());
-        assert_eq!(m.as_deref(), Some("A1"));
-        assert_eq!(v.as_deref(), Some("FAST"));
+        assert_eq!(
+            m.as_deref(),
+            Some(f.machine_id.as_str()),
+            "归属要按来源记录归到目录里登记的那台机型"
+        );
+        assert_eq!(
+            v.as_deref(),
+            Some(f.version_id.as_str()),
+            "版本要与目录登记的一致"
+        );
     }
 
-    /// 云端那一份按**来源记录里那一份**认（`A1-standard` 不该被这份自己的归属带偏）
+    /// 云端那一份按**来源记录里那一份**认（不该被这份自己的归属带偏）
     #[test]
     fn the_official_file_comes_from_the_source_record() {
         let c = catalog();
-        let body = "# machine: A1\n# variant: fast\n[toolhead]\noffset_x = -1\n";
-        let text = runtime::provenance::commit_text(body, "delivery/mkp/presets/A1-standard.toml");
+        let (source_name, _) = a_delivery_preset(&c);
+        // 文件头写**另一份**的身份，来源记录写 source_name —— 两者不同才验得出优先级
+        let other = c
+            .files
+            .iter()
+            .find(|f| f.kind == runtime::catalog::kind::PRESET && f.file_name != source_name)
+            .expect("交付目录里不该只有一份预设");
+        let body = format!(
+            "# machine: {}\n# variant: {}\n[toolhead]\noffset_x = -1\n",
+            other.machine_id, other.version_id
+        );
+        let text =
+            runtime::provenance::commit_text(&body, &format!("delivery/mkp/presets/{source_name}"));
         let source = runtime::provenance::parse(&text);
         let f = cloud_file_of(&c, &text, source.as_ref()).expect("该认出来源那一份");
-        assert_eq!(f.file_name, "A1-standard.toml");
+        assert_eq!(
+            f.file_name, source_name,
+            "来源记录优先于这份自己的归属 —— 认错了会拿错对照版本"
+        );
     }
 
     /// 没有来源记录：退回这份自己的归属 —— 于是导入的云端原件也认得自己对应哪一版
     #[test]
     fn without_a_source_record_the_owner_decides() {
         let c = catalog();
-        let text = "# machine: A1\n# variant: fast\n[toolhead]\noffset_x = -1\n";
-        let f = cloud_file_of(&c, text, None).expect("该按归属认出来");
-        assert_eq!(f.file_name, "A1-fast.toml");
+        let (name, _) = a_delivery_preset(&c);
+        let f = c
+            .files
+            .iter()
+            .find(|f| f.file_name == name)
+            .expect("目录里有这份");
+        let text = format!(
+            "# machine: {}\n# variant: {}\n[toolhead]\noffset_x = -1\n",
+            f.machine_id, f.version_id
+        );
+        let got = cloud_file_of(&c, &text, None).expect("该按归属认出来");
+        assert_eq!(
+            got.file_name, name,
+            "没有来源记录时按文件头归属认，认得回同一份"
+        );
     }
 
     /// 一份真目录 + 一份真预设正文：三方账算得出来，且「我改过的那一项」没被云端顶掉
     #[test]
     fn a_sync_report_finds_the_changed_param() {
         let defs = defs();
-        let cloud =
-            std::fs::read_to_string(repo_root().join("presets/delivery/mkp/presets/A1-fast.toml"))
-                .expect("读交付预设文件");
+        let (_, cloud) = a_delivery_preset(&catalog());
 
         let mut new_values = param_alg::read_param_values(&cloud, &defs).unwrap();
         let key = "toolhead.offset.x";
@@ -1038,6 +1091,11 @@ mod tests {
         current_sha: String,
         /// 我这份当初基于的那一版（= 云端当前版改过 `KEY` 的那一份）
         based_text: String,
+        /// 云端那一份在目录里的身份。按目录取第一份填进来，**不写死名字** ——
+        /// 业务改版本 id 时这些跟着走，断言只比对「同一次取到的三者」。
+        cloud_name: String,
+        cloud_machine: String,
+        cloud_version: String,
     }
 
     impl World {
@@ -1057,17 +1115,19 @@ mod tests {
                 catalog.to_pretty_json().unwrap().as_bytes(),
             )
             .unwrap();
-            let current_sha = catalog
+            let (cloud_name, current_text) = a_delivery_preset(&catalog);
+            let cloud_label = format!("delivery/mkp/presets/{cloud_name}");
+            let entry = catalog
                 .files
                 .iter()
-                .find(|f| f.file_name == "A1-fast.toml")
-                .and_then(|f| f.expected_sha())
-                .expect("目录里该登记着 A1-fast.toml 的摘要")
+                .find(|f| f.file_name == cloud_name)
+                .unwrap_or_else(|| panic!("目录里该登记着 {cloud_name}"));
+            let cloud_machine = entry.machine_id.clone();
+            let cloud_version = entry.version_id.clone();
+            let current_sha = entry
+                .expected_sha()
+                .unwrap_or_else(|| panic!("目录里该登记着 {cloud_name} 的摘要"))
                 .to_owned();
-            let current_text = std::fs::read_to_string(
-                repo_root().join("presets/delivery/mkp/presets/A1-fast.toml"),
-            )
-            .expect("读交付预设文件");
             runtime::content::ensure(&root, &current_sha, current_text.as_bytes()).unwrap();
 
             /* 我这份当初基于的那一版：云端当前版把这一项改成别的（同一个保真写口） */
@@ -1083,7 +1143,7 @@ mod tests {
              * 走「说不清」—— 那正是这条判据要覆盖的另一档（见缺失身份那条测试）。
              */
             let version = preset::model::SourceRef {
-                file: Some("delivery/mkp/presets/A1-fast.toml".to_owned()),
+                file: Some(cloud_label.clone()),
                 platform: Some("github".to_owned()),
                 repo: Some("mucoreben/mkpsupportease".to_owned()),
                 branch: Some("main".to_owned()),
@@ -1125,7 +1185,7 @@ mod tests {
                 &root,
                 LOCAL,
                 Some(&identity),
-                "A1-fast.toml",
+                &cloud_name,
                 &stamp,
                 Some(based_sha.as_str()),
             )
@@ -1138,6 +1198,9 @@ mod tests {
                 current_text,
                 current_sha,
                 based_text,
+                cloud_name,
+                cloud_machine,
+                cloud_version,
             }
         }
 
@@ -1155,6 +1218,17 @@ mod tests {
 
         fn local_text(&self) -> String {
             runtime::local::read_text(&self.user, LOCAL).unwrap()
+        }
+
+        /// 云端当前版里某一项的值。
+        ///
+        /// 正文取自"目录里第一份预设"，值随那一份走 —— 断言比这个，不写死具体数字。
+        fn cloud_value(&self, key: &str) -> String {
+            param_alg::read_param_values(&self.current_text, &defs())
+                .expect("云端正文该读得出来")
+                .get(key)
+                .unwrap_or_else(|| panic!("云端正文里该有 {key}"))
+                .clone()
         }
 
         fn decide(&self, key: &str, kind: &str) -> PresetParamSyncDto {
@@ -1191,7 +1265,7 @@ mod tests {
             来源记录里"基于哪一版"现在读的就是它（2026-11-01 起不再读文件头那个渲染时刻）。 */
             catalog.published_at = Some("2026-11-02T00:00:00Z".to_owned());
             for f in catalog.files.iter_mut() {
-                if f.file_name == "A1-fast.toml" {
+                if f.file_name == self.cloud_name {
                     f.sha256 = Some(sha.clone());
                     f.size = Some(text.len() as u64);
                 }
@@ -1211,9 +1285,20 @@ mod tests {
         let report = w.sync();
         assert_eq!(report.pending_count, 1, "只有云端改过的那一项：{report:?}");
         assert!(report.version_advanced, "云端换版了");
-        assert_eq!(report.cloud_file_name.as_deref(), Some("A1-fast.toml"));
-        assert_eq!(report.machine_id.as_deref(), Some("A1"));
-        assert_eq!(report.version_id.as_deref(), Some("FAST"));
+        assert_eq!(
+            report.cloud_file_name.as_deref(),
+            Some(w.cloud_name.as_str())
+        );
+        assert_eq!(
+            report.machine_id.as_deref(),
+            Some(w.cloud_machine.as_str()),
+            "机型要认回目录里登记的那台"
+        );
+        assert_eq!(
+            report.version_id.as_deref(),
+            Some(w.cloud_version.as_str()),
+            "版本要认回目录里登记的那一版"
+        );
         assert_eq!(
             report.based_on_release_time.as_deref(),
             Some("2026-10-31T00:00:00Z"),
@@ -1233,7 +1318,11 @@ mod tests {
             Some("-2"),
             "云端旧值 = 我处理到的那一版"
         );
-        assert_eq!(e.cloud_new.as_deref(), Some("-0.7"));
+        assert_eq!(
+            e.cloud_new.as_deref(),
+            Some(w.cloud_value(KEY).as_str()),
+            "云端新值 = 目录里那一份正文的原值"
+        );
         assert_eq!(e.decided, None, "还没处理过");
     }
 
@@ -1244,17 +1333,29 @@ mod tests {
         let after = w.decide(KEY, "adopt");
         assert_eq!(after.pending_count, 0, "处理过就不该再挂着");
 
+        let cloud_new = w.cloud_value(KEY);
         let e = after.entries.iter().find(|e| e.key == KEY).unwrap();
         assert_eq!(e.decided, Some("adopt"));
-        assert_eq!(e.local.as_deref(), Some("-0.7"), "文件里那一项该是云端新值");
+        assert_eq!(
+            e.local.as_deref(),
+            Some(cloud_new.as_str()),
+            "文件里那一项该是云端新值"
+        );
 
         /* 文件真的被改了，而且**只改了那一行**（保真：注释 / 别的行一个字不动） */
         let text = w.local_text();
-        assert!(text.contains("offset_x = -0.7"), "\n{text}");
-        assert!(text.contains("# 笔尖偏移"), "行尾注释要留着\n{text}");
+        assert!(
+            text.contains(&format!("offset_x = {cloud_new}")),
+            "\n{text}"
+        );
+        let edited = text
+            .lines()
+            .find(|l| l.trim_start().starts_with("offset_x ="))
+            .expect("offset_x 那一行还在");
+        assert!(edited.contains('#'), "行尾注释要留着：{edited}");
         assert_eq!(
             param_alg::read_param_values(&text, &defs()).unwrap()[KEY],
-            "-0.7"
+            cloud_new
         );
     }
 
@@ -1378,11 +1479,12 @@ mod tests {
 
         let report = w.sync();
         assert_eq!(report.pending_count, 1, "云端又改了这一项");
+        let held = w.cloud_value(KEY);
         let e = report.entries.iter().find(|e| e.key == KEY).unwrap();
         assert!(e.pending);
         assert_eq!(
             e.baseline_old.as_deref(),
-            Some("-0.7"),
+            Some(held.as_str()),
             "旧值 = 上次处理到的那一版（不是我最初来源记录里那一版）"
         );
         assert_eq!(e.cloud_new.as_deref(), Some("-9"));
@@ -1409,7 +1511,7 @@ mod tests {
         runtime::content::ensure(&w.root, &sha, next.as_bytes()).unwrap();
         let mut catalog = catalog_with_shas();
         for f in catalog.files.iter_mut() {
-            if f.file_name == "A1-fast.toml" {
+            if f.file_name == w.cloud_name {
                 f.sha256 = Some(sha.clone());
             }
         }
@@ -1432,9 +1534,10 @@ mod tests {
             .unwrap();
         assert!(second.pending);
         assert_eq!(second.decided, None, "它没被处理过");
+        let y_old = w.cloud_value("toolhead.offset.y");
         assert_eq!(
             second.baseline_old.as_deref(),
-            Some("26.3"),
+            Some(y_old.as_str()),
             "它的旧值仍取来源记录里那一版（没被第一项的水位带跑）"
         );
     }
@@ -1456,7 +1559,7 @@ mod tests {
         let report = w.sync();
         assert_eq!(
             report.cloud_file_name.as_deref(),
-            Some("A1-fast.toml"),
+            Some(w.cloud_name.as_str()),
             "来源那一份不在目录里 ⇒ 退回归属，仍然认得出云端对应哪一份"
         );
         assert!(

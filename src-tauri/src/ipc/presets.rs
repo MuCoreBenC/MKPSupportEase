@@ -1590,16 +1590,23 @@ mod tests {
         );
 
         // —— 版本文件：MKP 那支从 catalog 文件条目出，名字与落点对得上 ——
-        let vf = version_files_dto(&catalog, "A1", "FASTV3.3").expect("A1/FASTV3.3 该有答案");
-        assert!(!vf.incomplete, "A1/FASTV3.3 配齐了：{:?}", vf.missing);
+        // 取目录里任意一份：验「按身份查得到同一份」，不点名某个版本 id。
+        let sample = catalog
+            .files
+            .iter()
+            .find(|f| f.kind == crate::runtime::catalog::kind::PRESET)
+            .expect("交付目录里至少一份预设");
+        let (m, v) = (sample.machine_id.as_str(), sample.version_id.as_str());
+        let vf = version_files_dto(&catalog, m, v).unwrap_or_else(|| panic!("{m}/{v} 该有答案"));
+        assert!(!vf.incomplete, "{m}/{v} 配齐了：{:?}", vf.missing);
         let mkp = vf
             .files
             .iter()
             .find(|f| f.kind == "mkp_preset")
             .expect("MKP 引用必须在");
-        assert_eq!(mkp.file_name, "A1-fastv3.3.toml");
+        assert_eq!(mkp.file_name, sample.file_name);
         assert_eq!(
-            mkp.path, "delivery/mkp/presets/A1-fastv3.3.toml",
+            mkp.path, sample.path,
             "落点是发布根基准（B 类在 dist/ 下），也是客户端内部落点"
         );
         // 随包目录不登记期望值：透给界面的就是"还不知道"，不是 0 / 空串
@@ -1673,12 +1680,22 @@ mod tests {
             .expect("A1 的 BBS 条目在");
         assert_eq!(a1_bbs.delivery, "default", "被套餐装着的是 default");
         assert!(
-            a1_bbs.in_bundles.contains(&"A1_STANDARD".to_owned())
-                && a1_bbs.in_bundles.contains(&"A1_FAST".to_owned())
-                && a1_bbs.in_bundles.contains(&"A1_FASTV3.3".to_owned()),
-            "A1 的三个版本共用这条 BBS，三份套餐都在 in_bundles 里：{:?}",
+            !a1_bbs.in_bundles.is_empty(),
+            "被套餐装着的资产该有 in_bundles：{:?}",
             a1_bbs.in_bundles
         );
+        // 每条引用都要在目录里存在，且必须归 A1 —— 悬空或串机型都会让菜单落到别处
+        for b in &a1_bbs.in_bundles {
+            let bundle = catalog
+                .bundles
+                .iter()
+                .find(|x| &x.id == b)
+                .unwrap_or_else(|| panic!("in_bundles 里的 {b} 在目录里不存在"));
+            assert_eq!(
+                bundle.machine_id, "A1",
+                "A1 的 BBS 被装进了别家机型的套餐：{b}"
+            );
+        }
         assert_eq!(a1_bbs.nozzle.as_deref(), Some("0.4"), "喷嘴从路径段读出");
 
         // —— 菜单：可见性跟着套餐走 ——
@@ -1716,7 +1733,12 @@ mod tests {
         assert_eq!(offset_x.ui_component, UiComponent::Number);
 
         // —— 配方值：三层取值的结果与来源层 ——
-        let params = machine_params_dto(&catalog, "A1", Some("FASTV3.3")).expect("A1 的配方");
+        let params = machine_params_dto(
+            &catalog,
+            &sample.machine_id,
+            Some(sample.version_id.as_str()),
+        )
+        .expect("目录里那一份的配方");
         assert!(!params.is_empty());
         let x = params
             .iter()
@@ -1733,12 +1755,28 @@ mod tests {
             x.toml_key, offset_x.toml_key,
             "配方通道与元信息通道的 toml_key 必须是同一个值（不是两份真相）"
         );
-        // 真数据里 A1:FASTV3.3 把这一项钉在 -0.7（版本层，2026-10-19 作者改的
-        // 笔尖偏移）——三层取值要读出覆盖
-        assert_eq!(x.value, "-0.7");
-        assert_eq!(x.origin, "variant");
+        /* 三层取值：找一份**确实在版本层覆盖了 `offset.x`** 的预设再验 ——
+        哪一版覆盖了由真数据说了算，不写死版本 id 与那个具体数值。 */
+        let (vm, vv) = catalog
+            .files
+            .iter()
+            .filter(|f| f.kind == crate::runtime::catalog::kind::PRESET)
+            .find_map(|f| {
+                let ps = machine_params_dto(&catalog, &f.machine_id, Some(f.version_id.as_str()))
+                    .ok()?;
+                let p = ps.iter().find(|p| p.key == "toolhead.offset.x")?;
+                (p.origin == "variant").then(|| (f.machine_id.clone(), f.version_id.clone()))
+            })
+            .expect("真数据里该有至少一版在版本层覆盖了 toolhead.offset.x");
+        let vparams = machine_params_dto(&catalog, &vm, Some(&vv)).expect("该有配方");
+        let vx = vparams
+            .iter()
+            .find(|p| p.key == "toolhead.offset.x")
+            .expect("偏移 X 在配方里");
+        assert_eq!(vx.origin, "variant", "{vm}/{vv} 这一版在版本层覆盖了它");
+        assert!(!vx.value.is_empty(), "值来自那一层");
         // 机型层没写 → 「还原成」给的是出厂默认 0
-        assert_eq!(x.base_value.as_deref(), Some("0"));
+        assert_eq!(vx.base_value.as_deref(), Some("0"));
 
         // 机型不存在的报错要说出是谁
         let err = machine_params_dto(&catalog, "NOPE", None).unwrap_err();
@@ -1770,14 +1808,23 @@ mod tests {
             .filter(|p| p.deprecated)
             .map(|p| p.key.as_str())
             .collect();
-        assert_eq!(
-            meta_deprecated.len(),
-            6,
-            "真注册表 6 条字段级弃用：{meta_deprecated:?}"
+        assert!(
+            !meta_deprecated.is_empty(),
+            "真注册表里该有字段级弃用项，否则下面那条反向钉子空转：{meta_deprecated:?}"
         );
 
         // —— 配方通道：一条字段级弃用都不许有（排除语义没被偷改）——
-        let params = machine_params_dto(&catalog, "A1", Some("FASTV3.3")).expect("A1 的配方");
+        let sample = catalog
+            .files
+            .iter()
+            .find(|f| f.kind == crate::runtime::catalog::kind::PRESET)
+            .expect("交付目录里至少一份预设");
+        let params = machine_params_dto(
+            &catalog,
+            &sample.machine_id,
+            Some(sample.version_id.as_str()),
+        )
+        .expect("目录里那一份该有配方");
         let leaked: Vec<&str> = params
             .iter()
             .filter(|p| p.deprecated)

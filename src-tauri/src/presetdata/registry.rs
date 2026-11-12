@@ -5007,59 +5007,42 @@ order = 2.0
     /// 没有任何判据能描述它。所以批量入口要么全成，要么一个字节都不写。
     #[test]
     fn a_batch_of_values_lands_in_one_write() {
-        let Some(root) = crate::presetdata::repo_presets_root() else {
-            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
-            return;
-        };
-        let tmp = tempfile::tempdir().unwrap();
-        copy_tree(&root, tmp.path());
-        let mut p = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
+        let tree = crate::presetdata::testdata::minimal_presets_tree();
+        let mut p = crate::presetdata::Presets::load_from(tree.path()).unwrap();
+        let machine = tree.machine.clone();
+        let versioned = tree.versioned_param_key(&tree.version_with_assets);
 
-        // 一批：两个机型基底 + 一个版本覆盖 + 一次清空
+        // 一批：机型基底 + 版本覆盖
         p.apply_values(&[
             (
-                "toolhead.MKP_retract".to_owned(),
-                "A1".to_owned(),
+                tree.param.clone(),
+                machine.clone(),
                 Some(serde_json::json!(-3.5)),
             ),
             (
-                "toolhead.MKP_retract".to_owned(),
-                "P1S".to_owned(),
-                Some(serde_json::json!(-4.0)),
-            ),
-            (
-                "toolhead.MKP_retract".to_owned(),
-                "A1:FAST".to_owned(),
+                tree.param.clone(),
+                versioned.clone(),
                 Some(serde_json::json!(-5.0)),
             ),
         ])
         .expect("一批写得进去");
 
-        let again = crate::presetdata::Presets::load_from(tmp.path()).expect("改完读得通");
-        let t = &again
-            .registry
-            .param("toolhead.MKP_retract")
-            .unwrap()
-            .machine_variants;
-        assert_eq!(t["A1"], serde_json::json!(-3.5));
-        assert_eq!(t["P1S"], serde_json::json!(-4.0));
-        assert_eq!(t["A1:FAST"], serde_json::json!(-5.0));
+        let again = crate::presetdata::Presets::load_from(tree.path()).expect("改完读得通");
+        let t = &again.registry.param(&tree.param).unwrap().machine_variants;
+        assert_eq!(t[machine.as_str()], serde_json::json!(-3.5));
+        assert_eq!(t[versioned.as_str()], serde_json::json!(-5.0));
 
         // 清空也走同一条路
-        p.apply_values(&[(
-            "toolhead.MKP_retract".to_owned(),
-            "A1:FAST".to_owned(),
-            None,
-        )])
-        .expect("清得掉");
-        let again = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
-        let t = &again
-            .registry
-            .param("toolhead.MKP_retract")
-            .unwrap()
-            .machine_variants;
-        assert!(!t.contains_key("A1:FAST"), "清空没生效");
-        assert_eq!(t["A1"], serde_json::json!(-3.5), "顺带把别的键改了");
+        p.apply_values(&[(tree.param.clone(), versioned.clone(), None)])
+            .expect("清得掉");
+        let again = crate::presetdata::Presets::load_from(tree.path()).unwrap();
+        let t = &again.registry.param(&tree.param).unwrap().machine_variants;
+        assert!(!t.contains_key(&versioned), "清空没生效");
+        assert_eq!(
+            t[machine.as_str()],
+            serde_json::json!(-3.5),
+            "顺带把别的键改了"
+        );
     }
 
     /// **值与「跟不跟基底」同一次落盘**（2026-11-03 的验收点）。
@@ -5073,65 +5056,62 @@ order = 2.0
     /// 3. 改回跟随 = 表里删掉那个键（文件回到默认形状，不留 `= true`）。
     #[test]
     fn value_and_follow_state_go_out_in_the_same_write() {
-        let Some(root) = crate::presetdata::repo_presets_root() else {
-            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
-            return;
-        };
-        let tmp = tempfile::tempdir().unwrap();
-        copy_tree(&root, tmp.path());
-        let mut p = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
+        let tree = crate::presetdata::testdata::minimal_presets_tree();
+        let mut p = crate::presetdata::Presets::load_from(tree.path()).unwrap();
+        let scope = tree.versioned_param_key(&tree.version_with_assets);
+        let key = tree.param.as_str();
 
         /* ① 写值：一笔里同时带 `不跟随` */
         p.apply_values(&[crate::presetdata::ValueEdit::write(
-            "toolhead.MKP_retract",
-            "A1:FAST",
+            key,
+            scope.as_str(),
             serde_json::json!(-5.0),
         )])
         .unwrap();
-        let again = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
-        let q = again.registry.param("toolhead.MKP_retract").unwrap();
-        assert_eq!(q.machine_variants["A1:FAST"], serde_json::json!(-5.0));
+        let again = crate::presetdata::Presets::load_from(tree.path()).unwrap();
+        let q = again.registry.param(key).unwrap();
+        assert_eq!(q.machine_variants[scope.as_str()], serde_json::json!(-5.0));
         assert!(
-            !crate::presetdata::follows::is_following(q, "A1:FAST"),
+            !crate::presetdata::follows::is_following(q, scope.as_str()),
             "写值与状态必须同一笔落地"
         );
 
         /* ② 连带写（改基底时跟着变的那些）：显式 `跟随` ⇒ 还是跟随 */
         p.apply_values(&[crate::presetdata::ValueEdit::write(
-            "toolhead.MKP_retract",
-            "A1:FAST",
+            key,
+            scope.as_str(),
             serde_json::json!(-6.0),
         )
         .with_follows(true)])
             .unwrap();
-        let again = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
-        let q = again.registry.param("toolhead.MKP_retract").unwrap();
-        assert_eq!(q.machine_variants["A1:FAST"], serde_json::json!(-6.0));
+        let again = crate::presetdata::Presets::load_from(tree.path()).unwrap();
+        let q = again.registry.param(key).unwrap();
+        assert_eq!(q.machine_variants[scope.as_str()], serde_json::json!(-6.0));
         assert!(
-            crate::presetdata::follows::is_following(q, "A1:FAST"),
+            crate::presetdata::follows::is_following(q, scope.as_str()),
             "连带写不许把跟随项翻成独立值"
         );
 
         /* ③ 改回跟随 = 删键（不留 `= true` 这种同义写法） */
         p.apply_values(&[crate::presetdata::ValueEdit::keep(
-            "toolhead.MKP_retract",
-            "A1:FAST",
+            key,
+            scope.as_str(),
             true,
         )])
         .unwrap();
-        let again = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
-        let q = again.registry.param("toolhead.MKP_retract").unwrap();
+        let again = crate::presetdata::Presets::load_from(tree.path()).unwrap();
+        let q = again.registry.param(key).unwrap();
         assert!(
             q.follows.is_empty(),
             "跟随 = 表里没有这个键，实际：{:?}",
             q.follows
         );
         assert!(
-            crate::presetdata::follows::is_following(q, "A1:FAST"),
+            crate::presetdata::follows::is_following(q, scope.as_str()),
             "跟随"
         );
         assert_eq!(
-            q.machine_variants["A1:FAST"],
+            q.machine_variants[scope.as_str()],
             serde_json::json!(-6.0),
             "只改状态不许碰值"
         );

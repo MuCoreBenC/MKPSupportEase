@@ -65,8 +65,11 @@ fn core_path(rel: &str) -> PathBuf {
 }
 
 /// 数据源那一侧的预设（**会**随参数更新而变）。行为/映射判据用它。
+///
+/// 取**入库产物**（`assets/presets/`，随参数更新重生成），不取对照基线 ——
+/// 基线会被生成动作跟着改名字，做不了「当前参数」的稳定锚点。
 fn live_preset() -> PathBuf {
-    core_path("tests/fixtures/presets/A1-standard.toml")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/presets/A1-standard.toml")
 }
 
 /// 自有 golden 的**冻结**输入（参数更新不动它）。

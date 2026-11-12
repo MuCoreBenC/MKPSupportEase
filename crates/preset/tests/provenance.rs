@@ -15,12 +15,15 @@
 
 use std::path::PathBuf;
 
-use preset::generate::fixtures_dir;
 use preset::model::{SourceProvenance, SourceRef};
 use preset::provenance::{copy_with_provenance, parse, sha256_hex, strip};
 
+/// 冻结的预设样本：与 `fixtures/ir/build9/*.json` 成对，不随业务命名漂移。
+///
+/// 判据要的是一批**合法预设正文**，不是「当前产物长什么样」。
 fn fixtures() -> Vec<PathBuf> {
-    let dir = fixtures_dir();
+    let dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/ir/presets");
     let mut out: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("读 fixture 目录")
         .flatten()

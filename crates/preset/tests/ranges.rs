@@ -15,6 +15,17 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use preset::registry::{RangeSource, load_param_registry};
 
+/// 冻结的预设样本：与 `fixtures/ir/build9/*.json` 成对，不随业务命名漂移。
+fn frozen_presets_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../postprocess/tests/fixtures/ir/presets")
+}
+
+/// 契约夹具：自造，文件名与业务命名规则无关。
+fn contract_dir() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/contract")
+}
+
 /// `ParamEntry` 认识的 serde 键名。**改结构就要改这里** —— K-R4 就是靠这份清单发现差集的。
 const KNOWN_PARAM_KEYS: &[&str] = &[
     "key",
@@ -219,8 +230,8 @@ fn kr3_variant_lookup_is_case_insensitive() {
 fn kr1_all_presets_still_load_after_switching_the_source_of_truth() {
     use std::path::PathBuf;
 
-    // 9 份 fixture（仓库内，必跑）
-    let dir = preset::generate::fixtures_dir();
+    // 9 份冻结样本（仓库内，必跑）
+    let dir = frozen_presets_dir();
     let mut targets: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("fixtures 目录应存在")
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -248,9 +259,8 @@ fn kr1_all_presets_still_load_after_switching_the_source_of_truth() {
 
 #[test]
 fn kr7_variant_header_is_read_and_missing_is_not_an_error() {
-    // 真实预设（fixture）：A1_MINI 的 fast 那份，文件头有 `# variant: fast`
-    let dir = preset::generate::fixtures_dir();
-    let raw = std::fs::read_to_string(dir.join("A1_MINI-fast.toml")).expect("读 fixture");
+    // 契约夹具：文件头有 `# variant: fast`（名字中性，与业务命名无关）
+    let raw = std::fs::read_to_string(contract_dir().join("parse-write.toml")).expect("读契约夹具");
     let file = preset::read_preset_from_bytes(raw.clone()).expect("读预设");
     assert_eq!(
         file.variant.as_deref(),

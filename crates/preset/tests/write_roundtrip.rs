@@ -8,17 +8,25 @@
 //! K-P2 用「行级 diff 恰好一行」+ 「结构比较除该键外全等」双验：
 //! 前者说明文件没被重排，后者说明没有别的键被顺手改掉（文本 diff 会被格式化差异淹没）。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-// 基线目录只认 `generate::fixtures_dir()` 那一处（理由见 `tests/recipe.rs`）
-use preset::generate::fixtures_dir;
 use preset::model::TomlConfig;
 use preset::write::{Edit, EditValue, apply_edits};
 
+/// 冻结的预设样本：与 `fixtures/ir/build9/*.json` 成对，不随业务命名漂移。
+fn frozen_presets_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/ir/presets")
+}
+
+/// 契约夹具：自造，只放这些判据真正用到的字段。
+fn contract_preset() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/contract/parse-write.toml")
+}
+
 fn presets() -> Vec<PathBuf> {
-    let dir = fixtures_dir();
+    let dir = frozen_presets_dir();
     let mut out: Vec<PathBuf> = std::fs::read_dir(&dir)
-        .expect("读 fixtures/presets")
+        .expect("读冻结预设样本")
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "toml"))
         .collect();
@@ -60,8 +68,8 @@ fn kp1_zero_edits_round_trip_is_byte_identical() {
 
 #[test]
 fn kp2_one_edit_changes_exactly_one_line() {
-    let path = fixtures_dir().join("A1-standard.toml");
-    let raw = std::fs::read_to_string(&path).expect("读预设");
+    let path = contract_preset();
+    let raw = std::fs::read_to_string(&path).expect("读契约夹具");
     let before = parse(&raw);
 
     let out = apply_edits(
@@ -115,8 +123,8 @@ fn kp2_one_edit_changes_exactly_one_line() {
 
 #[test]
 fn kp2b_scalar_and_multiline_keep_their_shape() {
-    let path = fixtures_dir().join("A1_MINI-fast.toml");
-    let raw = std::fs::read_to_string(&path).expect("读预设");
+    let path = contract_preset();
+    let raw = std::fs::read_to_string(&path).expect("读契约夹具");
 
     /*
      * 改一个普通标量字段：那一行换了值，行尾注释要留着（其余行逐字节不变）。
@@ -166,8 +174,8 @@ fn kp2b_scalar_and_multiline_keep_their_shape() {
 
 #[test]
 fn kp3_refuses_new_keys_missing_sections_and_bad_values() {
-    let path = fixtures_dir().join("A1-standard.toml");
-    let raw = std::fs::read_to_string(&path).expect("读预设");
+    let path = contract_preset();
+    let raw = std::fs::read_to_string(&path).expect("读契约夹具");
 
     let cases: Vec<(&str, Edit, &str)> = vec![
         (

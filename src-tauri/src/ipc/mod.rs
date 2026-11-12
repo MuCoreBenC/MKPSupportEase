@@ -850,13 +850,19 @@ mod tests {
         let internal = tempfile::tempdir().unwrap();
         let user = tempfile::tempdir().unwrap();
         let exe = std::path::Path::new("dev/mkp-support-ease");
+        // 取目录里任意一份：这条判据要的是「不在盘上时说得清是哪一份」，与它叫什么无关
+        let sample = catalog
+            .files
+            .iter()
+            .find(|f| f.kind == crate::runtime::catalog::kind::PRESET)
+            .expect("交付目录里至少一份预设");
         let dto = post_process_dto(
             Some(exe),
             &catalog,
             internal.path(),
             user.path(),
-            "A1_MINI",
-            "FASTV3.3",
+            &sample.machine_id,
+            &sample.version_id,
             None,
         )
         .unwrap();
@@ -867,8 +873,9 @@ mod tests {
         );
         let reason = dto.reason.expect("要有原因");
         assert!(
-            reason.contains("A1_MINI-fastv3.3.toml"),
-            "原因要把是哪一份说出来：{reason}"
+            reason.contains(&sample.file_name),
+            "原因要把是哪一份说出来（{}）：{reason}",
+            sample.file_name
         );
     }
 
@@ -881,9 +888,12 @@ mod tests {
         let user = tempfile::tempdir().unwrap();
         let exe = std::path::Path::new("dev/mkp-support-ease");
 
+        // 取目录里任意一份：验「命令指的就是 catalog 落点」，不点名某一份
         let f = catalog
-            .file_of("A1_MINI", "FASTV3.3")
-            .expect("目录里该有这一份");
+            .files
+            .iter()
+            .find(|f| f.kind == crate::runtime::catalog::kind::PRESET)
+            .expect("交付目录里至少一份预设");
         let at = internal.path().join(&f.path);
         crate::fsx::atomic::atomic_write(&at, b"# machine: A1_MINI\n[toolhead]\n").unwrap();
 
@@ -892,8 +902,8 @@ mod tests {
             &catalog,
             internal.path(),
             user.path(),
-            "A1_MINI",
-            "FASTV3.3",
+            &f.machine_id,
+            &f.version_id,
             None,
         )
         .unwrap();
@@ -917,14 +927,21 @@ mod tests {
         let user = tempfile::tempdir().unwrap();
         let exe = std::path::Path::new("dev/mkp-support-ease");
 
-        /* 云端那份也在盘上：顺序不影响结果，用户操作的那份优先 */
+        /* 云端那份也在盘上：顺序不影响结果，用户操作的那份优先。
+        取目录里任意一份，本地副本按同一把钥匙命名 —— 不写死机型 / 版本。 */
         let f = catalog
-            .file_of("A1_MINI", "FASTV3.3")
-            .expect("目录里该有这一份");
+            .files
+            .iter()
+            .find(|f| f.kind == crate::runtime::catalog::kind::PRESET)
+            .expect("交付目录里至少一份预设");
         crate::fsx::atomic::atomic_write(&internal.path().join(&f.path), b"[toolhead]\n").unwrap();
 
-        let local = "# machine: A1_MINI\n# variant: fastv3.3\n[toolhead]\noffset_x = -0.9\n";
-        let local_at = user.path().join("presets-local/A1_MINI-fastv3.3.toml");
+        let local = format!(
+            "# machine: {}\n# variant: {}\n[toolhead]\noffset_x = -0.9\n",
+            f.machine_id,
+            f.version_id.to_lowercase()
+        );
+        let local_at = user.path().join(format!("presets-local/{}", f.file_name));
         crate::fsx::atomic::atomic_write(&local_at, local.as_bytes()).unwrap();
 
         let dto = post_process_dto(
@@ -932,8 +949,8 @@ mod tests {
             &catalog,
             internal.path(),
             user.path(),
-            "A1_MINI",
-            "FASTV3.3",
+            &f.machine_id,
+            &f.version_id,
             None,
         )
         .unwrap();
