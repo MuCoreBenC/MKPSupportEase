@@ -48,7 +48,7 @@ use crate::error::AppError;
 
 use super::traced;
 
-/// 正式版优先，找不到才退 Beta（与 `ipc::presets::slicer_process_dir` 同一套口径）
+/// 正式版优先，找不到才退 Beta（与 `ipc::presets::user_base_of("bambu")` 同一套口径）
 const BBS_APPDIRS: [&str; 2] = ["BambuStudio", "BambuStudioBeta"];
 
 /// 单份预设的字节上限（与 dev 端点同一个数）。工艺预设本体都在 1~4 KB，

@@ -37,6 +37,8 @@ interface Props {
   disabled?: boolean
   /** cell 档用 sm */
   size?: 'sm' | 'md'
+  /** 值为空时触发器上显示的那句提示（「选一个版本」）。不传 = 与原来一样显示空串 */
+  placeholder?: string
   onChange: (next: string) => void
 }
 
@@ -65,6 +67,7 @@ export default function SelectField({
   value,
   disabled = false,
   size = 'md',
+  placeholder,
   onChange,
 }: Props) {
   const [open, setOpen] = useState(false)
@@ -155,7 +158,7 @@ export default function SelectField({
         onClick={() => (open ? setOpen(false) : openList())}
       >
         {/* 值不在选项里时照原文显示 —— 注册表里三处枚举的可选值是反推的，不许擅自改成第一项 */}
-        <span className={s.text}>{current?.label ?? value}</span>
+        <span className={s.text}>{current?.label ?? (value === '' ? (placeholder ?? '') : value)}</span>
         <Chevron up={open} />
       </button>
 
@@ -176,7 +179,7 @@ export default function SelectField({
                     onClick={() => pick(o.value)}
                   >
                     <span className={s.check} aria-hidden>
-                      {on ? '✓' : ''}
+                      {on ? <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg> : null}
                     </span>
                     <span className={s.optLabel}>{o.label}</span>
                     {o.note !== undefined && <span className={s.note}>{o.note}</span>}

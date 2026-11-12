@@ -1,7 +1,7 @@
 {
   "name": "mkp-support-ease",
   "private": true,
-  "version": "0.0.10-preview.9",
+  "version": "0.0.11-preview.1",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -14,7 +14,7 @@
     "tauri:workbench:dev": "node scripts/tauri-workbench.mjs dev",
     "tauri:workbench:build": "node scripts/tauri-workbench.mjs build",
     "preview": "vite preview",
-    "lint": "eslint . && stylelint \"src/**/*.css\" && node scripts/check-locate.mjs && node scripts/check-release-cli.mjs",
+    "lint": "eslint . && stylelint \"src/**/*.css\" && node scripts/check-locate.mjs && node scripts/check-release-cli.mjs && node scripts/check-copy.mjs",
     "test": "vitest run",
     "lint:fix": "eslint . --fix && stylelint \"src/**/*.css\" --fix",
     "tauri": "node scripts/tauri-dev.mjs",
@@ -37,10 +37,13 @@
     "check:artifacts": "node scripts/check-artifact-boundary.mjs",
     "check:rust": "cargo fmt --all -- --check && cargo clippy --all-targets -p mkp-support-ease --features workbench -- -D warnings",
     "check:i18n": "node scripts/check-i18n.mjs",
+    "check:copy": "node scripts/check-copy.mjs",
     "translations:todo": "node scripts/stale-translations.mjs",
     "glue:check": "node scripts/glue-check.mjs",
+    "bambu:layers": "node scripts/bambu-layers.mjs",
     "preview:deliver": "cargo run -q --bin preview --features workbench -- deliver",
-    "preview:recover": "cargo run -q --bin preview --features workbench -- recover"
+    "preview:recover": "cargo run -q --bin preview --features workbench -- recover",
+    "clean:target": "./scripts/clean-target.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",

@@ -65,8 +65,11 @@ fn core_path(rel: &str) -> PathBuf {
 }
 
 /// 数据源那一侧的预设（**会**随参数更新而变）。行为/映射判据用它。
+///
+/// 取**入库产物**（`assets/presets/`，随参数更新重生成），不取对照基线 ——
+/// 基线会被生成动作跟着改名字，做不了「当前参数」的稳定锚点。
 fn live_preset() -> PathBuf {
-    core_path("tests/fixtures/presets/A1-standard.toml")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/presets/A1-standard.toml")
 }
 
 /// 自有 golden 的**冻结**输入（参数更新不动它）。
@@ -105,8 +108,8 @@ fn run_chain(preset_path: &Path, tag: &str) -> String {
     std::fs::copy(core_path("tests/golden/42274.2.gcode"), &work).expect("复制输入");
     let raw = std::fs::read_to_string(&work).expect("读输入");
     let mut ir = preset::load_ir(preset_path, Some(&raw)).expect("预设 → IR 必须成功");
-    // 用户偏好（`Ir.prefs`）的两颗钉子：参考档是「抬升 Z=20 + 跳过震动检测」。
-    ir.prefs.begin_stage_retract_z_lift_mm = 20;
+    // 用户偏好（`Ir.prefs`）的两颗钉子：参考档是「补抬 Z=5 + 跳过震动检测」。
+    ir.prefs.begin_stage_retract_z_lift_mm = 5;
     ir.prefs.skip_vibration_calibration = true;
     pipeline::process_with_ir_with_tower_ask(
         IrProcessRequest {

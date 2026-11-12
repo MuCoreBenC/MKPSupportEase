@@ -1,58 +1,29 @@
-//! 整链判据：**同一份输入 G-code，新项目的输出与来源仓库 `mkp-sr` 的输出逐字节相同**。
+//! 整链判据：**`config/A1.toml` → 12 步编排 → 输出字节**，与自分基线逐字节相同。
 //!
-//! 这是「`config.rs` + `pipeline.rs` 没搬错」的唯一整链证据。其余判据都只覆盖一段：
+//! 这是「配置层 → 编排层 → 输出」这条链的唯一字节锁。其余判据都只覆盖一段：
 //! `tests/postproc_*.rs` 覆盖 pass1/pass2 的字节，`tests/config.rs` 覆盖配置解析，
-//! `tests/pipeline.rs` 覆盖步骤顺序 —— 都不能证明「配置层 → 编排层 → 输出」这条整链等价。
+//! `tests/pipeline.rs` 覆盖步骤顺序 —— 都不能证明整链。
 //!
-//! ## 参考物怎么来的（可复现，不是手搓）
+//! ## 基线是什么
 //!
-//! 参考输出 `tests/golden/42274.2.e2e-A1.reference.gcode`（668687 字节）由来源仓库
-//! 自己的 CLI 生成，命令原样记录如下（在 `/Users/wzy/projects/mkp-rust/mkp-sr` 下执行）：
+//! `tests/golden/42274.2.e2e-A1.config.gcode` 是**本项目自己的**输出：
+//! 同一份输入 + `tests/fixtures/config/A1.toml` 原样进管线，出来的字节。
+//!
+//! 它回答「整链字节有没有变」，不回答「整链输出对不对」——后者靠真机验收与人工审阅。
+//!
+//! ## 再生
 //!
 //! ```text
-//! cargo run -q -p mkp-cli --bin mkp-sr -- \
-//!   tests/golden/42274.2.gcode \
-//!   --preset tests/fixtures/presets/A1.toml \
-//!   --out /tmp/ref-mkp-sr-A1.gcode
+//! cargo test -p mkpse-postprocess --test end_to_end -- --ignored regenerate_the_chain_baseline
 //! ```
 //!
-//! 本侧用的配置 `tests/fixtures/config/A1.toml` 也是**派生**的：由
-//! `mkp-sr` 的 `ir::build()` 对同一份 A1 预设产出的 IR JSON
-//! （`tests/fixtures/ir/build9/A1-standard.json`）经 `config::to_toml` 转成 TOML，
-//! 唯一的人工改动是 `Machine.MachineType = "A1"`（预设里的机型声明在 IR 之外，
-//! 见 `tests/pipeline.rs` 的派生说明与每轮复查）。
+//! **再生前必须逐行看 diff 并说清为什么变**，原因写进提交信息。
+//! 它不挂在生成、发布或任何同步动作上 —— 把现状抄成期望，判据就从「证明」退化成「自比自」。
 //!
-//! 所以这条判据实际验证的链条是：
-//! **预设 →（来源仓库）IR → TOML 配置 →（本项目）IR → 12 步 → 输出字节**。
-//! 中间那次 JSON→TOML 转换顺带真实验证了 PascalCase 键在 TOML 里可用。
+//! ## 这条判据管不到的事
 //!
-//! ## 证据等级（必须先说清）
-//!
-//! 它对照的是**当前 `mkp-sr` 的输出**，不是「正确的输出」。`mkp-sr` 自身的偏差会被
-//! 一并复制成绿色（与 AGENTS §7③ 同款：一致 ≠ 正确）。这条判据能守住「搬迁没改变行为」，
-//! **守不住「行为本来就对」**。
-//!
-//! 另外三件事这条判据管不到：
-//! - 只跑了 A1 这一个机型 / 一份输入（42274.2.gcode，34 个有效层）；
-//! - `printtime` 只进 stderr（两侧实测都是 `1478.3s`），不进字节，所以字节相同不代表估算相同；
-//! - 参考物是这一刻的 `mkp-sr`；那边将来改了行为，这里会红，**该红**。
-//!
-//! ## 2026-09-12：判据收窄为「除 MKP 标记行外逐字节相同」
-//!
-//! 本仓开始按 MKP 标记协议 v1 往产物里插 `;MKP_BEGIN` / `;MKP_END` / `;MKP_INFO` /
-//! `;MKP_STATS`，参考物里没有这些行。参考物由**来源仓库的 CLI** 生成、在本仓无法复现，
-//! 直接拿本侧输出覆盖它等于把判据变成自比自（彻底空转）。所以改成比对前剔除标记行：
-//! 判据由「逐字节相同」变成「**除新增标记行外**逐字节相同」——
-//! 这比原判据更强，因为它同时证明了标记是纯增量，没有顺带移动或改写任何一行原有输出。
-//!
-//! ## 2026-10-20：再收窄为「除标记行与换笔块外逐字节相同」
-//!
-//! 换笔前后两段的移动高度是**有意偏离**来源实现的（原因见
-//! `docs/GLUE-TRAVEL-Z-SAFETY-2026-10-20.md`：原写法让喷嘴从零净空贴面滑行 120mm、
-//! 装好笔后笔尖只剩 2.8mm 净空，高层会撞倒模型）。这段必然与旧参考不同，
-//! 所以比对前用 `strip_swap_travel_blocks` 把「`;Pre-glue preparation` →
-//! `;Glueing Started`」整段剔除。**不用本侧输出覆盖参考物**——那会让整链判据退化成自比自。
-//! 换笔段改由 `tests/travel_clearance.rs`（净空不等式）+ G1/G2 golden（逐字节）看守。
+//! - 只跑了 A1 一个机型 / 一份输入（`42274.2.gcode`，34 个有效层）；
+//! - `printtime` 只进 stderr，不进字节 ⇒ 字节相同不代表耗时估算相同。
 
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -69,8 +40,8 @@ fn golden_input() -> PathBuf {
     repo_root().join("tests/golden/42274.2.gcode")
 }
 
-fn reference_output() -> PathBuf {
-    repo_root().join("tests/golden/42274.2.e2e-A1.reference.gcode")
+fn baseline_output() -> PathBuf {
+    repo_root().join("tests/golden/42274.2.e2e-A1.config.gcode")
 }
 
 fn config_a1() -> PathBuf {
@@ -98,23 +69,6 @@ fn run_and_read(tag: &str, extra: &[&str]) -> Vec<u8> {
         "-o".into(),
         out_path.to_string_lossy().into_owned(),
     ];
-    /*
-     * 用户偏好（`Ir.prefs`，2026-10-17 落地）的两颗钉子：参考输出 fixture 是按
-     * 「抬升 Z=20 + 跳过震动检测」生成的（= 旧管线的两个写死常量）。这轮把这两档
-     * 变成了**设置页偏好**，出厂档分别改成 100 / 不跳 —— 判据若不钉回去就会假红。
-     * 钉在测试这层（`--set` 盖掉出厂档），fixture 保持"从 IR JSON 派生"的原样
-     * （`pipeline.rs` 的派生判据不许为端到端让路）。
-     */
-    args.extend(
-        [
-            "--set",
-            "Prefs.BeginStageRetractZLiftMm=20",
-            "--set",
-            "Prefs.SkipVibrationCalibration=true",
-        ]
-        .iter()
-        .map(|s| (*s).to_string()),
-    );
     args.extend(extra.iter().map(|s| (*s).to_string()));
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let out = run_cli(&refs);
@@ -127,74 +81,47 @@ fn run_and_read(tag: &str, extra: &[&str]) -> Vec<u8> {
     std::fs::read(&out_path).expect("输出文件应当存在")
 }
 
-/// 剔除 MKP 标记协议 v1 的标记行 —— 判据侧只有
-/// `postprocess::postproc::marks::strip_mark_lines` 这一份实现（全仓 8 处比对共用它；
-/// 分成八份实现就等于八个可能各自跑偏的口径）。
-fn strip_mkp_marks(bytes: &[u8]) -> Vec<u8> {
-    postprocess::postproc::marks::strip_mark_lines(bytes)
-}
-
-/// 剔除「换笔块」（`;Pre-glue preparation` → `;Glueing Started` 之前）后再比对。
-///
-/// **实现只有 `postprocess::postproc::marks::strip_swap_travel_blocks` 这一份**
-/// （换笔段为何偏离参考物、为什么是"剔除"而不是"覆盖参考物"，见那边的注释）。
-fn strip_swap_travel_blocks(bytes: &[u8]) -> Vec<u8> {
-    postprocess::postproc::marks::strip_swap_travel_blocks(bytes)
-}
-
-/// 剔除涂胶段内的抬笔/落笔与走速（2026-11-03 起由发射层按笔尖净空给出，
-/// 与 `mkp-sr` 参考必然不同）；XY 与 E 仍要求逐字节一致。
-fn strip_glue_section_vertical_moves(bytes: &[u8]) -> Vec<u8> {
-    postprocess::postproc::marks::strip_glue_section_vertical_moves(bytes)
-}
-
-/// 剔除塔块结束后的 feature 恢复行（2026-11-04 起塔块末尾会补一条
-/// `; FEATURE: <切片器当前那一档>`，否则模型段整段被预览算成「内墙」）。
-/// 判定锚与实现只有 `postprocess::postproc::marks::strip_tower_feature_restore` 一份。
-fn strip_tower_feature_restore(bytes: &[u8]) -> Vec<u8> {
-    postprocess::postproc::marks::strip_tower_feature_restore(bytes)
-}
-
-/// 统一口径：去换笔块 → 去涂胶段 Z/F → 去塔块 feature 恢复行 → 去标记行。
-fn normalize(bytes: &[u8]) -> Vec<u8> {
-    strip_mkp_marks(&strip_tower_feature_restore(
-        &strip_glue_section_vertical_moves(&strip_swap_travel_blocks(bytes)),
-    ))
-}
-
-/// 整链等价：新项目的输出与 `mkp-sr` 的参考输出**除 MKP 标记行外逐字节相同**。
-#[test]
-fn output_is_byte_identical_to_the_mkp_sr_reference() {
-    let got = normalize(&run_and_read("same", &[]));
-    let want = normalize(&std::fs::read(reference_output()).expect("参考输出 fixture 应当存在"));
-
-    // 先报长度，再逐字节定位——直接 assert_eq! 两个 668KB 的 Vec 会刷屏。
+/// 逐行比、逐行报：两个 600KB 的 Vec 直接 `assert_eq!` 会刷屏，
+/// 而「字节偏移 + 附近 80 字节」在一片相同的 G-code 里指不出是哪一行。
+fn compare_lines(what: &str, got: &[u8], want: &[u8]) {
+    let got_lines = lines_of(got);
+    let want_lines = lines_of(want);
     assert_eq!(
-        got.len(),
-        want.len(),
-        "剔除 MKP 标记行后输出长度与参考不等（本侧 {} 字节 / 参考 {} 字节）",
-        got.len(),
-        want.len()
+        got_lines.len(),
+        want_lines.len(),
+        "{what}: 行数不同（实际 {} 行 / 基线 {} 行）",
+        got_lines.len(),
+        want_lines.len()
     );
-    if let Some(i) = (0..got.len()).find(|&i| got[i] != want[i]) {
-        let from = i.saturating_sub(80);
-        panic!(
-            "第 {i} 字节起与参考不同：\n本侧: {:?}\n参考: {:?}",
-            String::from_utf8_lossy(&got[from..(i + 80).min(got.len())]),
-            String::from_utf8_lossy(&want[from..(i + 80).min(want.len())]),
-        );
+    for (i, (a, b)) in got_lines.iter().zip(want_lines.iter()).enumerate() {
+        assert_eq!(a, b, "{what}: 第 {} 行与基线不同", i + 1);
     }
 }
 
-/// 反空转 ①：参考输出不是输入的副本 —— 否则上一条判据在「管线什么都不做」时也会绿。
+fn lines_of(bytes: &[u8]) -> Vec<String> {
+    String::from_utf8_lossy(bytes)
+        .split_inclusive('\n')
+        .map(str::to_owned)
+        .collect()
+}
+
+/// 整链锁：配置原样进管线，出来的字节必须与基线逐字节相同。
 #[test]
-fn the_reference_is_not_just_a_copy_of_the_input() {
+fn output_matches_the_chain_baseline() {
+    let got = run_and_read("same", &[]);
+    let want = std::fs::read(baseline_output()).expect("整链基线 fixture 应当存在");
+    compare_lines("整链输出", &got, &want);
+}
+
+/// 反空转 ①：基线不是输入的副本 —— 否则上一条判据在「管线什么都不做」时也会绿。
+#[test]
+fn the_baseline_is_not_just_a_copy_of_the_input() {
     let input = std::fs::read(golden_input()).expect("输入 fixture 应当存在");
-    let want = std::fs::read(reference_output()).expect("参考输出 fixture 应当存在");
-    assert!(input != want, "参考输出与输入相同 ⇒ 整链判据是空的");
+    let want = std::fs::read(baseline_output()).expect("整链基线 fixture 应当存在");
+    assert!(input != want, "基线与输入相同 ⇒ 整链判据是空的");
     assert!(
         want.len() > input.len(),
-        "参考输出（{} 字节）没有比输入（{} 字节）长：后处理是往里加涂胶/塔/擦拭动作的，\
+        "基线（{} 字节）没有比输入（{} 字节）长：后处理是往里加涂胶/塔/擦拭动作的，\
          不该变短",
         want.len(),
         input.len()
@@ -203,19 +130,39 @@ fn the_reference_is_not_just_a_copy_of_the_input() {
 
 /// 反空转 ②：字节比对**对配置敏感**。
 ///
-/// 改一个真实旋钮（涂胶遍数 1 → 2）后输出必须与参考不同；否则说明配置根本没走到管线里，
+/// 改一个真实旋钮（涂胶遍数 1 → 2）后输出必须与基线不同；否则说明配置根本没走到管线里，
 /// 上一条判据就只是在比较「两个固定文件」。
 #[test]
 fn the_byte_comparison_is_sensitive_to_the_config() {
-    let baseline = normalize(&run_and_read("baseline", &[]));
-    let perturbed = normalize(&run_and_read("perturbed", &["--set", "Glue.PassCount=2"]));
-    let want = normalize(&std::fs::read(reference_output()).expect("参考输出 fixture 应当存在"));
+    let baseline = run_and_read("baseline", &[]);
+    let perturbed = run_and_read("perturbed", &["--set", "Glue.PassCount=2"]);
+    let want = std::fs::read(baseline_output()).expect("整链基线 fixture 应当存在");
 
-    // 用 assert!(a == b) 而不是 assert_eq!：后者失败时会把两个 668KB 的 Vec 原样打出来
+    // 用 assert!(a == b) 而不是 assert_eq!：后者失败时会把两个 600KB 的 Vec 原样打出来
     // （实测 5.2MB 输出，真正的原因反而被埋了）。
-    assert!(baseline == want, "基线跑法应当与参考一致（前置条件）");
+    assert!(baseline == want, "基线跑法应当与 fixture 一致（前置条件）");
     assert!(
         perturbed != want,
-        "把 Glue.PassCount 改成 2 之后输出仍与参考一致 ⇒ 配置没进管线，整链判据是空的"
+        "把 Glue.PassCount 改成 2 之后输出仍与基线一致 ⇒ 配置没进管线，整链判据是空的"
+    );
+}
+
+/// 手动再生工具。**具名 ignore，不是静默跳过**：平时不跑，否则判据文件被测试自己覆写，
+/// 就再也测不出「文件被改坏了」。
+///
+/// 写盘豁免（`clippy::disallowed_methods`）：写盘纪律管的是**生产代码** ——
+/// 它的风险不在「截断半个文件」，而在「改了判据期望却没人看 diff」。
+/// 兜着后者的是 `#[ignore]`（只能人手触发）与上面那条再生规矩。
+#[test]
+#[ignore = "手动再生：cargo test --test end_to_end -- --ignored regenerate_the_chain_baseline"]
+#[allow(clippy::disallowed_methods)]
+fn regenerate_the_chain_baseline() {
+    let bytes = run_and_read("regen", &[]);
+    let path = baseline_output();
+    std::fs::write(&path, &bytes).expect("写基线");
+    println!(
+        "已写入 {}（{} 字节）—— 提交前必须逐行审查 diff",
+        path.display(),
+        bytes.len()
     );
 }

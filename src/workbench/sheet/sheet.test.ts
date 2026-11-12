@@ -69,7 +69,7 @@ const cols: Col[] = [
     versionUid: null,
     level: 'machine',
     machine: 'A1',
-    label: '机型基底',
+    label: '机型基线',
     items: 0,
   },
 ]

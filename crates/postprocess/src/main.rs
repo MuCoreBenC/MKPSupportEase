@@ -452,9 +452,11 @@ fn cmd_run(gcode: &Path, config: &Path, out: Option<PathBuf>, set: Vec<String>) 
                 )
             );
             for w in &result.warnings {
+                /* 内核产物里存的是键 + 参数，CLI 这一面按**这一趟的语言**渲 */
+                let said = w.text();
                 eprintln!(
                     "{}",
-                    postprocess::diag::messages::text("cli.warning", &[("text", w.as_str())])
+                    postprocess::diag::messages::text("cli.warning", &[("text", said.as_str())])
                 );
             }
             ExitCode::SUCCESS

@@ -81,7 +81,10 @@ fn have_wiping_components(preset_text: &str, name: &str) -> String {
 fn preferred_mode_is_a_verbatim_copy_of_have_wiping_components() {
     let mut seen_values = std::collections::BTreeSet::new();
     for name in PRESET_NAMES {
-        let toml_path = repo_root().join(format!("tests/fixtures/presets/{name}.toml"));
+        // 2026-11-12：IR 判据的输入搬到 `ir/presets/`，与 `fixtures/presets/`
+        // （工作台生成产物的对照基线）分开。后者会随版本 id 改名而增删，
+        // 前者是与 build9 JSON 一对一冻结的判据资产，不该被生成动作碰。
+        let toml_path = repo_root().join(format!("tests/fixtures/ir/presets/{name}.toml"));
         let json_path = repo_root().join(format!("tests/fixtures/ir/build9/{name}.json"));
         let toml_text = std::fs::read_to_string(&toml_path)
             .unwrap_or_else(|e| panic!("读不到 {}: {e}", toml_path.display()));

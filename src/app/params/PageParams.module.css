@@ -429,7 +429,55 @@
   color: var(--warn-ink);
 }
 
+/* 「忽略」是次要动作：做成下划线文字，不跟主按钮抢位置 */
+.syncBarDismiss {
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.syncBarDismiss:hover {
+  color: var(--text-2);
+}
+
+/*
+ * 「更多」页最末尾那条找回入口：一张卡片的宽度、虚线、灰 ——
+ * 只为「能找回来」，不再是横幅。
+ */
+.syncRestoreRow {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-md);
+}
+
+.syncRestoreText {
+  flex: 1 1 auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 忽略之后那一行：矮、虚线、灰 —— 只为「能找回来」，不再占一条横幅的位置 */
+.syncBarOff {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-sm);
+  background: transparent;
+}
+
 .syncBarHint {
+  margin-left: 8px;
   color: var(--text-3);
 }
 
@@ -819,11 +867,16 @@
   padding: 0 14px;
   border: 0;
   border-radius: var(--r-sm);
-  background: #e5484d;
+  /* 实心红底走 token（与 `Btn variant="danger"` 悬停同一支） */
+  background: var(--danger-fill);
   font: inherit;
   font-size: var(--fs-body);
   color: #fff;
   cursor: pointer;
+}
+
+.danger:hover {
+  background: var(--danger-fill-hover);
 }
 
 /* ---------- 窄窗口 ---------- */

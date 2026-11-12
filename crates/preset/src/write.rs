@@ -11,9 +11,9 @@
 //! 3. **输出必须能被 `read_preset_from_bytes` + `load_ir` 读回** —— 这一步由调用方
 //!    （`src-tauri` 的 `preset_apply`）执行，本模块只保证不越权改动。
 //!
-//! 第 1 条**只对用户的预设成立**。`recipe_edit::set_override` 改的是我们自己的配方
-//! （`preset_recipes.toml`），那边**允许新增一行** —— 给新机型补覆盖值本来就得新增。
-//! 两个模块的立场相反是有意的，判据也不同；别把一边的结论搬到另一边。
+//! 第 1 条**只对用户的预设成立**。旧 `recipe_edit::set_override` 曾允许给自己那份配方
+//! 新增一行（给新机型补覆盖值），与这里立场相反；那条链连同 `preset_recipes.toml`
+//! 已于 2026-11-12 整份退役，现在全仓只有这一套写回纪律。
 //!
 //! # 形态不许漂移
 //!
@@ -79,8 +79,17 @@ pub const EDITABLE_KEYS: &[(&str, &str)] = &[
     ("toolhead", "offset_y"),
     ("toolhead", "offset_z"),
     ("toolhead", "MKP_retract"),
+    ("toolhead", "MKP_extrude"),
     ("toolhead", "custom_mount_gcode"),
     ("toolhead", "custom_unmount_gcode"),
+    ("toolhead", "pen_mount_wait_x"),
+    ("toolhead", "pen_mount_wait_y"),
+    ("toolhead", "pen_mount_x"),
+    ("toolhead", "pen_mount_speed"),
+    ("toolhead", "pen_unmount_wait_x"),
+    ("toolhead", "pen_unmount_wait_y"),
+    ("toolhead", "pen_unmount_x"),
+    ("toolhead", "pen_unmount_speed"),
     ("toolhead", "first_pen_revitalization_flag"),
     ("toolhead", "l803_leak_prevent_flag"),
     ("toolhead", "glue_z_offset"),

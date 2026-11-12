@@ -445,6 +445,11 @@ pub fn run() {
             let clean_handle = handle.clone();
             std::thread::spawn(move || crate::retention::prune_if_enabled_app(&clean_handle));
 
+            /* 日志轮转（2026-11-12）：14 天 + 总 20 MiB 双限，见 `obs::rotation`。
+             * 与执行记录同一处、同一个后台节奏 —— 都是"启动别等它"的活。 */
+            let log_handle = handle.clone();
+            std::thread::spawn(move || crate::obs::rotation::prune_app(&log_handle));
+
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -536,6 +541,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 备份与恢复（2026-10-17）：设置页 —— 打一份 zip / 从一份 zip 全量恢复
         ipc::backup::create_backup,
         ipc::backup::restore_backup,
+        // 备份框的默认落点（桌面）与成功之后那颗「打开位置」（2026-11-09）
+        ipc::backup::default_backup_dir,
+        ipc::backup::reveal_backup,
         // 修改历史（2026-10-17）：一份文件一本账，盘上留着
         ipc::history::get_preset_history,
         ipc::history::put_preset_history,
@@ -558,8 +566,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         界面上要能分别打开 */
         ipc::presets::reveal_delivered_file,
         ipc::presets::reveal_slicer_file,
-        // 切片器的「生效」= 复制进切片器自己的用户配置目录（2026-10-09 接通）
+        // 「这份放进了哪些账号目录」—— 右键菜单那个框按它逐行画
+        ipc::presets::get_slicer_placements,
+        // 切片器的「生效」= 放进切片器自己的用户配置目录（每个账号目录一份）
         ipc::presets::copy_to_slicer,
+        // 删除交付行时「连同切片器目录里那份一起删」（删除确认框里那个勾）
+        ipc::presets::remove_slicer_copies,
         // 新数据世界（第一圈）：运行时 catalog，读 `<appDataDir>/catalog.json`
         ipc::catalog::get_runtime_catalog,
         ipc::catalog::get_downloaded_files,
@@ -649,6 +661,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::update::cancel_update,
         ipc::update::install_update,
         ipc::update::open_url,
+        // 交互记录 + 导出日志（2026-11-12）：点击进 `ui.log`；设置页那一行打 zip
+        ipc::diagnostics::log_ui_events,
+        ipc::diagnostics::log_export_plan,
+        ipc::diagnostics::default_log_dir,
+        ipc::diagnostics::export_logs,
+        ipc::diagnostics::reveal_log_export,
     ])
 }
 
@@ -730,6 +748,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 备份与恢复（与上面那份清单一字不差）
         ipc::backup::create_backup,
         ipc::backup::restore_backup,
+        ipc::backup::default_backup_dir,
+        ipc::backup::reveal_backup,
         // 修改历史（与上面那份清单一字不差）
         ipc::history::get_preset_history,
         ipc::history::put_preset_history,
@@ -750,8 +770,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 打开两个落点所在的文件夹（与上面那份清单一字不差）
         ipc::presets::reveal_delivered_file,
         ipc::presets::reveal_slicer_file,
-        // 切片器的「生效」= 复制进切片器自己的用户配置目录（与上面那份清单一字不差）
+        ipc::presets::get_slicer_placements,
+        // 切片器的「生效」= 放进切片器自己的用户配置目录（与上面那份清单一字不差）
         ipc::presets::copy_to_slicer,
+        ipc::presets::remove_slicer_copies,
         // 新数据世界（第一圈）：与上面那份清单保持一字不差
         ipc::catalog::get_runtime_catalog,
         ipc::catalog::get_downloaded_files,
@@ -915,6 +937,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::machines::wb_add_version,
         app::machines::wb_version_orphans,
         app::machines::wb_remove_version,
+        app::machines::wb_set_version_id,
         app::machines::wb_set_version_field,
         app::machines::wb_set_machine_field,
         // 默认视角是分组列表（`wb_desk`）；矩阵退成「同时看几台机器的同一项」那个对比工具
@@ -927,6 +950,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_ui,
         app::wb_save_ui,
         app::wb_preview_bulk,
+        app::wb_preview_attach,
         app::wb_diff_draft,
         // 未保存改动的**逐行** diff（盘上 presets/ ↔ 影子树）。只读
         app::wb_shadow_diff,
@@ -986,6 +1010,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::update::cancel_update,
         ipc::update::install_update,
         ipc::update::open_url,
+        // 交互记录 + 导出日志（2026-11-12）：与客户端那份清单一字不差
+        ipc::diagnostics::log_ui_events,
+        ipc::diagnostics::log_export_plan,
+        ipc::diagnostics::default_log_dir,
+        ipc::diagnostics::export_logs,
+        ipc::diagnostics::reveal_log_export,
         // ★ **发布软件版本**（第四刀）：闸 / 事务 / 历史各一条 —— 与 CLI 同一个内核
         app::release_tx::wb_release_preflight,
         app::release_tx::wb_release_software,

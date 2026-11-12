@@ -1,3 +1,4 @@
+import type { SlicerTarget } from '../contract'
 import { t } from '../../i18n'
 import { allPresetFiles } from './resources'
 
@@ -86,48 +87,129 @@ export function localFileIds(): string[] {
  */
 
 // ——————————————————————————————————————————————————————————————
-// 已复制到切片器目录的
+// 已放进切片器目录的
 // ——————————————————————————————————————————————————————————————
 
-/**
- * 哪些切片器 profile 已经躺进切片器自己的 profile 目录了。**可写的内存集合。**
- *
- * 切片器文件光下到本机**没用** —— 它得在切片器的目录里才生效。所以两种类型的「生效」
- * 是两件事：
- *
- *   MKP     生效 = 设为当前配置       状态 已应用 / 未应用
- *   切片器   生效 = 复制到切片器目录    状态 已复制 / 未复制
- *
- * 演示集合挑「MKPProcess A1 0.4 0.20.json」（它同时也在「本机已有」里）——
- * 这样默认那一屏能同时看到「已复制」和「未复制」两种行。
- *
- * **键是文件名**（2026-10-09 起）：与真机 `copy_to_slicer` / `get_slicer_copied`
- * 同一个取用口径（下载 / 应用 / 读正文也都认它），不再用资产库的 asset id。
- */
-const DEMO_SLICER_COPIED = new Set<string>(['MKPProcess A1 0.4 0.20.json'])
+/** 假后端里的两个切片器与它们各自的账号目录（真机上就是 `user/<账号>/process`） */
+const DEMO_SLICER_ACCOUNTS: Record<SlicerTarget, string[]> = {
+  bambu: ['2046724740', 'default'],
+  /* Orca 那一档少一个账号：框里能看出"另一个切片器也有落点" */
+  orca: ['default'],
+}
 
-/** 已复制到切片器目录的**文件名**。返回副本，调用方改不到这份状态 */
+/** `切片器/账号` → 那一格已经躺进了哪几份文件。**可写的内存集合。** */
+const DEMO_SLICER_PLACED = new Map<string, Set<string>>([
+  ['bambu/2046724740', new Set(['MKPProcess A1 0.4 0.20.json'])],
+  ['bambu/default', new Set(['MKPProcess A1 0.4 0.20.json'])],
+])
+
+/** 那一格（账号目录）的演示路径（浏览器里没有磁盘，形状照真机给） */
+function demoProcessPath(slicer: SlicerTarget, account: string): string {
+  const app = slicer === 'bambu' ? 'BambuStudio' : 'OrcaSlicer'
+  return `~/Library/Application Support/${app}/user/${account}/process`
+}
+
+/** 这份预设归哪个切片器（与真后端 `slicer_of_kind` 同一口径） */
+const DEMO_SLICER_OF_KIND: Record<string, SlicerTarget> = { bbs_config: 'bambu' }
+
+/**
+ * 已放进切片器的**文件名**。返回副本，调用方改不到这份状态。
+ *
+ * 与真机同一个口径：**自己那个切片器**的每一个账号目录里都有才算「已放入」
+ * （别的切片器那一档是手动放的，不算进"这一份生效了没有"）。
+ */
 export function slicerCopied(): string[] {
-  return [...DEMO_SLICER_COPIED]
+  return allPresetFiles()
+    .filter((file) => {
+      const own = DEMO_SLICER_OF_KIND[file.kind]
+      if (own === undefined) return false
+      return DEMO_SLICER_ACCOUNTS[own].every((account) =>
+        DEMO_SLICER_PLACED.get(`${own}/${account}`)?.has(file.fileName) === true,
+      )
+    })
+    .map((file) => file.fileName)
 }
 
 /**
- * 复制某个切片器 profile 到切片器目录。**只改内存，刷新还原。**
- *
- * 真后端在这里的真实失败：不是切片器配置、本机没有那份字节；**目标已有同名就换掉它**
- * （2026-10-13 作者改判「有相同的就覆盖吧」—— 原来是拒的，理由是"那份可能被用户在
- * 切片器里改过"）。假后端没有磁盘，所以只校验"类型对不上"——
- * 传错类型静默成功的话，界面上会出现「已复制一个 MKP 预设」这种说不通的状态。
- *
- * 回一句结果：这次是**替换**（那儿原来就有一份同名的）还是**新建**（与真后端同一个形状）。
+ * 这份在**每个切片器的每个账号目录**里的实况（与真后端 `get_slicer_placements`
+ * 同一个形状：自己那一档在前，本机装了的另一个切片器跟在后面）。
  */
-export function copyToSlicerIn(fileName: string): boolean {
+export function slicerPlacements(fileName: string): {
+  available: boolean
+  reason: string | null
+  dirs: { slicer: SlicerTarget; account: string; path: string; placed: boolean }[]
+} {
   const hit = allPresetFiles().find((f) => f.fileName === fileName)
   if (hit === undefined) throw new Error(t('mock.slicer.noSuchFile', { file: fileName }))
-  if (hit.kind === 'mkp_preset') {
-    throw new Error(t('mock.slicer.notMKP', { file: hit.fileName }))
+  const own = DEMO_SLICER_OF_KIND[hit.kind]
+  if (own === undefined) throw new Error(t('mock.slicer.notMKP', { file: hit.fileName }))
+  const order: SlicerTarget[] = own === 'bambu' ? ['bambu', 'orca'] : ['orca', 'bambu']
+  return {
+    available: true,
+    reason: null,
+    dirs: order.flatMap((slicer) =>
+      DEMO_SLICER_ACCOUNTS[slicer].map((account) => ({
+        slicer,
+        account,
+        path: demoProcessPath(slicer, account),
+        placed: DEMO_SLICER_PLACED.get(`${slicer}/${account}`)?.has(fileName) === true,
+      })),
+    ),
   }
-  const replaced = DEMO_SLICER_COPIED.has(fileName)
-  DEMO_SLICER_COPIED.add(fileName)
-  return replaced
+}
+
+/**
+ * 把这份从**它自己那个切片器**的每个账号目录里删掉（删除确认框里那个勾）。
+ * 返回删掉了几份；本来就不在 = 0。别的切片器与云端一概不碰。
+ */
+export function removeSlicerCopiesIn(fileName: string): number {
+  const hit = allPresetFiles().find((f) => f.fileName === fileName)
+  if (hit === undefined) return 0
+  const own = DEMO_SLICER_OF_KIND[hit.kind]
+  if (own === undefined) return 0
+  let removed = 0
+  for (const account of DEMO_SLICER_ACCOUNTS[own]) {
+    const cell = `${own}/${account}`
+    const placed = DEMO_SLICER_PLACED.get(cell)
+    if (placed?.delete(fileName) === true) removed += 1
+  }
+  return removed
+}
+
+/**
+ * 把某个切片器 profile 放进切片器目录（`slicer` 不给 = 它自己那一档；`account` 给了就
+ * 只放那一个账号）—— **只改内存，刷新还原。**
+ *
+ * 真后端在这里的真实失败：不是切片器配置、本机没有那份字节、认不出的切片器 / 账号目录；
+ * **目标已有同名就换掉它**（2026-10-13 作者改判「有相同的就覆盖吧」）。假后端没有磁盘，
+ * 所以只校验"类型对不上"与"不认识的切片器 / 账号"—— 静默成功的话，界面上会出现
+ * 「放入一个 MKP 预设」这种说不通的状态。
+ */
+export function copyToSlicerIn(
+  fileName: string,
+  slicer?: SlicerTarget,
+  account?: string,
+): { replaced: boolean; targets: number } {
+  const hit = allPresetFiles().find((f) => f.fileName === fileName)
+  if (hit === undefined) throw new Error(t('mock.slicer.noSuchFile', { file: fileName }))
+  const own = DEMO_SLICER_OF_KIND[hit.kind]
+  if (own === undefined) throw new Error(t('mock.slicer.notMKP', { file: hit.fileName }))
+  const target = slicer ?? own
+  const accounts = DEMO_SLICER_ACCOUNTS[target]
+  if (accounts === undefined) {
+    throw new Error(t('mock.slicer.unknownSlicer', { slicer: target }))
+  }
+  const wanted = account === undefined ? accounts : [account]
+  let replaced = false
+  for (const wanted_account of wanted) {
+    if (!accounts.includes(wanted_account)) {
+      throw new Error(t('mock.slicer.unknownAccount', { account: wanted_account }))
+    }
+    const cell = `${target}/${wanted_account}`
+    const placed = DEMO_SLICER_PLACED.get(cell) ?? new Set<string>()
+    if (placed.has(fileName)) replaced = true
+    placed.add(fileName)
+    DEMO_SLICER_PLACED.set(cell, placed)
+  }
+  return { replaced, targets: wanted.length }
 }

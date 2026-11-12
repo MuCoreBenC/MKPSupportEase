@@ -1,0 +1,184 @@
+/*
+ * 「查看放入情况」那个框的样式（2026-11-10）。
+ *
+ * 形制照报告页「导出执行报告」那一套：**平铺行 + 发丝线**，不做卡片气泡 ——
+ * 左边一枚小图标、中间两行字（账号名 + 目录路径）、右边徽章与动作按钮。
+ * 只用现有 token，不引新的颜色。
+ */
+
+/* 还没读到 / 没有账号目录时那一句 */
+.hint {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  line-height: 1.6;
+}
+
+/*
+ * 一组 = 一个切片器。组与组之间留一段空当，标题用产品名（Bambu Studio / OrcaSlicer），
+ * 后面的「另一个切片器 · 字段表不一样」只挂在非自己那一档上。
+ */
+.groups {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.group + .group {
+  margin-top: 8px;
+}
+
+.groupHead {
+  margin: 0;
+  padding: 2px 2px 4px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+/* 别的切片器那句说明：比标题再淡一档，读起来像注解而不是警告 */
+.groupNote {
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* 最后一行不留收口线（与导出框同一条） */
+.row:last-child {
+  border-bottom: 0;
+}
+
+.rowIcon {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  color: var(--text-3);
+}
+
+/* 已放入那一格换成强调色（同一格同一尺寸，状态切换时行不长高） */
+.row[data-placed] .rowIcon {
+  color: var(--accent);
+}
+
+.rowMeta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rowName {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 账号目录名（数字 uid / `default` / `BBL`）—— 拖得动，用户可能要抄它 */
+.account {
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  line-height: 1.5;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* `default` 后面那枚小标签：它是"没登录时用的那一套"，不说清会被当成真账号 */
+.tag {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* 目录路径：一行、中间不留白，长了省略号；全文在 `data-tip` 上 */
+.rowPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--text-3);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 徽章：已放入 = 浅绿底深绿字；未放入 = 浅灰底灰字 */
+.badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+.badge[data-on] {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+/* 右侧那组动作：未放入先给一颗「放入」，再是恒有的「打开文件夹」 */
+.rowActs {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 「打开文件夹」那颗小方钮（形制照导出框的 `.srcAct`） */
+.iconBtn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-solid);
+  color: var(--text-2);
+}
+
+.iconBtn:hover {
+  color: var(--text-1);
+  border-color: var(--text-3);
+}
+
+/* 页脚左边那一簇（「全部放入」）：把关闭按钮推到另一头，页脚高度由按钮撑着 */
+.footLeft {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}

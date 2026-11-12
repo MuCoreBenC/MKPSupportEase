@@ -2,7 +2,7 @@
  * 两条分段控件（同级尺码 + **拆开**）。
  *
  * 作者：「让 MKP配置/切片器配置 变小，跟本地/云端差不多高」「两组不要挨着」——
- * 原本 38px 的那一级退回 32px；位置那条带 `.segPush`（auto 边距）归入右簇，
+ * 原本 38px 的那一级退回 32px；位置那条跟着外层 `.cluster`（auto 边距）归入右簇，
  * 与机型 / 搜索挨在一起。左 = 我在看什么类型；右 = 我从哪里看、怎么筛。
  *
  * 配方同校准页 `.rail/.tab`：灰底槽（--surface-sunken、1px --line 边框、--r-sm 外圈、
@@ -22,8 +22,19 @@
   background: var(--surface-sunken);
 }
 
-/* 位置那条：auto 边距把它推到右簇（与机型 / 搜索挨着） */
-.segPush {
+/*
+ * 右簇：位置分段 + 排在它**左边**的那一颗（今天只有「云端」表的刷新）。
+ *
+ * auto 边距原来直接挂在分段自己身上（`.segPush`）；多了左边那颗之后挪到这一层 ——
+ * 否则 auto 边距只会把分段推过去，刷新留在类型分段旁边，与它要刷的那一格隔着半个窗宽。
+ * 中间的距离跟工具栏同一条 clamp（右边那颗搜索框也吃这条）。
+ */
+.cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: clamp(8px, 1.1vw, 12px);
+  flex-shrink: 0;
+  min-width: 0;
   margin-left: auto;
 }
 

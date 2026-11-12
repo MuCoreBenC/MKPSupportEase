@@ -95,6 +95,8 @@ pub(crate) mod keys {
     pub const MACHINE_DISABLED: &str = "hook.machine_disabled";
     pub const CALIB_MODE_QUESTION: &str = "hook.calib_mode_question";
     pub const CALIB_STOPPED: &str = "hook.calib_stopped";
+    /// 强制校准模式开着、但外形对不上任何一块校准板 ⇒ 停下（原文件不动）
+    pub const CALIB_NOT_RECOGNIZED: &str = "hook.calib_not_recognized";
     /* 挪塔那一问（2026-10-18）：设置页「智能塔位置」开着且真撞了才问 */
     pub const TOWER_RELOCATION_QUESTION: &str = "hook.tower_relocation_question";
     /// 挪完了、复检通过（成功句）
@@ -109,6 +111,11 @@ pub(crate) mod keys {
     pub const CHOICE_TOWER_RELOCATE_HINT: &str = "hook.choice_tower_relocate_hint";
     pub const CHOICE_TOWER_MODEL: &str = "hook.choice_tower_model";
     pub const CHOICE_TOWER_MODEL_HINT: &str = "hook.choice_tower_model_hint";
+    pub const DEBUG_PLAN_STOPPED: &str = "hook.debug_plan_stopped";
+    /// 调试那一问的坐标概要（两段「等待位 → 目标位」）
+    pub const DEBUG_PLAN_SUMMARY: &str = "hook.debug_plan_summary";
+    /// 同上，末尾多一句「测 N 遍」（`repeat > 1` 时才用这条）
+    pub const DEBUG_PLAN_SUMMARY_REPEAT: &str = "hook.debug_plan_summary_repeat";
     pub const CHOICE_CALIB_PRINT: &str = "hook.choice_calib_print";
     pub const CHOICE_CALIB_PRINT_HINT: &str = "hook.choice_calib_print_hint";
     pub const CHOICE_CALIB_DIRECT: &str = "hook.choice_calib_direct";
@@ -153,6 +160,7 @@ const ALL_KEYS: &[&str] = &[
     keys::MACHINE_DISABLED,
     keys::CALIB_MODE_QUESTION,
     keys::CALIB_STOPPED,
+    keys::CALIB_NOT_RECOGNIZED,
     keys::CALIB_DONE_PRINT,
     keys::CALIB_DONE_DIRECT,
     keys::CANCELLED,
@@ -171,6 +179,8 @@ const ALL_KEYS: &[&str] = &[
     keys::LINE_STOPPED,
     keys::LINE_CANCELLED,
     keys::LOG_PATH,
+    keys::DEBUG_PLAN_SUMMARY,
+    keys::DEBUG_PLAN_SUMMARY_REPEAT,
 ];
 
 /// 一条「原因」：**文案键 + 具名参数**，句子按面现场渲染（界面 / 切片器 / 记录 / 日志）。
@@ -436,7 +446,10 @@ pub struct Outcome {
     pub output: PathBuf,
     pub elapsed_ms: u128,
     /// 内核给的警告：**逐条给用户看**（不是日志）—— 比如"这一盘没有支撑"。
-    pub warnings: Vec<String>,
+    ///
+    /// 存的是**指代**（键 + 参数）而不是句子：归档要活过语言切换（见
+    /// [`messages::MessageRef`]）。要显示时调 `.text()`，按这一趟的语言渲。
+    pub warnings: Vec<messages::MessageRef>,
     /// 打印时间估算**交出去**了（这一趟没算）：交给常驻进程补全。
     /// `None` = 这一趟已经自己算完（或压根不需要）。
     pub deferred_print_time: Option<DeferredPrintTime>,
@@ -474,6 +487,14 @@ pub trait Asker {
     ///
     /// 默认实现给"没有界面"那一档用：不会替用户决定，一律 `None`。
     fn ask_calibration(&mut self, _question: &str) -> Option<String> {
+        None
+    }
+
+    /// 调试那一问（2026-11-11）：这一趟测落笔 / 收笔 / 两个都测。
+    ///
+    /// 返回被选中的 id；`None` = 没有界面 / 超时 —— 那时**不拦**，
+    /// 按偏好里存的那一组跑（调试本来就是自己人用）。
+    fn ask_debug_plan(&mut self, _question: &str) -> Option<String> {
         None
     }
 }
@@ -610,6 +631,14 @@ fn result_facts(done: &postprocess::pipeline::ProcessResult) -> crate::hook_ipc:
         print_time_seconds: done.print_time.as_ref().map(|pt| pt.total_seconds),
         glue_length_mm: done.stats.pass1.glue_total_length,
         slicer: done.stats.pass1.slicer_version.clone(),
+        /* 层高范围：`0` 是"量不出来"的哨兵（层数太少），到这一层换成 `None` —— 界面据此
+        退回开场事实里切片器标称的那个数，不把 0 当成 `0.00 mm` 摆出去 */
+        layer_height_min: (done.stats.pass1.layer_height_max > 0.0)
+            .then_some(done.stats.pass1.layer_height_min),
+        layer_height_max: (done.stats.pass1.layer_height_max > 0.0)
+            .then_some(done.stats.pass1.layer_height_max),
+        /* 调试那一趟的坐标概要：结果页要摆，正常那一趟是 `None`（那一行不出现） */
+        debug: done.debug.clone(),
     }
 }
 
@@ -623,6 +652,58 @@ fn result_facts(done: &postprocess::pipeline::ProcessResult) -> crate::hook_ipc:
 /// 延后能省几百毫秒；但没人接手时传 `true` 会让那条记录永远停在"正在估算"。
 ///
 /// `ui`：只给界面看的那一条（开场那条 `Hello`，事实跟着它一起走），没有界面时传 [`UiLine::Silent`]。
+/// 调试那一问的正文：非高级模式报两段「等待位 → 目标位」与速度，
+/// 高级模式只报行数（代码本身太长，塞进提示卡会把那一屏撑爆，想看就在设置窗里看）。
+fn debug_plan_summary(d: &postprocess::ir::types::DebugIr) -> String {
+    if let Some(code) = &d.custom_gcode {
+        /* 高级模式：把那段代码原样摆出来（前端按 `\n` 拆行，卡里滚动）。
+        只报"共 N 行"的话，作者没法在动手前确认自己写的那几行对不对。 */
+        let body: Vec<&str> = code.lines().filter(|l| !l.trim().is_empty()).collect();
+        if !body.is_empty() {
+            return body.join("\n");
+        }
+    }
+    /*
+     * 两段各报「等待位 → 目标位」：等待位没单独定过（`None` = 跟随驻点位）时
+     * 就写驻点位那个数 —— 这一句说的是**这一趟会走到哪**，不是设置窗里的勾选状态。
+     */
+    let wait = if d.move_y {
+        format!("{} Y{}", num_or_int(d.wait_x), num_or_int(d.wait_y))
+    } else {
+        num_or_int(d.wait_x)
+    };
+    let mount_wait = num_or_int(d.mount_wait_x.unwrap_or(d.wait_x));
+    let mount = num_or_int(d.mount_x);
+    let unmount_wait = num_or_int(d.unmount_wait_x.unwrap_or(d.wait_x));
+    let unmount = num_or_int(d.unmount_x);
+    let speed = num_or_int(d.speed);
+    let args = [
+        ("wait", wait.as_str()),
+        ("mw", mount_wait.as_str()),
+        ("mx", mount.as_str()),
+        ("uw", unmount_wait.as_str()),
+        ("ux", unmount.as_str()),
+        ("speed", speed.as_str()),
+    ];
+    if d.repeat > 1 {
+        let repeat = d.repeat.to_string();
+        let mut with_repeat = args.to_vec();
+        with_repeat.push(("repeat", repeat.as_str()));
+        messages::text(keys::DEBUG_PLAN_SUMMARY_REPEAT, &with_repeat)
+    } else {
+        messages::text(keys::DEBUG_PLAN_SUMMARY, &args)
+    }
+}
+
+/// 整数不带小数点（与内核 `num()` 同一口径）
+fn num_or_int(v: f64) -> String {
+    if v.fract().abs() < 1e-9 {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
+    }
+}
+
 pub fn run(
     job: &HookJob,
     sink: &mut dyn ProgressSink,
@@ -690,7 +771,7 @@ pub fn run(
 
     // 归档第一笔：**原件先备份**。原地覆盖模式下原文件会被处理后的内容盖掉，
     // 这一笔是它唯一的副本。失败只降级成警告：产物优先（见 `crate::archive` 模块头）。
-    let mut archive_warnings: Vec<String> = Vec::new();
+    let mut archive_warnings: Vec<messages::MessageRef> = Vec::new();
     let archived = archive_begin(&job.gcode, &raw, &mut archive_warnings);
 
     /*
@@ -748,10 +829,12 @@ pub fn run(
      *   缺了它按出厂档跑仍然是对的 —— 与 `usage` 那个账同一个口径（提示而非用户资产）。
      *   记录也照落，只是那几档是出厂值。
      */
-    if let Some(root) = crate::fsx::paths::internal_root_headless() {
-        if let Ok(prefs) = crate::runtime::app_state::resolved_postproc_prefs(&root) {
-            crate::runtime::postproc_prefs::apply_to_ir(&mut ir, &prefs);
-        }
+    /* ★ 读一次、留着：后面「强制校准模式」那一档也要它（原来它只活在 `if let` 里，
+     *   判定点拿不到）。读不出来不阻断这一趟 —— 缺了它按出厂档跑仍然是对的。 */
+    let postproc_prefs = crate::fsx::paths::internal_root_headless()
+        .and_then(|root| crate::runtime::app_state::resolved_postproc_prefs(&root).ok());
+    if let Some(prefs) = &postproc_prefs {
+        crate::runtime::postproc_prefs::apply_to_ir(&mut ir, prefs);
     }
 
     /*
@@ -950,7 +1033,77 @@ pub fn run(
      * **不猜**：不看正文里的旧注释、不看尺寸、不看文件名（2026-10-18 删掉的那条
      * G-code 标记链就是"看了会给出错答案"的例子）。
      */
-    let calib_mode = mode_of(&identity_probe);
+    /* 身份定案的三条口径（2026-11-12 加第三档）：
+     *
+     *   ① 调试在跑 ⇒ 一律普通模型（`Mode::None`）：调试那一趟只跑动作，跟校准无关，
+     *      否则会先弹校准那一问、再弹调试那一问（要答两次），碰撞还会在调试之前把这一趟掐掉；
+     *   ② 强制校准模式（设置页开关）⇒ **不看 3MF 身份**，只按实测外形认；对不上就停下
+     *      （原文件不动），提示用户去关掉开关；
+     *   ③ 出厂档 ⇒ 3MF 有身份才认，并用外形纠正合并文件里读错的那一盘（见 `decide_calibration`）。
+     */
+    let calib_mode = if ir.debug.is_some() {
+        calibration::Mode::None
+    } else {
+        let force = postproc_prefs
+            .as_ref()
+            .is_some_and(|p| p.force_calibration_mode);
+        let verdict = match postprocess::postproc::machine_dims::tables().calibration_models() {
+            Some(profiles) => postprocess::postproc::calib_models::decide_calibration(
+                force,
+                mode_of(&identity_probe),
+                calibration_size(&content),
+                profiles,
+            ),
+            /* 档表没装载（预设目录缺）：强制模式下无从判断 ⇒ 与「对不上」同一条路；
+             * 出厂档下保持 3MF 那条原判。 */
+            None if force => postprocess::postproc::calib_models::CalibVerdict::Unrecognized,
+            None => postprocess::postproc::calib_models::decide_calibration(
+                false,
+                mode_of(&identity_probe),
+                None,
+                &[],
+            ),
+        };
+        match verdict {
+            postprocess::postproc::calib_models::CalibVerdict::Calibration(m) => m,
+            postprocess::postproc::calib_models::CalibVerdict::NotCalibration => {
+                calibration::Mode::None
+            }
+            /* 强制模式下认不出 ⇒ **停下**：静默降级成普通模型会把校准板当模型打出来。
+             * 出口与"校准那一问答了停止"同一条（归档 + 原文件不动）。 */
+            postprocess::postproc::calib_models::CalibVerdict::Unrecognized => {
+                let err = HookError::bad_input(Reason::new(keys::CALIB_NOT_RECOGNIZED));
+                let ff = FailureFacts::capture(
+                    &ir,
+                    &content,
+                    &raw,
+                    job,
+                    "",
+                    &opening_slicer,
+                    opening_layer_height,
+                    opening_nozzle,
+                );
+                archive_failure(
+                    &archived,
+                    job,
+                    &preset_machine,
+                    &err,
+                    true,
+                    raw.len() as u64,
+                    started_at,
+                    started,
+                    /* 管线还没进（判在读身份这一步），没有步骤账 */
+                    Vec::new(),
+                    None,
+                    Some(&ff),
+                    relocation.as_ref(),
+                    model_map_from(&content, Some(&ir)),
+                    &identity_probe,
+                );
+                return Err(err);
+            }
+        }
+    };
     if let (true, Some(client)) = (
         postprocess::postproc::calibration::is_any(calib_mode),
         ui.client(),
@@ -1052,6 +1205,27 @@ pub fn run(
         current: None,
         done: Vec::new(),
     };
+    /*
+     * 调试那一问（2026-11-11）：开跑前问「这一趟测哪些动作」。
+     *
+     * 答案**直接改 IR 上那两个开关** —— 用户当场说的，比偏好文件里存的优先。
+     * 没界面 / 超时（`None`）就不拦，按偏好跑：调试是自己人用，不该卡住。
+     * 位置必须在 `ir` 被搬进管线**之前**（下面那段 `pipeline::process_with_ir…` 按值搬）。
+     */
+    if let Some(dbg) = ir.debug.as_ref() {
+        if let Some(client) = ui.client() {
+            let mut asker = ChannelAsker { client };
+            match asker.ask_debug_plan(&debug_plan_summary(dbg)) {
+                /* 继续：**原样按 IR 跑**（动作用户自己定，界面不替他挑） */
+                Some(id) if id == crate::hook_ipc::CHOICE_KEEP => {}
+                /* 停止 / 超时 / 认不出的答复：这一趟不跑 */
+                _ => {
+                    return Err(HookError::stopped(Reason::new(keys::DEBUG_PLAN_STOPPED)));
+                }
+            }
+        }
+    }
+
     let ask: Option<&mut dyn TowerAsk> = tower_ask.as_mut().map(|a| a as &mut dyn TowerAsk);
     /*
      * 模型俯视几何**在 IR 被搬进管线之前**算好（2026-10-27）：管线按值收 IR，
@@ -1248,16 +1422,16 @@ fn record_id_of(paths: &ArchivePaths) -> String {
 fn archive_begin(
     gcode: &std::path::Path,
     raw: &str,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<messages::MessageRef>,
 ) -> Option<ArchivePaths> {
     let Some(root) = crate::archive::history_root() else {
-        warnings.push(messages::text(keys::ARCHIVE_UNAVAILABLE, &[]));
+        warnings.push(messages::MessageRef::new(keys::ARCHIVE_UNAVAILABLE, &[]));
         return None;
     };
     match crate::archive::begin(&root, gcode, raw, crate::archive::now_local()) {
         Ok(paths) => Some(paths),
         Err(e) => {
-            warnings.push(messages::text(
+            warnings.push(messages::MessageRef::new(
                 keys::ARCHIVE_BACKUP_FAILED,
                 &[("detail", &e.to_string())],
             ));
@@ -1288,7 +1462,7 @@ fn archive_success(
     opening_nozzle: f64,
     started_at: time::OffsetDateTime,
     started: std::time::Instant,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<messages::MessageRef>,
     relocation: Option<&crate::archive::RelocationRecord>,
     // 校准件身份探测结果（在机型核对之前那一次读盘拿到的，见 `probe_model_identity`）
     identity: &postprocess::gcode::IdentityProbe,
@@ -1299,7 +1473,7 @@ fn archive_success(
         None
     } else {
         if let Err(e) = crate::archive::archive_output(paths, &done.output_path) {
-            warnings.push(messages::text(
+            warnings.push(messages::MessageRef::new(
                 keys::ARCHIVE_OUTPUT_FAILED,
                 &[("detail", &e.to_string())],
             ));
@@ -1308,7 +1482,7 @@ fn archive_success(
             Ok(sha) => match crate::archive::file_fact(&done.output_path, None, sha) {
                 Ok(fact) => Some(fact),
                 Err(e) => {
-                    warnings.push(messages::text(
+                    warnings.push(messages::MessageRef::new(
                         keys::ARCHIVE_FACT_FAILED,
                         &[("detail", &e.to_string())],
                     ));
@@ -1316,7 +1490,7 @@ fn archive_success(
                 }
             },
             Err(e) => {
-                warnings.push(messages::text(
+                warnings.push(messages::MessageRef::new(
                     keys::ARCHIVE_SHA_FAILED,
                     &[("detail", &e.to_string())],
                 ));
@@ -1434,6 +1608,19 @@ fn archive_success(
         calibration: calibration_facts(identity, done),
         /* 参数快照：预设 TOML 那一刻的值 + IR 终态（见 `archive::ParamSnapshot`） */
         snapshot: facts.snapshot(),
+        /* 调试那一趟的参数 —— 普通那趟是 `None`，这一格就缺键 */
+        debug: done.debug.as_ref().map(|d| crate::archive::DebugFacts {
+            wait_x: d.wait_x,
+            wait_y: d.wait_y,
+            /* 两组等待位：`None` = 跟随驻点位，报告里写 `null`，写回据此跳过 */
+            mount_wait_x: d.mount_wait_x,
+            unmount_wait_x: d.unmount_wait_x,
+            mount_x: d.mount_x,
+            unmount_x: d.unmount_x,
+            speed: d.speed,
+            test_mount: d.test_mount,
+            test_unmount: d.test_unmount,
+        }),
     };
     let meta = Meta {
         schema_version: Meta::SCHEMA_VERSION,
@@ -1449,8 +1636,13 @@ fn archive_success(
         model_name: done.header_facts.model_name.clone(),
         /* 拉起这一趟的那个切片器进程（父进程）—— 引导层靠它认"我刚才切的那一份" */
         slicer_pid: crate::parent::pid(),
+        // 这份产物是哪一次编译写的（与启动日志同一串）："明明修了还在"时先看这一格
+        build: Some(crate::build_fingerprint()),
         invocation: crate::archive::invocation(),
-        warnings: done.warnings.clone(),
+        /* 句子与指代都写：`warnings` 是这一刻的语言（人肉排查 / 老读者），
+        `warningRefs` 才是真值 —— 报告页按**打开时**的语言重说（见 `ipc::report`） */
+        warnings: done.warnings.iter().map(|w| w.text()).collect(),
+        warning_refs: Some(done.warnings.clone()),
         error: None,
         error_key: None,
         error_args: None,
@@ -1467,7 +1659,7 @@ fn archive_success(
         detail,
     };
     if let Err(e) = crate::archive::write_meta(paths, &meta) {
-        warnings.push(messages::text(
+        warnings.push(messages::MessageRef::new(
             keys::ARCHIVE_META_FAILED,
             &[("detail", &e.to_string())],
         ));
@@ -1633,8 +1825,13 @@ fn archive_failure(
         model_name: postprocess::gcode::model_name(&job.gcode),
         /* 失败 / 取消也记：这一趟同样是**那个**切片器拉起来的（见成功那一处） */
         slicer_pid: crate::parent::pid(),
+        // 这份产物是哪一次编译写的（与启动日志同一串）："明明修了还在"时先看这一格
+        build: Some(crate::build_fingerprint()),
         invocation: crate::archive::invocation(),
+        /* 失败 / 取消那几条出口没有内核警告；空数组 = "这一格是新的、确实没有"，
+        与"旧记录没这一格"（`null`）分得开 */
         warnings: Vec::new(),
+        warning_refs: Some(Vec::new()),
         error: Some(error),
         /*
          * ★ 存**原因键 + 参数**，不是"拿整句去反查"（2026-10-31 修）。
@@ -1667,6 +1864,8 @@ fn archive_failure(
         model_map,
         relocation: relocation.cloned(),
         detail: Detail {
+            /* 失败那趟不记调试参数：没写产物，记下来也解释不了什么 */
+            debug: None,
             input_file: input_fact(&job.gcode, input_size_bytes, None, ""),
             output_file: None,
             stats: None,
@@ -1704,6 +1903,15 @@ fn mode_of(identity: &postprocess::gcode::IdentityProbe) -> calibration::Mode {
         .as_deref()
         .and_then(calibration::parse_mode_id)
         .unwrap_or(calibration::Mode::None)
+}
+
+/// 实测外形（宽, 高）：`compute_bbox` 的挤出包围盒；算不出来 = `None`。
+///
+/// 强制校准模式下 `None` 与「对不上任何一块板」同一条路 —— 没有外形就没有依据，不猜。
+fn calibration_size(content: &[String]) -> Option<(f64, f64)> {
+    postprocess::postproc::disk::compute_bbox(content)
+        .ok()
+        .map(|b| (b.x_max - b.x_min, b.y_max - b.y_min))
 }
 
 /// 校准件验收那一组（`detail.calibration`）—— **只搬运，不判定**。
@@ -2135,6 +2343,20 @@ impl Asker for ChannelAsker<'_> {
         )
     }
 
+    /// 调试那一问：**只展示、不选择**（2026-11-11 作者第二版）。
+    ///
+    /// 作者：「不需要这 3 个按钮了，它就是按照我输入的代码去测试的，没必要，
+    /// 但还是要弹出这个窗口让用户看一下」—— 于是问题正文里带上这一趟要跑的
+    /// 坐标 / 动作概要，按钮回到默认那两颗（继续 / 停下）。
+    fn ask_debug_plan(&mut self, question: &str) -> Option<String> {
+        self.client.ask(
+            crate::hook_ipc::QKIND_DEBUG_PLAN,
+            question,
+            Vec::new(),
+            crate::hook_ipc::CHOICE_STOP,
+        )
+    }
+
     /// 校准件那一问：两个选项摆给界面（`print` 主、`direct` 次），超时 = `stop`。
     fn ask_calibration(&mut self, question: &str) -> Option<String> {
         use crate::hook_ipc::{
@@ -2469,7 +2691,8 @@ fn finished_payload(
             exit_code: EXIT_OK,
             elapsed_ms: out.elapsed_ms as u64,
             output: Some(out.output.display().to_string()),
-            warnings: out.warnings.clone(),
+            /* 界面那一面要**句子**（模态框当场就摆）；记录那一面存了指代，语言到打开时再定 */
+            warnings: out.warnings.iter().map(|w| w.text()).collect(),
             /* 结果读数：成功才有（失败 / 取消时内核没把这几个数算出来 —— 空着） */
             result: Some(out.result.clone()),
             /* 校准件那一趟选了哪种跑法 —— 界面与报告据此分开说"两种成功" */
@@ -2550,7 +2773,8 @@ pub fn report(done: Result<Outcome, HookError>, log: Option<&Path>) -> u8 {
             eprintln!("{line}");
             // 警告各占一行：那是**用户要看的东西**，不是日志
             for w in &out.warnings {
-                let line = messages::text(keys::WARNING, &[("text", w)]);
+                let said = w.text();
+                let line = messages::text(keys::WARNING, &[("text", &said)]);
                 tracing::warn!("{line}");
                 eprintln!("{line}");
             }
@@ -2880,10 +3104,13 @@ mod tests {
         assert_eq!(bare.slicer_print_time_seconds, None);
     }
 
-    /// 仓库里那份夹具预设（与内置产物同构）—— 机型 A1 / 变体 fast
+    /// 仓库里那份**冻结的夹具预设**（与内置产物同构）—— 机型 A1 / 变体 fast。
+    ///
+    /// 2026-11-12：从 `fixtures/ir/presets/` 取，不再从 `crates/preset/assets/presets/`
+    /// 取。后者是随包产物，会随版本 id 改名而增删；夹具是判据资产，不该被生成动作搬走。
     fn fixture_preset(dest: &std::path::Path) {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../crates/preset/assets/presets/A1-fast.toml");
+            .join("../crates/postprocess/tests/fixtures/ir/presets/A1-fast.toml");
         std::fs::copy(&src, dest).expect("拷一份夹具预设");
     }
 
@@ -3067,7 +3294,7 @@ mod tests {
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let toml = d.path().join("A1_MINI-fast.toml");
         std::fs::copy(
-            manifest.join("../crates/preset/assets/presets/A1_MINI-fast.toml"),
+            manifest.join("../crates/postprocess/tests/fixtures/ir/presets/A1_MINI-fast.toml"),
             &toml,
         )
         .expect("拷一份 A1 mini 预设");
@@ -3443,7 +3670,7 @@ mod tests {
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let toml = d.path().join("A1_MINI-fast.toml");
         std::fs::copy(
-            manifest.join("../crates/preset/assets/presets/A1_MINI-fast.toml"),
+            manifest.join("../crates/postprocess/tests/fixtures/ir/presets/A1_MINI-fast.toml"),
             &toml,
         )
         .expect("拷一份预设");
@@ -3586,6 +3813,39 @@ mod tests {
         assert!(
             still.collision().is_some(),
             "事实要跟着错误一起出门（报告页据此画图）"
+        );
+    }
+
+    /// 调试那一问的正文：两段各报「等待位 → 目标位」，跟随时取驻点位。
+    #[test]
+    fn debug_plan_summary_reports_both_wait_points() {
+        let mut d = postprocess::ir::types::DebugIr {
+            wait_x: 20.0,
+            mount_x: 267.0,
+            unmount_x: 276.0,
+            speed: 10_000.0,
+            ..Default::default()
+        };
+        assert_eq!(
+            debug_plan_summary(&d),
+            "驻点 X20 · 落笔 20 → 267 · 收笔 20 → 276 · 10000 mm/min"
+        );
+
+        /* P 系列：两个等待位与驻点位都不同，各走各的 */
+        d.mount_wait_x = Some(20.0);
+        d.unmount_wait_x = Some(246.0);
+        d.mount_x = 1.0;
+        d.unmount_x = 256.0;
+        assert_eq!(
+            debug_plan_summary(&d),
+            "驻点 X20 · 落笔 20 → 1 · 收笔 246 → 256 · 10000 mm/min"
+        );
+
+        /* 测两遍：换第二条模板，末尾多一句（四语各有自己的说法） */
+        d.repeat = 2;
+        assert!(
+            debug_plan_summary(&d).ends_with("测 2 遍"),
+            "repeat > 1 要走带遍数的那条文案"
         );
     }
 

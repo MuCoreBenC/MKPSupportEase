@@ -17,7 +17,7 @@
  *   本机已有哪些文件    api.getLocalFiles()                       → **固定演示集合**，实测 3 个（2 MKP / 1 BBS）
  *   用户自己的文件      api.getLocalPresetFiles()                  → **本地文件**（扫 presets-local/），空是合法状态
  *   当前使用的那一条    AppState 的 activePreset 格（`run/app-state.json`，经唯一客户端订阅）→ **全局唯一**，null = 一套都还没应用
- *   已复制到切片器目录  api.getSlicerCopied()                     → **固定演示集合**，实测 1 个
+ *   已放入切片器目录    api.getSlicerCopied()                     → 真（扫每个账号目录，起始 1 个）
  *   每个组合的文件      api.getVersionFiles(machineId, versionId) → 9 个组合各 2 个，A2L/STANDARD 是 incomplete
  *   与出厂不同 N 项     api.getMachineParams(machineId, versionId) 里 origin === 'variant' 的条数
  *
@@ -28,8 +28,8 @@
  * # 两种类型的「生效」是两件不同的事
  *
  * ```
- * MKP     生效 = 设为当前使用        唯一底账 run/active-preset.json  状态 已应用 / 未应用
- * 切片器   生效 = 复制到切片器的目录   api.copyToSlicer()     状态 已复制 / 未复制
+ * MKP     生效 = 设为当前使用        唯一底账 run/active-preset.json  状态 在用 / 未使用
+ * 切片器   生效 = 放进切片器的目录     api.copyToSlicer()     状态 已放入 / 未放入
  * ```
  *
  * MKP 那个写走新世界的应用命令（IPC 落 `run/active-preset.json`），写完**重读底账**而不是自己在本地改状态：
@@ -82,6 +82,7 @@ import type {
   LocalFileIdentity,
   LocalPresetIdentity,
 } from '../../api'
+import type { SlicerTarget } from '../../api/contract'
 import { isAppError } from '../../api/contract'
 import { useLocale, useT } from '../../i18n'
 import { localizeMachines } from '../shared/dataLabel'
@@ -223,10 +224,11 @@ export interface PresetData {
    */
   active: ActivePreset | null
   /**
-   * 哪些切片器 profile **已经复制到切片器的 profile 目录**了（asset id）。
+   * 哪些切片器 profile **已经放进切片器的 profile 目录**了（**文件名**）。
    *
-   * 和 `localIds` 是两件事：在本机 ≠ 切片器看得见它。切片器行的「已复制 / 未复制」只看这一个。
-   * 假后端同样是固定演示集合（实测 1 个）。
+   * 和 `localIds` 是两件事：在本机 ≠ 切片器看得见它。切片器行的「已放入 / 未放入」
+   * 只看这一个，而且要求**每一个账号目录里都有** —— 切片器读的是当前登录那个账号的
+   * 那一份，少一处用户换个账号就选不到。
    */
   slicerCopied: string[]
   /**
@@ -235,6 +237,22 @@ export interface PresetData {
    * ★ 只读**本机**（扫盘 + 账本），**不发网络** —— 切页签不该顺手发一次网络请求。
    */
   refreshLocal: () => Promise<void>
+  /**
+   * **手动向云端要一次目录**（「云端」表那一颗刷新按钮，2026-11-11）。
+   *
+   * 自动那一趟一整个运行期只走一次（`checkBootstrapOnce`），用户在工作台发了新版
+   * 之后不重启就看不到 —— 这一颗把那趟再走一遍，判据与自动那条**完全同源**：
+   * 只比目录这一代（`checkRemoteUpdate`），有变化且读得懂才 `applyRemoteUpdate`。
+   * **绝不下载任何预设文件**（下载归行上的「下载 / 更新」）。
+   */
+  refreshCatalog: () => Promise<CatalogRefreshResult>
+  /**
+   * **重读「已放入」**（只扫切片器的账号目录，不发网络）。
+   *
+   * 盘才是底账：用户在系统文件管理器里删掉那一份，界面不能还挂着「已放入」——
+   * 窗口重新获得焦点、切回本地页签、放入动作跑完（成没成都算）时都对着它重读一次。
+   */
+  refreshSlicerCopied: () => Promise<void>
   pick: (machineId: string, versionId: string) => void
   /**
    * 只换机型（预设页那个下拉）。版本跟着落到这台机型的第一个 —— 版本 id 在机型之间
@@ -276,12 +294,14 @@ export interface PresetData {
    */
   clearApply: () => Promise<void>
   /**
-   * 把某个切片器 profile 复制进切片器目录，然后重新拉 `getSlicerCopied()`。同上。
+   * 把某个切片器 profile 放进切片器目录（**那一个切片器的每一个账号目录各一份**；
+   * `slicer` 不给 = 它自己那一档，`account` 再给就只放那一个），然后重新拉
+   * `getSlicerCopied()`。同上。
    *
-   * 回来给一句结果（`replaced`）：**那格同名就换掉**（2026-10-13 作者改判）——
-   * 提示条按它说清这次是新放了一份，还是把原来那份替换了。
+   * 回来给一句结果（`replaced` / `targets`）：**那格同名就换掉**（2026-10-13 作者改判）——
+   * 提示条按它说清这次是新放了一份还是把原来那份替换了、进了几个账号目录。
    */
-  copy: (assetId: string) => Promise<CopyToSlicerOutcome>
+  copy: (fileName: string, slicer?: SlicerTarget, account?: string) => Promise<CopyToSlicerOutcome>
   /**
    * 「下载」目录里登记的那一份：走新世界下载管道（`api.downloadCatalogFile(fileName)`），
    * 落进下载区 `mkp/`。盘上那一份对不上目录时（需更新）走的是**同一条路** ——
@@ -375,8 +395,10 @@ export interface PresetData {
   /**
    * **删除本机那份交付预设文件**（2026-10-06 一切皆可删）：删了回「未下载」，
    * 随时可从云端重下。回来**重读云端那一侧**（那一行 + 归档清单一起刷新）。
+   *
+   * `alsoSlicer` = 用户在那个确认框里勾了「同时删掉切片器目录里那份」。
    */
-  removePreset: (fileName: string) => Promise<void>
+  removePreset: (fileName: string, alsoSlicer?: boolean) => Promise<void>
   /**
    * **删除归档区一份旧版本**（2026-10-06 允许删，代价讲清：删了找不回）。
    * 回来重读云端那一侧（归档清单以盘为准）。
@@ -393,7 +415,8 @@ export interface PresetData {
    * 只给文件名 —— 路径由后端按目录登记拼。
    */
   revealDelivered: (fileName: string) => Promise<void>
-  revealSlicer: (fileName: string) => Promise<void>
+  /** `slicer` / `account` 给了就只开那一格（未放入时打开目录本身） */
+  revealSlicer: (fileName: string, slicer?: SlicerTarget, account?: string) => Promise<void>
 }
 
   /**
@@ -472,6 +495,17 @@ interface BootstrapResult {
   /** 远端有更新但**本客户端读不懂**（`NOT_SUPPORTED`）—— 列表照常，只多一句提示 */
   needsNewerClient: boolean
 }
+
+/**
+ * **手动刷新云端目录**的结局（页面按它选文案，这里不造句）。
+ *
+ *   `same`        远端与这一份同一代 —— 没换，本机那两侧已对过一眼
+ *   `synced`      远端有新版、本机读得懂 —— 目录已换、两表已按新目录重读
+ *   `unreadable`  远端有新版但本客户端读不懂 —— **盘上零改动**，页面去开那句「需升级」
+ *
+ * 失败（没网 / 没配源 / 坏档）照抛给调用方 —— 那一句由页面用提示条说，这里不吞。
+ */
+export type CatalogRefreshResult = 'same' | 'synced' | 'unreadable'
 
 /**
  * 进入「预设」后的**后台检查**一次远端目录（第十七刀；第三刀下半补 readable / 读不懂那一路）。
@@ -923,6 +957,22 @@ export function usePresetData(importRevision = 0): PresetData {
   }, [presetPrefsRevision, readLocalPresets])
 
   /*
+   * **换界面语言 ⇒ 本机文件那几句重新要一次**（2026-11-09）。
+   *
+   * `LocalPresetFile.stateDetail`（「TOML 语法不对 · 第 3 行第 1 列」这类）是**后端**
+   * 按当时那个语言写的句子；列表留在内存里，切了语言它不会跟着翻。
+   * 只重读本机那一侧（扫盘，**不发网络**），列表行那句原因当场换语言。
+   */
+  const localeSeen = useRef(locale)
+  useEffect(() => {
+    if (localeSeen.current === locale) return
+    localeSeen.current = locale
+    void readLocalPresets().catch(() => {
+      /* 读不到就保持旧列表 —— 与上面同一条纪律 */
+    })
+  }, [locale, readLocalPresets])
+
+  /*
    * **草稿代次也听**（`draftState`）：参数页改了值 / 保存了 / 取消了（含预设页上
    * 那个「修改参数」模态框）、或正文编辑保存作废了参数草稿 —— 列表行上那枚
    * 「未保存」小圆点当场跟着亮 / 灭。只读一眼轻摘要，不重读别的。
@@ -984,6 +1034,68 @@ export function usePresetData(importRevision = 0): PresetData {
     await readLocalPresets()
   }, [readLocalPresets])
 
+  /**
+   * **手动向云端要一次目录**（「云端」表那一颗刷新按钮）。
+   *
+   * 与 `checkBootstrapOnce` 同一条判据、同一道闸（读不懂就不落盘），差别只有两处：
+   * 它**不受"本次运行只一次"那道刹管**（用户点一次就走一趟），并且把结局交回页面
+   * 由页面说话（`same` / `synced` / `unreadable`）；失败照抛，不在这里吞。
+   */
+  const refreshCatalog = useCallback(async (): Promise<CatalogRefreshResult> => {
+    const check = await api.checkRemoteUpdate()
+    if (check.upToDate) {
+      /* 同一代：只把本机那一侧对一眼（扫盘 + 账本，不再发第二条网络） */
+      await readLocalPresets().catch(() => {})
+      setNeedsNewerClient(false)
+      return 'same'
+    }
+    if (!check.readable) {
+      /* 读不懂就不换目录（与自动那条同一道闸）—— 页面去开「需升级」那句 */
+      setNeedsNewerClient(true)
+      return 'unreadable'
+    }
+    await api.applyRemoteUpdate()
+    setNeedsNewerClient(false)
+    /* 目录换了：两张表都以新目录为准重读（同一条出口，代次守卫管着先后） */
+    await readPresetFeedInto().catch(() => {})
+    await readLocalPresets().catch(() => {})
+    return 'synced'
+  }, [readLocalPresets, readPresetFeedInto])
+
+  /**
+   * 重读「已放入」。**盘是底账**：用户去访达把那一份删了，这里回来就得变「未放入」。
+   *
+   * 只在低频时机调（窗口聚焦 / 切回本地页签 / 放入动作跑完），一条命令 = 每个账号目录
+   * 各一次 `stat`，不打网络。
+   */
+  const refreshSlicerCopied = useCallback(async (): Promise<void> => {
+    setSlicerCopied(await api.getSlicerCopied())
+  }, [])
+
+  /*
+   * 窗口重新拿到焦点、或从后台切回来时，把「已放入」对着盘重读一次。
+   *
+   * 这一条收拾的是**界面之外**的改动：用户去访达 / 资源管理器把那一份删了、挪了，
+   * 回来行上不能还挂着「已放入」。低频路径，不加节流也不会打爆（一条命令 = 每个
+   * 账号目录各一次 `stat`，不发网络）。
+   */
+  useEffect(() => {
+    const reread = () => {
+      void refreshSlicerCopied().catch(() => {
+        /* 读不到就保持旧状态 —— 与首屏同一条纪律 */
+      })
+    }
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') reread()
+    }
+    window.addEventListener('focus', reread)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.removeEventListener('focus', reread)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [refreshSlicerCopied])
+
   const pick = useCallback((machineId: string, versionId: string) => {
     setAt({ machineId, versionId })
   }, [])
@@ -1016,16 +1128,21 @@ export function usePresetData(importRevision = 0): PresetData {
   }, [])
 
   /*
-   * 切片器的「生效」= 复制进切片器自己的用户配置目录。**键是文件名**
+   * 切片器的「生效」= 放进切片器自己的用户配置目录。**键是文件名**
    * （2026-10-09 起，与下载 / 应用 / 读正文同一个取用口径），真机落盘、假后端改内存。
    *
    * **目标已有同名就换掉它**（2026-10-13 作者改判：「有相同的就覆盖吧」）——
-   * 后端原子替换，回来的 `replaced` 说这次是新放还是替换，提示条按它说话。
+   * 后端原子替换，回来的 `replaced` 说这次是新放还是替换、`targets` 说进了几个账号目录，
+   * 提示条按它们说话。
+   *
+   * ★ **失败也重读**：一次写多个账号目录，可能只有一个没写成 —— 界面不能停在旧结论上。
    */
-  const copy = useCallback(async (fileName: string) => {
-    const outcome = await api.copyToSlicer(fileName)
-    setSlicerCopied(await api.getSlicerCopied())
-    return outcome
+  const copy = useCallback(async (fileName: string, slicer?: SlicerTarget, account?: string) => {
+    try {
+      return await api.copyToSlicer(fileName, slicer, account)
+    } finally {
+      setSlicerCopied(await api.getSlicerCopied())
+    }
   }, [])
 
   /*
@@ -1152,14 +1269,29 @@ export function usePresetData(importRevision = 0): PresetData {
    * 删除本机那份交付预设文件（2026-10-06 一切皆可删）：重读云端那一侧 ——
    * 那一行回「未下载」，归档清单跟着刷新（`readPresetFeed` 连归档一起读）。
    * 若删的是使用中那份，后端会撤使用中指针 —— `appStateMutated` 让横幅同帧回「未应用」。
+   *
+   * ★ `alsoSlicer`（2026-11-10 作者：「删除的时候弹窗可以勾选同步删云端的吗」）：
+   *   云端删不了（发布目录只读、BBS 账号里的云端也不归本程序删），但**切片器目录里那份**
+   *   能删 —— 那正是"删了它还在"的来源。两件事按顺序做，第二件失败也要把第一件的重读做完。
    */
-  const removePreset = useCallback(async (fileName: string) => {
-    await api.deleteDeliveryFile(fileName)
-    /* 投递面广播（本页跟着重读，清单以盘为准）；删的是使用中那份时后端已撤指针，
-       那条走 AppState 的广播（下面这句） */
-    deliveryMutated()
-    appStateMutated()
-  }, [])
+  const removePreset = useCallback(
+    async (fileName: string, alsoSlicer?: boolean) => {
+      try {
+        await api.deleteDeliveryFile(fileName)
+        if (alsoSlicer === true) {
+          await api.removeSlicerCopies(fileName)
+          /* 切片器那一行的「已放入」也跟着翻回「未放入」 */
+          setSlicerCopied(await api.getSlicerCopied())
+        }
+      } finally {
+        /* 投递面广播（本页跟着重读，清单以盘为准）；删的是使用中那份时后端已撤指针，
+           那条走 AppState 的广播（下面这句） */
+        deliveryMutated()
+        appStateMutated()
+      }
+    },
+    [],
+  )
 
   /* 删除归档区一份旧版本（代价讲清在确认框）：投递面广播，清单以盘为准 */
   const removeArchived = useCallback(async (path: string) => {
@@ -1193,9 +1325,13 @@ export function usePresetData(importRevision = 0): PresetData {
     await api.revealDeliveredFile(fileName)
   }, [])
 
-  const revealSlicer = useCallback(async (fileName: string) => {
-    await api.revealSlicerFile(fileName)
-  }, [])
+  /* `slicer` / `account` 给了就只开那一格（未放入时开目录本身），见 `revealSlicerFile` */
+  const revealSlicer = useCallback(
+    async (fileName: string, slicer?: SlicerTarget, account?: string) => {
+      await api.revealSlicerFile(fileName, slicer, account)
+    },
+    [],
+  )
 
   /*
    * **改一份预设的备注**（2026-10-07 副标题覆盖账；只有本地表读它）：写完重读整本账 ——
@@ -1265,6 +1401,8 @@ export function usePresetData(importRevision = 0): PresetData {
     active,
     slicerCopied,
     refreshLocal,
+    refreshCatalog,
+    refreshSlicerCopied,
     pick,
     pickMachine,
     apply,
@@ -1533,6 +1671,21 @@ export function usePresetPage(data: PresetData): PresetPage {
   }, [scope, refreshLocal])
 
   /*
+   * **切回「本地」那一页时，把「已放入」对着盘重读一次**（2026-11-10）。
+   *
+   * 与上面那条同一类：用户在系统文件管理器里动过切片器目录（删了 / 换了一份），
+   * 切回这一页就该看到盘上的事实。只扫切片器的账号目录，不发网络
+   * （时间窗口靠窗口聚焦那一条兜住，两条各管一种"刚动过"的时机）。
+   */
+  const refreshSlicerCopied = data.refreshSlicerCopied
+  useEffect(() => {
+    if (scope !== 'local') return
+    void refreshSlicerCopied().catch(() => {
+      /* 读不到就保持旧状态 —— 同上 */
+    })
+  }, [scope, refreshSlicerCopied])
+
+  /*
    * 表头排序（2026-10-16）。
    *
    * ★ 2026-10-20 名称列改**三循环**（作者：「名称那个应该是三循环的点击切换排序，
@@ -1574,7 +1727,7 @@ export function usePresetPage(data: PresetData): PresetPage {
   }, [])
 
   const localSet = useMemo(() => new Set(data.localIds), [data.localIds])
-  /* 已复制到切片器目录的那一份集合。和 localSet 是两件事，别合并 */
+  /* 已放进每个账号目录的那一份集合。和 localSet 是两件事，别合并 */
   const copiedSet = useMemo(() => new Set(data.slicerCopied), [data.slicerCopied])
 
   /* 要汇总哪几台机型：一台，或者「全部机型」那一档的全部 */

@@ -78,7 +78,7 @@ interface NavItem {
   id: PageId
   label: string
   icon: ReactNode
-  badge?: 'dirty' | 'build'
+  badge?: 'build'
 }
 
 const NAV: NavItem[] = [
@@ -105,7 +105,6 @@ const NAV: NavItem[] = [
   {
     id: 'params',
     label: '参数台',
-    badge: 'dirty',
     icon: (
       <>
         <path d="M4 8h16M4 16h16" />
@@ -195,7 +194,8 @@ type NavId = NavItem['id']
  *
  * 判据 = 这一页会不会往参数草稿里放东西（`wb.applyDraft` 那一路）：
  * 机型（先落盘再生成）、参数台、资产库（交付身份改了先进草稿）、生成与发布（同上）。
- * 其余：套餐页是即时落盘、设置页只读、开发台不落盘 ⇒ 页头不摆这一槽。
+ * 其余：设置页只读、开发台不落盘 ⇒ 页头不摆这一槽（套餐页改过之后草稿就不空了，
+ * 会走下面第 ③ 条照样摆出来）。
  * ★ 草稿非空时**无论在哪一页都摆**（见 `headOpsVisible` 的 ③）—— 别让改动存不下去。
  */
 const DRAFT_PAGES: ReadonlySet<NavId> = new Set<NavId>([
@@ -406,8 +406,14 @@ export function WorkbenchApp() {
       .catch(() => undefined)
   }, [])
 
-  /** 整本重取。机型页的结构性写（建 / 删 / 复制版本）之后徽章的机型版本数要跟上 */
-  const refreshBook = useCallback(() => {
+  /**
+   * **只刷外壳那份整本**（不拨 `tick`）。
+   *
+   * 给「改版本 id / 改一格字段」这类**页面自己已经拿着新清单**的编辑用：
+   * `wb_set_*` 已经把新清单返回给调用页了，再拨 tick 让整机重取一遍只会把
+   * 正在编辑的详情卡刷掉（作者 2026-11-12：「改了 id 就展开不了详情」）。
+   */
+  const refreshBookQuiet = useCallback(() => {
     wb.book()
       .then(setBook)
       .catch(() => undefined)
@@ -419,16 +425,28 @@ export function WorkbenchApp() {
   }, [refreshReport])
 
   /**
+   * 整本重取。机型页的结构性写（建 / 删 / 复制版本）之后徽章的机型版本数要跟上。
+   *
+   * ★ **同时拨 `tick`**（2026-11-12）：整本变了说明编辑态真变了，各页读的**自己那份**
+   * 清单（机型页的 `wb_machines`、生成页的交付读数、参数台的 desk）都得重取。
+   * 早先只刷整本、不拨 tick：机型页只在挂载时读一次，于是「放弃改动」之后
+   * 那个已经丢弃的版本还留在列表里（作者报的「放弃后东西还在」）。
+   *
+   * 值编辑走的是 quiet 分支、不经过这里，所以连点步进器不会变成每敲一下重取四份清单。
+   */
+  const refreshBook = useCallback(() => {
+    refreshBookQuiet()
+    setTick((n) => n + 1)
+  }, [refreshBookQuiet])
+
+  /**
    * 生成 / 发布**写了盘上的产物**之后：整本、检查报告、交付读数一起重取。
    *
-   * `refreshBook` 只重取整本与报告，**不拨 `tick`**；而 ①生成卡那 9 行与交付明细挂在
-   * `tick` 上（`wb_delivery_files` 的 `useEffect` 依赖它）。只调 `refreshBook` 的话，
-   * 底栏已写「已生成」、检查卡待办已清零，右边那 9 行还是生成前的「待更新」与旧大小
-   * —— 同一屏两个时点，看起来就像"生成了但没刷新"。
+   * `refreshBook` 自己会拨 `tick`（①生成卡那 9 行与交付明细就挂在它上面，
+   * `wb_delivery_files` 的 `useEffect` 依赖它）—— 这里不必再拨一次。
    */
   const refreshAfterArtifacts = useCallback(() => {
     refreshBook()
-    setTick((n) => n + 1)
   }, [refreshBook])
 
   /**
@@ -861,7 +879,8 @@ export function WorkbenchApp() {
   }, [report])
 
   const badgeOf = (b?: NavItem['badge']): { n: number; block: boolean } => {
-    if (b === 'dirty') return { n: dirty ? 1 : 0, block: false }
+    // 「有未保存改动」不进导航：它是全工作台一个数，由状态栏那一条说
+    // （挂在某一页图标上会被读成"那一页有改动"，作者 2026-11-11 报的）
     if (b === 'build') return buildBadge
     return { n: 0, block: false }
   }
@@ -878,8 +897,9 @@ export function WorkbenchApp() {
       case 'bundles':
         return '套餐 = 交付的真源（bundles.toml）—— 装什么、谁在用、改指向，都在这一页'
       case 'build':
-        return report
-          ? `阻断 ${report.blocks} · 待办 ${report.todos} · 提示 ${report.hints}${report.hints > 0 && report.blocks === 0 && report.todos === 0 ? ' · 都过了' : ''}`
+        /* 三档的中文标签只有一个出口（后端词表）—— 这里不再写一遍 block→阻断 */
+        return report && words
+          ? `${words.severity.block.label} ${report.blocks} · ${words.severity.todo.label} ${report.todos} · ${words.severity.hint.label} ${report.hints}${report.hints > 0 && report.blocks === 0 && report.todos === 0 ? ' · 都过了' : ''}`
           : ''
       case 'assets':
         return '资产域定义 + 引用反查 —— 交付身份改了先进草稿'
@@ -890,7 +910,7 @@ export function WorkbenchApp() {
       case 'dev':
         return '把平时看不见的那几屏按按钮演出来（不读 G-code、不落记录）'
     }
-  }, [page, book, report])
+  }, [page, book, report, words])
 
   /* ---------- 页面渲染（挂载入口只有这一处） ---------- */
 
@@ -941,9 +961,11 @@ export function WorkbenchApp() {
           <MachinesPage
             book={book}
             words={words}
+            tick={tick}
             onGoto={goto}
             onSave={save}
             onBookRefresh={refreshBook}
+            onBookRefreshQuiet={refreshBookQuiet}
           />
         )
       case 'params':
@@ -976,6 +998,7 @@ export function WorkbenchApp() {
             tick={tick}
             initialSel={bundleSel}
             onGoto={goto}
+            onBookRefresh={refreshBook}
           />
         )
       case 'assets':
@@ -987,6 +1010,7 @@ export function WorkbenchApp() {
             initialSel={assetSel}
             initialAssign={assetAssign}
             onGoto={goto}
+            onBookRefresh={refreshBook}
             onApply={async (label, patches, opts) => {
               await run(label, patches, undefined, opts)
             }}
@@ -1438,8 +1462,10 @@ export function WorkbenchApp() {
                   className={s.sbBtn}
                   disabled={txn?.canUndo !== true || busy}
                   data-tip={
-                    txn !== null && txn.ops.length > 0
-                      ? `撤销：${txn.ops[txn.ops.length - 1].label}`
+                    /* 与「未保存改动」框那颗读同一份 `topOp` —— 值编辑不进 `txn.ops`，
+                       拿 `ops` 会在这类撤销上说出一个空标签 */
+                    txn?.topOp != null
+                      ? `撤销：${txn.topOp.label}（${txn.topOp.fields} 处）`
                       : (words?.disabled.nothingToUndo ?? '没有可撤销的改动')
                   }
                   onClick={() => void undo()}
@@ -1506,6 +1532,8 @@ export function WorkbenchApp() {
               canSave={saveOn}
               canDiscard={dirty && !busy}
               busy={busy}
+              /* 与页头「未保存 N」同一个数：文件对比为空时也要能说清还有几处在内存里 */
+              dirtyCount={book?.dirtyCount ?? 0}
               onDiscard={() => {
                 setHistoryOpen(false)
                 void discard()
@@ -1520,6 +1548,8 @@ export function WorkbenchApp() {
               canRedo={txn?.canRedo === true}
               onUndo={undo}
               onRedo={redo}
+              /* 撤销栈顶那一条：字段表那颗「撤销这一笔（N 处）」与 undo 弹的是同一条 */
+              topOp={txn?.topOp ?? null}
             />
 
             {/* Toast：右下角，压在模态遮罩之上（遮罩开着时「已撤销」这类提示还得看得见） */}

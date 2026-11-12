@@ -27,9 +27,9 @@
 //! 现在：**最终文件的字节只由原文件决定**。生成时间改由生成记录
 //! （`built.json` 的 `stamp`，只记真正写了盘的那一次）与交付目录的 `publishedAt`
 //! 表达，它们都在**文件之外**，改时间不会改内容。
-//! `crates/preset` 的配方一直是这么做的（`preset_recipes.toml` 把时间写死，
-//! 注释原话是"生成时现取会让「重新生成逐字节相同」失效"）—— 工作台这条链
-//! 曾是唯一的例外。
+//! 旧 `gen-presets` 配方（`preset_recipes.toml`，2026-11-12 已整链退役）当年也是这么做的：
+//! 把时间写死，理由是"生成时现取会让「重新生成逐字节相同」失效"。
+//! 现在工作台这条链沿用同一条纪律：时间只写在文件之外。
 //!
 //! # 产物头没有 uuid（2026-10-05 删，别加回来）
 //!
@@ -92,6 +92,7 @@ use serde_json::Value;
 
 use crate::error::AppError;
 use crate::ipc::traced;
+use crate::presetdata::Origin;
 use crate::workbench::clock;
 use crate::workbench::domain::derive::Book;
 use crate::workbench::domain::issues::{self, Report};
@@ -161,14 +162,11 @@ pub fn wb_receipts(
     ))
 }
 
-/// 预检（b05 Task 11.8）：[`issues::inspect`] 的全部 + 清单 ↔ 配方对齐。
+/// 预检（b05 Task 11.8）：[`issues::inspect`] 的全部 + 交付目录自查 + 内嵌目录自查。
 ///
-/// 配方正文直接取 `preset::PRESET_RECIPES_TOML`（编进二进制的真源，与 `gen-presets`
-/// 咬同一份）。读不回来不报错 —— 它变成报告里的**一条**，其余检查照跑；
-/// 让预检整个失败等于把「数据坏了」变成「工具坏了」。
-///
-/// 生成闸门（[`issues::inspect`]，`wb_generate` 里那道）**刻意不含**配方对齐：
-/// 生成读参数注册表，不读配方，对不上不影响工作台的产物（见 `issues.rs` 那边的说明）。
+/// 2026-11-12：旧的「清单 ↔ `preset_recipes.toml` 配方」对齐已随 `gen-presets` 整链
+/// 退役。生成从来不读那份配方，工作台产物由 `presets/*.toml` 单一源渲染；那 8 条
+/// 「版本在配方里没有对应变体」是退役链留下的空转待办，不再报。
 #[tauri::command(async)]
 pub fn wb_preflight() -> Result<Report, AppError> {
     traced("wb_preflight", |_| {
@@ -180,9 +178,6 @@ pub fn wb_preflight() -> Result<Report, AppError> {
             「已生成」—— 同一份数据两处说法相反（作者截图踩到）。 */
             let probe = renderer_for(ctx);
             let book = book_with_probe(ctx, &ctx.presets, &c, &d, &probe);
-            let recipe = preset::recipe::Recipe::parse(preset::PRESET_RECIPES_TOML)
-                .map_err(|e| e.to_string());
-            let recipe_ref = recipe.as_ref().map_err(String::as_str);
             // 交付目录的「清单 ↔ 文件」自查在 app 层做（要摸盘），结果作为一条交给预检
             let delivery = super::delivery::audit_catalog(
                 &crate::workbench::paths::delivery_root_path(),
@@ -191,7 +186,7 @@ pub fn wb_preflight() -> Result<Report, AppError> {
             // 内嵌目录（编译进安装包的那份）跟仓库数据对不对得上也是盘上的事实 ——
             // 同一条路交给预检：坏了自己成为报告里的一条，不让整个预检失败
             let embedded = audit_embedded_catalog();
-            Ok(issues::preflight(&book, recipe_ref, delivery, embedded))
+            Ok(issues::preflight(&book, delivery, embedded))
         })
     })
 }
@@ -398,6 +393,12 @@ pub(super) fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
             let Some(hit) = layers.effective(&p.key) else {
                 continue;
             };
+            /* 「无值不落盘」：只有出厂层有值 ⇒ 该机型/变体根本用不到这一项，整行不写。
+             * 例：A 系列的落笔/收笔骨架只动 X，等待位 Y 对它不适用；落一个 `0` 进
+             * TOML 只会让界面上多出一格永远不该被改的 Y（而那是绝对坐标）。 */
+            if p.omit_when_unset && hit.origin == Origin::Factory {
+                continue;
+            }
             if p.ui_component == UiComponent::Gcode {
                 // 多行字符串：注释在上一行，值用 `"""`
                 push_comment(&mut out, &p.toml_comment, false);
@@ -692,7 +693,9 @@ pub(super) fn generation_source_note(ctx: &super::Ctx) -> String {
 /// 「还没决定要不要」的改动，而台账记的却是另一代。所以这里**拒绝**，并且
 /// **不自动保存**（保存是用户的边界，不是生成顺手的副作用）。
 pub(super) fn require_clean(ctx: &super::Ctx) -> Result<(), AppError> {
-    let dirty = ctx.txn.dirty_count() + ctx.draft.dirty_count();
+    /* 与页头那个 N 同一处算：值编辑只活在内存（`Ctx::history`），只看事务与草稿
+    会把"改了值还没保存"当成干净 —— 而生成拿的是编辑态。 */
+    let dirty = ctx.dirty_count();
     if dirty == 0 {
         return Ok(());
     }
@@ -907,6 +910,17 @@ fn generate_inner(
          * 配方那条链已删，`presets/` 是唯一权威源 —— 改参数只改一处，两边同时变。
          */
         let assets_dir = preset::generate::assets_dir();
+        /* 按**整个清单**算出的全部产物名，与本次 `scope` 无关。
+        不能用 `rendered`：它只含这次要生成的那几份（Stale / Picked 都是部分），
+        拿它当「该有的集合」会把没参与这次生成的那些版本产物误当旧名清掉。
+        `delivery::expected_products` 是「盘上该有什么」的唯一实现，
+        连停用机型的产物也认（清理只许按它，见那边的注释）。 */
+        let mkp_prefix = format!("{mkp_rel}/");
+        let expected_names: BTreeSet<String> = super::delivery::expected_products(&book)
+            .iter()
+            .filter_map(|rel| rel.strip_prefix(&mkp_prefix))
+            .map(str::to_owned)
+            .collect();
         let mut n_written = 0usize;
         let mut n_same = 0usize;
         for r in &rendered {
@@ -934,8 +948,19 @@ fn generate_inner(
                 .map_err(|e| AppError::io("内核产物写不出来").with_detail(e.to_string()))?;
             n_written += 1;
         }
+        let n_pruned = prune_orphan_presets(
+            &assets_dir,
+            &expected_names,
+            &trash_root,
+            "kernel-presets",
+            &tx_stamp,
+        )?;
         receipt.assets = super::receipt::Counts::of(n_written, n_same, 0);
-        receipt.step("assets", true, receipt.assets.summary());
+        receipt.step(
+            "assets",
+            true,
+            format!("{}；清掉旧名 {} 份", receipt.assets.summary(), n_pruned),
+        );
 
         /* ★ **单一源的判据**（2026-11-01）：内核产物与交付产物必须逐字节相同。
          *
@@ -959,11 +984,28 @@ fn generate_inner(
         let fixtures_dir = preset::generate::fixtures_dir();
         let n_base = preset::generate::sync_baseline(&assets_dir, &fixtures_dir)
             .map_err(|e| AppError::io("测试基线同步失败").with_detail(e))?;
+        /* 基线只写不清，旧名由这里按同一份 expected 清掉 —— 两处目录同进同退。
+        IR 判据的冻结输入已搬到 `fixtures/ir/presets/`，不受这次清理影响。 */
+        let n_base_pruned = prune_orphan_presets(
+            &fixtures_dir,
+            &expected_names,
+            &trash_root,
+            "baseline-presets",
+            &tx_stamp,
+        )?;
         /* `sync_baseline` 返回"这次真写了几份"；总数是那份目录里应有的份数，
         未变数由它自己算 —— 不拿上面 assets 的计数冒充（那是另一个东西）。 */
         let base_total = rendered.len();
         receipt.baseline = super::receipt::Counts::of(n_base, base_total.saturating_sub(n_base), 0);
-        receipt.step("baseline", true, receipt.baseline.summary());
+        receipt.step(
+            "baseline",
+            true,
+            format!(
+                "{}；清掉旧名 {} 份",
+                receipt.baseline.summary(),
+                n_base_pruned
+            ),
+        );
 
         /* 第 5 步：内嵌目录重建 —— 读的就是刚写出去的那批入库产物 */
         /* `build_from_repo` 收的是**仓库根**（它自己会拼 `presets/`），不是 presets 那一层 */
@@ -1270,6 +1312,65 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
         unchanged,
         blocked: None,
     })
+}
+
+/// 把目录里**本次清单不认**的旧名 `.toml` 移进回收站，返回移了几份。
+///
+/// 2026-11-12（作者：「改了 id 之后要自动做成新的，别每次手动改错误」）：
+/// `rendered` 只给当前清单算出的新名字，改过 id 的旧名产物会留在目录里，
+/// 被 `include_str!` 编进二进制、被判据当成该有的一份 —— 客户端随包预设
+/// 于是停在旧 id，而编译期一声不响。生成既然是这两个目录的唯一写入方，
+/// 清旧名就该由生成做。
+///
+/// **走回收不直接删**：`workbench/.trash/<kind>/<时间戳>/` 可还原，
+/// 与交付残留 `clean_strays` 同一条纪律。
+fn prune_orphan_presets(
+    dir: &std::path::Path,
+    expected: &BTreeSet<String>,
+    trash_root: &std::path::Path,
+    kind: &str,
+    stamp: &str,
+) -> Result<usize, AppError> {
+    let mut orphans: Vec<String> = Vec::new();
+    let entries = std::fs::read_dir(dir).map_err(|e| {
+        AppError::io(format!("读不到产物目录 {}", dir.display())).with_detail(e.to_string())
+    })?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.ends_with(".toml") && !expected.contains(&name) {
+            orphans.push(name);
+        }
+    }
+    orphans.sort();
+
+    for name in &orphans {
+        let src = dir.join(name);
+        let dst = trash_root.join(kind).join(stamp).join(name);
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                AppError::io(format!("建不出回收目录 {}", parent.display()))
+                    .with_detail(e.to_string())
+            })?;
+        }
+        std::fs::rename(&src, &dst).map_err(|e| {
+            AppError::io(format!(
+                "移不动旧名产物：{} → {}",
+                src.display(),
+                dst.display()
+            ))
+            .with_detail(e.to_string())
+        })?;
+    }
+    if !orphans.is_empty() {
+        tracing::info!(
+            dir = %dir.display(),
+            moved = orphans.len(),
+            names = ?orphans,
+            at = %stamp,
+            "旧名产物已移入回收站"
+        );
+    }
+    Ok(orphans.len())
 }
 
 /// 内核产物（`assets_dir`）与交付产物（`delivery_dir`）有哪一份不同。
@@ -3053,9 +3154,79 @@ mod tests {
 
     /* ---------- 对照基线（b05 Task 14.9） ---------- */
 
+    /// **清旧名只清清单不认的，且可还原**（2026-11-12）。
+    ///
+    /// 改版本 id 之后，生成按新清单写出新名产物；旧名该进回收站，
+    /// 但这批文件里还有没有参与本次生成的其它版本、以及非 TOML 的说明文件，
+    /// 一个都不许动。
+    #[test]
+    fn pruning_removes_only_orphans_and_keeps_them_recoverable() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let trash = tempfile::tempdir().expect("临时目录");
+        /* 测试夹具也走 `atomic_write`：本仓禁止 `std::fs::write`
+         * （clippy 的 `disallowed_methods`，理由是"先截断再写，崩了留半个文件"）。 */
+        crate::fsx::atomic::atomic_write(&dir.path().join("A1-standard.toml"), "标准版".as_bytes())
+            .unwrap();
+        crate::fsx::atomic::atomic_write(
+            &dir.path().join("A1-fast260326.toml"),
+            "快拆版".as_bytes(),
+        )
+        .unwrap();
+        crate::fsx::atomic::atomic_write(&dir.path().join("A1-fastv3.3.toml"), "旧名".as_bytes())
+            .unwrap();
+        crate::fsx::atomic::atomic_write(&dir.path().join("README.md"), "不是产物".as_bytes())
+            .unwrap();
+
+        let expected: BTreeSet<String> = ["A1-standard.toml", "A1-fast260326.toml"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let moved = prune_orphan_presets(
+            dir.path(),
+            &expected,
+            trash.path(),
+            "kernel-presets",
+            "2026-11-12T00-00-00",
+        )
+        .expect("清理");
+        assert_eq!(moved, 1);
+
+        let mut left: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            vec![
+                "A1-fast260326.toml".to_owned(),
+                "A1-standard.toml".to_owned(),
+                "README.md".to_owned()
+            ]
+        );
+        let saved = trash
+            .path()
+            .join("kernel-presets/2026-11-12T00-00-00/A1-fastv3.3.toml");
+        assert_eq!(std::fs::read_to_string(&saved).unwrap(), "旧名");
+
+        // 再来一次应该是 no-op：幂等，且不会把 expected 里的东西搬走
+        assert_eq!(
+            prune_orphan_presets(
+                dir.path(),
+                &expected,
+                trash.path(),
+                "kernel-presets",
+                "again",
+            )
+            .expect("再清一次"),
+            0
+        );
+    }
+
     /// **真数据只读锚点**：当前产物与基线应当逐字节相同（K-G0' 绿的现状），
-    /// 所以 diff 必须是 9 条全 `same`。这条同时验证 diff 命令**只读**：
-    /// 它跑前后基线目录的文件集合不能变。
+    /// 所以 diff 必须是 `BUILTIN_PRESETS.len()` 条全 `same`。这条同时验证 diff 命令
+    /// **只读**：它跑前后基线目录的文件集合不能变。
     #[test]
     fn the_real_baseline_diff_reports_all_same() {
         let fixtures = preset::generate::fixtures_dir();
@@ -3063,8 +3234,8 @@ mod tests {
         let out = wb_baseline_diff().expect("diff");
         assert_eq!(
             out.len(),
-            9,
-            "BUILTIN_PRESETS 是 9 份 —— 名单变了就说清为什么"
+            preset::BUILTIN_PRESETS.len(),
+            "diff 条数应等于随包预设表的份数 —— 表由 build.rs 按目录生成，不会说谎"
         );
         let not_same: Vec<_> = out.iter().filter(|e| e.status != "same").collect();
         assert!(
@@ -3295,11 +3466,13 @@ mod tests {
 
         let baseline_dir = preset::generate::fixtures_dir();
         let baselines = baseline_by_identity(&baseline_dir);
-        assert_eq!(
+        // 基线目录还兼作 `crates/postprocess` 的 IR 判据输入，可能比随包表多几份
+        // 旧名资产；这里只要求「够现役产物配对」，不写死份数。
+        assert!(
+            baselines.len() >= preset::BUILTIN_PRESETS.len(),
+            "基线份数（{}）比随包预设（{}）还少：{:?} —— 是谁动的？",
             baselines.len(),
-            9,
-            "基线应当正好 9 份（实测 {}）：{:?} —— 是谁动的？",
-            baselines.len(),
+            preset::BUILTIN_PRESETS.len(),
             baselines.keys().collect::<Vec<_>>()
         );
 
@@ -3368,24 +3541,32 @@ mod tests {
             ));
         }
 
-        // 反空转①：9 份基线一份不少地配上号。
-        // 配不上只有一种原因：`presets/machines/*.toml` 里那条身份没了（改名/删版本），
-        // 而基线还留着 —— 那种情况必须有人处置，不能靠 `continue` 悄悄少比一份
-        let unmatched: Vec<&(String, String)> =
-            baselines.keys().filter(|k| !matched.contains(*k)).collect();
+        // 反空转①：随包表里的**每一份**都要配上基线。
+        //
+        // 2026-11-12 换向：原来咬「基线里不能有配不上现役版本的孤儿」，但基线目录
+        // 还兼作 `crates/postprocess` 的 IR 判据输入，会合法地留着几份旧身份资产。
+        // 现在改成从 `BUILTIN_PRESETS`（由 build.rs 按目录生成）往回核对，
+        // 对现役产物一份不少，同时不再把判据资产误判成孤儿。
+        let table_names: std::collections::BTreeSet<String> = preset::BUILTIN_PRESETS
+            .iter()
+            .map(|(name, _)| (*name).to_owned())
+            .collect();
+        let matched_names: std::collections::BTreeSet<String> = matched
+            .iter()
+            .map(|(m, v)| preset_file_name(m, v))
+            .collect();
+        let unmatched: Vec<&String> = table_names.difference(&matched_names).collect();
         assert!(
             unmatched.is_empty(),
-            "基线里有 {} 份没配上任何版本：{unmatched:?} —— \
+            "随包表里有 {} 份没配上基线：{unmatched:?} —— \
              `presets/machines/*.toml` 与夹具的身份对不上了",
             unmatched.len()
         );
-        // 反空转②：比到的份数 == 基线份数（上面那条为空 + 一对一配对 ⇒ 这条冗余，
-        // 它写在这是为了让「基线 9 份、比了 9 份」成为一句能直接读的结论）
-        assert_eq!(
-            compared,
-            baselines.len(),
-            "比了 {compared} 份，基线有 {} 份",
-            baselines.len()
+        // 反空转②：比到的份数不少于随包表（一对一配对 ⇒ 多出来的只能是额外基线资产）
+        assert!(
+            compared >= table_names.len(),
+            "比了 {compared} 份，随包表有 {} 份",
+            table_names.len()
         );
         assert!(
             value_diff.is_empty(),
@@ -3762,21 +3943,17 @@ mod tests {
             .flat_map(|m| m.versions.iter().map(|v| preset_file_name(&m.id, &v.id)))
             .collect();
 
-        // 消费端 crates/preset/assets/presets/ 下实测的 9 份
-        let want: std::collections::BTreeSet<String> = [
-            "A1-standard.toml",
-            "A1-fast.toml",
-            "A1-fastv3.3.toml",
-            "A1_MINI-standard.toml",
-            "A1_MINI-fast.toml",
-            "A1_MINI-fastv3.3.toml",
-            "P1S-lite.toml",
-            "P2S-standard.toml",
-            "X1C-lite.toml",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
+        // 消费端 `crates/preset/assets/presets/` 下**实际**的那批文件名。
+        // 2026-11-12 起不再写死名单：写死就是「改一次 id、改一次判据」，
+        // 而这里要守的本来就是「清单算出的名字 == 消费端目录里的名字」。
+        let want: std::collections::BTreeSet<String> =
+            std::fs::read_dir(preset::generate::assets_dir())
+                .expect("读得到入库产物目录")
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .filter(|name| name.ends_with(".toml"))
+                .collect();
+        assert!(!want.is_empty(), "入库产物目录空了，判据在空转");
 
         assert_eq!(
             got, want,

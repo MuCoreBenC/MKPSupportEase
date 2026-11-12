@@ -5,6 +5,7 @@
 # 闸⑤：推 tag 时，tag 名必须等于 v<package.json version>、必须 annotated、必须在 main 上
 # 闸⑧：产物边界 —— 开发时生成的东西不许混进正式交付（见 scripts/check-artifact-boundary.mjs）
 # 闸⑩：Rust 静态检查 —— fmt + clippy，与 CI 的 rust job 同一份命令
+# 闸⑪：界面文字 —— 描述位不写破折号补解释 / 括号补丁 / 超长（docs/COPY-STYLE.md）
 #
 # 逃生开关：ALLOW_PUSH_MAIN=1  ALLOW_FORCE_PUSH=1  ALLOW_DELETE_REMOTE=1  ALLOW_TAG_MISMATCH=1
 #           ALLOW_PRESET_ARTIFACTS=1（只放掉闸⑧）  ALLOW_RUST_CHECK=1（只放掉闸⑩）
@@ -31,6 +32,9 @@ VER=$(pkg_version)
 # 闸⑨：版本号策略（2026-11-04）—— 已发布的号永不再用；开发版本必须是下一个号的 -dev。
 # 只为拦「把开发版本写成已发布号 / 发布后忘了 next」，不判断本次推的是哪条分支。
 node scripts/version.mjs check || exit 1
+
+# 闸⑪：文案（没有逃生开关 —— 文案坏了不该靠一句环境变量放过去）
+node scripts/check-copy.mjs || exit 1
 
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ -z "$remote_ref" ] && continue

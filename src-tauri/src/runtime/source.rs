@@ -165,11 +165,11 @@ impl SourceMode {
     }
 
     /// 界面上给用户看的那一句（**产品文案只有这一处**）。
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Self::Gitee => "Gitee（国内直连）",
-            Self::Github => "GitHub",
-            Self::Custom => "自定义地址",
+            Self::Gitee => ::postprocess::diag::messages::text("ui.runtime.source.gitee", &[]),
+            Self::Github => "GitHub".to_owned(),
+            Self::Custom => ::postprocess::diag::messages::text("ui.runtime.source.custom", &[]),
         }
     }
 

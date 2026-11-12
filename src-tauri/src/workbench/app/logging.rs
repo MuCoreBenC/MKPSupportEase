@@ -77,7 +77,7 @@ impl Why {
     pub fn suffix(self) -> &'static str {
         match self {
             Self::UserEdit => "",
-            Self::Follows => "（随基底生效）",
+            Self::Follows => "（随基线生效）",
             Self::Promoted => "（归并连带）",
             Self::CopySnapshot => "（复制快照）",
             Self::EmptyVariantsDropped => "（空表清理）",

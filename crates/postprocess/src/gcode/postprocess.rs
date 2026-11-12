@@ -137,7 +137,7 @@ pub fn filter_e_moves(lines: &[String]) -> Vec<String> {
 }
 
 fn is_virtual_extrusion_line(line: &str) -> bool {
-    line.contains("virtual extrusion")
+    crate::gcode::virtual_extrude::is_tagged(line)
 }
 
 fn is_calibration_home_line(line: &str) -> Option<f64> {

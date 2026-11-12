@@ -558,7 +558,7 @@ A1 = 3.85
             report.problems.len(),
             report.problems
         );
-        assert_eq!(report.params, 83, "参数个数");
+        assert_eq!(report.params, 92, "参数个数");
         assert_eq!(report.tabs, 7, "分组个数");
 
         let twice = normalize_registry(&once).expect("第二遍");

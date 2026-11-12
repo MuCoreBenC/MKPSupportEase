@@ -325,6 +325,26 @@ export interface ReportSlicerFacts {
  * 一份记录能独立回答「当时看的是哪个模型、两边各写了什么、怎么判的、最终用了哪一档」——
  * 用户把原始 3MF 删了也解释得清。
  */
+/** 调试那一趟的参数（`detail.debug`）：报告页据此显示「本次是调试模式」 */
+export interface ReportDebugFacts {
+  waitX: number
+  waitY: number
+  /**
+   * 落笔等待位 X。`null` = 跟随驻点位；**缺键 = 旧记录没记这一项**。
+   *
+   * 两者不能混：跟随是该位置没定过，没记是当时还没有这个概念 ——
+   * 写回时都不写，但界面上要分得开。
+   */
+  mountWaitX?: number | null
+  /** 收笔等待位 X。`null` = 跟随驻点位（同上） */
+  unmountWaitX?: number | null
+  mountX: number
+  unmountX: number
+  speed: number
+  testMount: boolean
+  testUnmount: boolean
+}
+
 export interface ReportCalibrationFacts {
   /** `origin.txt` 的原值（可能是 `.stl`，也可能为空） */
   originPath: string | null
@@ -442,6 +462,12 @@ export interface ReportDetail {
    */
   calibration?: ReportCalibrationFacts | null
   /**
+   * **调试模式那一趟**（2026-11-11，`_meta.json` 的 `detail.debug`）。
+   *
+   * 普通那一趟不写这一格、旧记录也没有 ⇒ `null` ⇒ 整组不摆。
+   */
+  debug?: ReportDebugFacts | null
+  /**
    * **参数快照**（2026-10-21，`_meta.json` 的 `detail.snapshot`）。
    *
    * 切片那一刻的两份原文：预设 TOML 里读到的全量参数 + IR 终态。
@@ -473,6 +499,13 @@ export interface ReportDetail {
    * 与 `collision` 同一套判空口径（`!= null`）。
    */
   relocation?: RelocationRecord | null
+  /**
+   * 这一趟的警告，**已经按现在这套语言说好**（2026-11-09）。
+   *
+   * 记录里存的是键 + 参数（`warningRefs`），读口按打开时的语言重说 —— 切了语言
+   * 再翻旧记录，这里跟着换；老记录只有当年那句，认得出表里哪一条就重说，
+   * 认不出就原样摆。界面直接摆，不要再自己拼。
+   */
   warnings: string[]
   /** 调用现场（exe + argv）—— 排查「用的哪份预设跑的」看它 */
   invocation: { exe?: string; args?: string[] } | null
@@ -1268,13 +1301,45 @@ export interface PresetHistory {
   entries: HistoryRecord[]
 }
 
+/**
+ * 备份 / 恢复的一跳进度（一次调用一路 Channel，不是全局广播）。
+ *
+ * `done` / `total` 的单位**按动作定**：备份是**字节**（打包时边写边报），恢复是**文件条数**
+ * （zip 里多少条要放回去）。界面只认 `total > 0` 才画百分比 —— 清点阶段 `total = 0`
+ * 是"还不知道"，不是"零"。
+ */
+export interface BackupTick {
+  /** `scan` = 清点文件 / 认说明书 / 删旧树；`pack` = 真在搬（写 zip / 解条目） */
+  stage: 'scan' | 'pack'
+  /** 正在处理的那一份（相对内部根；清点阶段是空串） */
+  file: string
+  /** 已完成（备份 = 字节；恢复 = 文件条数） */
+  done: number
+  /** 总量（同 `done` 的单位） */
+  total: number
+}
+
+/**
+ * **恢复范围**（2026-11-09）：恢复页那一行下拉。
+ *
+ *   `all`      设置 + 预设 + 执行记录，全都放回（原来的"全量覆盖"）
+ *   `presets`  只动预设那几棵：用户 toml / 修改历史 / 云端原文镜像 / 原文备份 / 回收站
+ *   `settings` 只动设置与执行记录：catalog / app-state / delivery-index / 执行归档
+ *
+ * 选中范围内仍是**整棵换掉**（回到那一刻）；范围外一个都不碰。
+ * 选 `presets` 而这份备份当初没带预设 ⇒ 后端**报错**（不静默什么都不做）。
+ */
+export type RestoreScope = 'all' | 'presets' | 'settings'
+
 /** 打完 / 恢复完一份备份的回执 */
 export interface BackupSummary {
   /** 备份文件自己的绝对路径（界面照原样显示：用户要知道东西落在哪了） */
   path: string
   /** 里面几个文件 */
   files: number
-  /** 字节数（恢复时 = 那份 zip 的大小） */
+  /** **打包前**那些文件的字节和（界面拿它说"原始多大 → 压缩后多大"；恢复时 = 解出来的字节和） */
+  sourceBytes: number
+  /** zip 本身的字节数（恢复时 = 那份包多大） */
   bytes: number
   /** 什么时候打的这份备份（UTC epoch 秒） */
   createdUnix: number
@@ -2227,10 +2292,46 @@ export interface ResolvedPostprocPrefs {
   skipVibrationCalibration: boolean
   beginStageRetractEnabled: boolean
   beginStageRetractZLiftMm: number
+  /** 调试模式：切片只产出「只跑落笔/收笔」的骨架 */
+  debugModeEnabled: boolean
+  debugWaitX: number
+  /** 落笔等待位 X；`null` = 跟随驻点位 */
+  debugMountWaitX: number | null
+  debugMountX: number
+  /** 收笔等待位 X；`null` = 跟随驻点位 */
+  debugUnmountWaitX: number | null
+  debugUnmountX: number
+  debugSpeed: number
+  /** 调试时动不动 Y 轴（A 系列只走 X；P 系列要站到 Y 才有得撞） */
+  debugWaitY: number
+  /** 落笔等待位 Y；`null` = 跟随驻点位 */
+  debugMountWaitY: number | null
+  /** 落笔位的 Y；`null` = 跟随落笔等待位 */
+  debugMountY: number | null
+  /** 收笔等待位 Y；`null` = 跟随驻点位 */
+  debugUnmountWaitY: number | null
+  /** 收笔位的 Y；`null` = 跟随收笔等待位 */
+  debugUnmountY: number | null
+  debugMoveY: boolean
+  /** 这一趟重复几遍（1 = 一遍） */
+  debugRepeat: number
+  /** 到驻点的速度（mm/min），`debugUseTravelSpeed` 为真时才生效 */
+  debugTravelSpeed: number
+  debugUseTravelSpeed: boolean
+  /** 高级模式：整段动作块自己写；`null` = 按字段生成 */
+  debugCustomGcode: string | null
   zCalibrationDwellSec: number
   xyCalibrationDwellSec: number
   bedGlueEnabled: boolean
   bedGlueAllModels: boolean
+  /**
+   * **强制校准模式**：不看 3MF 里那条身份，只按模型实测外形认校准件。
+   *
+   * 给"手上只有模型文件、3MF 里没有 `MKPSE:Calibration`"那一类用。
+   * 打开后外形对不上任何一块校准板 ⇒ 这一趟**停下**（原文件不动），
+   * 报「不是校准件」并提示关掉这个开关。
+   */
+  forceCalibrationMode: boolean
   /** **智能塔位置**（2026-11-04 三档）：撞了是停下、直接挪、还是问一句 */
   autoTowerPosition: TowerRelocateMode
 }
@@ -2249,10 +2350,29 @@ export interface PostprocPrefsWire {
   skipVibrationCalibration?: boolean | null
   beginStageRetractEnabled?: boolean | null
   beginStageRetractZLiftMm?: number | null
+  debugModeEnabled?: boolean | null
+  debugWaitX?: number | null
+  debugMountWaitX?: number | null
+  debugMountX?: number | null
+  debugUnmountWaitX?: number | null
+  debugUnmountX?: number | null
+  debugSpeed?: number | null
+  debugWaitY?: number | null
+  debugMountWaitY?: number | null
+  debugMountY?: number | null
+  debugUnmountWaitY?: number | null
+  debugUnmountY?: number | null
+  debugMoveY?: boolean | null
+  debugRepeat?: number | null
+  debugTravelSpeed?: number | null
+  debugUseTravelSpeed?: boolean | null
+  debugCustomGcode?: string | null
   zCalibrationDwellSec?: number | null
   xyCalibrationDwellSec?: number | null
   bedGlueEnabled?: boolean | null
   bedGlueAllModels?: boolean | null
+  /** **强制校准模式**：`null` = 回到出厂档（关） */
+  forceCalibrationMode?: boolean | null
   /** **智能塔位置**（2026-11-04 三档）：`null` = 回到出厂档（`off`） */
   autoTowerPosition?: TowerRelocateMode | null
 }
@@ -2514,6 +2634,26 @@ export interface PostProcessQuestion {
    * 别的一问没有这一格 ⇒ 缺省。界面照它画俯视图与坐标。
    */
   geo?: RelocateGeo | null
+  /**
+   * **要现场填的一组数值**（2026-11-11，调试那一问）。
+   *
+   * 空 / 缺省 = 这一问只有按钮；非空 = 除了按钮还要画这些输入框，
+   * 答复时把改后的值一并带回（`answerPostProcess` 的第三个参数）。
+   */
+  fields?: PostProcessQuestionField[]
+}
+
+/** 问句里的一个数值输入框（与 Rust `hook_ipc::QuestionField` 逐字对齐） */
+export interface PostProcessQuestionField {
+  /** 钩子按它读回填好的值 */
+  key: string
+  label: string
+  /** `mm` / `mm/min` / 空 */
+  unit: string
+  value: number
+  min: number
+  max: number
+  step: number
 }
 
 /**
@@ -2644,6 +2784,53 @@ export interface PostProcessResult {
   glueLengthMm?: number
   /** 切片软件（`"BambuStudio 02.08.02.60"` —— pass1 从输入头行刮到的完整串） */
   slicer?: string
+  /**
+   * 层厚的**最小 / 最大**（mm）—— 两个一样 = 固定层高。
+   *
+   * 缺 = 层数太少量不出来（或老钩子没这两格）⇒ 界面退回开场事实里那个标称
+   * `facts.layerHeight`。**可变层高（自适应）只有跑到 pass1 数完 `; Z_HEIGHT:` 才知道**：
+   * 输入头里那一行 `; layer_height = 0.2` 写的仍是标称值，照它显示等于没说
+   * （作者 2026-11-08：「如果用户开了可变层高怎么办？……层高是多少多少到多少多少」）。
+   */
+  layerHeightMin?: number
+  layerHeightMax?: number
+  /**
+   * **调试那一趟的动作参数**（正常那一趟是 `null`）。
+   *
+   * 结果页要摆的正是问句里那行概要（驻点 / 落笔 / 收笔 / 速度）——
+   * 有它的时候「预估打印时间」「涂胶总长」**不摆**：那两个数是从原文件算的，
+   * 而这份产物只跑笔的动作（作者 2026-11-12：「把那些对应的坐标也显示出来」、
+   * 「预估打印时间、胶总长这些就是不要了」）。
+   */
+  debug?: DebugPlan | null
+}
+
+/**
+ * 调试动作参数（Rust `postprocess::ir::types::DebugIr` 的镜像）。
+ *
+ * ★ 字段名是 **snake_case**：那个结构没有 `rename_all`，序列化出来就是 Rust 的字段名
+ *   （与 `_meta.json` 的 `detail.debug` 同一份形状）。
+ */
+export interface DebugPlan {
+  /** 驻点位：调试循环从这里出发，收口也回到这里 */
+  wait_x: number
+  wait_y: number
+  /** 落笔等待位 X。`null` = 跟随驻点位 */
+  mount_wait_x?: number | null
+  mount_x: number
+  /** 收笔等待位 X。`null` = 跟随驻点位 */
+  unmount_wait_x?: number | null
+  unmount_x: number
+  /** 动作行的移动速度（mm/min） */
+  speed: number
+  test_mount: boolean
+  test_unmount: boolean
+  /** 这一趟重复几遍（`0` 与 `1` 等价） */
+  repeat: number
+  /** 要不要动 Y 轴 */
+  move_y: boolean
+  /** 高级模式：整段动作块由用户写。非空时上面的坐标不作数 */
+  custom_gcode?: string | null
 }
 
 /**
@@ -2781,14 +2968,58 @@ export interface BbsLocalTree {
 }
 
 /**
- * 「复制进切片器」这一次干了什么（[`MkpApi.copyToSlicer`] 的返回值）。
+ * 「放进切片器」这一次干了什么（[`MkpApi.copyToSlicer`] 的返回值）。
  *
- * `replaced: true` = 切片器目录里原来已经有一份同名的，这一手把它**换成了**我们这份
- * （2026-10-13 作者改判：同名就覆盖）；`false` = 新建。提示条按它说话 ——
- * 「替换掉了你别的东西」与「新放了一份」是两件事，不合并成一句"已复制"。
+ * `replaced: true` = 有目标那儿原来已经有一份同名的，这一手把它**换成了**我们这份
+ * （2026-10-13 作者改判：同名就覆盖）；`false` = 全是新建。提示条按它说话 ——
+ * 「替换掉了你别的东西」与「新放了一份」是两件事，不合并成一句"已放入"。
+ *
+ * `targets` = 这一手**写进了几个账号目录**：切片器读的是当前登录那个账号的目录，
+ * 所以一次写全所有账号目录 —— 提示条按它说清去处。
  */
 export interface CopyToSlicerOutcome {
   replaced: boolean
+  targets: number
+}
+
+/**
+ * 能往里放的切片器 —— 就是 [`SlicerId`] 里那两个**有自己预设目录**的档。
+ *
+ * 写成 `Extract` 而不是另抄一遍联合类型：抄一遍就会有一天少一个档。
+ * `system` / `custom` 是"用哪个程序打开模型"的档，没有自己的账号目录。
+ */
+export type SlicerTarget = Extract<SlicerId, 'bambu' | 'orca'>
+
+/**
+ * 一份预设落在**某个切片器的某个账号目录**里的实况
+ * （[`MkpApi.getSlicerPlacements`] 一行）。
+ *
+ * `account` 是切片器自己分的目录名（数字 uid / `default` / `BBL` …）；`placed` =
+ * 那个目录里**现在**真有这份文件 —— 在系统文件管理器里删掉之后它就会变 `false`。
+ */
+export interface SlicerPlacement {
+  /** 哪个切片器 —— 框里按它分组 */
+  slicer: SlicerTarget
+  account: string
+  /** 那个 `process` 目录的绝对路径（界面显示用，也是「打开文件夹」的落点） */
+  path: string
+  placed: boolean
+}
+
+/**
+ * 「这份放进了哪些账号目录」—— 「查看放入情况」那个框的全部数据。
+ *
+ * 列的是**放入会写的那些目录**（含还没建出来的 `default/process`）：不存在的那一格
+ * 也列出来、`placed: false` —— 用户要看到「还有这一处没放」。
+ *
+ * **自己那一档排在最前**，本机装了的另一个切片器（OrcaSlicer）跟在后面 —— 那一档可以
+ * 手动放，但它不是"这份预设有没生效"的判据（字段表是另一套，界面会说清）。
+ * `available: false` = 本机没有**自己那一档**的 `user/` 目录，`reason` 是那句人话。
+ */
+export interface SlicerPlacements {
+  available: boolean
+  reason: string | null
+  dirs: SlicerPlacement[]
 }
 
 /* ---------- 切片软件（2026-10-13 第二刀：「其他应用…」从磁盘指定） ---------- */
@@ -3135,8 +3366,19 @@ export interface MkpApi {
    * 备份要的是"丢了就再也回不来的东西"。
    *
    * 文件名由后端定（`SupportEase-备份-<时刻>.zip`），于是同一天打几份也不会互相盖掉。
+   *
+   * `includePresets = false`：跟预设有关的那几棵（用户 toml / 修改历史 / 云端原文镜像 /
+   * 原文备份 / 回收站）**不进包**（界面上那颗「连同预设一起备份」）—— 包里只剩设置与执行归档。
+   * 这份包恢复时也不动它们 —— 判断依据记在说明书里，不靠调用方再传一次。
+   *
+   * `onTick` 可选：给了就看过程（`scan` → 一跳一跳的 `pack`），不给就是"点了等结果"。
+   * 命令本身跑在线程池里（几百 MB 的归档不会把窗口冻住），**进度只有这一条路**。
    */
-  createBackup(destDir: string): Promise<BackupSummary>
+  createBackup(
+    destDir: string,
+    includePresets: boolean,
+    onTick?: (tick: BackupTick) => void,
+  ): Promise<BackupSummary>
 
   /**
    * **从一份备份恢复**（设置页）：**全量覆盖** —— 备份里有的一律覆盖，
@@ -3146,9 +3388,33 @@ export interface MkpApi {
    * （靠多份备份按时间选拿细粒度），要么细粒度同步（要求每个文件有稳定 id 与合并语义）。
    * 我们走前者。
    *
+   * `scope` 决定**动不动哪一块**（见 [`RestoreScope`]）：选中范围内整棵换掉，
+   * 范围外一个都不碰。默认在界面那侧是 `all`。
+   *
    * 恢复完界面要**整窗重载**（盘上的数据换过了，内存里的都不算数）。
    */
-  restoreBackup(zipPath: string): Promise<BackupSummary>
+  restoreBackup(
+    zipPath: string,
+    scope: RestoreScope,
+    onTick?: (tick: BackupTick) => void,
+  ): Promise<BackupSummary>
+
+  /**
+   * **备份的默认落点**（2026-11-09 作者：默认就放桌面）。
+   *
+   * 后端算（系统认得的桌面，建不出来就照实报错；没有桌面环境退回数据根下的
+   * `exports/`）—— 界面**照它显示**，不自己拼 `~/Desktop`：Windows 的桌面不叫这个名，
+   * 被 iCloud / OneDrive 接管的桌面又是另一个真路径。
+   */
+  defaultBackupDir(): Promise<string>
+
+  /**
+   * **在系统文件管理器里选中那份备份**（备份框成功之后那颗「打开位置」）。
+   *
+   * 只认**绝对路径 + `.zip` + 盘上真有这一份**（路径是 `createBackup` 自己给的），
+   * 别的一律拒 —— 这条口子不是"打开任意路径"。
+   */
+  revealBackup(path: string): Promise<void>
 
   /**
    * **把这一份存进用户根**，然后丢掉草稿。存到哪由**这份草稿改的是哪一份**决定：
@@ -3307,13 +3573,17 @@ export interface MkpApi {
   revealDeliveredFile(fileName: string): Promise<void>
 
   /**
-   * 打开**切片器目录里那份**（`user/<账号>/process/…`）所在的文件夹，并选中它。
+   * 打开**切片器目录里那份**（`user/<账号>/process/…`）所在的文件夹。
    *
-   * 那是「复制」过去的落点（切片器的生效就是那一手），与我们自己的下载区**不是一处** ——
+   * 那是「放入」过去的落点（切片器的生效就是那一手），与我们自己的下载区**不是一处** ——
    * 用户在 BBS 里改的也是那一份，所以「去文件夹里看看」得能分别打开两处。
-   * 还没复制过去 → 照实报告"先复制"。
+   *
+   * `slicer` 不给 = 这份预设自己那一档（BBS 的工艺预设 → `bambu`）；`account` 给了就
+   * 只看那个账号目录：文件在就选中它，**不在就打开目录本身**（框里那一行的「打开文件夹」
+   * 在未放入时也点得动）；两个都不给就取第一个真有这份的目录，一份都没有 → 照实报告
+   * "先放入"。
    */
-  revealSlicerFile(fileName: string): Promise<void>
+  revealSlicerFile(fileName: string, slicer?: SlicerTarget, account?: string): Promise<void>
 
   /**
    * **删除一份用户文件**：进**回收站**，不是真删（2026-10-29 作者改判）。
@@ -3336,22 +3606,43 @@ export interface MkpApi {
   emptyRecovery(): Promise<number>
 
   /**
-   * 已经复制到切片器目录的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。
-   * 盘就是底账：切片器的用户配置目录里真有这份文件才算「已复制」。
+   * 已经放进切片器的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。
+   *
+   * 盘就是底账，而且是**每一个账号目录里都有**才算「已放入」：切片器读的是当前登录
+   * 那个账号的目录，少一处用户换个账号就选不到，那不算放好。
    */
   getSlicerCopied(): Promise<string[]>
 
   /**
-   * 把一份切片器配置复制进切片器自己的用户配置目录 —— **切片器的「生效」就是这一手**
+   * 这份预设在**每个账号目录**里的实况（「查看放入情况」那个框按它逐行画）。
+   *
+   * 列的是**放入会写的那些目录**（含还没建出来的 `default/process`）—— 不存在的那一格
+   * 也列出来、`placed: false`。在系统文件管理器里删掉之后重开这个框，那一行就变回
+   * 「未放入」：读的是盘，不是记忆。
+   */
+  getSlicerPlacements(fileName: string): Promise<SlicerPlacements>
+
+  /**
+   * 把一份切片器配置放进切片器自己的用户配置目录 —— **切片器的「生效」就是这一手**
    * （MKP 预设的生效是「启用」，两回事）。
    *
-   * 真机上会落盘。两条真实的失败照实抛：不是切片器配置 / 本机还没有那份字节（先「下载」）。
+   * 写的是**那一个切片器的每一个**账号目录（登录哪个账号都能选到它）；`slicer` 不给 =
+   * 这份预设自己那一档（行上那颗「放入」就是这么走的），给了就写指定的那个切片器（框里
+   * 那一行点名要放 OrcaSlicer 时走这里）；`account` 再给就只写那一个账号目录。名字都是
+   * 后端扫出来的，认不出来就整次拒绝。
+   *
+   * 真机上会落盘。真实的失败照实抛：不是切片器配置 / 本机还没有那份字节（先「下载」）/
+   * 一个目录都没写成 / 只写成了一部分。
    *
    * ★ **目标已有同名就换掉它**（2026-10-13 作者改判：「有相同的就覆盖吧」）——
    *   原来是拒的，理由是"那份可能被用户在切片器里改过"。覆盖走原子替换，切片器正开着
-   *   也不会读到半个；返回值说清这次是**新建**还是**替换**（提示条按它说话）。
+   *   也不会读到半个；返回值说清这次是**新建**还是**替换**、写进了几个账号目录。
    */
-  copyToSlicer(fileName: string): Promise<CopyToSlicerOutcome>
+  copyToSlicer(
+    fileName: string,
+    slicer?: SlicerTarget,
+    account?: string,
+  ): Promise<CopyToSlicerOutcome>
 
   /**
    * 本机 BBS 目录里现在有哪几份工艺预设（用户层 + 系统层，一次读全）—— 工艺页左边
@@ -3823,6 +4114,15 @@ export interface MkpApi {
   deleteDeliveryFile(fileName: string): Promise<void>
 
   /**
+   * **连同切片器目录里那份一起删掉**（[`deleteDeliveryFile`] 之后由调用方按用户勾选决定）。
+   *
+   * 删的是**这份预设自己那个切片器**每个账号目录里的同名文件；别的切片器、以及云端
+   * （发布目录 / BBS 账号里的云端预设）一个字节不动。返回删掉了几份；本来就不在 = 0，
+   * 不报错（删除的目标状态就是"不在"）。
+   */
+  removeSlicerCopies(fileName: string): Promise<number>
+
+  /**
    * **删除归档区里的一份旧版本**（作者裁决 2026-10-06：允许删）。
    *
    * 入参是 [`getArchivedFiles`] 给的那个相对路径。**删了就找不回**
@@ -4012,6 +4312,71 @@ export interface MkpApi {
     path: string,
     decisions: ParamDecision[],
   ): Promise<PresetParamSync>
+
+  /* ---------- 交互记录 + 导出日志（2026-11-12） ---------- */
+
+  /**
+   * **记一批界面动作**（进 `ui.log`）。
+   *
+   * 调用方是 `src/app/log/track.ts` 的批量队列（400 ms 一批），不是页面 ——
+   * 页面只调 `track()`。失败一律吞掉：日志写不出去不该影响任何操作。
+   */
+  logUiEvents(events: UiEvent[]): Promise<void>
+
+  /**
+   * 打开导出框时读一次：包里会有什么（哪几份、多大、覆盖哪几天）。
+   * **不打包、不写盘**，只读 `logs/` 目录。
+   */
+  logExportPlan(): Promise<LogPlan>
+
+  /** 导出框的默认落点（桌面；问不到桌面时退数据根 `exports/`） */
+  defaultLogDir(): Promise<string>
+
+  /**
+   * **打一份日志包**：三条日志流逐行脱敏后进 zip，外加一份 `summary.txt`。
+   *
+   * 没有日志可导出时如实报 `E_LOG_EXPORT_002`，不产空包。
+   */
+  exportLogs(destDir: string): Promise<LogExport>
+
+  /** 在文件管理器里选中那份日志包（导出成功之后那颗「打开位置」） */
+  revealLogExport(path: string): Promise<void>
+}
+
+/** 一条界面动作。事件名是内部标识（`click` / `tab` / `api.fail`…），不进界面。 */
+export interface UiEvent {
+  event: string
+  /** 发生这件事时在哪一页（页签 id） */
+  page?: string
+  /** 细节，序列化后 ≤512 字 */
+  detail?: string
+}
+
+/** 导出清单里的一份日志。 */
+export interface LogFileInfo {
+  name: string
+  /** 哪一条流 */
+  stream: 'app' | 'ui' | 'hook'
+  /** `YYYY-MM-DD` */
+  day: string
+  bytes: number
+}
+
+/** 打开导出框时读到的清单。 */
+export interface LogPlan {
+  files: LogFileInfo[]
+  bytes: number
+  /** 有日志覆盖的第一天 / 最后一天；一份都没有时都是 `null` */
+  from: string | null
+  to: string | null
+}
+
+/** 一份打好的日志包。 */
+export interface LogExport {
+  /** zip 的绝对路径 */
+  path: string
+  files: number
+  bytes: number
 }
 
 /** 方法名，报错时用来指出是哪个口子没接 */

@@ -175,6 +175,18 @@
 }
 
 /*
+ * 「撤销这一笔（N 处）」+ 一句口径：一次手势改的所有格子在一条里，
+ * 不再逐行各给一颗（作者 2026-11-09 —— 逐行那颗看着像"只撤这一格"）。
+ */
+.fieldTools {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--w-line);
+}
+
+/*
  * **三列表格**（2026-11-03 作者定稿：平铺 + 标签）：归属 / 字段变化 / 来源。
  *
  * 为什么是表格而不是"一条一句人话"：一次改 `A1` 的 Z 会归并连带写出
@@ -305,34 +317,6 @@
 
 /* 就地撤销：平时不显形，悬停这一行才亮 —— 与参数行右键菜单同一条口径
    （格子里已经显示了信息，按钮不该抢读） */
-.fieldUndo {
-  padding: 2px 8px;
-  border: 1px solid var(--w-line);
-  border-radius: var(--r-sm);
-  background: var(--surface-solid);
-  font: inherit;
-  font-size: 11px;
-  color: var(--w-t2);
-  white-space: nowrap;
-  cursor: pointer;
-  opacity: 0;
-}
-
-.field:hover .fieldUndo,
-.fieldUndo:focus-visible {
-  opacity: 1;
-}
-
-.fieldUndo:hover:not(:disabled) {
-  color: var(--w-t1);
-  border-color: var(--w-line-strong);
-}
-
-.fieldUndo:disabled {
-  color: var(--w-t-off);
-  cursor: default;
-}
-
 /* 底部：重做那颗 + 一句口径说明（重做是栈顺序的事，不按行位置） */
 .fieldFoot {
   display: flex;
@@ -374,6 +358,16 @@
 
 .viewBtn:hover {
   color: var(--w-t1);
+}
+
+/* 「代码对比」在文件层面没有差异时不可点：这一档里没有字节可看 */
+.viewBtn:disabled {
+  color: var(--w-t3);
+  cursor: default;
+}
+
+.viewBtn:disabled:hover {
+  color: var(--w-t3);
 }
 
 .viewBtnOn,

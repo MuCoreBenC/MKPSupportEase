@@ -28,7 +28,22 @@ use postprocess::ir::types::*;
 // 那是编排层（pipeline）的事。import 进来只会得到一条 unused 警告，
 // 而警告在 -D warnings 下就是错误。
 use postprocess::ir::num_strip;
+use postprocess::postproc::pen_template::{PenVars, render};
 use std::collections::HashMap;
+
+/// 把「骨架 + 字段」渲染成最终 G-code。
+///
+/// 结构不对（未知占位符、没闭合、行首不是 G/M/L）就是预设内容非法，硬错误 ——
+/// 不静默放行，否则用户会拿到一段半截动作。
+fn render_pen_skeleton(
+    skeleton: &str,
+    vars: PenVars,
+    field: &str,
+) -> Result<String, PostprocError> {
+    render(skeleton, &vars).map_err(|e| PostprocError::InvalidConfig {
+        message: format!("{field}: {e}"),
+    })
+}
 
 /// exec_mode 三值（`""` = CLI 回退读 TOML，process.go:219 语义）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -71,8 +86,26 @@ pub fn build(
     ir.toolhead.x_offset = cfg.toolhead.offset_x;
     ir.toolhead.y_offset = cfg.toolhead.offset_y;
     ir.toolhead.z_offset = cfg.toolhead.offset_z;
-    ir.toolhead.custom_mount_gcode = split_gcode_lines(&cfg.toolhead.custom_mount_gcode);
-    ir.toolhead.custom_unmount_gcode = split_gcode_lines(&cfg.toolhead.custom_unmount_gcode);
+    ir.toolhead.custom_mount_gcode = split_gcode_lines(&render_pen_skeleton(
+        &cfg.toolhead.custom_mount_gcode,
+        PenVars {
+            wait: cfg.toolhead.pen_mount_wait_x,
+            wait_y: cfg.toolhead.pen_mount_wait_y,
+            target: cfg.toolhead.pen_mount_x,
+            speed: cfg.toolhead.pen_mount_speed,
+        },
+        "custom_mount_gcode",
+    )?);
+    ir.toolhead.custom_unmount_gcode = split_gcode_lines(&render_pen_skeleton(
+        &cfg.toolhead.custom_unmount_gcode,
+        PenVars {
+            wait: cfg.toolhead.pen_unmount_wait_x,
+            wait_y: cfg.toolhead.pen_unmount_wait_y,
+            target: cfg.toolhead.pen_unmount_x,
+            speed: cfg.toolhead.pen_unmount_speed,
+        },
+        "custom_unmount_gcode",
+    )?);
     ir.toolhead.nozzle_switch_temperature = 0.0;
     ir.toolhead.glue_z_offset = cfg.toolhead.glue_z_offset;
     ir.toolhead.prime_length = cfg.toolhead.prime_length;
@@ -362,7 +395,13 @@ pub fn build(
     ir.gcode.mkp_retract = mkp_retract;
     ir.gcode.custom_gcode_e_ownership = original_mkp_retract == 0.0;
 
-    let mut mkp_extrude = ((mkp_retract.abs() + 0.5) * 100.0).round() / 100.0;
+    /* 挤出：TOML 显式填了就用它（联动关闭），填 0 才走 `|回抽| + 0.5`。
+     * 用户要的是「可以比回抽多 0.5，也可以自己定」—— 一个 0 就把两件事分开。 */
+    let mut mkp_extrude = if cfg.toolhead.mkp_extrude != 0.0 {
+        cfg.toolhead.mkp_extrude
+    } else {
+        ((mkp_retract.abs() + 0.5) * 100.0).round() / 100.0
+    };
     if ir.gcode.custom_gcode_e_ownership {
         for line in &ir.toolhead.custom_unmount_gcode {
             if line.contains("G1 E") {
@@ -1146,30 +1185,37 @@ mod tests {
         assert!((ir.ironing.coverage_threshold - 55.0).abs() < f64::EPSILON);
     }
 
-    /// 9 份真实预设在**嵌入注册表**分支下 build 也必须成功（弃用/范围不误伤）。
+    /// 冻结的 IR 判据预设在**嵌入注册表**分支下 build 也必须成功（弃用/范围不误伤）。
     ///
-    /// 名单是 `{机型 id}-{版本 id 小写}` 那套规则算出来的（b05 Task 5 统一命名）；
-    /// 写死成字面量是刻意的 —— 名字集合本身是要盯的东西。
+    /// 2026-11-12：输入从 `fixtures/ir/presets/` 取，那是与 `ir/build9/*.json`
+    /// 一对一冻结的资产；`generate::fixtures_dir()` 是工作台产物的对照基线，
+    /// 会随版本 id 改名而增删，不该拿来当这条判据的输入。
+    /// 名单改成遍历目录：新增预设自动进入覆盖面，删掉一份也不会悄悄少测。
     #[test]
     fn nine_presets_build_with_embedded_registry() {
         let reg = crate::load_param_registry();
-        for name in [
-            "A1-standard",
-            "A1-fast",
-            "A1-fastv3.3",
-            "A1_MINI-standard",
-            "A1_MINI-fast",
-            "A1_MINI-fastv3.3",
-            "P1S-lite",
-            "P2S-standard",
-            "X1C-lite",
-        ] {
-            // 同上：预设 fixture 只在内核那一份里，路径只认 `generate::fixtures_dir()`。
-            let path = crate::generate::fixtures_dir().join(format!("{name}.toml"));
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../postprocess/tests/fixtures/ir/presets");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(&dir)
+            .expect("IR 判据预设目录应存在")
+            .flatten()
+        {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             let file = crate::read_preset(&path).unwrap();
             build(&file.config, Some(&reg), CalibrationExecMode::Fallback)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
+            seen += 1;
         }
+        assert!(seen >= 9, "反空转：IR 判据预设被读漏了，实测 {seen} 份");
     }
 
     /// NumStrip：孤立 -/. 不算、多数字提取按序。

@@ -325,7 +325,7 @@ export default function BbsPresetDrawer({
                 /* 还没下载的那一份：点了不是切预设，是去把它取回来（见 Props.onNeedDownload） */
                 onClick={() => (it.notDownloaded ? onNeedDownload?.() : onPick(it.key))}
               >
-                <span className={s.tick}>{it.current ? '✓' : ''}</span>
+                <span className={s.tick}>{it.current ? <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg> : null}</span>
                 {it.star && <span className={s.star}>*</span>}
                 <span className={s.name}>{it.label}</span>
                 {/* 行尾那两颗小标签：都是"这一份是什么来路"，不参与选中 */}

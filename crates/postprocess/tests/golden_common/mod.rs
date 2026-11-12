@@ -1,14 +1,12 @@
 //! golden 比对 harness 的公共件。
 //!
-//! 消费的数据在仓库根 `tests/golden/`（vendored 自 mkp-sr，脱钩代价见 spec doc.md §7③）。
-//! 本模块只做机械比对，不含任何算法。
+//! 消费的数据在仓库根 `tests/golden/`。本模块只做机械比对，不含任何算法。
 //!
-//! 判据语义与旧 Go 侧逐字对齐：
-//! - 行切分 = `processor/golden_test.go:301 splitLines`：
-//!   `TrimRight(s, "\n")` 后按 `\n` 切（LF-only，golden 实测无 CR）；
-//! - G1/G2 先比行数再逐行 `!=`（零容差）；
+//! 比对规则（零容差）：
+//! - 行切分：掐掉尾部 `\n` 后按 `\n` 切（LF-only，golden 实测无 CR）；
+//! - G1/G2 先比行数再逐行 `!=`；
 //! - G3 按 `=== CASE <name> ===` 分块**点名**比对（不整文件逐行——级联错位
-//!   会把真差异淹掉，旧侧 CI run 32437912254 的教训）；
+//!   会把真差异淹掉）；
 //! - `<nil>` 与 `<empty>` 是 golden 里的**字面行**：nil 输出与空切片被区分，
 //!   退化成空转会被发现。
 
@@ -108,12 +106,12 @@ pub fn compare_line_wise(label: &str, expected: &[String], actual: &[String]) {
 
 const CASE_PREFIX: &str = "=== CASE ";
 
-/// 判据档位（design.md §2.4 处置② / tasks.md 3.5）。
+/// 判据档位。
 ///
-/// 所有 23 个 CASE **起步全是 ByteExact**：旧 Go 侧的金字塔里唯一跨架构不稳的
-/// `rib/mid_tower_h250` 已被移出字节 golden（vendored 的这份就没有它）。
-/// 降档通道存在但只能走 Task 8.8 的证明流程（先打印中间 cos 值证明是 FMA 类
-/// 差异，写进 HONEST-BOUNDARIES），**不允许悄悄降**。
+/// 23 个 CASE **全部是 ByteExact**。`rib/mid_tower_h250` 因跨架构不稳（FMA 类差异）
+/// 不列入字节比对，这份 golden 里没有它。
+/// `NumericTable` 通道留着，但降档必须先打印中间量、证明差异来源并写进文档，
+/// **不允许悄悄降**。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tier {
     ByteExact,

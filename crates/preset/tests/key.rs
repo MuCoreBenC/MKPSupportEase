@@ -3,14 +3,25 @@
 //! 这把钥匙决定三件事：列表里哪些条目该合成一条、副本叫什么名字、
 //! 副本的来源找不到时拿谁作对照。三处用同一把，所以它算错一次会同时错三处。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-// 基线目录只认 `generate::` 那一处（理由见 `tests/recipe.rs`）
-use preset::generate::fixtures_dir;
 use preset::{PresetKey, read_preset_from_bytes};
 
+/// 冻结的预设样本：与 `fixtures/ir/build9/*.json` 成对，不随业务命名漂移。
+///
+/// 判据要的**不是**「当前产物长什么样」，而是「一批合法预设各自的钥匙算得对不对」——
+/// 所以用冻结件，不用会跟着生成动作改名的对照基线。
+fn frozen_presets_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/ir/presets")
+}
+
+/// 契约夹具：自造，文件名与业务命名规则无关（业务改 id / 改名字，它不动）。
+fn contract_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/contract")
+}
+
 fn fixtures() -> Vec<PathBuf> {
-    let dir = fixtures_dir();
+    let dir = frozen_presets_dir();
     let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
         .expect("读 fixture 目录")
         .flatten()
@@ -25,62 +36,51 @@ fn key_of(text: &str) -> PresetKey {
     PresetKey::of(&read_preset_from_bytes(text.to_string()).expect("预设能读"))
 }
 
-/// K-LC0：9 份 fixture 的钥匙与文件名逐份钉住。
+/// K-LC0：每一份 fixture 的钥匙与文件名逐份钉住。
 ///
 /// 这里同时钉住**文件名**：副本、内置产物、以及将来的任何产物都按它命名，
 /// 名字变了等于用户目录里多出一份看起来一样的东西。
 ///
-/// b05 Task 5 之前这张表是**四元组**（旧云端名 → 机型 → 变体 → 产物名），
-/// 因为两边命名不同；夹具改名之后那层映射没有了，剩下的就是
-/// 「钥匙 → 名字」——而名字由 `preset::preset_file_name` 算出，不是查表来的。
+/// 2026-11-12：**不再列死名单、也不写死 9 份**。原来那张四元组表每改一次版本 id
+/// 就要手改一次；现在遍历目录，逐份断言「文件头读出的 (机型, 变体) 算出的名字
+/// == 它自己的文件名」—— 新增版本、改 id 都在覆盖范围内，漏一份反倒会少一次校验。
 #[test]
 fn klc0_every_fixture_has_the_key_we_expect() {
-    let want: Vec<(&str, &str, Option<&str>)> = vec![
-        ("A1-standard.toml", "A1", Some("standard")),
-        ("A1-fast.toml", "A1", Some("fast")),
-        ("A1-fastv3.3.toml", "A1", Some("fastv3.3")),
-        ("A1_MINI-standard.toml", "A1_MINI", Some("standard")),
-        ("A1_MINI-fast.toml", "A1_MINI", Some("fast")),
-        ("A1_MINI-fastv3.3.toml", "A1_MINI", Some("fastv3.3")),
-        ("P1S-lite.toml", "P1S", Some("lite")),
-        ("P2S-standard.toml", "P2S", Some("standard")),
-        ("X1C-lite.toml", "X1C", Some("lite")),
-    ];
-    assert_eq!(fixtures().len(), 9);
+    let all = fixtures();
+    assert!(
+        all.len() >= 9,
+        "反空转：fixture 至少该有 9 份，实测 {}",
+        all.len()
+    );
 
-    for (name, machine, variant) in want {
-        let path = fixtures()
-            .into_iter()
-            .find(|p| p.file_name().unwrap() == name)
-            .unwrap_or_else(|| panic!("K-LC0 红：没有 fixture {name}"));
-        let key = key_of(&std::fs::read_to_string(&path).expect("读"));
-        assert_eq!(
-            (key.machine.as_str(), key.variant.as_deref()),
-            (machine, variant),
-            "K-LC0 红：{name} 的钥匙不对"
-        );
+    for path in &all {
+        let name = path
+            .file_name()
+            .expect("fixture 有文件名")
+            .to_string_lossy()
+            .to_string();
+        let key = key_of(&std::fs::read_to_string(path).expect("读"));
+        assert!(!key.machine.is_empty(), "K-LC0 红：{name} 没读出机型");
         assert_eq!(
             key.file_name(),
             name,
             "K-LC0 红：{name} 这个名字与钥匙算出来的不一样"
         );
     }
-    println!("K-LC0 绿：9 份 fixture 的钥匙与文件名逐份对上");
+    println!("K-LC0 绿：{} 份 fixture 的钥匙与文件名逐份对上", all.len());
 }
 
 /// 云端旧名与我们那套写法说的是**同一把钥匙**。
 ///
-/// 这条判据以前叫 `klc0_same_machine_and_variant_is_one_key_regardless_of_file_name`：
-/// 拿夹具里那份 `A1MF.toml` 与内置产物 `A1_MINI-fast.toml` 逐字节比，说明「同一份内容、
-/// 两个文件名 ⇒ 同一把钥匙」。b05 Task 5 把夹具也改名之后，「两个文件名」这个前提没了
-/// —— 内容相等由 `generate.rs` 的 `kg0p_products_match_the_baseline` 守。
-///
-/// 留下的真问题是：**旧名字还算不算同一把钥匙**。旧仓与用户目录里仍然是 `A1MF.toml`，
+/// 真问题是：**旧名字还算不算同一把钥匙**。旧仓与用户目录里仍然是 `A1MF.toml`，
 /// 它必须归到 `A1_MINI:fast` —— 归错了，同一个预设会被当成两台机器的两份参数。
+///
+/// 输入是契约夹具（自造、名字中性）：判据只关心**文件头读出的身份**，
+/// 与这份夹具自己叫什么无关。
 #[test]
 fn the_cloud_shorthand_is_the_same_key_as_our_own_spelling() {
-    let text = std::fs::read_to_string(fixtures_dir().join("A1_MINI-fast.toml"))
-        .expect("读夹具那份（A1_MINI 的 fast）");
+    let text =
+        std::fs::read_to_string(contract_dir().join("parse-write.toml")).expect("读契约夹具");
     let from_header = key_of(&text);
     // 旧名那套的简写：`M` = mini、`F` = 快拆（读法见 spec 的 `migration-map.md`）
     let from_shorthand = PresetKey::new("A1MF", Some("fast"));

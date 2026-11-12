@@ -135,11 +135,45 @@ export function usePostprocPrefs(): PostprocPrefsApi {
             wire.beginStageRetractEnabled ?? before.resolved.beginStageRetractEnabled,
           beginStageRetractZLiftMm:
             wire.beginStageRetractZLiftMm ?? before.resolved.beginStageRetractZLiftMm,
+          debugModeEnabled: wire.debugModeEnabled ?? before.resolved.debugModeEnabled,
+          debugWaitX: wire.debugWaitX ?? before.resolved.debugWaitX,
+          debugMountWaitX:
+            wire.debugMountWaitX !== undefined
+              ? wire.debugMountWaitX
+              : before.resolved.debugMountWaitX,
+          debugMountX: wire.debugMountX ?? before.resolved.debugMountX,
+          debugUnmountWaitX:
+            wire.debugUnmountWaitX !== undefined
+              ? wire.debugUnmountWaitX
+              : before.resolved.debugUnmountWaitX,
+          debugUnmountX: wire.debugUnmountX ?? before.resolved.debugUnmountX,
+          debugSpeed: wire.debugSpeed ?? before.resolved.debugSpeed,
+          debugWaitY: wire.debugWaitY ?? before.resolved.debugWaitY,
+          debugMountWaitY:
+            wire.debugMountWaitY !== undefined
+              ? wire.debugMountWaitY
+              : before.resolved.debugMountWaitY,
+          debugMountY: wire.debugMountY !== undefined ? wire.debugMountY : before.resolved.debugMountY,
+          debugUnmountWaitY:
+            wire.debugUnmountWaitY !== undefined
+              ? wire.debugUnmountWaitY
+              : before.resolved.debugUnmountWaitY,
+          debugUnmountY: wire.debugUnmountY !== undefined ? wire.debugUnmountY : before.resolved.debugUnmountY,
+          debugMoveY: wire.debugMoveY ?? before.resolved.debugMoveY,
+          debugRepeat: wire.debugRepeat ?? before.resolved.debugRepeat,
+          debugTravelSpeed: wire.debugTravelSpeed ?? before.resolved.debugTravelSpeed,
+          debugUseTravelSpeed: wire.debugUseTravelSpeed ?? before.resolved.debugUseTravelSpeed,
+          debugCustomGcode:
+            wire.debugCustomGcode !== undefined
+              ? wire.debugCustomGcode
+              : before.resolved.debugCustomGcode,
           zCalibrationDwellSec: wire.zCalibrationDwellSec ?? before.resolved.zCalibrationDwellSec,
           xyCalibrationDwellSec:
             wire.xyCalibrationDwellSec ?? before.resolved.xyCalibrationDwellSec,
           bedGlueEnabled: wire.bedGlueEnabled ?? before.resolved.bedGlueEnabled,
           bedGlueAllModels: wire.bedGlueAllModels ?? before.resolved.bedGlueAllModels,
+          forceCalibrationMode:
+            wire.forceCalibrationMode ?? before.resolved.forceCalibrationMode,
           autoTowerPosition: wire.autoTowerPosition ?? before.resolved.autoTowerPosition,
         },
       }

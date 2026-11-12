@@ -48,11 +48,11 @@ import type {
 } from '../../api/contract'
 import { detectPlatform } from '../../hooks/usePlatform'
 import { Btn } from '../ui/Controls'
-import { HeadNote, Modal, summarizeNotes } from '../../components/modal'
+import { HeadNote, Modal, NoticeHero, PageToggle } from '../../components/modal'
 import { useTitlebarDrag } from '../useTitlebarDrag'
 import { questionUiState } from './questionUi'
 import { estimatedPrintTimeSeconds } from './facts'
-import { SETTINGS_TARGET_TOWER } from '../settings/targets'
+import { FAIL_FIX_TARGETS, SETTINGS_TARGET_TOWER } from '../settings/targets'
 import type { SettingsTargetId } from '../settings/targets'
 import { percentOf, stepName } from './steps'
 import { SETTLE_MS, useSmoothPercent } from './useSmoothPercent'
@@ -266,6 +266,13 @@ interface FactRow {
   value: string
   /** 灰字行（切片软件这类「看一眼就行」的读数） */
   grey?: boolean
+  /**
+   * 值被省略号截掉时用来悬停看全（`data-tip`）。
+   *
+   * 只给**长度不可控的那两格**（耗材 / 切片软件）：多色件的耗材名能长到
+   * `PLA;PETG;ABS;TPU;PA6-CF`，格子只有一栏宽，截了得能看回来。
+   */
+  tip?: string
 }
 
 interface FactGroup {
@@ -273,28 +280,67 @@ interface FactGroup {
   rows: FactRow[]
 }
 
+/** 层高范围（mm）—— 内核 pass1 量出来的最小 / 最大层厚（可变层高时两头不一样） */
+interface LayerHeightRange {
+  min: number
+  max: number
+}
+
+/**
+ * 「层高」那一格：**固定层高给一个数，可变层高给一段**（作者 2026-11-08：「如果用户开了
+ * 可变层高怎么办？……就比如说层高是多少多少到多少多少，就那种感觉」）。
+ *
+ * ★ 用的是**内核量出来的范围**，不是切片器头里那个标称值：自适应层高时头里写的仍是
+ *   `; layer_height = 0.2`，照它显示等于把可变层高说成固定。
+ * ★ 两头差不到 0.005mm 就当固定（舍入噪声不许摆成 `0.20 – 0.20 mm`）；量不出来
+ *   （层数太少的件）也退回标称值 —— 不瞎猜范围。
+ */
+function layerHeightText(facts: PostProcessFacts | null, range: LayerHeightRange | null): string {
+  if (range !== null && range.max - range.min >= 0.005) {
+    return `${mmText(range.min)} – ${mmText(range.max)} mm`
+  }
+  return facts !== null && facts.layerHeight > 0 ? `${mmText(facts.layerHeight)} mm` : '—'
+}
+
 /** 左栏「机型与切片基础」—— 六态共用（这一栏几格真机全有） */
-function baseGroup(tr: Tr, facts: PostProcessFacts | null): FactGroup {
+function baseGroup(
+  tr: Tr,
+  facts: PostProcessFacts | null,
+  range: LayerHeightRange | null,
+): FactGroup {
+  /* 耗材那一格：多色件的耗材名能长到 `PLA;PETG;ABS;TPU;PA6-CF`，格子只有一栏宽 ⇒
+     截了要给得回来（`tip` 走悬停气泡，见 `FactRow.tip`） */
+  const filament =
+    facts === null
+      ? '—'
+      : `${facts.filamentType} · ${
+          facts.nozzleDiameter > 0 ? `${mmText(facts.nozzleDiameter)} mm` : '—'
+        }`
   return {
     title: tr('postproc.facts.baseTitle'),
     rows: [
-      { label: tr('postproc.facts.gcodeMachine'), value: facts?.gcodeMachine ?? '—' },
-      { label: tr('postproc.facts.presetMachine'), value: facts?.presetMachine ?? '—' },
+      /* 机型名同样是"长度不可控"那一类（`Bambu Lab X1 Carbon` 之类）：截了要能看回来 */
+      {
+        label: tr('postproc.facts.gcodeMachine'),
+        value: facts?.gcodeMachine ?? '—',
+        tip: facts?.gcodeMachine,
+      },
+      {
+        label: tr('postproc.facts.presetMachine'),
+        value: facts?.presetMachine ?? '—',
+        tip: facts?.presetMachine,
+      },
       {
         /* 喷嘴那一格：`0` 是"没有值"的哨兵（内核缺值一律 0）—— 别把它当 0.00 mm 摆出去
            （作者 2026-10-14：「它怎么就不显示那一个喷嘴层高」）。真值现在由内核
            从输入头 `; nozzle_diameter = ` 认（`pass1::adopt_nozzle_and_layer_height`）。 */
         label: tr('postproc.facts.filamentNozzle'),
-        value:
-          facts === null
-            ? '—'
-            : `${facts.filamentType} · ${
-                facts.nozzleDiameter > 0 ? `${mmText(facts.nozzleDiameter)} mm` : '—'
-              }`,
+        value: filament,
+        tip: filament,
       },
       {
         label: tr('postproc.facts.layerHeight'),
-        value: facts !== null && facts.layerHeight > 0 ? `${mmText(facts.layerHeight)} mm` : '—',
+        value: layerHeightText(facts, range),
       },
     ],
   }
@@ -315,7 +361,8 @@ function runGroup(tr: Tr, facts: PostProcessFacts | null): FactGroup {
     },
     { label: tr('postproc.facts.fileSize'), value: facts === null ? '—' : sizeText(facts.fileSizeBytes) },
     { label: tr('report.glue.speed'), value: facts?.glueSpeed === undefined ? '—' : speedText(facts.glueSpeed) },
-    { label: tr('report.slicer.software'), value: facts?.slicer ?? '—', grey: true },
+    /* 切片软件也是"长度不可控"那类（`BambuStudio 02.08.02.60` + 别的切片器更长的串） */
+    { label: tr('report.slicer.software'), value: facts?.slicer ?? '—', grey: true, tip: facts?.slicer },
   ]
   return { title: tr('postproc.facts.runTitle'), rows }
 }
@@ -325,14 +372,45 @@ function doneGroup(tr: Tr, finished: PostProcessFinished, facts: PostProcessFact
   const res = finished.result
   const rows: FactRow[] = []
   /*
-   * 「预估打印时间」**行永远在**，右侧的值看结论（2026-11-04 作者两句话定的口径）：
-   * 先说「失败不显示」，后补「是那个预估打印时间字段还在，只是右侧的参数是用那个横杠-」。
+   * 调试那一趟只摆**这一趟真正跑过的坐标**（2026-11-12 作者：「把那些对应的坐标也显示出来」）。
    *
-   * 所以失败 / 取消那一趟右侧是「—」，**不拿**开场事实里切片器自报的时长顶上
-   * （原来那一退就是失败屏「1 小时 58 分」的来源）；成功那趟内核重算的优先，
-   * 还没算出来先摆切片器自报的。取值抽到 `./facts`（有回归测试），这里不再自己定。
+   * 「预估打印时间」「涂胶总长」这两格在调试这一趟是从**原文件**算出来的 ——
+   * 那份产物只跑笔的动作，既没有胶也没有模型，摆出来全是错的
+   * （作者：「预估打印时间、胶总长这些就是不要了」）。
    */
-  {
+  const dbg = res?.debug ?? null
+  if (dbg !== null) {
+    const custom = dbg.custom_gcode ?? ''
+    if (custom.trim() !== '') {
+      /* 高级模式：整段动作由用户写，坐标字段不作数 —— 只报行数 */
+      const n = custom.split('\n').filter((l) => l.trim() !== '').length
+      rows.push({
+        label: tr('postproc.facts.debugPlan'),
+        value: tr('postproc.facts.debugPlanCustom', { n: String(n) }),
+      })
+    } else {
+      /* 等待位没填就跟随驻点 —— 与内核 `action_block` 同一条规矩（`?? wait_x`） */
+      const mw = dbg.mount_wait_x ?? dbg.wait_x
+      const uw = dbg.unmount_wait_x ?? dbg.wait_x
+      const value = tr('postproc.facts.debugPlanValue', {
+        wait: String(dbg.wait_x),
+        mw: String(mw),
+        mx: String(dbg.mount_x),
+        uw: String(uw),
+        ux: String(dbg.unmount_x),
+        speed: String(dbg.speed),
+      })
+      rows.push({ label: tr('postproc.facts.debugPlan'), value, tip: value })
+    }
+  } else {
+    /*
+     * 「预估打印时间」**行永远在**，右侧的值看结论（2026-11-04 作者两句话定的口径）：
+     * 先说「失败不显示」，后补「是那个预估打印时间字段还在，只是右侧的参数是用那个横杠-」。
+     *
+     * 所以失败 / 取消那一趟右侧是「—」，**不拿**开场事实里切片器自报的时长顶上
+     * （原来那一退就是失败屏「1 小时 58 分」的来源）；成功那趟内核重算的优先，
+     * 还没算出来先摆切片器自报的。取值抽到 `./facts`（有回归测试），这里不再自己定。
+     */
     const printSec = estimatedPrintTimeSeconds({
       finished,
       resultSeconds: res?.printTimeSeconds,
@@ -342,11 +420,11 @@ function doneGroup(tr: Tr, finished: PostProcessFinished, facts: PostProcessFact
       label: tr('postproc.facts.printTime'),
       value: printSec === undefined ? '—' : printTimeText(printSec),
     })
+    rows.push({
+      label: tr('report.glue.total'),
+      value: res?.glueLengthMm === undefined ? '—' : mm2(res.glueLengthMm),
+    })
   }
-  rows.push({
-    label: tr('report.glue.total'),
-    value: res?.glueLengthMm === undefined ? '—' : mm2(res.glueLengthMm),
-  })
   /* 这一格真机现在就有：处理耗时 = finished.elapsedMs，大小 = 开场那几个事实里的字节数 */
   rows.push({
     label: tr('postproc.facts.elapsed'),
@@ -361,32 +439,19 @@ function doneGroup(tr: Tr, finished: PostProcessFinished, facts: PostProcessFact
   return { title: tr('postproc.facts.doneTitle'), rows }
 }
 
-/**
- * 这一屏的**提示**一律走共用件 [`HeadNote`]（`components/modal`）—— 落点是标题右边
- * 那一格（回执槽），不是框身。
+/*
+ * 这一屏的提示分两处，**按"要不要读全"分**，不在框身里另起一行：
  *
- * 作者 2026-10-17 三次点名之后收的口径：
- *   · 「这种错误一行的能不能放到标题右侧」
- *   · 「这个文字提示不应该加在这个地方，应该加在标题后面……会导致我的模态框高度宽度变化」
- *   · 「把所有这些提示的，不管是什么的，都用同一套组件，同一套逻辑复用在标题后面显示」
+ *   ① **一句话**（「这一步没成」「校准件这一趟是这么跑的」）⇒ 共用件 `HeadNote`，
+ *      落在**标题右边那一格**。那一格永远一行、超出省略号，字数不影响框的尺寸。
+ *   ② **一整段、要看全的**（内核留下的警告）⇒ 共用件 `NoticeHero`，占**上面那张 hero 卡**，
+ *      左下角那颗钮翻回「信息」还看得见两栏事实（见下面的 `pages`）。
+ *      ★ 作者 2026-11-08：「这种出错的就显示在 HERO 里面……这样就不用说上面也显示错误、
+ *        下面也显示错误」——原来同一段警告在标题右边截一遍、框身里再列一遍，还多撑高一块。
  *
- * 原来这一屏自己抄了一份 `HeadNote` + `.headErr/.headNote/.headOk` 三档样式，
- * 现在那三档住共用件里（`components/modal/HeadNote.module.css`）—— 别在这里再抄一遍。
- *
- * ★ 必须**在 `Modal` 里面渲染**：槽是 `Modal` 自己给的（`modalHeadSlot.ts`），
+ * ★ `HeadNote` 必须**在 `Modal` 里面渲染**：槽是 `Modal` 自己给的（`modalHeadSlot.ts`），
  * 在外面拿到的永远是 `null`。
  */
-
-/**
- * 内核那几条警告压成**一行**（标题右边那一格只放得下一行）。
- *
- * 多条那半截的写法归共用件（`summarizeNotes`）；这里只加"警告："这层帽子 ——
- * 因为报告页那些"读不出来"之类的提示也是同一格，帽子里得说清是哪一类事。
- */
-function warningsLine(list: string[]): string {
-  const one = summarizeNotes(list)
-  return list.length === 1 ? t('postproc.warn.line1', { one }) : t('postproc.warn.lineN', { one })
-}
 
 function FactsGroups({ groups }: { groups: FactGroup[] }) {
   return (
@@ -401,7 +466,9 @@ function FactsGroups({ groups }: { groups: FactGroup[] }) {
             {g.rows.map((r) => (
               <div className={r.grey === true ? `${s.factRow} ${s.factGrey}` : s.factRow} key={r.label}>
                 <span className={s.factLabel}>{r.label}</span>
-                <span className={s.factValue}>{r.value}</span>
+                <span className={s.factValue} data-tip={r.tip}>
+                  {r.value}
+                </span>
               </div>
             ))}
           </div>
@@ -481,7 +548,7 @@ function ProgressHero({
   )
 }
 
-/* ---- ② 机型不匹配：红警告 hero（空心圈 + 标题 + 后端那一句问话） ---- */
+/* ---- ② 那一问：提示卡（橙色 = 拦一下 / 绿色 = 挑个跑法），走共用件 `NoticeHero` ---- */
 
 /**
  * 「1 分 52 秒后自动终止」——没人答就自动按"不跑"收场。
@@ -490,20 +557,6 @@ function ProgressHero({
  * （`question.deadlineUnixMs`），所以补推一次也不会从头数。
  * 每秒重算一次靠上面那条 `running` 的 interval（`setTick`）——这一屏跑着的时候本来就每秒重渲。
  */
-/**
- * 校准那趟的**那一句结论**（`print` / `direct` 两种跑法各一句）。
- *
- * ★ 与 Rust 侧 `hook::calib_done_line` 读的是**同一组键**（`messages.toml` 的
- * `hook.calib_done_print` / `hook.calib_done_direct`）—— 报告页那一侧也读它，
- * 于是界面与报告不会各说各的。这里这份是它的前端镜像：那一行住在标题右边
- * （`HeadNote`），要的是"立刻能画"的短句，不再回一趟后端。
- *
- * ★★ 两边**必须逐字一致**；改文案时 `messages.toml` 与这里一起改。
- */
-function calibDoneLine(choice: 'print' | 'direct'): string {
-  return t(choice === 'direct' ? 'postproc.calibDone.direct' : 'postproc.calibDone.print')
-}
-
 function countdownText(deadlineUnixMs: number | undefined): string | null {
   /* 老一侧（没这个字段）/ 预览那一档（0）= 不摆倒计时，不许摆出个 `NaN 秒` */
   if (deadlineUnixMs === undefined || !Number.isFinite(deadlineUnixMs) || deadlineUnixMs <= 0) {
@@ -518,79 +571,18 @@ function countdownText(deadlineUnixMs: number | undefined): string | null {
   return t('postproc.autoStop.minSec', { m, s: sec - m * 60 })
 }
 
-function WarnHero({ text, deadlineUnixMs }: { text: string; deadlineUnixMs?: number }) {
-  const left = countdownText(deadlineUnixMs)
-  return (
-    <div className={`${s.warnHero} ${s.warnSoft}`} role="status">
-      <span className={s.warnGlyph} aria-hidden="true">
-        <span className={s.warnBadge}>!</span>
-      </span>
-      <div className={s.warnCopy}>
-        {/*
-          这一叠（标题 + 问话 + 倒计时）在框内滚：hero 与其它三扇一样**定死 104px**
-          （作者 2026-10-17：「内容在里面滚动」），内容多的时候不许把框撑高。
-
-          ★ 文案只留三行（作者：「你就用很简单的文案，简短几行的」）：
-            标题（是什么事）+ 后端那一句（哪两台机对不上）+ 倒计时（不管会怎样）。
-          原来那两句"维度按预设算 / 怎么答"是内核口径，作者原话：「文案不好，什么纬度？」
-        */}
-        <div className={s.warnScroll}>
-          <span className={s.warnTitle}>{t('postproc.ask.machineTitle')}</span>
-          {/* 正文就是后端那一句问话（`question.text`）—— 不另编文案 */}
-          <span className={s.warnLine}>{text}</span>
-          {left !== null && <span className={s.warnHint}>{left}</span>}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 /**
- * **那一问的 hero**（2026-10-17 泛化）：按 `questionKind` 分两种长相，**同一口 104px 的框、
- * 同一套 `.warnScroll` 内滚**（作者：「hero 高度定死，内容在里面滚动」）。
+ * 校准那趟的**那一句结论**（`print` / `direct` 两种跑法各一句）。
  *
- * - `machine-mismatch` = 警告橙（`.warnSoft`）：这是"结果可能出错"，要拦一下；
- * - `calibration-mode` = 中性绿（`.askSoft`）：**不是出错**，是"这一盘怎么跑"的流程选择，
- *   拿警告色去说它会让用户以为出了问题（作者：「这不是警告」）。
+ * ★ 与 Rust 侧 `hook::calib_done_line` 读的是**同一组键**（`messages.toml` 的
+ * `hook.calib_done_print` / `hook.calib_done_direct`）—— 报告页那一侧也读它，
+ * 于是界面与报告不会各说各的。这里这份是它的前端镜像：那一行住在标题右边
+ * （`HeadNote`），要的是"立刻能画"的短句，不再回一趟后端。
  *
- * ★ 种类串必须与后端常量**逐字一致**（`hook_ipc::QKIND_*`）。这里原来写的是
- * `calibration-print`，而后端发的是 `calibration-mode` —— 对不上就落到兜底那条，
- * 校准那一问被套上"预设与机型不匹配 · 等你决定"的橙框（作者 2026-10-17 截图）。
- *
- * 两种都只摆三行：标题 + 后端那一句 + 倒计时。文案不在这里编（正文就是 `question.text`）。
+ * ★★ 两边**必须逐字一致**；改文案时 `messages.toml` 与这里一起改。
  */
-function AskHero({
-  questionKind,
-  text,
-  deadlineUnixMs,
-}: {
-  questionKind: string
-  text: string
-  deadlineUnixMs?: number
-}) {
-  if (questionKind === 'calibration-mode') {
-    const left = countdownText(deadlineUnixMs)
-    return (
-      <div className={`${s.warnHero} ${s.askSoft}`} role="status">
-        <span className={s.warnGlyph} aria-hidden="true">
-          {/* 圈里那枚记号是**画出来的 SVG**，不是文字符号 —— 与 `.resBadge` 那条同一条理由：
-              字体里的 `✦` 自带基线偏移（`align-items: center` 居中的是行盒、不是字形），
-              看上去会偏低。SVG 占满整个盒子，几何上就是正的（作者 2026-10-17 截图）。 */}
-          <span className={`${s.warnBadge} ${s.askBadge}`}>
-            <SparkMark />
-          </span>
-        </span>
-        <div className={s.warnCopy}>
-          <div className={s.warnScroll}>
-            <span className={s.warnTitle}>{t('postproc.ask.calibTitle')}</span>
-            <span className={s.warnLine}>{text}</span>
-            {left !== null && <span className={s.warnHint}>{left}</span>}
-          </div>
-        </div>
-      </div>
-    )
-  }
-  return <WarnHero text={text} deadlineUnixMs={deadlineUnixMs} />
+function calibDoneLine(choice: 'print' | 'direct'): string {
+  return t(choice === 'direct' ? 'postproc.calibDone.direct' : 'postproc.calibDone.print')
 }
 
 /* ---- ③ 成功：四格指标条（笔偏移 X/Y/Z + 涂胶速度） ---- */
@@ -682,22 +674,26 @@ function SquareMark() {
  * 形状 = 四条内凹的边（每边一个控制点拉向圆心），比正菱形更像"闪光"，与 `✦` 同一种感觉。
  */
 /**
- * 下面那一块**能翻到哪几页**（2026-10-18 起两页，2026-11-04 扩成三页）。
+ * 这一屏**能翻到哪几页**。每一页说的是"上面那张 hero 是什么 + 下面那一格摆什么"：
  *
- * - `facts`：两栏事实（机型与切片基础 / 擦料与胶水消耗）—— 每一屏都有
+ * - `facts`：上面是这一趟的结果 hero（四格读数 / 红卡），下面是两栏事实
+ *   （机型与切片基础 / 擦料与胶水消耗）—— 跑着、普通成功都只有这一页
  * - `note` ：说明页。挪塔那一问是"要不要挪"的问句；**碰撞失败是陈述句**（见 `CollisionNote`）
- * - `fail` ：红卡（只有失败那几屏有）
+ * - `fail` ：红卡 + 两栏事实（碰撞失败那一屏的默认页）
+ * - `warn` ：警告页。**上面换成警告卡**（`NoticeHero`），下面仍是那两栏事实 ——
+ *   作者 2026-11-08：「出错的就显示在 HERO 里面……下面的那些内容不用变，
+ *   变的是上面的 hero 那一个卡片」
  */
-type RelocateTab = 'note' | 'fail' | 'facts'
+type PageTab = 'note' | 'fail' | 'facts' | 'warn'
 
 /**
  * 每一页在**左下角那颗钮**上怎么写（钮上写的是**点它会去哪一页**）。
  *
- * ★ 与「每次提问」那一屏原来那两颗文案同一个口径（钮上写目标页，`aria`/`data-tip`
- *   说全"切到哪儿"）—— 三档共用一张表，才不会一屏一个说法。
+ * ★ `aria` / `data-tip` 说全"切到哪儿"—— 钮面只有一个词，光念那个词听不出会发生什么。
+ *   四档共用一张表，才不会一屏一个说法。
  */
 const TAB_META: Record<
-  RelocateTab,
+  PageTab,
   { label: StringKey; toAria: StringKey; toTip: StringKey }
 > = {
   /* 挪塔那一屏叫「信息」（那两栏是"数据"）；失败那一屏叫「返回」（那一页是"结论"） */
@@ -717,19 +713,12 @@ const TAB_META: Record<
     toAria: 'postproc.relocate.toFacts',
     toTip: 'postproc.relocate.toFactsTitle',
   },
-}
-
-/**
- * 翻页那颗钮上的记号：一个 i（"信息"）—— 画成 SVG，与全站「圈里记号一律 SVG」同一条。
- */
-function InfoGlyph() {
-  return (
-    <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
-      <circle cx="6" cy="6" r="4.6" stroke="currentColor" strokeWidth="1.1" />
-      <path d="M6 5.4v3" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
-      <circle cx="6" cy="3.7" r="0.62" fill="currentColor" />
-    </svg>
-  )
+  /* 警告页：钮上写「警告」（点它去看这一趟的警告） */
+  warn: {
+    label: 'postproc.warn.tab',
+    toAria: 'postproc.warn.toTab',
+    toTip: 'postproc.warn.toTabTitle',
+  },
 }
 
 function SparkMark() {
@@ -946,6 +935,15 @@ export default function PostProcessModal({
 
   const finished = run?.finished ?? null
   const running = run !== null && finished === null
+  /**
+   * 内核留下的警告（这一趟跑完才有）。
+   *
+   * ★ 它们住在**上面那张 hero 卡**（共用件 `NoticeHero`）里，不在框身里另起一块 ——
+   *   作者 2026-11-08：「出错的就显示在 HERO 里面……这样就不用说上面也显示错误、
+   *   下面也显示错误」，框也不会被那一块撑高。
+   * ★ 可能有好几条（一条一个段落），也可能一条都没有；`?? []` 兜老一侧不带这个字段。
+   */
+  const warnings = finished?.warnings ?? []
   /*
    * ★★ 正在等用户作答（2026-10-17）。**要不要问，看的是"问句还在不在"**：
    * 钩子那边推完问句就在原地等，直到有人答 / 按停止 / 超时 —— 这一整段时间界面上
@@ -1200,31 +1198,45 @@ export default function PostProcessModal({
   }, [running])
 
   /*
-   * **那一块的两页**（2026-10-18 起；2026-11-04 泛化成三档）
+   * **这一块能翻到哪几页** —— 一页 = 上面那张 hero + 下面这一格的内容。
    *
+   *   `facts` = 这一趟的结果 hero（四格读数 / 红卡）+ 两栏事实
    *   `note`  = 挪塔说明 / 碰撞说明（说什么、为什么、下一步怎么办）
-   *   `facts` = 原来那两栏事实（机型与切片基础 / 擦料与胶水消耗）
-   *   `fail`  = 「处理失败」那张红卡（只有失败那几屏有）
+   *   `fail`  = 「处理失败」那张红卡 + 两栏事实（碰撞失败那一屏的默认页）
+   *   `warn`  = **警告卡** + 两栏事实（只在有警告的结果屏有）
    *
-   * 三页**叠在同一格里**（`.relocateSlot`），页高 = 较高那一页 ⇒ 翻页不跳、框不变大。
-   * 左下角那颗小钮切；页脚在那里统一渲染（见下面 footer 那段注释）。
+   * 几页**叠在同一格里**（`.relocateSlot`），页高 = 较高那一页 ⇒ 翻页不跳、框不变大。
+   * 左下角那颗小钮切（共用件 `PageToggle`，挂在页脚那块 `footLead` 上）。
    *
    * ★ 2026-11-04 作者：「我点击这个信息，又切换回原本的那一个，然后点击了说明就切换成
    *   这一个碰撞的」—— **碰撞失败那几屏也归这套翻页管**，不再只在"有问句"时才有那颗钮。
-   */
-  /*
-   * **默认落在"信息"那一页**（2026-11-04 作者：「默认显示信息呀，不要默认显示说明」）。
+   * ★ 2026-11-08 作者：「出错的就显示在 HERO 里面……下面的那些内容不用变，
+   *   变的是上面的 hero 那一个卡片」—— 警告页就是这么一页：**下面还是那两栏事实**。
    *
-   * ★ 初值原来是 `'note'` —— 那是挪塔那一问的合理默认（问句本身就摆在说明页上），
-   *   但它同时让失败 / 成功那两屏一进来就停在说明页。现在统一以"信息"开场：
-   *   问句那一屏的正文行仍然在 `note` 页，可答的按钮在页脚，翻不翻都看得见。
+   * **默认落在"信息"那一页**（2026-11-04 作者：「默认显示信息呀，不要默认显示说明」）：
+   * 初值曾是 `'note'`（挪塔那一问的合理默认），但它同时让失败 / 成功那两屏一进来就停在
+   * 说明页 ⇒ 现在统一以"信息"开场，`warn` 由下面那条 effect 在有警告时顶上来。
    */
-  const [relocateTab, setRelocateTab] = useState<RelocateTab>('facts')
+  const [pageTab, setPageTab] = useState<PageTab>('facts')
   const questionKind = run?.question?.questionKind
   useEffect(() => {
     /* 换一问（或这一问结束）就翻回"说明"那页 —— 别把上一问的翻页状态带过来 */
-    setRelocateTab('note')
+    setPageTab('note')
   }, [questionKind])
+  /*
+   * **成功但带警告 ⇒ 翻到警告页**：那条警告是这一趟要紧的结论，藏在钮后面等于没说。
+   *
+   * ★ 只认**成功**那一趟：失败 / 已停止的头等事是"没成"（红卡），警告只挂在那几屏的
+   *   第二页（见下面 `pages`）—— 默认页不许被它顶掉。
+   * ★ 依赖是**警告本身**（拼成一个串），不是 `finished` 对象：「预估打印时间」是后补的，
+   *   补进来时 `usePostProcessRun` 会换一个新对象（同一个结论）—— 拿对象当键就会平白
+   *   重翻一次页，人刚点去看信息就被弹回警告页。
+   * ★ 新一趟开跑（`finished` 变 null）⇒ 串变空 ⇒ 回到"信息"。
+   */
+  const warnKey = finished?.ok === true ? warnings.join('\u0000') : ''
+  useEffect(() => {
+    setPageTab(warnKey === '' ? 'facts' : 'warn')
+  }, [warnKey])
 
   if (run === null || view.dismissed) return null
 
@@ -1285,42 +1297,66 @@ export default function PostProcessModal({
     finished.code === 'E_GCODE_COLLISION_001'
 
   /**
-   * 这一屏下面那块**有哪几页**（按翻页顺序）。
+   * 这一趟失败得**去设置里改一项**吗 —— 按码查表（`FAIL_FIX_TARGETS`）。
+   *
+   * 有落点 ⇒ 页脚多一颗「去设置」：收掉这一屏、跳到设置页那一行并亮它。
+   * 表里没有的码不摆那颗钮（没有可去的地方就不给假出口）。
+   */
+  const failFixTarget: SettingsTargetId | null =
+    finished !== null && !finished.ok && !finished.cancelled && finished.code !== null
+      ? FAIL_FIX_TARGETS[finished.code] ?? null
+      : null
+  const canFixSetting = failFixTarget !== null && onOpenSettings !== undefined
+
+  /** 这一颗的收场是**真收**（不驻留胶囊）：跳过去是为了看/改那一行，改完会再跑一趟 */
+  const goFixSettings = () => {
+    const target = failFixTarget
+    if (target === null || onOpenSettings === undefined) return
+    finishForGood()
+    onOpenSettings(target)
+  }
+
+  /** 这一趟带警告 ⇒ 结果屏多一页「警告」（见下面那张表） */
+  const hasWarnings = warnings.length > 0
+
+  /**
+   * 这一屏**有哪几页**（按翻页顺序；第一页 = 默认页）。
    *
    * | 这一屏 | 页 |
    * |---|---|
-   * | 挪过塔（问句中 / 结完账） | 说明 ↔ 信息 |
-   * | **碰撞失败** | **红卡 + 信息（同一页） ↔ 碰撞说明** |
-   * | 别的失败 | 不翻（红卡 + 信息，一颗钮都不摆） |
+   * | 挪过塔（问句中 / 结完账） | 信息 ↔ 说明（有警告再挂一页警告） |
+   * | **碰撞失败** | **红卡 + 信息（同一页） ↔ 碰撞说明**（有警告再挂一页警告） |
+   * | 别的失败 | 不翻（红卡 + 信息，一颗钮都不摆）；有警告再挂一页警告 |
    * | 跑着 / 普通成功 | 只有信息 |
+   * | **成功但带警告** | **警告 ↔ 信息**（默认警告：那条警告先给人看） |
    *
-   * ★ 失败**只有两页**（2026-11-04 作者第二次纠正：「我说的失败还是这样子，我不要 3 种切换，
-   *   我就要两种切换」，并贴了老样子那张图）：红卡与两栏事实本来就在**同一屏**上下摆着，
-   *   是这块的"原样"——所以"失败"不是一个单独的页，它就是**默认那一页**。
-   *   翻页钮只在那两页之间转：默认 ←→ 说明。
+   * ★ 失败那屏的"失败"不是一个单独的页（2026-11-04 作者：「我不要 3 种切换」）：
+   *   红卡与两栏事实本来就在**同一屏**上下摆着，是这块的"原样"——它就是**默认那一页**。
+   * ★ 默认页永远是 `pages[0]`：`warn` 只在**成功但带警告**那一屏排到最前（上面那条
+   *   effect 把它翻上来）；失败 / 挪塔那几屏它排最后，红卡与图仍是第一眼看到的东西。
    */
-  /*
-   * ★ **信息永远排第一**（2026-11-04 作者：「默认显示信息呀，不要默认显示说明」）——
-   *   `activeTab` 落回 `pages[0]`，所以顺序就是把默认页定死的那一格。
-   *   失败那屏的"信息"就是老样子那两栏（红卡在顶部 hero，不参与翻页）。
-   */
-  const pages: RelocateTab[] = isCollisionFail
-    ? ['fail', 'note']
+  const pages: PageTab[] = isCollisionFail
+    ? hasWarnings ? ['fail', 'note', 'warn'] : ['fail', 'note']
     : showsRelocateMaps
-      ? ['facts', 'note']
-      : []
+      ? hasWarnings ? ['facts', 'note', 'warn'] : ['facts', 'note']
+      : finished !== null && !finished.ok
+        ? hasWarnings ? ['facts', 'warn'] : []
+        : hasWarnings
+          ? ['warn', 'facts']
+          : []
 
   /** 当前这一页不在这一屏的页表里（换了屏）⇒ 落回第一页，别停在空白页上 */
   /*
    * ★ 问句那一屏**强制停在说明页**：问句正文就住在 `note` 页，翻到"信息"去看两栏数字
    *   反而看不到"它在问什么"（作者 2026-10-18 定过：那一屏就是"说明 + 选项"）。
-   *   别的屏一律按 `relocateTab`（默认 `facts` = 信息）。
+   *   那一屏因此**不摆翻页钮**（摆了也翻不动，见页脚那段）。
+   *   别的屏一律按 `pageTab`（默认 `facts` = 信息）。
    */
-  const wantTab: RelocateTab = isAskingRelocate ? 'note' : relocateTab
-  const activeTab: RelocateTab = pages.includes(wantTab) ? wantTab : (pages[0] ?? 'facts')
+  const wantTab: PageTab = isAskingRelocate ? 'note' : pageTab
+  const activeTab: PageTab = pages.includes(wantTab) ? wantTab : (pages[0] ?? 'facts')
 
   /** 下一颗钮转到哪一页（按 `pages` 轮转） */
-  const nextTab: RelocateTab | null =
+  const nextTab: PageTab | null =
     pages.length < 2
       ? null
       : pages[(pages.indexOf(activeTab) + 1) % pages.length] ?? null
@@ -1358,10 +1394,23 @@ export default function PostProcessModal({
    * ★ 挪过塔的成功趟（`auto` 档）四格读数**仍在 hero 位**（两幅图在它上面一格，
    *   用的是同一块 `lead` 槽，见上面那段），所以这里不用另加 `MetricsStrip`。
    */
+  /**
+   * 层高范围：**只有跑完才有**（pass1 数完 `; Z_HEIGHT:` 才知道），跑着 / 问句那两屏
+   * 只能摆切片器标称值。`result` 线上真的会是 `null`（与 `metricsReady` 那条同因），
+   * 所以先收成一格再判。
+   */
+  const resultFacts = finished?.result ?? null
+  const layerHeights: LayerHeightRange | null =
+    resultFacts !== null &&
+    typeof resultFacts.layerHeightMin === 'number' &&
+    typeof resultFacts.layerHeightMax === 'number'
+      ? { min: resultFacts.layerHeightMin, max: resultFacts.layerHeightMax }
+      : null
+
   const factsPageGroups =
     asking || running
-      ? [baseGroup(tr, facts), runGroup(tr, facts)]
-      : [baseGroup(tr, facts), doneGroup(tr, finished as PostProcessFinished, facts)]
+      ? [baseGroup(tr, facts, layerHeights), runGroup(tr, facts)]
+      : [baseGroup(tr, facts, layerHeights), doneGroup(tr, finished as PostProcessFinished, facts)]
 
   /** 两条命令（停止 / 答复）都要等后端，失败要说出来 —— 界面不许"点了没反应" */
   const act = (fn: () => Promise<void>) => {
@@ -1393,15 +1442,15 @@ export default function PostProcessModal({
 
 
   /*
-   * 顶部那一块（跑着 hero / 问句警告 / 结果 hero）——四种长相收成一个变量，
-   * 下面那句 facts 与警告行是它们**共用**的尾巴。
+   * 顶部那一块（跑着 hero / 问句提示卡 / 结果 hero / 警告卡）——几种长相收成一个变量，
+   * 下面那一格（两栏事实 / 说明页）是它们**共用**的尾巴。
    */
   let lead: ReactNode = null
   if (showAsk && run.question !== null) {
     /*
      * **挪塔那一问**（2026-10-18）：撞了要看图才敢决定 ⇒ 上摆放两幅俯视图（不套外圈
      * 容器、高度跟 hero 那一带对齐），文案挪到下面"原本两栏事实"的位置（可翻页，
-     * 见下面的 `relocateTab`）。几何没带出来（旧钩子 / 解析丢格）就退回三行字。
+     * 见下面的 `pageTab`）。几何没带出来（旧钩子 / 解析丢格）就退回三行字。
      */
     lead = isAskingRelocate ? (
       <RelocateMaps
@@ -1410,10 +1459,33 @@ export default function PostProcessModal({
         machineType={run.facts?.presetMachine ?? null}
       />
     ) : (
-      <AskHero
-        questionKind={run.question.questionKind}
-        text={run.question.text}
-        deadlineUnixMs={run.question.deadlineUnixMs}
+      /*
+       * 那一问的提示卡（共用件 `NoticeHero`，卡高恒 104、内容多了在卡里滚）：
+       *
+       * - `machine-mismatch` = 警告橙：这是"结果可能出错"，要拦一下；
+       * - `calibration-mode` = 中性绿：**不是出错**，是"这一盘怎么跑"的流程选择，
+       *   拿警告色去说它会让用户以为出了问题（作者：「这不是警告」）。
+       *
+       * ★ 种类串必须与后端常量**逐字一致**（`hook_ipc::QKIND_*`）：对不上就落到兜底
+       *   那条橙框（校准那一问曾经被套上"预设与机型不匹配 · 等你决定"，2026-10-17）。
+       * ★ 正文就是后端那一句问话（`question.text`），不另编文案；末行是倒计时。
+       */
+      <NoticeHero
+        /* `debug-plan` 与校准那问同一档：**不是出错**，是"这一盘怎么跑"的流程选择 */
+        tone={run.question.questionKind === 'machine-mismatch' ? 'warn' : 'ask'}
+        title={tr(
+          run.question.questionKind === 'debug-plan'
+            ? 'postproc.ask.debugTitle'
+            : run.question.questionKind === 'calibration-mode'
+              ? 'postproc.ask.calibTitle'
+              : 'postproc.ask.machineTitle',
+        )}
+        lines={run.question.text.split('\n')}
+        hint={countdownText(run.question.deadlineUnixMs) ?? undefined}
+        /* 圈里那枚 `✦` 是**画出来的 SVG**：字体符号自带基线偏移，几何坐标不会 */
+        glyph={
+          run.question.questionKind === 'machine-mismatch' ? undefined : <SparkMark />
+        }
       />
     )
   } else if (showProgress) {
@@ -1445,7 +1517,24 @@ export default function PostProcessModal({
       </div>
     )
   } else if (finished !== null) {
-    if (finished.ok) {
+    /*
+     * **警告页**（2026-11-08）：上面这一块换成警告卡 —— 下面那两栏事实一点不动
+     * （作者：「下面的那些内容不用变，变的是上面的 hero 那一个卡片」）。
+     *
+     * 警告一条一段（内核原话照抄），多了在卡里滚：卡高恒 104，模态框不跟着长。
+     * 这一页只在 `hasWarnings` 时才在页表里（见上面的 `pages`），所以不会空着。
+     */
+    if (activeTab === 'warn') {
+      lead = (
+        <div ref={leadBoxRef} key="leadWarn">
+          <NoticeHero
+            tone="warn"
+            title={tr('postproc.warn.title', { n: warnings.length })}
+            lines={warnings}
+          />
+        </div>
+      )
+    } else if (finished.ok) {
       /*
        * **挪过塔的成功趟**（2026-11-04 作者：「如果我开了自动的话，它也得把那个塔的移动的
        * 显示出来呀」）—— 上摆放两幅俯视图，四格读数挪到下面那块（可翻页回来看）。
@@ -1554,17 +1643,22 @@ export default function PostProcessModal({
          */
         <>
           <div className={s.footLead}>
-            {pages.length > 1 && nextTab !== null && (
-              <button
-                type="button"
-                className={s.slotToggle}
-                onClick={() => setRelocateTab(nextTab)}
-                aria-label={tr(tabMeta[nextTab].toAria)}
-                data-tip={tr(tabMeta[nextTab].toTip)}
-              >
-                <InfoGlyph />
-                {tr(tabMeta[nextTab].label)}
-              </button>
+            {/*
+              翻页那颗小钮（共用件 `PageToggle`）：**问句那一屏不摆** —— 那一屏
+              强制停在说明页（见上面 `wantTab`），钮翻不动，摆一颗点了没反应的钮更糟。
+            */}
+            {pages.length > 1 && nextTab !== null && !isAskingRelocate && (
+              <PageToggle
+                label={tr(tabMeta[nextTab].label)}
+                ariaLabel={tr(tabMeta[nextTab].toAria)}
+                tip={tr(tabMeta[nextTab].toTip)}
+                onClick={() => {
+                  /* 翻页 = 看这一页的 hero：先把"双击翻回 100%"那一态收掉，
+                     否则进度 hero 会压着新页的 hero 不放 */
+                  setPeek(false)
+                  setPageTab(nextTab)
+                }}
+              />
             )}
             {replay && (
               <span className={s.previewTag}>{tr('postproc.replay.tag')}</span>
@@ -1598,8 +1692,8 @@ export default function PostProcessModal({
             </Btn>
           ) : showAsk && run.question !== null ? (
             /*
-             * 那一问的按钮（2026-10-17 泛化）：**问句自带选项表就照它画**，没有就还是
-             * 机型那一问的老两颗（强制继续不强调 / 终止占强调位 —— 第 9~11 轮定的）。
+             * 那一问的按钮（2026-10-17 泛化）：**问句自带选项表就照它画**；没有就摆兜底两颗，
+             * 顺序与强调位按问句种类分（调试继续优先 / 机型不匹配终止优先，见下面两支）。
              * 按钮皮肤是全站那一套（`.btn` 默认胶囊），这里不加任何 className。
              */
             run.question.choices !== undefined && run.question.choices.length > 0 ? (
@@ -1635,7 +1729,35 @@ export default function PostProcessModal({
                     </Btn>
                   ))}
               </span>
+            ) : run.question.questionKind === 'debug-plan' ? (
+              /*
+               * 调试那一问：**继续优先**（2026-11-12 作者：「按钮换一下位置，继续优先」）。
+               * 这一趟只是去试位置，继续占强调位、放最右；停下退到左边、用普通皮肤。
+               */
+              <>
+                <Btn
+                  disabled={busy}
+                  onClick={() =>
+                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'stop'))
+                  }
+                >
+                  {tr('postproc.choice.stop')}
+                </Btn>
+                <Btn
+                  variant="accent"
+                  disabled={busy}
+                  onClick={() =>
+                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'keep'))
+                  }
+                >
+                  {tr('postproc.choice.keep')}
+                </Btn>
+              </>
             ) : (
+              /*
+               * 机型不匹配：维持老口径 —— 强制继续不强调、终止占强调位
+               * （第 9~11 轮定的：不匹配还硬跑会出事，强调位留给人先看清再决定）。
+               */
               <>
                 <Btn
                   disabled={busy}
@@ -1669,7 +1791,7 @@ export default function PostProcessModal({
             <>
               <Btn onClick={finishForGood}>{tr('tabs.close')}</Btn>
               <Btn
-                variant="accent"
+                variant={canFixSetting ? 'default' : 'accent'}
                 onClick={() => {
                   finishForGood()
                   onOpenReport()
@@ -1677,6 +1799,11 @@ export default function PostProcessModal({
               >
                 {tr('postproc.openReport')}
               </Btn>
+              {canFixSetting && (
+                <Btn variant="accent" onClick={goFixSettings}>
+                  {tr('postproc.goSettings')}
+                </Btn>
+              )}
             </>
           )}
         </>
@@ -1696,16 +1823,18 @@ export default function PostProcessModal({
          */}
         {pages.length > 1 ? (
           /*
-           * 下面这块**两页叠在同一格**（见上面 `pages` 那段）。
+           * 下面这块**几页叠在同一格**（见上面 `pages` 那段）。
            *
-           * ★ **两页都挂着、叠在同一格里**（2026-10-18 第三次修）：前一版给槽写死一个
+           * ★ **都挂着、叠在同一格里**（2026-10-18 第三次修）：前一版给槽写死一个
            *   高度，可"四行两栏"的真实高度随主题/字体变 ⇒ 要么底下留一大片空、要么
            *   撑高框。叠起来之后槽高 = **较高的那一页**（就是两栏事实），于是：
            *     · 信息页零留空（它就是定高的那一页）；
-           *     · 翻页不跳（另一页被 `visibility: hidden` 藏住，但**仍占格**）。
+           *     · 翻页不跳（藏起来的那页被 `visibility: hidden` 藏住，但**仍占格**）。
            *
            * ★ 失败那屏的默认页 = **就是那两栏事实**（红卡不动，仍钉在顶部 hero 槽）——
            *   翻页只翻"事实 ↔ 说明"，红卡不参与翻页（2026-11-04 作者：失败页不用动）。
+           * ★ 警告页与信息页**共用这两栏事实**：翻到警告只是上面那张 hero 换了
+           *   （2026-11-08 作者：「下面的那些内容不用变」），所以没有第三块内容。
            */
           <div className={s.relocateSlot}>
             <div
@@ -1714,49 +1843,41 @@ export default function PostProcessModal({
             >
               <FactsGroups groups={factsPageGroups} />
             </div>
-            <div
-              className={`${s.relocatePage} ${activeTab === 'note' ? '' : s.relocatePageOff}`}
-              aria-hidden={activeTab !== 'note'}
-            >
-              {isAskingRelocate && run.question !== null ? (
-                <RelocateNote
-                  question={run.question}
-                  countdown={countdownText(run.question.deadlineUnixMs)}
-                />
-              ) : isCollisionFail ? (
-                /* **只有失败那屏**才说"撞了、下次怎么办" —— 2026-11-04 作者截图：
-                   成功那一趟也摆出了这句，因为说明页原来只看"有没有挪过塔" */
-                <CollisionNote
-                  relocated={finished?.relocation?.to != null}
-                  onGoSettings={onOpenSettings !== undefined ? goTowerSettings : undefined}
-                />
-              ) : (
-                /* 成功且挪过塔：说明页说的是**这一趟挪了塔**，不是"撞了" */
-                <RelocateDoneNote record={finished?.relocation ?? null} />
-              )}
-            </div>
+            {/* 没有"说明"这一页的屏（只有警告 ↔ 信息）：这一格都不摆，别白占一层 */}
+            {pages.includes('note') && (
+              <div
+                className={`${s.relocatePage} ${activeTab === 'note' ? '' : s.relocatePageOff}`}
+                aria-hidden={activeTab !== 'note'}
+              >
+                {isAskingRelocate && run.question !== null ? (
+                  <RelocateNote
+                    question={run.question}
+                    countdown={countdownText(run.question.deadlineUnixMs)}
+                  />
+                ) : isCollisionFail ? (
+                  /* **只有失败那屏**才说"撞了、下次怎么办" —— 2026-11-04 作者截图：
+                     成功那一趟也摆出了这句，因为说明页原来只看"有没有挪过塔" */
+                  <CollisionNote
+                    relocated={finished?.relocation?.to != null}
+                    onGoSettings={onOpenSettings !== undefined ? goTowerSettings : undefined}
+                  />
+                ) : (
+                  /* 成功且挪过塔：说明页说的是**这一趟挪了塔**，不是"撞了" */
+                  <RelocateDoneNote record={finished?.relocation ?? null} />
+                )}
+              </div>
+            )}
           </div>
         ) : (
           /* 只有一页（跑着 / 普通成功）：不摆翻页槽，直接一组事实 */
           <FactsGroups groups={factsPageGroups} />
         )}
         {/*
-          内核那几条警告（"这一盘没有支撑"之类）：
-            · **标题右边那一格**（`HeadNote`）= 汇总一句话「警告 N 条 · 首条…」，
-              作者 2026-10-17：「把所有这些提示的，不管是什么的，都用同一套组件、同一套逻辑
-              复用在标题后面显示」；
-            · 框身这张列表 = **明细**（每条一行，要读全就得在这儿）。
-          两者分工不同，不是重复：格子只回答"有没有事、什 么事"，
-          明细回答"具体哪几条"。明细的条数不影响格子（格子只有一行、省略号）。 */}
-        {finished !== null && finished.warnings.length > 0 && (
-          <HeadNote text={warningsLine(finished.warnings)} tone="note" />
-        )}
-        {finished !== null &&
-          finished.warnings.map((w) => (
-            <p className={s.warn} key={w}>
-              {tr('postproc.warn.item', { w })}
-            </p>
-          ))}
+         * 内核那几条警告**不在这儿**：它们住在上面那张 hero 卡里（`NoticeHero`，警告页）——
+         * 作者 2026-11-08：「这样就不用说上面也显示错误、下面也显示错误」。
+         *
+         * 这一格只剩**一句**的提示（答晚了 / 校准那趟的跑法），走 `HeadNote` 的标题右边。
+         */}
         {err !== null && <HeadNote text={err} tone="error" />}
       </div>
     </Modal>

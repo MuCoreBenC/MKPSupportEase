@@ -110,6 +110,7 @@ import type {
   ReportExportPlan,
   ReportGlueFacts,
   ReportCalibrationFacts,
+  ReportDebugFacts,
   ReportSlicerFacts,
   ReportSlicerTowerFacts,
   ReportSnapshot,
@@ -120,6 +121,7 @@ import { POSTPROCESS_FINISHED, POSTPROCESS_PRINT_TIME } from '../postprocess/eve
 import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
 import { Btn } from '../ui/Controls'
+import WriteBackPresetModal from './WriteBackPresetModal'
 import Icon from '../shell/icons'
 import ui from '../ui/ui.module.css'
 import ExportModal from './ExportModal'
@@ -134,9 +136,9 @@ import s from './PageReport.module.css'
 /**
  * 统计里挑给用户看的几格（键与 `_meta.json` 的 `detail.stats` 同名）。
  * 第三格是**值的单位** —— 单位跟着值印（`0 mm`），不挂在字段名上。
+ * 塔高不摆在这：擦料塔那一组的「层数 / 高度」就是同一件事，两处摆容易对不上。
  */
 const STAT_CELLS: [string, StringKey, string][] = [
-  ['towerHeight', 'report.stat.towerHeight', 'mm'],
   ['glueLayerCount', 'report.stat.glueLayers', ''],
   ['totalLayerNumber', 'report.stat.totalLayers', ''],
   ['maxZHeight', 'report.stat.maxZ', 'mm'],
@@ -403,6 +405,13 @@ const GROUP_SHAPES: Record<string, ReactNode> = {
     </>
   ),
   glue: <path d="M12 3.5c3.5 4 6 7.2 6 10a6 6 0 0 1-12 0c0-2.8 2.5-6 6-10z" />,
+  /* 调试＝准星：对的是「工具头有没有走到那个位置」，不是印出来的东西 */
+  debug: (
+    <>
+      <circle cx="12" cy="12" r="6" />
+      <path d="M12 2.5v4M12 17.5v4M2.5 12h4M17.5 12h4" />
+    </>
+  ),
   tower: (
     <>
       <rect x="6.5" y="4" width="11" height="16" rx="1.5" />
@@ -523,6 +532,8 @@ interface Group {
   /** 组名后面那句摘要（横线上跟在标题后） */
   sum: string
   cells: [string, string][]
+  /** 组标题行右端那颗动作（目前只有「调试」用它带「写回预设」） */
+  action?: ReactNode
   /**
    * **组内小节**（2026-11-04）。
    *
@@ -531,6 +542,15 @@ interface Group {
    * `cells` 留作兜底（旧渲染路径 / 摘要仍读它）。
    */
   sections?: { title: string; cells: [string, string][] }[]
+  /**
+   * **一段一段的正文**（2026-11-09）。只给「警告」用。
+   *
+   * 警告不是"字段 → 值"的对子：左边那列（`cells` 那条路的字段列）对它没有意义，
+   * 反倒白吃掉八个多字的宽度 —— 而警告恰恰是整页最长的一类句子（作者：「他这样子
+   * 左右放好，还是说他撑满整个这个宽度」）。给了这一格就按段落渲染：单条不编号，
+   * 多条把序号做成行首徽标（组头已经写了「警告 N 条」，单条再编一次是第三遍）。
+   */
+  lines?: string[]
   /**
    * 组**末尾**那一句提示 + 可选的去处（2026-11-04）。
    *
@@ -562,6 +582,28 @@ function printTimeStatusText(tr: Tr, status: string | null | undefined): string 
   if (status === 'computing') return tr('report.pt.computing')
   if (status === 'failed') return tr('report.pt.failed')
   return '—'
+}
+
+/**
+ * 警告正文（2026-11-09）：**整段满宽**，不是"序号 | 正文"两列。
+ *
+ * 序号只在多条时出现，做在行首 —— 单条时它零信息（组头已经写了「警告 N 条」），
+ * 而那个字段列却要白吃掉八个多字的宽度。换行回到卡片左内边：长句要的就是那一列
+ * 宽度，缩进反而把续行挤窄。
+ */
+function WarnLines({ lines }: { lines: string[] }) {
+  const many = lines.length > 1
+  return (
+    /* `data-many` 才切到"序号 | 正文"两栏（挂起缩进）：单条时正文要占满整行 */
+    <ol className={s.warnList} data-many={many}>
+      {lines.map((w, i) => (
+        <li key={i} className={s.warnItem}>
+          {many && <span className={s.warnNo}>{i + 1}</span>}
+          {w}
+        </li>
+      ))}
+    </ol>
+  )
 }
 
 function shaShort(sha: string | undefined): string {
@@ -798,12 +840,9 @@ function slicerGroup(tr: Tr, slicer: ReportSlicerFacts): Group | null {
     ],
     [
       tr('report.slicer.support'),
-      slicer.treeSupport === undefined && slicer.useDiskWipe === undefined
+      slicer.treeSupport === undefined
         ? '—'
-        : `${tr('report.slicer.tree', { v: onOff(slicer.treeSupport) })} · ${tr(
-            'report.slicer.diskWipe',
-            { v: onOff(slicer.useDiskWipe) },
-          )}`,
+        : tr('report.slicer.tree', { v: onOff(slicer.treeSupport) }),
     ],
   ]
   if (!hasAnyValue(cells)) return null
@@ -865,6 +904,51 @@ function calibrationGroup(tr: Tr, c: ReportCalibrationFacts): Group | null {
   }
 }
 
+/**
+ * 调试那一趟（`detail.debug`，2026-11-11）。
+ *
+ * 与「涂胶 / 擦料塔 / 校准」同构：四格指标 + 一句「本次为调试模式」。
+ * 普通那一趟后端不写这一格 ⇒ 旧记录读到 `null` ⇒ 整组不摆。
+ */
+function debugGroup(tr: Tr, d: ReportDebugFacts, onWrite: () => void): Group | null {
+  const waitY = d.waitY !== 0 ? ` / ${fmtNum(d.waitY)}` : ''
+  const actions = [
+    d.testMount ? tr('report.debug.actMount') : null,
+    d.testUnmount ? tr('report.debug.actUnmount') : null,
+  ]
+    .filter((x): x is string => x !== null)
+    .join(' → ')
+
+  /*
+   * 「等待位 → 目标位」：调试时等待位可以跟随驻点位（`null`），
+   * 也可能这份记录早于那个功能（缺键）。三种情况各说各的，不拿驻点位回填。
+   */
+  const withWait = (wait: number | null | undefined, target: number): string => {
+    if (typeof wait === 'number') return `${fmtNum(wait)} → ${fmtNum(target)} mm`
+    if (wait === null) return `${tr('report.debug.follow')} → ${fmtNum(target)} mm`
+    return `${fmtNum(target)} mm`
+  }
+
+  const cells: [string, string][] = [
+    [tr('report.debug.wait'), `${fmtNum(d.waitX)}${waitY} mm`],
+    [tr('report.debug.mount'), withWait(d.mountWaitX, d.mountX)],
+    [tr('report.debug.unmount'), withWait(d.unmountWaitX, d.unmountX)],
+    [tr('report.debug.speed'), `${fmtNum(d.speed)} mm/min`],
+    [tr('report.debug.actions'), actions === '' ? '—' : actions],
+  ]
+  return {
+    id: 'debug',
+    title: tr('report.debug.title'),
+    sum: tr('report.debug.summary'),
+    cells,
+    action: (
+      <Btn size="sm" onClick={onWrite}>
+        {tr('report.debug.writeOpen')}
+      </Btn>
+    ),
+  }
+}
+
 /** 一组里所有格子的值都是「—」就别摆这一组（成功/失败两种情况字段不一样多） */
 function hasAnyValue(cells: [string, string][]): boolean {
   return cells.some(([, v]) => v !== '—')
@@ -880,6 +964,7 @@ function buildGroups(
   tr: Tr,
   detail: ReportDetail,
   onOpenSettings?: (target: SettingsTargetId) => void,
+  onWriteDebug?: (d: ReportDebugFacts) => void,
 ): Group[] {
   const st = detail.summary
   const stats = detail.stats ?? {}
@@ -914,6 +999,18 @@ function buildGroups(
     sum: `${okText()} · ${elapsedText(tr, st.elapsedMs)}`,
     cells: resultCells,
   })
+
+  /* 警告紧跟结论：出了事要一眼看见；没有就不摆（空组还要占一条横线，等于喊狼来了） */
+  if (detail.warnings.length > 0) {
+    groups.push({
+      id: 'warnings',
+      title: tr('report.g.warnings'),
+      sum: tr('report.warnings.count', { n: detail.warnings.length }),
+      /* 正文走 `lines`，不走"字段 → 值"那张两列网格（见 Group.lines 的说明） */
+      cells: [],
+      lines: detail.warnings,
+    })
+  }
 
   /* 打印：切片器给的事实 + 本程序算出来的打印时间 */
   const printCells: [string, string][] = [
@@ -966,6 +1063,12 @@ function buildGroups(
   /* 校准件身份证据链：普通模型那一趟后端不写这一格 ⇒ 整组不摆（旧记录同理） */
   if (detail.calibration != null) {
     const g = calibrationGroup(tr, detail.calibration)
+    if (g !== null) groups.push(g)
+  }
+
+  /* 调试那一趟：普通记录没有这一格 ⇒ 整组不摆 */
+  if (detail.debug != null) {
+    const g = debugGroup(tr, detail.debug, () => onWriteDebug?.(detail.debug!))
     if (g !== null) groups.push(g)
   }
 
@@ -1125,19 +1228,6 @@ function buildGroups(
         cells: [],
       })
     }
-  }
-
-  /* 警告：没有就不摆这一组（空组还要占一条横线，等于喊狼来了） */
-  if (detail.warnings.length > 0) {
-    groups.push({
-      id: 'warnings',
-      title: tr('report.g.warnings'),
-      sum: tr('report.warnings.count', { n: detail.warnings.length }),
-      cells: detail.warnings.map((w, i): [string, string] => [
-        tr('report.warnings.item', { n: i + 1 }),
-        w,
-      ]),
-    })
   }
 
   /* 管线计时：一步一行，步里的多行细节跟着 */
@@ -1654,6 +1744,12 @@ export default function PageReport({
   const [, setNarrow] = useState(false)
 
   const pageRef = useRef<HTMLDivElement>(null)
+  /* 写回窗的遮罩宿主 = 报告页本体（`.page` 是 relative）。
+     挂 document.body 的话，切到「设置」页它还浮在别的页面上 —— 作者截图里就是这样。 */
+  const [pageEl, setPageEl] = useState<HTMLElement | null>(null)
+  useEffect(() => {
+    setPageEl(pageRef.current)
+  }, [])
   const sideRef = useRef<HTMLElement>(null)
   /*
    * 浮层判据 = **真的浮着**（`position:absolute`），不是窄档这个布尔值。
@@ -1817,7 +1913,7 @@ export default function PageReport({
     return () => {
       alive = false
     }
-  }, [selId, detailNonce])
+  }, [selId, detailNonce, locale])
 
   /*
    * 打印时间还在补算（`printTimeStatus === 'computing'`）时的兜底：隔一会儿再看一眼。
@@ -1948,7 +2044,17 @@ export default function PageReport({
     })
   }
 
-  const groups = detail === null ? [] : buildGroups(tr, detail, onOpenSettings)
+  /* 「写回预设」那一扇：只有调试组的按钮能开，带上这条记录的机型 */
+  const [writeBack, setWriteBack] = useState<{
+    machine: string | null
+    facts: ReportDebugFacts
+  } | null>(null)
+
+  const groups = detail === null
+    ? []
+    : buildGroups(tr, detail, onOpenSettings, (d) =>
+        setWriteBack({ machine: detail.summary.machineType, facts: d }),
+      )
   const activeTab = groups.some((g) => g.id === tab) ? tab : TAB_ALL
   const sel = (rows ?? []).find((r) => r.id === selId) ?? null
 
@@ -2277,6 +2383,7 @@ export default function PageReport({
                             role="tab"
                             className={s.tab}
                             data-on={activeTab === g.id}
+                            data-tone={g.id === 'warnings' ? 'warn' : undefined}
                             aria-selected={activeTab === g.id}
                             onClick={() => setTab(g.id)}
                           >
@@ -2291,6 +2398,7 @@ export default function PageReport({
                             key={g.id}
                             className={s.panel}
                             data-on={activeTab === TAB_ALL || activeTab === g.id}
+                            data-tone={g.id === 'warnings' ? 'warn' : undefined}
                           >
                             <p className={s.grpBar}>
                               <span className={s.grpIcon} aria-hidden="true">
@@ -2309,8 +2417,13 @@ export default function PageReport({
                               </span>
                               <b>{g.title}</b>
                               {g.sum !== '' && <span className={s.grpSum}>{g.sum}</span>}
+                              {g.action !== undefined && (
+                                <span className={s.grpAction}>{g.action}</span>
+                              )}
                             </p>
-                            {g.id === 'pipeline' ? (
+                            {g.lines !== undefined ? (
+                              <WarnLines lines={g.lines} />
+                            ) : g.id === 'pipeline' ? (
                               <ol className={s.steps}>
                                 {detail.pipeline.map((step, i) => (
                                   <li key={i} className={s.step}>
@@ -2478,6 +2591,17 @@ export default function PageReport({
             quietUntil: null,
           }}
           onOpenReport={() => setReplay(null)}
+        />
+      )}
+      {/* 写回预设那扇窗：只有「调试」组那颗按钮能开它 */}
+      {writeBack !== null && pageEl !== null && (
+        <WriteBackPresetModal
+          host={pageEl}
+          open
+          onClose={() => setWriteBack(null)}
+          machine={writeBack.machine}
+          facts={writeBack.facts}
+          onDone={() => {}}
         />
       )}
     </section>

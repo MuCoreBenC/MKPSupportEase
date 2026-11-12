@@ -47,18 +47,18 @@ assetRefs = ["a1-standard", "a1-bbs-04-020"]
 updatedAt = '2026-10-16'
 
 [[bundles]]
-id = 'A1_FAST'
+id = 'A1_FAST260326'
 display = 'A1 快拆版6月以前'
 machineId = 'A1'
 assetRefs = ['a1-fast', 'a1-bbs-04-020']
-updatedAt = '2026-10-16'
+updatedAt = '2026-11-12'
 
 [[bundles]]
-id = 'A1_FASTV3.3'
+id = 'A1_FAST261111'
 display = 'A1 快拆版260628'
 machineId = 'A1'
 assetRefs = ['a1-fastv3.3', 'a1-bbs-04-020']
-updatedAt = '2026-10-16'
+updatedAt = '2026-11-12'
 
 # ---------------- A1 mini：三个版本各一份 ----------------
 
@@ -70,18 +70,18 @@ assetRefs = ['a1_mini-standard', 'a1_mini-bbs-04-020']
 updatedAt = '2026-10-16'
 
 [[bundles]]
-id = 'A1_MINI_FAST'
+id = 'A1_MINI_FAST260326'
 display = 'A1 mini 快拆版6月以前'
 machineId = 'A1_MINI'
 assetRefs = ['a1_mini-fast', 'a1_mini-bbs-04-020']
-updatedAt = '2026-10-16'
+updatedAt = '2026-11-12'
 
 [[bundles]]
-id = 'A1_MINI_FASTV3.3'
+id = 'A1_MINI_FAST261111'
 display = 'A1 mini 快拆版260628'
 machineId = 'A1_MINI'
 assetRefs = ['a1_mini-fastv3.3', 'a1_mini-bbs-04-020']
-updatedAt = '2026-10-16'
+updatedAt = '2026-11-12'
 
 # ---------------- P1S / P2S / X1C：单版本机型沿用旧名 ----------------
 

@@ -545,6 +545,11 @@ fn finish(
                 print_time_seconds: Some(13140.0),
                 glue_length_mm: 9350.85,
                 slicer: "BambuStudio 02.08.02.60".to_owned(),
+                /* 层高范围：这一屏演的是"固定 0.2"（可变层高那一档见前端 `?pp=vh` 那一屏） */
+                layer_height_min: Some(0.2),
+                layer_height_max: Some(0.2),
+                /* 演出档不演调试（那一档走真钩子的调试弹框，不在这里） */
+                debug: None,
             }),
             /* 校准件那几档演出：结论里也带上"选了哪种跑法" */
             calib_choice: calib_choice.map(std::string::ToString::to_string),

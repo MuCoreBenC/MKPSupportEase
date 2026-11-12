@@ -1781,3 +1781,23 @@ html[data-theme='dark'] body {
   margin: -1px 8px 8px;
   padding: var(--w-p-card-sm);
 }
+
+/* ============ 幽灵滚动条 ============ */
+/*
+ * 作者 2026-11-09：面板本来就窄，宁可看不见条、也不要它占位置。
+ * 与客户端 `src/styles/global.css` 同一套口径：零宽度、零占位；
+ * 滚轮 / 触控板 / 键盘 / 拖拽照常可用。
+ *
+ * 工作台自己的全局样式只在 `workbench.html` 这一支加载（见 `main.tsx` 头注），
+ * 所以这条不会漏到客户端。
+ */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* 老 Edge */
+}
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  background: transparent;
+}

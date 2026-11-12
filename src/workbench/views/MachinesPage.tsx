@@ -27,6 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
 import type {
+  AppError,
   AssetList,
   BookView,
   BundleList,
@@ -34,7 +35,9 @@ import type {
   MachineList,
   MachineView,
   RegistryView,
+  VersionAssetRef,
   VersionField,
+  VersionNode,
   VersionView,
   Words,
 } from '../api'
@@ -42,9 +45,11 @@ import { ContextMenu } from '../components/menu'
 import type { ContextMenuEntry } from '../components/menu/types'
 import { useContextMenu } from '../components/menu/useContextMenu'
 import AssetPicker, { AssetField } from '../c14/AssetPicker'
+import ErrorDialog from '../c14/ErrorDialog'
 import FieldMark, { TodoValue } from '../c14/FieldMark'
 import ModalC14 from '../c14/ModalC14'
 import PickOrType from '../c14/PickOrType'
+import SelectField from '../c14/field/SelectField'
 import { fieldState, machineFieldLabels, placeholderText } from '../c14/labels'
 import { toasts } from '../c14/toast'
 import { useSplitRail } from '../c14/SplitRail'
@@ -56,11 +61,24 @@ import s from '../c14.module.css'
 interface Props {
   book: BookView
   words: Words
+  /**
+   * 外壳的「工作区换代」计数（保存 / 放弃 / 撤销 / 重做 / 重载 / 生成之后 +1）。
+   *
+   * 这一页自己持有 `wb_machines` 那一份清单，挂在挂载时读一次；页面又常驻不卸载
+   * （外壳 `held` 保留节点），不跟着它重取的话，「放弃改动」之后已经被丢弃的版本
+   * 还会留在列表与详情里（作者 2026-11-12 报的那个）。
+   */
+  tick: number
   onGoto: (view: string, focus?: GotoFocus) => void
   /** 外壳的保存。生成按钮在草稿脏时给的「先落盘再生成」就是它 */
   onSave: () => Promise<boolean>
   /** 结构性写（建 / 删 / 复制）之后让外壳重取整本 —— 徽章的机型版本数跟着走 */
   onBookRefresh: () => void
+  /**
+   * 只刷整本、**不拨 `tick`**。改 id / 改一格字段时用：页面已经拿着命令返回的新清单，
+   * 不该再整机重取把正在编辑的详情卡刷掉。
+   */
+  onBookRefreshQuiet: () => void
 }
 
 /** 版本行选中标记：`机型id/版本id`。只在本页内当 key 用，不是后端的 uid */
@@ -68,6 +86,42 @@ const vidOf = (machineId: string, versionId: string) => `${machineId}/${versionI
 
 /** 机型 / 版本 id 的即时格式提示（真闸在后端；这里只让明显打错的当场现形） */
 const idOk = (v: string) => /^[A-Z][A-Z0-9_]*$/.test(v)
+
+/**
+ * 机型 / 版本 id 输入框：**中文输入法合成期间原样收字，合成结束才转大写**。
+ *
+ * 每按一个键就 `.toUpperCase()` 会把候选框里的拼音逐字拆成大写插进去
+ * （打「快拆」得到 `KUAI CHAI` 那一串，候选框也跟着乱飘），所以合成中不许改写。
+ */
+function IdInput({
+  value,
+  onChange,
+  label,
+  placeholder,
+}: {
+  value: string
+  onChange: (next: string) => void
+  label: string
+  placeholder?: string
+}) {
+  const composing = useRef(false)
+  return (
+    <input
+      className={s.inp}
+      value={value}
+      aria-label={label}
+      placeholder={placeholder}
+      onChange={(e) => onChange(composing.current ? e.target.value : e.target.value.toUpperCase())}
+      onCompositionStart={() => {
+        composing.current = true
+      }}
+      onCompositionEnd={(e) => {
+        composing.current = false
+        onChange(e.currentTarget.value.toUpperCase())
+      }}
+    />
+  )
+}
 
 /**
  * 「?」小提示（与套餐页 `BundlesPage` 那枚同形）：原说明全文挂在 `title` 上，
@@ -119,7 +173,15 @@ const I18N_FIELDS = [
 ] as const
 type I18nKey = `${(typeof I18N_FIELDS)[number]['suffix']}${(typeof I18N_LANGS)[number]['suffix']}`
 
-export default function MachinesPage({ book, words, onGoto, onSave, onBookRefresh }: Props) {
+export default function MachinesPage({
+  book,
+  words,
+  tick,
+  onGoto,
+  onSave,
+  onBookRefresh,
+  onBookRefreshQuiet,
+}: Props) {
   /** 左栏宽度可拖（作者 2026-10-03，同参数台） */
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const rail = useSplitRail('machines', bodyRef)
@@ -143,14 +205,29 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
   const [addBrand, setAddBrand] = useState('')
   const [addDisplay, setAddDisplay] = useState('')
   const [addVOpen, setAddVOpen] = useState(false)
+  /** 从哪一版照抄；空串 = 空白版本（只继承机型基线） */
+  const [avFrom, setAvFrom] = useState('')
   const [avId, setAvId] = useState('')
   const [avName, setAvName] = useState('')
   const [copyOpen, setCopyOpen] = useState<string | null>(null)
   const [copyId, setCopyId] = useState('')
   const [copyName, setCopyName] = useState('')
   const [withRecipe, setWithRecipe] = useState(true)
-  /** 删除版本的两步：`null` = 没开；`{vid}` = 第一步；带 orphans = 第二步 */
-  const [del, setDel] = useState<{ vid: string; orphans: string[] | null } | null>(null)
+  /** 「复制参数」补入入口：`null` = 关着；非空 = 给这一版补参数 */
+  const [recipePick, setRecipePick] = useState<string | null>(null)
+  const [recipeTpl, setRecipeTpl] = useState('')
+  /** 失败弹框：标题 + 一句后果 + 原始错误（带码与请求号） */
+  const [errDialog, setErrDialog] = useState<{
+    title: string
+    lead: string
+    error: AppError
+  } | null>(null)
+  /** 删除版本的两步：`null` = 没开；`{vid}` = 第一步；orphans 与 assets 都回来 = 第二步 */
+  const [del, setDel] = useState<{
+    vid: string
+    orphans: string[] | null
+    assets: VersionAssetRef[] | null
+  } | null>(null)
   const [bunOpen, setBunOpen] = useState<string | null>(null)
   const [bunPick, setBunPick] = useState('')
   const [imgOpen, setImgOpen] = useState(false)
@@ -205,7 +282,9 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       }
     })()
   }, [])
-  useEffect(loadAll, [loadAll])
+  /* `tick` 变了 = 工作区换代（保存 / 放弃 / 撤销 / 重做 / 重载）—— 清单必须重取，
+  否则本页常驻不卸载，放弃掉的版本会一直留在列表里（见 Props.tick 的注） */
+  useEffect(loadAll, [loadAll, tick])
 
   /** 每次写完都重取检查报告 —— 阻断集合变了，生成按钮的门禁跟着走 */
   const refreshReport = useCallback(() => {
@@ -214,11 +293,23 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       .catch(() => undefined)
   }, [])
 
-  /** 结构性写之后：外壳的整本（徽章、构建行）也要跟上 */
-  const afterStructural = useCallback(() => {
-    onBookRefresh()
-    refreshReport()
-  }, [onBookRefresh, refreshReport])
+  /**
+   * 结构性写之后：外壳的整本（徽章、构建行）也要跟上。
+   *
+   * `quiet = true` 用于「页面自己已经拿着命令返回的新清单」的编辑（改 id、
+   * 改套餐指向）：只刷整本、不拨 `tick`，免得整机重取把正在编辑的详情卡刷掉。
+   */
+  const afterStructural = useCallback(
+    (quiet = false) => {
+      if (quiet) {
+        onBookRefreshQuiet()
+        return
+      }
+      onBookRefresh()
+      refreshReport()
+    },
+    [onBookRefresh, onBookRefreshQuiet, refreshReport],
+  )
 
   const m: MachineView | undefined = list?.machines.find((x) => x.id === machineId)
 
@@ -312,7 +403,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
   const curBrand = list?.brands.find((b) => b.id === brandId) ?? undefined
 
   /**
-   * **把一台机型挪到另一个品牌下**（2026-10-03）。即时落盘，回一份新清单。
+   * **把一台机型挪到另一个品牌下**（2026-10-03）。走草稿（保存后写入），回一份新清单。
    *
    * toast 里说清"从哪家挪到哪家" —— 移动是一次看不见的落盘，说清楚才知道成没成。
    */
@@ -329,7 +420,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     }
   }
 
-  /** 改品牌的一格（显示名 / 品牌图）。**即时落盘**，回一份新清单 */
+  /** 改品牌的一格（显示名 / 品牌图）。**走草稿（保存后写入）**，回一份新清单 */
   const saveBrand = async (field: 'name' | 'logo', value: string | null) => {
     if (!curBrand) return
     try {
@@ -348,9 +439,37 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     if (!m) return
     try {
       setList(await wb.setVersionField(m.id, versionId, field, value))
-      if (field === 'recommendedBundle') onBookRefresh()
+      if (field === 'recommendedBundle') afterStructural(true)
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /**
+   * 改版本 id（**主键**）。后端把参数四张表与归属资产一起搬到新 id；
+   * 成功之后选中态跟到新 uid，详情卡按新 id 重新展开。
+   *
+   * 返回 `false` = 没改成（输入框要退回旧值），错误已经以 toast 说过一遍。
+   */
+  const saveVersionId = async (next: string): Promise<boolean> => {
+    if (!m || !picked) return false
+    const want = next.trim()
+    if (want === '' || want === picked.id) return true
+    if (!idOk(want)) {
+      toasts.push('版本 id 只能用大写字母、数字与下划线')
+      return false
+    }
+    const oldId = picked.id
+    try {
+      setList(await wb.setVersionId(m.id, oldId, want))
+      setPickedVid(vidOf(m.id, want))
+      toasts.push(`已把 ${m.id}/${oldId} 改成 ${m.id}/${want} —— 保存后写入`)
+      /* 只刷整本、不拨 tick：详情卡要留在原地，好接着改 id 或别的字段 */
+      afterStructural(true)
+      return true
+    } catch (e) {
+      failToast(e)
+      return false
     }
   }
 
@@ -462,13 +581,27 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             id: 'delete',
             label: '删除版本…',
             danger: true,
-            onSelect: () => setDel({ vid: `${m.id}/${(menu.target ?? '').split('/')[1] ?? ''}`, orphans: null }),
+            onSelect: () =>
+              setDel({
+                vid: `${m.id}/${(menu.target ?? '').split('/')[1] ?? ''}`,
+                orphans: null,
+                assets: null,
+              }),
           },
         ]
       : [])
 
   /* —— 弹窗公共的提交失败出口 —— */
   const failToast = (e: unknown) => toasts.push(isAppError(e) ? e.message : String(e))
+
+  /**
+   * **已经产生了现场**的失败走模态框：版本建好了、参数没抄过来 —— 人得盯着那句
+   * 原因决定下一步，toast 转眼就没（作者 2026-11-12）。没产生现场的那类仍走 toast。
+   */
+  const showError = (title: string, lead: string, e: unknown) => {
+    if (isAppError(e)) setErrDialog({ title, lead, error: e })
+    else failToast(e)
+  }
 
   if (pageErr !== null) {
     return (
@@ -512,7 +645,32 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     pickedVidParts && pickedVidParts[0] === m.id
       ? m.versions.find((v) => v.id === pickedVidParts[1])
       : undefined
-  const pickedNode = picked ? nodeOf(m.id, picked.id) : undefined
+  /*
+   * 详情卡不许因为外壳的 book 慢一拍就整块消失。
+   *
+   * 改版本 id / 新增版本时，`wb_machines` 已经返回新清单（`picked` 有值），
+   * 而外壳那份 `book` 是异步重取的 —— 这一帧 `nodeOf` 按新 uid 找不到节点，
+   * `picked && pickedNode` 就为假，详情卡被卸载。作者遇到的就是「改完 id
+   * 立马刷新、详情展开不了、打错字想再改一次都没地方点」。
+   *
+   * book 里还没有这一版时，按清单合成一个最小节点过渡：身份 / 参数 / 关联
+   * 那些格子读的都是 `picked` 与 `list`，不靠这个节点；等 book 到了自然换真值。
+   */
+  const pickedNode: VersionNode | undefined = picked
+    ? (nodeOf(m.id, picked.id) ?? {
+        uid: vidOf(m.id, picked.id),
+        versionId: picked.id,
+        name: picked.name,
+        tag: picked.tag ?? null,
+        items: 0,
+        build: 'neverBuilt',
+        bbsSource: 'inheritedFromMachine',
+        bbsCount: 0,
+        recipeEmpty: !picked.hasRecipe,
+        lastBuild: null,
+        orphanKeys: [],
+      })
+    : undefined
   const pickedRow = pickedNode ? rowOf(pickedNode.uid) : undefined
   const todo = todoOf(m)
   const visibleCount = registry.params.filter(
@@ -538,6 +696,8 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
   const addReady = addId.trim() !== '' && addDisplay.trim() !== '' && addBrand.trim() !== ''
   const avTaken = m.versions.some((v) => v.id === avId.trim())
   const avReady = idOk(avId) && avName.trim() !== '' && !avTaken
+  /** 照抄的源版本；`undefined` = 空白版本 */
+  const avTpl = avFrom === '' ? undefined : m.versions.find((v) => v.id === avFrom)
   const copyParts = copyOpen?.split('/') ?? null
   const copyTpl = copyParts ? m.versions.find((v) => v.id === copyParts[1]) : undefined
   const copyTaken = copyOpen !== null && m.versions.some((v) => v.id === copyId.trim())
@@ -551,21 +711,41 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       setMachineId(addId.trim())
       setPickedVid(null)
       setAddOpen(false)
-      toasts.push(`已新增机型 ${addId.trim()} —— presets/machines/${addId.trim()}.toml 已写入`)
+      toasts.push(`已新增机型 ${addId.trim()} —— 已进草稿，保存后写入`)
       afterStructural()
     } catch (e) {
       failToast(e)
     }
   }
 
-  /** 新增版本。id 校验在后端（字符集 + 机型内唯一），名字必填 */
+  /**
+   * 新增版本。id 校验在后端（字符集 + 机型内唯一），名字必填。
+   *
+   * 选了「继承自」就照抄那一版的**定义各格与参数正文**（与右键「复制版本」同两条命令），
+   * 只换 id 与名字；不选就是一个只继承机型基线的空壳。
+   */
   const submitAddVersion = async () => {
+    const newId = avId.trim()
     try {
-      const next = await wb.addVersion(m.id, avId.trim(), avName.trim())
-      setList(next)
-      setPickedVid(vidOf(m.id, avId.trim()))
+      if (avTpl === undefined) {
+        const next = await wb.addVersion(m.id, newId, avName.trim())
+        setList(next)
+        toasts.push(`已新增版本 ${m.id}/${newId} —— 已进草稿，保存后写入`)
+      } else {
+        const next = await wb.copyVersion(m.id, avTpl.id, newId, avName.trim())
+        setList(next)
+        let note = `照抄自 ${avTpl.id}`
+        try {
+          const n = await wb.copyRecipe(m.id, avTpl.id, newId)
+          note = `照抄自 ${avTpl.id}（参数正文 ${n} 项，独立快照）`
+        } catch (e) {
+          showError('复制配方失败', `版本 ${newId} 已建好，参数没有抄过来。`, e)
+          note = `照抄自 ${avTpl.id}，参数正文没抄过来`
+        }
+        toasts.push(`已新增版本 ${m.id}/${newId} —— ${note}（已进草稿）`)
+      }
+      setPickedVid(vidOf(m.id, newId))
       setAddVOpen(false)
-      toasts.push(`已新增版本 ${m.id}/${avId.trim()} —— 写进了 ${m.file}`)
       afterStructural()
     } catch (e) {
       failToast(e)
@@ -596,11 +776,15 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
           const n = await wb.copyRecipe(m.id, templateId, copyId.trim())
           recipeNote = `参数正文已复制（${n} 项，独立快照）`
         } catch (e) {
-          failToast(e)
-          recipeNote = '版本定义已建，但参数正文复制失败 —— 可以在参数台重试'
+          showError(
+            '复制配方失败',
+            `版本 ${copyId.trim()} 已建好，参数没有抄过来。`,
+            e,
+          )
+          recipeNote = '版本定义已建，参数正文没抄过来'
         }
       }
-      toasts.push(`已复制为 ${m.id}/${copyId.trim()} —— ${recipeNote}`)
+      toasts.push(`已复制为 ${m.id}/${copyId.trim()} —— ${recipeNote}（已进草稿）`)
       setPickedVid(vidOf(m.id, copyId.trim()))
       setCopyOpen(null)
       afterStructural()
@@ -609,9 +793,29 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     }
   }
 
-  /** 删除版本第二步。**立刻落盘，不可逆** —— 所以第一步先问孤儿 */
+  /**
+   * 「复制参数」补入入口（2026-11-12）：给一个**参数源待补**的版本补一份独立快照。
+   *
+   * `hasRecipe` 不会随 `afterStructural()` 翻 —— 那是外壳的整本；这一页读的是
+   * `wb_machines`，得自己 `loadAll()` 重取一次，卡片才会从「参数源待补」变成
+   * 「本版本覆盖 N 项」。
+   */
+  const submitRecipeCopy = async () => {
+    if (recipePick === null || recipeTpl === '' || !m) return
+    try {
+      const n = await wb.copyRecipe(m.id, recipeTpl, recipePick)
+      setRecipePick(null)
+      loadAll()
+      afterStructural(true)
+      toasts.push(`参数已复制（${n} 项，独立快照）`)
+    } catch (e) {
+      showError('复制配方失败', `版本 ${recipePick} 的参数没有抄过来。`, e)
+    }
+  }
+
+  /** 删除版本第二步：**进草稿**，撤销能整条退回来 —— 所以第一步先问孤儿与归属资产 */
   const submitDelete = async () => {
-    if (del === null || del.orphans === null || !m) return
+    if (del === null || del.orphans === null || del.assets === null || !m) return
     const [, vid] = del.vid.split('/')
     try {
       const next = await wb.removeVersion(m.id, vid)
@@ -688,8 +892,16 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     if (!picked.hasRecipe)
       return {
         label: '补参数源',
-        hint: '这个版本还是纯继承基底（参数源待补）—— 去参数台把它的参数正文钉下来。',
-        run: () => onGoto('params', { machineId: m.id, uid, key: null }),
+        hint: '这一版还没有自己的参数正文 —— 选一个模板版本抄一份进来。',
+        run: () => {
+          /* 只有这一版时没有模板可抄，退回参数台逐格填 */
+          if (m.versions.length > 1) {
+            setRecipeTpl('')
+            setRecipePick(picked.id)
+          } else {
+            onGoto('params', { machineId: m.id, uid, key: null })
+          }
+        },
       }
     const blocks = myBlocks(uid)
     if (blocks.length > 0)
@@ -723,14 +935,22 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     }
   })()
 
-  /** 打开删除弹窗的第一步：先问孤儿（删除独有的风险，用户不查就不知道） */
+  /**
+   * 打开删除弹窗的第一步：先问孤儿与归属资产（删除独有的风险，用户不查就不知道）。
+   * 两条都回来才给「确认删除」—— 少一条就等于让人闭着眼睛点
+   */
   const askDelete = (vid: string) => {
-    setDel({ vid: vidOf(m.id, vid), orphans: null })
-    void wb
-      .versionOrphans(m.id, vid)
-      .then((orphans) => setDel((cur) => (cur && cur.vid === vidOf(m.id, vid) ? { ...cur, orphans } : cur)))
+    const want = vidOf(m.id, vid)
+    setDel({ vid: want, orphans: null, assets: null })
+    void Promise.all([wb.versionOrphans(m.id, vid), wb.versionAssets(m.id, vid)])
+      .then(([orphans, assets]) =>
+        setDel((cur) => (cur && cur.vid === want ? { ...cur, orphans, assets } : cur)),
+      )
       .catch(failToast)
   }
+
+  /** 归属资产里还被**机型**引用着的那些 —— 它们删不掉，这一版也就删不掉 */
+  const assetBlockers = del?.assets?.filter((a) => a.machines.length > 0) ?? []
 
   return (
     <div className={s.split} ref={bodyRef} style={rail.style}>
@@ -1271,6 +1491,8 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnSm}`}
               onClick={() => {
+                /* 已在详情里选了某一版，就默认照抄那一版 —— 「再改一点」的常见起点 */
+                setAvFrom(picked?.id ?? '')
                 setAvId('')
                 setAvName('')
                 setAddVOpen(true)
@@ -1297,9 +1519,18 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                 >
                   <span className={`${s.mono} ${s.rowMeta}`}>{v.id}</span>
                   <span className={s.rowName}>{v.name}</span>
-                  <span className={s.rowMeta}>{v.recommendedBundle ?? placeholderText.noBundle}</span>
+                  <span
+                    className={s.rowMeta}
+                    data-tip={
+                      v.recommendedBundle
+                        ? `套餐 ${v.recommendedBundle}`
+                        : '没指套餐，生成时用机型默认'
+                    }
+                  >
+                    {v.recommendedBundle ?? placeholderText.noBundle}
+                  </span>
                   {!v.hasRecipe && (
-                    <span className={s.todo} title="纯继承机型基底，还没有自己的参数正文（14.4）">
+                    <span className={s.todo} title="纯继承机型基线，还没有自己的参数正文（14.4）">
                       参数源待补
                     </span>
                   )}
@@ -1318,8 +1549,8 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               </p>
             )}
             <p className={s.cardNoteDim}>
-              新增与删除立刻写入文件
-              <HelpDot text="没有草稿也没有撤销，删之前会先问孤儿引用。复制走两条命令：先版本定义，勾了才拷参数正文。" />
+              新增与删除先进草稿，保存后才写进仓库
+              <HelpDot text="删之前会先问孤儿引用与归属资产；撤销能整条退回来。复制走两条命令：先版本定义，勾了才拷参数正文。" />
             </p>
           </div>
         </div>
@@ -1393,8 +1624,24 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                       一行一行排会随语言变多而撑爆详情卡（2026-10-31 作者定） */}
                   <span className={s.kvKey}>版本 id</span>
                   <span className={s.kvVal}>
-                    <span className={s.mono}>{picked.id}</span>
-                    <span className={s.cardNote}>改 id = 删掉再加一个 —— 这一步后端还没做</span>
+                    <input
+                      className={s.inp}
+                      defaultValue={picked.id}
+                      key={`vid-${picked.id}`}
+                      aria-label="版本 id"
+                      onBlur={(e) => {
+                        const el = e.currentTarget
+                        const next = el.value.trim()
+                        if (next === picked.id) return
+                        void saveVersionId(next).then((ok) => {
+                          if (!ok) el.value = picked.id
+                        })
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      }}
+                    />
+                    <span className={s.cardNote}>改 id 会一起搬走这一版的参数与资产归属，保存后写入</span>
                   </span>
 
                   <span className={s.kvKey}>标签</span>
@@ -1513,13 +1760,26 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                         </span>
                       </>
                     ) : (
-                      <span className={s.todo} title="还没有自己的参数正文 —— 值全部继承机型基底">
+                      <span className={s.todo} title="还没有自己的参数正文 —— 值全部继承机型基线">
                         参数源待补
                       </span>
                     )}
                   </span>
                 </div>
                 <div className={s.sectOps}>
+                  {!picked.hasRecipe && m.versions.length > 1 && (
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnSm}`}
+                      title="从另一版抄一份完整参数（独立快照，之后各改各的）"
+                      onClick={() => {
+                        setRecipeTpl('')
+                        setRecipePick(picked.id)
+                      }}
+                    >
+                      复制参数
+                    </button>
+                  )}
                   <button
                     type="button"
                     className={`${s.btn} ${s.btnSm}`}
@@ -1808,7 +2068,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                 void (async () => {
                   try {
                     setList(await wb.addBrand(nbId.trim(), nbName.trim()))
-                    toasts.push(`已新增品牌 ${nbId.trim()} —— presets/brands.toml 已写入`)
+                    toasts.push(`已新增品牌 ${nbId.trim()} —— 已进草稿，保存后写入`)
                     setAddBrandOpen(false)
                     setBrandId(nbId.trim())
                     onBookRefresh()
@@ -1991,13 +2251,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             机型 id
             <FieldMark />
           </span>
-          <input
-            className={s.inp}
-            value={addId}
-            placeholder="A2L"
-            aria-label="机型 id"
-            onChange={(e) => setAddId(e.target.value.toUpperCase())}
-          />
+          <IdInput value={addId} label="机型 id" placeholder="A2L" onChange={setAddId} />
           {/* 拦着新建的理由当场写在输入框下面 —— 只放禁用按钮的悬停里，人只能猜 */}
           {addId.trim() !== '' && !idOk(addId) && (
             <span className={s.inpHint}>id 只能用大写字母、数字和下划线 —— 例如 A2L、A1_MINI</span>
@@ -2067,17 +2321,22 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
         }
       >
         <div className={s.kv} style={{ display: 'grid' }}>
+          <span className={s.kvKey}>继承自</span>
+          <SelectField
+            label="继承自"
+            size="sm"
+            value={avFrom}
+            options={[
+              { value: '', label: '空白版本', note: '只继承机型基线' },
+              ...m.versions.map((v) => ({ value: v.id, label: v.name || v.id, note: v.id })),
+            ]}
+            onChange={setAvFrom}
+          />
           <span className={s.kvKey}>
             版本 id
             <FieldMark />
           </span>
-          <input
-            className={s.inp}
-            value={avId}
-            placeholder="STANDARD"
-            aria-label="版本 id"
-            onChange={(e) => setAvId(e.target.value.toUpperCase())}
-          />
+          <IdInput value={avId} label="版本 id" placeholder="STANDARD" onChange={setAvId} />
           <span className={s.kvKey}>
             版本名
             <FieldMark />
@@ -2091,8 +2350,14 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
           />
         </div>
         <p className={s.cardNoteDim}>
-          <strong>id 与版本名都得现在填</strong> —— 版本一建出来就直接参与生成
-          <HelpDot text="没名字的版本在检查页和生成页都认不出来。新版本的标签、说明、套餐还是空的，参数纯继承机型基底（卡片上会标「参数源待补」）—— 套餐去版本详情卡指，参数去参数台改。" />
+          <strong>id 与版本名现在就得填。</strong>版本一建出来就直接参与生成
+          <HelpDot
+            text={
+              avTpl
+                ? `照抄 ${avTpl.id} 的定义、套餐与参数，之后两边各改各的；id 与名字是新填的。`
+                : '新版本的标签、说明、套餐是空的，参数纯继承机型基线，卡片上标「参数源待补」。'
+            }
+          />
         </p>
       </ModalC14>
 
@@ -2132,12 +2397,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             新版本 id
             <FieldMark />
           </span>
-          <input
-            className={s.inp}
-            value={copyId}
-            aria-label="新版本 id"
-            onChange={(e) => setCopyId(e.target.value.toUpperCase())}
-          />
+          <IdInput value={copyId} label="新版本 id" onChange={setCopyId} />
           <span className={s.kvKey}>版本名</span>
           <input
             className={s.inp}
@@ -2151,9 +2411,12 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
           <input type="checkbox" checked={withRecipe} onChange={(e) => setWithRecipe(e.target.checked)} />
           <span>
             <b>同时复制配方</b>
-            <HelpDot text="拷出来是独立快照 —— 之后改模板、改基底都传不到它身上。不勾就是一个纯继承基底的空壳版本（标「参数源待补」）。" />
+            <HelpDot text="拷出来是独立快照 —— 之后改模板、改基线都传不到它身上。不勾就是一个纯继承基线的空壳版本（标「参数源待补」）。" />
           </span>
         </label>
+        <p className={s.cardNoteDim} style={{ margin: '6px 0 0' }}>
+          套餐一并复制，新版本指过去
+        </p>
       </ModalC14>
 
       {/* —— 编辑版本（name / tag / description 三格一次提交） —— */}
@@ -2257,11 +2520,11 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
         </p>
       </ModalC14>
 
-      {/* —— 删除版本（两步：先问孤儿，再确认；确认后立刻落盘，不可逆） —— */}
+      {/* —— 删除版本（两步：先问连带清掉什么，再确认；确认后进草稿） —— */}
       <ModalC14
         open={del !== null}
         title={`删除版本 · ${del?.vid.split('/')[1] ?? ''}`}
-        subtitle="先查孤儿引用，再确认 —— 确认之后立刻写入，没有回收站也没有撤销"
+        subtitle="先查会连带清掉什么。确认后进草稿，保存才写进仓库"
         size="md"
         onClose={() => setDel(null)}
         footer={
@@ -2270,45 +2533,117 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             <button type="button" className={s.btn} onClick={() => setDel(null)}>
               不删了
             </button>
-            {del?.orphans !== null ? (
-              <button type="button" className={`${s.btn} ${s.btnDanger}`} onClick={() => void submitDelete()}>
+            {del?.orphans !== null && del?.assets !== null ? (
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnDanger}`}
+                disabled={assetBlockers.length > 0}
+                onClick={() => void submitDelete()}
+              >
                 确认删除
               </button>
             ) : (
-              <span className={s.cardNote}>正在查孤儿引用…</span>
+              <span className={s.cardNote}>正在查会连带清掉什么…</span>
             )}
           </>
         }
       >
-        {del === null ? null : del.orphans === null ? (
+        {del === null || del.orphans === null || del.assets === null ? (
           <p className={s.note} style={{ margin: 0 }}>
-            正在查「删掉这一版会让哪些字段留下孤儿引用」……
+            正在查「删掉这一版会连带清掉什么」……
           </p>
         ) : (
           <>
             <p className={s.note} style={{ margin: 0 }}>
               要删掉 <b>{m.id}/{del.vid.split('/')[1]}</b>。
-              <strong>立刻写入文件，没有回收站也没有撤销。</strong>
+              <strong>确认后进草稿，保存才写进仓库；删错了可以撤销。</strong>
             </p>
             {del.orphans.length > 0 ? (
               <p className={s.note}>
-                删掉之后这 {del.orphans.length} 项会留下指向它的<strong>孤儿引用</strong>
-                （不报错，但那几项在这台机器上会悄悄不生效）：
+                这一版钉过的 {del.orphans.length} 项参数会一起删掉（值回到继承基底）：
                 <br />
                 <code className={s.mono}>{del.orphans.join('、')}</code>
               </p>
             ) : (
-              <p className={s.note}>没有任何字段引用这一版，删掉不会留下孤儿。</p>
+              <p className={s.note}>这一版没有钉过参数，值全部继承基底。</p>
             )}
+            {del.assets.length > 0 && (
+              <p className={s.note}>
+                归属这一版的 {del.assets.length} 条资产记录会一起删掉：
+                <br />
+                <code className={s.mono}>{del.assets.map((a) => a.id).join('、')}</code>
+              </p>
+            )}
+            {del.assets
+              .filter((a) => a.bundles.length > 0)
+              .map((a) => (
+                <p key={`${a.id}-detach`} className={s.note}>
+                  <b>{a.id}</b> 会从 {a.bundles.join('、')} 套餐里摘掉。
+                </p>
+              ))}
+            {assetBlockers.map((a) => (
+              <p key={a.id} className={s.note}>
+                <b>{a.id}</b> 还被 {a.machines.join('、')} 引用，这一版暂时删不掉。
+              </p>
+            ))}
             <p className={s.note}>
-              <strong>会一起消失的</strong>：版本本身、标签与说明、它对套餐的指向、
-              已生成的产物记录，以及它自己钉过的 {pickedNode?.items ?? 0} 项参数值。
+              <strong>会一起消失的</strong>：版本本身、标签与说明、它对套餐的指向、已生成的产物记录。
               <br />
-              <strong>一个都不动的</strong>：这台机型、别的版本、套餐定义、资产库里的文件。
+              <strong>一个都不动的</strong>：这台机型、别的版本、套餐本身、资产库里的文件。
             </p>
           </>
         )}
       </ModalC14>
+
+      {/* —— 复制参数（「参数源待补」的补入入口，2026-11-12） —— */}
+      <ModalC14
+        open={recipePick !== null}
+        title={`复制参数 · ${recipePick ?? ''}`}
+        size="md"
+        closeOnScrim={false}
+        onClose={() => setRecipePick(null)}
+        footer={
+          <>
+            <span className={s.grow} />
+            <button type="button" className={s.btn} onClick={() => setRecipePick(null)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnPrimary}`}
+              disabled={recipeTpl === ''}
+              onClick={() => void submitRecipeCopy()}
+            >
+              复制
+            </button>
+          </>
+        }
+      >
+        <div className={s.kv} style={{ display: 'grid' }}>
+          <span className={s.kvKey}>模板版本</span>
+          <SelectField
+            label="模板版本"
+            size="sm"
+            value={recipeTpl}
+            placeholder="选一个版本"
+            options={(m?.versions ?? [])
+              .filter((v) => v.id !== recipePick)
+              .map((v) => ({ value: v.id, label: v.name || v.id, note: v.id }))}
+            onChange={setRecipeTpl}
+          />
+        </div>
+        <p className={s.cardNoteDim}>抄的是模板的完整有效配方，之后两边各改各的。</p>
+      </ModalC14>
+
+      {/* 错误弹框：复制失败时把码、请求号与字段级原因一起摆出来 */}
+      <ErrorDialog
+        open={errDialog !== null}
+        title={errDialog?.title ?? '操作失败'}
+        lead={errDialog?.lead ?? ''}
+        error={errDialog?.error ?? null}
+        onClose={() => setErrDialog(null)}
+      />
+
       {rail.handle}
     </div>
   )

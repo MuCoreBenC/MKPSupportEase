@@ -58,10 +58,15 @@
  *  - 这里留下的是**开发 / 排查的后门**：临时把下载指向本地 `python3 -m http.server`
  *    或别的源。默认状态就是"没被碰过"（内置默认 / 没配），普通用户什么都不用动。
  *
- * 交互：**两个云端源摆成固定单选**（Gitee / GitHub），选上**立即生效**并回写
+ * 交互：**三个源收在一只下拉里**（共用件 `SelectField`：Gitee / GitHub / 自定义地址，
+ * 为什么不是一排按钮见 `sourceOptions` 那段），选上**立即生效**并回写
  * （作者 2026-10-05 推翻旧的"选了不写、另摆按钮"那套 —— 「点了怎么没有立即帮我
- * 切换成 Gitee」）。自定义地址收在最后那一档，仍是两步：选上只展开输入框，
- * 按「应用」才写；保存前先探一次，取不到就整次拒绝。
+ * 切换成 Gitee」）。自定义那一档仍是两步：选上只展开输入框、光标直接落进去，
+ * 按「应用」或**在框里回车**才写；写之前先探一次，取不到就整次拒绝。
+ *
+ * **下拉里打勾的那一条 = 盘上真在用的那一个**：打勾只在写成功之后才移动。选自定义
+ * 只展开输入区，空着 / 没点应用 / 探不通都不会让它离开原来那一档；
+ * 失败时输入区与那条错误留着 —— 地址收回去，人就只能照着报错重敲一遍。
  *
  * # 试验场专用
  *
@@ -78,16 +83,18 @@ import {
   useState,
   type MouseEvent,
 } from 'react'
-/* 系统文件选择框：挑"备份放哪个文件夹"与"恢复哪一份 zip" —— 位置一律由用户点名 */
-import { open } from '@tauri-apps/plugin-dialog'
-
 import { api, errorText, isAppError } from '../../api'
+import { STORAGE } from '../../api/storageKeys'
 import type { LocalePref, PresetSource, SoftwareUpdate, ThemePref } from '../../api/contract'
-import { msg, useText, useT, type StringKey, type Text } from '../../i18n'
+/* 前端偏好落 localStorage 的那一件（自定义地址的历史就是它） */
+import { useStickyState } from '../../hooks/useStickyState'
+import { msg, useLocale, useText, useT, type StringKey, type Text } from '../../i18n'
 /* 换源广播（2026-10-08）：保存即生效、不许要求重启 —— 两个代次都只回答"要不要重读" */
 import { deliveryMutated, sourceMutated, useSourceRevision } from '../state/deliveryState'
 /* AppState 客户端：主题 / 语言这两格从它读；写完再兜底刷一次（浏览器 mock 没有事件通道） */
 import { appStateMutated, useLocalePref, useThemePref } from '../state/appState'
+/* 界面动作记录：开关 / 主题 / 语言 / 更新渠道与那枚翻转插画（2026-11-12） */
+import { track } from '../log/track'
 import {
   SLICER_CHOOSE,
   slicerOptionsOf,
@@ -119,6 +126,14 @@ import BedGlueSection from './BedGlueSection'
 import DataSection from './DataSection'
 /* 预设那一块（2026-10-20）：与上面同一条规矩（自己一个文件、只管自己那一行） */
 import PresetsSection from './PresetsSection'
+/* 「最近删除」那一行（2026-11-09 并进「备份与恢复」） */
+import RecoverySection from './RecoverySection'
+/* 卡片头（2026-11-10）：图标 + 名称 + 一句说明，全页同一处定义 */
+import { SectionHead } from './SectionHead'
+/* 深色星河（2026-11-10）：算法生成的两层画布，替掉原来那张 1200×470 的静态 SVG */
+import GalaxyBackdrop from './GalaxyBackdrop'
+/* 备份 / 恢复那一框（2026-11-09）：挑位置、看进度、看结果都在框里 */
+import BackupModal from './BackupModal'
 import { openWithGuideFigure } from '../guide/openWithGuide'
 /* 「保存后的重切引导」那个共用开关（与提示里的「不再显示」写同一个键）：
    这一页是它**唯一能重新打开**的地方，见 `guide/guidesPref` */
@@ -138,8 +153,18 @@ import type { SettingsTarget } from './targets'
 import s from './PageSettings.module.css'
 
 /*
- * 左目录（2026-10-30）：12 项 = 这一页的 12 个 section，**顺序必须与 DOM 一致** ——
+ * 左目录：**8 个大类**，一项 = 这一页的一个 section，**顺序必须与 DOM 一致** ——
  * 滚到哪亮到哪（scrollspy）与点击跳转都按这个顺序对 id。
+ *
+ * ★ 2026-11-09 收成 8 项（作者：「分 8 大类就够了」）：原来 13 项里有 5 项各自只有
+ *   一两行（引导 / 执行记录 / 校准与补偿 / 热床预涂胶 / 最近删除），目录比正文还长。
+ *   现在它们降成大类里的小标题（`.subTitle`）或直接并进相邻的那一行，目录只剩
+ *   "一眼扫得完"的八格。合并口径：
+ *     外观与语言 ← 主题 + 界面语言
+ *     切片与引导 ← 默认切片软件 + 保存后的重切提示
+ *     后处理     ← 通知/显示/涂胶/塔 + 校准与补偿 + 热床预涂胶 + 重置
+ *     备份与恢复 ← 备份/恢复 + 最近删除
+ *     数据与维护 ← 预设位置 + 自动清理执行记录 + 清理与卸载
  *
  * ★ 这是设置页第一次有"目录"：原来一屏十几个灰卡片一路滚下来，找「备份」只能从头滚。
  *   窄窗（≤900）时它整块不显示（作者：「窄的时候直接不显示就算了」），
@@ -149,15 +174,10 @@ const NAV: { id: string; key: StringKey; icon: IconName }[] = [
   { id: 'upd', key: 'settings.update.title', icon: 'refresh' },
   { id: 'appearance', key: 'settings.appearance.title', icon: 'theme' },
   { id: 'slicer', key: 'settings.slicer.title', icon: 'box' },
-  { id: 'guides', key: 'settings.guides.title', icon: 'doc' },
-  { id: 'history', key: 'settings.history.title', icon: 'history' },
-  { id: 'backup', key: 'settings.backup.title', icon: 'download' },
   { id: 'postproc', key: 'settings.postproc.title', icon: 'bolt' },
-  { id: 'calib', key: 'settings.calib.title', icon: 'crosshair' },
-  { id: 'glue', key: 'settings.glue.title', icon: 'drop' },
   { id: 'presets', key: 'settings.presets.title', icon: 'presets' },
+  { id: 'backup', key: 'settings.backup.title', icon: 'download' },
   { id: 'data', key: 'settings.data.title', icon: 'folder' },
-  { id: 'recovery', key: 'settings.recovery.title', icon: 'history' },
   { id: 'advanced', key: 'settings.advanced.title', icon: 'params' },
 ]
 
@@ -167,7 +187,7 @@ const NAV: { id: string; key: StringKey; icon: IconName }[] = [
  * ★ 为什么必须拆出去：`active` 原来住在 `PageSettings` 里，每越过一章的边界就要把
  *   这一整页（十几章、几十个控件、几颗自绘下拉）重新 render 一遍 —— 滚动路径上
  *   每隔三四百像素顿一下，就是作者说的「右侧卡卡的」。拆出来之后滚到哪儿只重画
- *   这 13 行，正文一个字节都不参与。
+ *   这 8 行，正文一个字节都不参与。
  *
  * ★ 滚动路径上**一个 DOM 都不读**：章节顶点只在布局真变了时量一次
  *   （挂载 / `ResizeObserver` / 窗口 resize），滚动时纯算术 + 一帧最多一次 rAF。
@@ -506,6 +526,23 @@ const LOCALE_CHOICES: { id: LocalePref; label: StringKey; hint: StringKey }[] = 
   { id: 'en', label: 'settings.locale.en', hint: 'settings.locale.enHint' },
 ]
 
+/**
+ * 「更新渠道」那两档（2026-11-10）—— 与后端候选里的 `channel` 一一对应，**id 是契约**。
+ *
+ * ★ 候选不再摆两张卡：只画选中的那一路（作者：「只显示一个，用切片的去切换
+ *   正式版测试版」）。分段控件与主题 / 语言那一套是同一种控件、同一种排法。
+ */
+const CHANNEL_CHOICES: { id: 'stable' | 'preview'; label: StringKey }[] = [
+  { id: 'stable', label: 'settings.update.channelStable' },
+  { id: 'preview', label: 'settings.update.channelPreview' },
+]
+
+/**
+ * 「自定义地址」记几条：应用成功一次的记一条，新的在前、同一个地址不重复。
+ * 再多就把那一行撑成一堵墙 —— 这一格是"找回上次那条开发地址"，不是书签管理器。
+ */
+const ADDR_HISTORY_MAX = 6
+
 /*
  * 深链落点的类型与常量都住在 `settings/targets.ts`（唯一出处）。这一页只消费：
  * `id` 写错字过不了类型检查，也过不了 `check-locate.mjs`。
@@ -518,8 +555,35 @@ export default function PageSettings({
 } = {}) {
   const [source, setSource] = useState<PresetSource | null>(null)
   const [loadErr, setLoadErr] = useState<string | null>(null)
+  /*
+   * 下拉里打勾的那一条 = **盘上生效的那一档**（没选过 = 出厂那个内置源）。
+   * 它只在**写成功**时移动：打勾的那个，就必须真的在用哪一个。
+   */
   const [mode, setMode] = useState<Mode>('github')
+  /*
+   * 自定义输入区**展不展开**（纯界面状态，与打勾分开）。
+   *
+   * 分开是因为这两件事同时成立：打勾留在生效的那一档，而输入框与那条错误**得留着**
+   * —— 空着 / 没点应用 / 探不通都不是"切过去了"，把打勾挪过去就是在说假话。
+   */
+  const [customOpen, setCustomOpen] = useState(false)
   const [draft, setDraft] = useState('')
+  /*
+   * 选「自定义地址」⇒ **光标直接落进输入框**：那一档选上只是展开、还没写盘，
+   * 光标在那儿人才知道下一步是打字，而不是"点了一下什么都没发生"。
+   * 用计数不用布尔：接着再点一次「自定义地址」也要再收一次焦点。
+   */
+  const draftRef = useRef<HTMLInputElement | null>(null)
+  const [draftFocus, setDraftFocus] = useState(0)
+  useEffect(() => {
+    if (draftFocus === 0) return
+    draftRef.current?.focus()
+  }, [draftFocus])
+  /*
+   * 用过的自定义地址（新的在前）。落 localStorage —— 它只是"以前写过的那条别丢"，
+   * 不是底账：真正生效的地址由后端 `run/app-state.json` 记。
+   */
+  const [addrHistory, setAddrHistory] = useStickyState<string[]>(STORAGE.clientPresetSourceHistory, [])
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<{ text: Text; bad?: boolean; detail?: string } | null>(null)
   /*
@@ -548,6 +612,8 @@ export default function PageSettings({
    */
   const { state: updateState, info: installMeta, refresh: refreshUpdate } = useSoftwareUpdate()
   const [pendingChannel, setPendingChannel] = useState<'stable' | 'preview' | null>(null)
+  /* 「更新渠道」那一格选的是哪一路（2026-11-10）：候选只画选中的那一个 */
+  const [channelPick, setChannelPick] = useState<'stable' | 'preview'>('stable')
   const [installing, setInstalling] = useState(false)
 
 
@@ -627,80 +693,13 @@ export default function PageSettings({
   const [autoCheckErr, setAutoCheckErr] = useState<Text | null>(null)
 
   /*
-   * **备份与恢复**（2026-10-17）：两个动作都要先问系统要一个位置（文件夹 / 那份 zip）。
+   * **备份与恢复**（2026-10-17 / 2026-11-09）。
    *
-   * ★ 「恢复」是**不可撤销**的（它把现在的数据换掉）⇒ 与「清空历史」同一条规矩：
-   *   点一下只是武装，再点才真做（二次确认在界面这一侧，后端只管照做）。
-   * ★ 恢复完要**整窗重载**：盘上的数据换过了，内存里的都不算数。
+   * 这一页只剩**一个入口**：两件事并进同一扇框（框里自己分页），挑位置、看进度、
+   * 看结果也都在框里 —— 作者的口径：「备份好了不要在这个界面显示」+
+   * 「备份和还原合并成同一个按钮」。
    */
-  const [backupBusy, setBackupBusy] = useState(false)
-  const [restoreBusy, setRestoreBusy] = useState(false)
-  /* 恢复的二次确认：点了「从备份恢复」之后摆出来（再点一次才真恢复） */
-  const [restoreArm, setRestoreArm] = useState<string | null>(null)
-  const [backupNote, setBackupNote] = useState<{ text: Text; bad: boolean } | null>(null)
-
-  /** 备份：问系统"放到哪个文件夹"，剩下的（文件名、打包）全交给后端 */
-  const doBackup = useCallback(async () => {
-    setBackupBusy(true)
-    setBackupNote(null)
-    try {
-      const picked = await open({ directory: true, title: tr('settings.backup.pickDir') })
-      const dir = Array.isArray(picked) ? picked[0] : picked
-      if (typeof dir !== 'string' || dir === '') {
-        setBackupBusy(false)
-        return
-      }
-      const sum = await api.createBackup(dir)
-      setBackupNote({
-        text: msg('settings.backup.done', { path: sum.path, files: sum.files }),
-        bad: false,
-      })
-    } catch (e) {
-      setBackupNote({ text: msg('settings.backup.failed', { detail: errorText(e) }), bad: true })
-    } finally {
-      setBackupBusy(false)
-    }
-  }, [tr])
-
-  /** 恢复：问系统"哪一份备份"，**二次确认**之后才真的覆盖 */
-  const doRestore = useCallback(async () => {
-    /* 第一下：挑一份备份 + 武装；第二下：拿已经挑好的那份真恢复 */
-    if (restoreArm === null) {
-      setBackupNote(null)
-      try {
-        const picked = await open({
-          directory: false,
-          multiple: false,
-          title: tr('settings.restore.pickTitle'),
-          filters: [{ name: tr('settings.restore.pickFilter'), extensions: ['zip'] }],
-        })
-        const at = Array.isArray(picked) ? picked[0] : picked
-        if (typeof at !== 'string' || at === '') return
-        setRestoreArm(at)
-        setBackupNote({
-          text: msg('settings.restore.ask', { path: at }),
-          bad: false,
-        })
-      } catch (e) {
-        setBackupNote({
-          text: msg('settings.restore.pickFailed', { detail: errorText(e) }),
-          bad: true,
-        })
-      }
-      return
-    }
-    setRestoreBusy(true)
-    try {
-      const sum = await api.restoreBackup(restoreArm)
-      /* 盘上换过了 ⇒ 整窗重载（内存里的都不算数） */
-      setBackupNote({ text: msg('settings.restore.done', { files: sum.files }), bad: false })
-      window.setTimeout(() => window.location.reload(), 600)
-    } catch (e) {
-      setBackupNote({ text: msg('settings.restore.failed', { detail: errorText(e) }), bad: true })
-      setRestoreArm(null)
-      setRestoreBusy(false)
-    }
-  }, [restoreArm, tr])
+  const [backupOpen, setBackupOpen] = useState(false)
 
   const read = useCallback(async () => {
     setLoadErr(null)
@@ -709,16 +708,53 @@ export default function PageSettings({
       setSource(got)
       /* 初值跟着生效值走：选了自定义 = 自定义那一档；其余 = 出厂默认那个内置源 */
       setMode((got?.mode ?? 'github') as Mode)
+      /* 生效的就是自定义 ⇒ 输入区跟着展开（地址一并填进去，见下一行） */
+      setCustomOpen(got?.mode === 'custom')
       setDraft(got?.mode === 'custom' ? (got?.address ?? '') : '')
+      /*
+       * 现在生效的就是自定义 ⇒ 它也该出现在「用过的地址」里：
+       * 升级上来的人（这一行还没记过任何东西）不必把手上那条再敲一遍。
+       */
+      const live = got?.mode === 'custom' ? (got.address ?? '').trim() : ''
+      if (live !== '') {
+        setAddrHistory((prev) =>
+          prev[0] === live ? prev : [live, ...prev.filter((x) => x !== live)].slice(0, ADDR_HISTORY_MAX),
+        )
+      }
     } catch (e) {
       setSource(null)
       setLoadErr(errorText(e))
     }
-  }, [])
+  }, [setAddrHistory])
 
   useEffect(() => {
     void read()
   }, [read])
+
+  /*
+   * **换界面语言 ⇒ 数据源那几句重新要一次**（2026-11-09）。
+   *
+   * `PresetSource.label` / `builtin[].label` 是**内核**翻的（`runtime::source::label`
+   * → `ui.runtime.source.gitee`），切语言只换了后端那一格，前端手里这份 `source`
+   * 还是旧语言那一串 ⇒ 界面全中文、只有那个按钮写着「Gitee（中国国内から直結）」。
+   *
+   * 只更新 `source`（名字与地址），**不动** `mode` / `customOpen` / `draft`：
+   * 换语言不该顺手把人正在填的地址清掉。
+   */
+  const locale = useLocale()
+  const localeSeen = useRef(locale)
+  useEffect(() => {
+    if (localeSeen.current === locale) return
+    localeSeen.current = locale
+    void api.getPresetSource().then(
+      (got) => {
+        setSource(got)
+        setLoadErr(null)
+      },
+      /* 读不到就留着旧的那一份 —— 名字语言不对，好过整块变成"读不出来" */
+      () => {},
+    )
+  }, [locale])
 
   /*
    * 软件更新：**只在打开这一页时问一次**（铁律 2：更新检查不在启动 / 首屏路径）。
@@ -851,13 +887,20 @@ export default function PageSettings({
 
   /*
    * 选云端源 = **立即生效**（作者 2026-10-05：选了没反应让人怀疑没点上）。
-   * 乐观把单选切过去，后端落盘成功就用回传值校准；失败**回到生效的那一档**，
-   * 结论讲成人话、技术细节进折叠。自定义仍只展开输入框，不在这里写。
+   * 乐观把打勾切过去，后端落盘成功就用回传值校准；失败**回到生效的那一档**，
+   * 结论讲成人话、技术细节进折叠。
+   *
+   * **自定义那档不移动打勾**：它选上只是展开输入区（光标落进去），写盘要等
+   * 「应用」/ 回车 —— 打勾跟着"我点了什么"走的话，空着 / 没应用 / 探不通
+   * 都会让它停在一个没在用的档上。
+   *
+   * 换到内置源成功 ⇒ 自定义输入区收起（那一档已经不是"正在改的东西"了）。
    */
   const pick = async (next: Mode) => {
     setNote(null)
     if (next === 'custom') {
-      setMode('custom')
+      setCustomOpen(true)
+      setDraftFocus((n) => n + 1)
       return
     }
     if (busy) return
@@ -869,19 +912,19 @@ export default function PageSettings({
         /* 演示后端没有内置源（真机必有）：选内置 = 回到"没配"，如实照做 */
         setSource(null)
         setMode(next)
+        setCustomOpen(false)
         sourceChanged()
         return
       }
       setSource(got)
       setMode(got.mode as Mode)
+      setCustomOpen(false)
       setNote({ text: msg('settings.advanced.switched', { label: got.label }) })
       await afterSourceChanged()
     } catch (e) {
       setMode((source?.mode as Mode | undefined) ?? 'github')
       setNote({
-        text: msg('settings.advanced.switchFailed', {
-          label: source?.label ?? tr('settings.advanced.defaultSource'),
-        }),
+        text: msg('settings.advanced.switchFailed', { label: effectiveLabel }),
         bad: true,
         detail: errorText(e),
       })
@@ -899,6 +942,7 @@ export default function PageSettings({
     if (themeBusy) return
     setThemeBusy(true)
     setThemeErr(null)
+    track('theme', { to: next })
     try {
       await api.setTheme(next)
       appStateMutated()
@@ -920,6 +964,7 @@ export default function PageSettings({
     if (localeBusy) return
     setLocaleBusy(true)
     setLocaleErr(null)
+    track('locale', { to: next })
     try {
       await api.setLocale(next)
       appStateMutated()
@@ -938,6 +983,7 @@ export default function PageSettings({
     if (autoCleanBusy) return
     setAutoCleanBusy(true)
     setAutoCleanErr(null)
+    track('autoCleanHistory', { on: next })
     try {
       setAutoClean(await api.setAutoCleanHistory(next))
     } catch (e) {
@@ -952,6 +998,7 @@ export default function PageSettings({
     if (autoCheckBusy) return
     setAutoCheckBusy(true)
     setAutoCheckErr(null)
+    track('update.autoCheck', { on: next })
     try {
       setAutoCheckUpdate(await api.setAutoCheckUpdate(next))
     } catch (e) {
@@ -1040,25 +1087,37 @@ export default function PageSettings({
     }
   }
 
-  /* 当前生效的那一句账：读不出来 / 没配 / 你指定的 / 内置源 —— 四种都要说得出 */
+  /*
+   * 当前生效的那一句账：读不出来 / 没配 / 没有地址 / 地址本身 —— 四种都要说得出。
+   *
+   * ★ 只说**地址**，不再重复源的名字：名字已经在下拉触发器上（两者显示的永远是同一
+   *   条账），再拼一遍就是「Gitee（国内直连）：https://…」那种两截冒号。
+   *   读不出来的技术原因挂在这一行的悬停气泡上（`data-tip`），可见的只留一句话。
+   */
   const currentText =
     loadErr !== null
-      ? tr('settings.advanced.readFailed', { detail: loadErr })
+      ? tr('settings.advanced.readFailed')
       : source === null
         ? tr('settings.advanced.unconfigured')
-        : source.mode === 'custom'
-          ? tr('settings.advanced.customText', {
-              address:
-                source.address === ''
-                  ? tr('settings.advanced.emptyAddress')
-                  : source.address,
-            })
-          : tr('settings.advanced.builtinText', {
-              label: source.label,
-              address: source.address,
-            })
+        : source.address === ''
+          ? tr('settings.advanced.emptyAddress')
+          : source.address
 
   const canSet = draft.trim() !== ''
+
+  /**
+   * 失败回执里"现在用的还是 ___"那一格：**照生效的那一条说**。
+   *
+   * 内置源报名字；自定义报**地址本身**（报"自定义地址"等于没说 —— 人家要修的正是那一串）。
+   */
+  const effectiveLabel =
+    source === null
+      ? tr('settings.advanced.defaultSource')
+      : source.mode === 'custom'
+        ? source.address === ''
+          ? tr('settings.advanced.emptyAddress')
+          : source.address
+        : source.label
 
   /* 单选显示的永远是**盘上真账**：还没选过（null）时按"跟随系统"那一档显示 */
   const currentTheme: ThemePref = theme ?? 'system'
@@ -1081,6 +1140,26 @@ export default function PageSettings({
   const slicerShow: SlicerId = slicer === 'custom' && slicerCustom === null ? 'system' : slicer
   /* 「跟随系统默认」在这台机器上指谁那一句（问不到 = `null` ⇒ 那行不摆） */
   const slicerSystem = systemSlicerLine(tr, systemApp)
+
+  /*
+   * 数据源下拉的选项：两个云端源（名字由内核给）+ 最后一档自定义。
+   *
+   * ★ 为什么是下拉、不是一排按钮：三段名字都长（「Gitee（国内直连）」/
+   *   「GitHub（直连）」/「自定义地址（开发 / 排查）」），一排并排在行右缘装不下 ——
+   *   越出行边界的同时，还把左边的「当前：…」压成一条窄缝。下拉的触发器定宽，
+   *   长名字在框里省略号解决；哪一条是出厂默认挂在 `note` 上（原来在 `data-tip` 尾巴）。
+   */
+  const sourceOptions: FieldOption[] = [
+    ...(source?.builtin ?? []).map((b) => ({
+      value: b.id,
+      label: b.label,
+      note: b.id === source?.defaultMode ? tr('settings.advanced.defaultTag').trim() : undefined,
+    })),
+    { value: 'custom', label: tr('settings.advanced.customLabel') },
+  ]
+  /* 生效的那一档不在选项里（源读不出来 / 演示后端没有内置源）⇒ 按第一项显示，
+     不把 `github` 这种 id 原文露在触发器上 */
+  const sourceShow = sourceOptions.some((o) => o.value === mode) ? mode : (sourceOptions[0]?.value ?? '')
 
   /**
    * **换源之后广播一声**（2026-10-08 作者要求：地址保存即生效，**不许要求重启**）。
@@ -1133,21 +1212,34 @@ export default function PageSettings({
     })
   }
 
-  /* 自定义地址的落盘（先探后写，后端做）。失败不回滚单选：输入框留着让人改地址重试 */
+  /*
+   * 自定义地址的落盘（先探后写，后端做）。
+   *
+   * 勾**只有写成功才落到自定义上**，失败原地不动 —— 于是失败之后勾仍在原来那一档，
+   * 输入区与错误句留着（地址收回去，人就只能照着报错重敲一遍）。
+   */
   const apply = async () => {
     if (busy) return
     setBusy(true)
     setNote(null)
+    const address = draft.trim()
+    /*
+     * **点了「应用」就记**，成不成探通都记：这一行是"我刚才打的那串地址别丢"，
+     * 不是"验证通过的地址清单" —— 探不通的那条最需要回来改个字符再试，
+     * 丢了就等于要重敲一遍。生效与否看下面那句话，不靠这一行。
+     */
+    setAddrHistory((prev) => [address, ...prev.filter((x) => x !== address)].slice(0, ADDR_HISTORY_MAX))
     try {
-      const got = await api.setPresetSource('custom', draft.trim())
+      const got = await api.setPresetSource('custom', address)
       setSource(got)
+      /* 写进去了才把勾落在自定义上（写之前那个勾一直停在生效的那一档） */
+      setMode('custom')
+      setCustomOpen(true)
       /* 地址生效了还要**当场把目录同步过来** —— 不然界面停在旧目录直到重启 */
       await afterSourceChanged()
     } catch (e) {
       setNote({
-        text: msg('settings.advanced.applyFailed', {
-          label: source?.label ?? tr('settings.advanced.defaultSource'),
-        }),
+        text: msg('settings.advanced.applyFailed', { label: effectiveLabel }),
         bad: true,
         detail: errorText(e),
       })
@@ -1169,7 +1261,6 @@ export default function PageSettings({
   const channels = (upd?.candidates ?? [])
     .slice()
     .sort((a, b) => (a.channel === 'stable' ? 0 : 1) - (b.channel === 'stable' ? 0 : 1))
-  const showChannelCards = channels.length > 0
 
   /* 正在搬字节的那一态（有它就把所有下载入口禁掉：后端会如实拒第二遍） */
   const transferring =
@@ -1180,11 +1271,10 @@ export default function PageSettings({
       : '…'
 
   /*
-   * 左列**只有两行**（状态 + 版本对照）⇒ 动作条竖向居中（2026-10-30 作者：
-   * 「这两行的时候，看起来是居中的」）。多出说明 / 失败原因 / 提示任何一段就退回
-   * 顶对齐 —— 那几段会把左列撑高，按钮跟着居中就掉到卡片中部去了（a07 的老裁决）。
+   * ★ 2026-11-10：原来这里有一条 `compactUpdate`（只有两行时动作条竖向居中）。
+   *   那一块现在是不带卡的英雄带（`.updBand`），左列与右列都按 `align-items: center`
+   *   走，不再分"两行 / 多一段"两档 —— 判据少一个，版面也不会跳。
    */
-  const compactUpdate = upd !== null && (notes ?? '').trim() === ''
 
   /*
    * 「查看更新」跳哪儿：**跟着这页下面选的数据源走**（作者 2026-10-13：
@@ -1198,11 +1288,74 @@ export default function PageSettings({
     source?.mode === 'custom' && source.address !== '' ? source.address : releaseUrl
 
   /*
+   * 「发现新版本」那一行画什么（2026-11-10）。
+   *
+   * 候选只在主动检查时才带得回来；带了就按「更新渠道」选中的那一路画**一条**，
+   * 没带就退回普通那次检查的那一条（`upd`）。两种情形共用同一段版面，
+   * 所以先把它们归成同一个形状 —— 下面的 JSX 里不再分叉。
+   */
+  const picked = channels.find((c) => c.channel === channelPick) ?? channels[0]
+  const found =
+    picked !== undefined
+      ? {
+          channel: picked.channel,
+          version: picked.version,
+          notes: picked.notes,
+          canInstall: picked.asset !== undefined,
+          url: picked.url,
+        }
+      : hasUpdate
+        ? {
+            channel: 'stable' as const,
+            version: upd?.latestVersion ?? '—',
+            notes: upd?.notes,
+            canInstall: upd?.asset !== undefined,
+            url: jumpUrl,
+          }
+        : null
+  /* 这一版**已经下好了**：后端 `Ready` 里带着版本与通道，两格都对上才算 */
+  const foundReady =
+    found !== null &&
+    updateState?.state === 'ready' &&
+    updateState.version === found.version &&
+    (picked === undefined || updateState.channel === picked.channel)
+  /* 正在下**这一版**（通道未知时也认：离开页面又回来时宁可显示进度，也不假装没在下） */
+  const foundMoving =
+    found !== null &&
+    transferring !== null &&
+    (pendingChannel === null || pendingChannel === found.channel)
+
+  /*
    * 这一页的根（`.page`）= 「顶栏页签以下那一整块」。交给模态框当 `host`，
    * 遮罩 `absolute inset:0` 才会铺满这一块（与 `PagePresets` 的 `pageEl` 同一个做法）。
    * 只在「最近删除」那个框上用得到 —— 列表搬进框里之后（2026-10-29）。
    */
   const [pageEl, setPageEl] = useState<HTMLDivElement | null>(null)
+
+  /*
+   * 离开这一页再回来 ⇒ 把"敞着、但什么都没写进去"的自定义编辑区收回去。
+   *
+   * 页签是**常驻挂**的（`PageSlot` 只切 `data-hidden`，见 `App.tsx` 那段注释）：
+   * 不主动收的话，切去别的页再回来，输入框仍空着、编辑区仍敞着 —— 而盘上一格没变，
+   * 界面看着像"自定义那一档还没生效"。
+   *
+   * 只收**空着**的那一种：真打了字还没点应用的不动（那是人家正在填的东西，收掉等于删稿）。
+   */
+  useEffect(() => {
+    const slot = pageEl?.closest('[data-hidden]')
+    if (!(slot instanceof HTMLElement)) return
+    let hidden = slot.hasAttribute('data-hidden')
+    const mo = new MutationObserver(() => {
+      const now = slot.hasAttribute('data-hidden')
+      if (hidden && !now && draft.trim() === '') {
+        setCustomOpen(false)
+        setDraft(source?.mode === 'custom' ? source.address : '')
+      }
+      hidden = now
+    })
+    mo.observe(slot, { attributes: true, attributeFilter: ['data-hidden'] })
+    return () => mo.disconnect()
+  }, [pageEl, draft, source])
 
   /* 右栏滚动容器：搜索效果与左目录都认它（左目录里那颗 ref 由 SideNav 收） */
   const mainRef = useRef<HTMLElement | null>(null)
@@ -1248,8 +1401,8 @@ export default function PageSettings({
       let hit = 0
       Array.from(sec.children).forEach((child) => {
         const node = child as HTMLElement
-        /* 章节标题（h2）不参与命中判断，也不藏 —— 章还在，只是行被筛掉 */
-        if (node.tagName === 'H2') return
+        /* 卡片头（`data-head`，含 h2/h3）不参与命中判断，也不藏 —— 卡还在，只是行被筛掉 */
+        if (node.tagName === 'H2' || node.hasAttribute('data-head')) return
         const on = term === '' || (node.textContent ?? '').toLowerCase().includes(term)
         node.style.display = on ? '' : 'none'
         if (on) hit += 1
@@ -1265,6 +1418,8 @@ export default function PageSettings({
 
   return (
     <div className={s.page} ref={setPageEl}>
+      {/* 深色星河（浅色档自己不渲染）：铺在整页底下，见 `GalaxyBackdrop` 头注 */}
+      <GalaxyBackdrop />
       <header className={s.head}>
         <h1 className={s.title}>{tr('settings.title')}</h1>
         <label className={s.search}>
@@ -1304,17 +1459,44 @@ export default function PageSettings({
        * 「他应该放到上面呀…我就觉得他这个位置放在这不舒服」—— 按钮吊在卡片底下
        * 显得空、也够不着）。说明块仍封顶可滚，长文案不会把按钮挤下去。
        */}
-      <section className={s.section} id="upd" data-sec aria-label={tr('settings.update.title')}>
-        <div className={`${s.updateTop} ${compactUpdate ? s.updateTopCentered : ''}`}>
+      {/*
+       * ★ 2026-11-10：这一块**不在卡里**（作者：「把更新的放在外面放在最上面，右侧也加一个
+       *   相关的图片或者 svg」）。它是整页最上面的一条英雄带：左边标题 + 状态 + 版本，
+       *   右边是按钮组和一枚更新插画；下面那些卡才是"设置项"。
+       *   仍然挂在 `#upd` / `[data-sec]` 上 —— 左目录第一项、搜索、深链都还认它。
+       */}
+      {/*
+       * 软件更新（2026-11-10 第三版，照参考稿）：
+       *
+       *   ① 抬头（英雄带）：**不套卡**，直接坐在页面背景上 —— 标题 / 状态 / 当前版本，
+       *      右上角一枚插画 + 化开的光晕（作者：「不要套卡片，就直接放在背景」）。
+       *   ② 紧跟一张卡：发现新版本（只摆选中的那一路）→ 更新检查 → 自动检查更新
+       *      → 更新渠道（分段控件切正式版 / 测试版）。
+       *
+       * ★ 候选从"两张卡"收成"一行"（作者：「只显示一个，用切片的去切换正式版测试版，
+       *   文案也是用立即更新这种按钮、发现新版本这种文案」）。
+       */}
+      <section className={s.updBand} id="upd" data-sec aria-label={tr('settings.update.title')}>
+        <div className={s.updHero}>
           <div className={s.updateRow}>
+            {/*
+             * 标题那一行（2026-11-10 第五版，作者：「标题大一点、上一点，检查更新跟着标题
+             * 右侧」）：大标题与那颗按钮同一条横线，下面才是状态 / 版本 / 说明。
+             */}
+            <div className={s.updTitleRow}>
+              <h2 className={s.updTitle}>{tr('settings.update.title')}</h2>
+              <Btn disabled={updateBusy} onClick={() => void checkUpdate()}>
+                {updateBusy ? tr('settings.update.checking') : tr('settings.update.recheck')}
+              </Btn>
+            </div>
             <div className={s.updateHeadline}>
               {updateBusy ? (
                 <span className={s.updateIdle}>{tr('settings.update.checking')}</span>
               ) : hasUpdate ? (
                 <span className={s.updateFresh}>{tr('settings.update.hasNew')}</span>
               ) : upd !== null ? (
-                /* ★ 「已是最新」是**好消息**（作者 2026-10-05：字体要绿的）——
-                   与「有新版本」同一个绿；「没查到」才是灰的（不是坏消息，是不知道）。 */
+                /* 「已是最新」是**好消息**（作者 2026-10-05：字体要绿的）；
+                   「没查到」才是灰的（不是坏消息，是不知道）。 */
                 <span className={s.updateLatest}>{tr('settings.update.latest')}</span>
               ) : (
                 <span className={s.updateIdle}>{tr('settings.update.unknown')}</span>
@@ -1331,7 +1513,7 @@ export default function PageSettings({
                 : tr('settings.update.version', { version: appVersion || '—' })}
             </p>
 
-            {/* 更新说明：长文案时这块自己滚（`.notes` 封顶），卡片高度不再跟着长 */}
+            {/* 更新说明：长文案时这块自己滚（`.notes` 封顶） */}
             {notes !== undefined && <p className={s.notes}>{notes}</p>}
 
             {upd === null && !updateBusy && (
@@ -1343,172 +1525,136 @@ export default function PageSettings({
             )}
           </div>
 
-          <div className={s.secActions}>
-            {/*
-             * ★ 动作条从左到右 = 干扰小 → 干扰大（2026-10-13 第二轮，作者看截图后：
-             *   「这个更新按钮应该它有颜色不应该放到中间，应该放到右边啊」）：
-             *   最左「重新检查」（反复点也安全；不用深墨那档 —— 作者当天先说过
-             *   「我不喜欢这个颜色太深了吧」）→ 中间「查看更新」（外链）→
-             *   最右「更新」（绿色主操作，作者：「如果有新版的话，应该用新版的那个颜色」）。
-             *   **有颜色的那颗永远压最右** —— 夹在中间会把整张卡的视觉焦点拽到中央，
-             *   两边各剩一颗白按钮，越看越怪。
-             */}
-            <Btn disabled={updateBusy} onClick={() => void checkUpdate()}>
-              {updateBusy ? tr('settings.update.checking') : tr('settings.update.recheck')}
-            </Btn>
-            {/*
-             ★ 「查看更新」用 `api.openUrl`，**不用 `<a target="_blank">`**：
-              Tauri 的 webview 没开 opener 权限，`<a>` 点了**什么都不发生**
-              （0.0.2 用户实测："点了没反应，没弹出浏览器"）。修法是走命令（第五刀）。
-
-             ★ **没有新版就不摆这颗**（2026-11-06 作者：「我只要一个检查更新，有新的版本
-              才应该显示查看呀」）。以前条件里只有 `jumpUrl !== undefined`，而 `jumpUrl`
-              在自定义源下恒等于数据源地址 ⇒ 明明"已是最新"，右边还杵着一颗「查看更新」；
-              点开还是个 API 地址。现在它只在**真有新版**时出现。
-            */}
-            {hasUpdate && jumpUrl !== undefined && (
-              <Btn onClick={() => void openReleasePage(jumpUrl)}>
-                {tr('settings.update.view')}
-              </Btn>
-            )}
-            {/* 有安装包才摆「更新」。双通道开启后这颗收进卡片里，
-                免得同一版本出现两颗功能一样的按钮（卡片按通道各自发起下载）。 */}
-            {hasUpdate && upd?.asset !== undefined && !showChannelCards && (
-              <Btn variant="accent" disabled={updateBusy} onClick={() => void startDownload()}>
-                {tr('settings.update.install')}
-              </Btn>
-            )}
+          {/* 右侧只剩插画（按钮已经跟到标题右边去了，见 `updTitleRow`） */}
+          <div className={s.updAside}>
+            <UpdateArt />
           </div>
         </div>
 
-        {/*
-         * 双通道候选卡（2026-11-05）：正式版排第一、预览版排第二，颜色区分。
-         * ★ 只在 `checkSoftwareUpdate` 主动返回 `candidates` 时出现；
-         *   自动通知 / 标题栏那一路永远不带这数组，所以预览版不会主动冒出来。
-         * ★ **后端已经滤掉"不比当前版本新"的**（2026-11-06 作者："不要显示旧版"）：
-         *   装了 0.0.10-dev 而正式版还停在 0.0.6 时，正式版那张卡根本不会来 ——
-         *   所以这里不需要再判大小，也不提供"切回旧版"的动作。
-         */}
-        {showChannelCards && (
-          <div className={s.channelList}>
-            {channels.map((c) => {
-              const stable = c.channel === 'stable'
-              const canInstall = c.asset !== undefined
-              /*
-               * 三档判据（2026-11-06）：**这一份**下好了没有 → 正在为哪一路下载 → 要不要发起。
-               *
-               * `downloaded` 必须同时对上通道与版本：后端 `Ready` 现在带着这两格，
-               * 只判"有东西下好了"会让正式版那张卡也变成「重启并安装」，
-               * 而实际装的是预览版 —— 这正是作者看到"再点又下一遍"的另一面。
-               */
-              const downloaded =
-                updateState?.state === 'ready' &&
-                updateState.channel === c.channel &&
-                updateState.version === c.version
-              /* 通道未知时（离开页面又回来）宁可两张卡都显示进度，也不假装没在下 */
-              const movingHere =
-                transferring !== null &&
-                (pendingChannel === null || pendingChannel === c.channel)
-              return (
-                <div
-                  key={c.channel}
-                  className={`${s.channelCard} ${stable ? s.channelStable : s.channelPreview}`}
-                >
-                  <div className={s.channelBody}>
-                    <div className={s.channelHead}>
-                      <span className={`${s.channelTag} ${stable ? s.channelTagStable : s.channelTagPreview}`}>
-                        {tr(stable ? 'settings.update.candidateStable' : 'settings.update.candidatePreview')}
-                      </span>
-                      <span className={s.channelVersion}>{c.version}</span>
-                      {stable && (
-                        <span className={s.channelBadge}>{tr('settings.update.stableBadge')}</span>
-                      )}
-                      {!stable && (
-                        <span className={s.channelBadgeMuted}>{tr('settings.update.previewBadge')}</span>
-                      )}
-                    </div>
-                    {c.notes !== undefined && c.notes !== '' && (
-                      <p className={s.channelNote}>{c.notes}</p>
-                    )}
-                    {!stable && (
-                      <p className={s.channelNoteMuted}>{tr('settings.update.previewNote')}</p>
-                    )}
-                  </div>
-                  <div className={s.channelActions}>
-                    {installing ? (
-                      <Btn disabled>{tr('settings.update.installing')}</Btn>
-                    ) : downloaded ? (
-                      /* 已就绪且就是这一版 ⇒ 只可能是「安装」；再点这里不会重新下载 */
-                      <Btn variant="accent" onClick={() => void installDownloaded()}>
-                        {tr('update.install')}
-                      </Btn>
-                    ) : movingHere ? (
-                      /* 正在为这张卡下载：禁用 + 进度（点第二遍后端会拒，别让人白点） */
-                      <Btn disabled>
-                        {tr('settings.update.downloading', { pct: transferredPct })}
-                      </Btn>
-                    ) : canInstall ? (
-                      <Btn
-                        variant={stable ? 'accent' : 'default'}
-                        disabled={updateBusy || transferring !== null}
-                        onClick={() => void startDownload(c.channel)}
-                      >
-                        {tr(stable ? 'settings.update.updateStable' : 'settings.update.tryPreview')}
-                      </Btn>
-                    ) : (
-                      c.url !== undefined && (
-                        <Btn onClick={() => void openReleasePage(c.url ?? '')}>
-                          {tr('settings.update.view')}
-                        </Btn>
-                      )
-                    )}
-                  </div>
+        <div className={s.section}>
+          {/* 发现新版本：**只摆选中的那一路** */}
+          {found !== null && (
+            <div className={s.foundRow}>
+              <span className={s.foundIcon} aria-hidden="true">
+                <Icon name="download" size={17} />
+              </span>
+              <div className={s.foundText}>
+                <div className={s.foundTitle}>
+                  {tr('settings.update.found', { version: found.version })}
                 </div>
-              )
-            })}
-            <p className={s.channelHint}>{tr('settings.update.recheckHint')}</p>
+                {found.notes !== undefined && found.notes !== '' && (
+                  <p className={s.foundNote}>{found.notes}</p>
+                )}
+                {found.channel === 'preview' && (
+                  <p className={s.foundNote}>{tr('settings.update.previewNote')}</p>
+                )}
+              </div>
+              <div className={s.foundAction}>
+                {/*
+                 * 「查看更新」用 `api.openUrl`，**不用 `<a target="_blank">`**：
+                 * Tauri 的 webview 没开 opener 权限，`<a>` 点了什么都不发生。
+                 * 没有新版就不摆这一颗（作者 2026-11-06）。
+                 */}
+                {hasUpdate && jumpUrl !== undefined && (
+                  <Btn onClick={() => void openReleasePage(jumpUrl)}>
+                    {tr('settings.update.view')}
+                  </Btn>
+                )}
+                {installing ? (
+                  <Btn disabled>{tr('settings.update.installing')}</Btn>
+                ) : foundReady ? (
+                  /* 这一版已经下好 ⇒ 只可能是「重启并安装」，再点不会重下 */
+                  <Btn variant="accent" onClick={() => void installDownloaded()}>
+                    {tr('update.install')}
+                  </Btn>
+                ) : foundMoving ? (
+                  <Btn disabled>
+                    {tr('settings.update.downloading', { pct: transferredPct })}
+                  </Btn>
+                ) : found.canInstall ? (
+                  <Btn
+                    variant="accent"
+                    disabled={updateBusy || transferring !== null}
+                    onClick={() => void startDownload(picked?.channel)}
+                  >
+                    {tr('settings.update.install')}
+                  </Btn>
+                ) : found.url !== undefined ? (
+                  <Btn onClick={() => void openReleasePage(found.url ?? '')}>
+                    {tr('settings.update.view')}
+                  </Btn>
+                ) : null}
+              </div>
+            </div>
+          )}
+
+          {/* 自动检查更新：偏好（不是动作），所以单独一行、不挤进上面那条动作条 */}
+          <div className={`${s.field} ${s.fieldRow}`}>
+            <div className={s.fieldText}>
+              <div className={s.fieldTitle}>
+                {tr('settings.update.autoCheck')}
+                <Tip text={tr('settings.update.autoCheckHint')} />
+              </div>
+              <p className={s.current}>{tr('settings.update.autoCheckNote')}</p>
+            </div>
+            <Switch
+              checked={autoCheckUpdate ?? false}
+              ariaLabel={tr('settings.update.autoCheck')}
+              onChange={(v) => void pickAutoCheckUpdate(v)}
+              disabled={autoCheckUpdate === null || autoCheckBusy}
+            />
           </div>
-        )}
+          {autoCheckErr !== null && (
+            <p className={`${s.note} ${s.noteBad}`}>{say(autoCheckErr)}</p>
+          )}
 
-        {/*
-         * 「上次更新没成」+ **安装日志在哪儿**（2026-11-06）。
-         *
-         * 安装脚本在应用**退出之后**才跑，那时界面上没有任何东西能报错；下一次启动
-         * 只能靠 `run/update-result.json` 这一本账。以前这本账写是写了，**没人读** ——
-         * 作者点完「重启并安装」什么都没发生，界面上也永远查不到原因。
-         * 这里把那本账摊开，并把日志的绝对路径直接写出来（他可以整段发给我）。
-         */}
-        {installMeta?.lastResult !== undefined && !installMeta.lastResult.ok && (
-          <p className={s.fieldNote}>
-            {tr('settings.update.lastFailed', {
-              detail: installMeta.lastResult.reason,
-              log: installMeta.installLog,
-            })}
-          </p>
-        )}
-
-        {/*
-         * 「自动检查更新」（2026-11-05）：作者截图里右上角那块空位。
-         * 不塞进右上的动作条（那条是「重新检查 / 查看更新 / 更新」三颗按钮的），
-         * 单独一行放在卡片下沿 —— 开关是**偏好**，按钮是**动作**，别混。
-         */}
-        <div className={`${s.field} ${s.fieldRow} ${s.autoCheckRow}`}>
-          <div className={s.fieldText}>
-            <div className={s.fieldTitle}>
-              {tr('settings.update.autoCheck')}
-              <Tip text={tr('settings.update.autoCheckHint')} />
+          {/*
+           * 更新渠道（2026-11-10 第三版）：**一直都在**（作者：「那个切换不同版本，正式版
+           * 测试版的切换按钮呢」）。它是"跟着哪一路走"的偏好，不是"只有两条候选时才有"。
+           * 哪一路这趟没有候选 ⇒ 那一颗仍可点（换个渠道再检查），只是候选行会退回另一路。
+           */}
+          <div className={`${s.field} ${s.fieldRow}`}>
+            <div className={s.fieldText}>
+              <div className={s.fieldTitle}>
+                {tr('settings.update.channelLabel')}
+                <Tip text={tr('settings.update.channelNote')} />
+              </div>
+            </div>
+            <div
+              className={s.seg}
+              role="radiogroup"
+              aria-label={tr('settings.update.channelLabel')}
+            >
+              {CHANNEL_CHOICES.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={(picked?.channel ?? channelPick) === c.id}
+                  onClick={() => {
+                    track('update.channel', { to: c.id })
+                    setChannelPick(c.id)
+                  }}
+                >
+                  {tr(c.label)}
+                </button>
+              ))}
             </div>
           </div>
-          <Switch
-            checked={autoCheckUpdate ?? false}
-            ariaLabel={tr('settings.update.autoCheck')}
-            onChange={(v) => void pickAutoCheckUpdate(v)}
-            disabled={autoCheckUpdate === null || autoCheckBusy}
-          />
+
+          {/*
+           * 「上次更新没成」+ **安装日志在哪儿**：安装脚本在应用退出之后才跑，那时界面上
+           * 没有任何东西能报错；下一次启动只能靠 `run/update-result.json` 这本账。
+           */}
+          {installMeta?.lastResult !== undefined && !installMeta.lastResult.ok && (
+            <p className={s.fieldNote}>
+              {tr('settings.update.lastFailed', {
+                detail: installMeta.lastResult.reason,
+                log: installMeta.installLog,
+              })}
+            </p>
+          )}
         </div>
-        {autoCheckErr !== null && (
-          <p className={`${s.note} ${s.noteBad}`}>{say(autoCheckErr)}</p>
-        )}
       </section>
 
       {/*
@@ -1519,7 +1665,11 @@ export default function PageSettings({
        * ★ a07：整行都是 `<label>`（说明文字也能点），标记换成自绘墨点（见 CSS 头注释）。
        */}
       <section className={s.section} id="appearance" data-sec aria-label={tr('settings.appearance.title')}>
-        <h2 className={s.secTitle}>{tr('settings.appearance.title')}</h2>
+        <SectionHead
+          icon="theme"
+          title={tr('settings.appearance.title')}
+          desc={tr('settings.appearance.desc')}
+        />
 
         {/* 2026-10-30：三行竖排单选 → 一行分段控件（作者：「一条一条的参数、选项太多了」）。
             分段下面那一句只讲**当前这一档**什么意思，不再把三档的说明同时铺开。 */}
@@ -1602,7 +1752,11 @@ export default function PageSettings({
        *   一并换；BBS 抽屉那两颗是同一天同一个改法）。
        */}
       <section className={s.section} id="slicer" data-sec aria-label={tr('settings.slicer.title')}>
-        <h2 className={s.secTitle}>{tr('settings.slicer.title')}</h2>
+        <SectionHead
+          icon="box"
+          title={tr('settings.slicer.title')}
+          desc={tr('settings.slicer.desc')}
+        />
 
         {/* 2026-10-30：一行 —— 左边标题与"现在指向谁"，右边下拉 + 「去系统里改…」。
             完整路径太长不进弹层，仍摆在标题下面一行。 */}
@@ -1659,23 +1813,20 @@ export default function PageSettings({
           </div>
         </div>
 
-        {slicerErr !== null && <p className={`${s.note} ${s.noteBad}`}>{say(slicerErr)}</p>}
-      </section>
-
-      {/*
-       * 引导（2026-10-17 作者：「能不能做一个不再显示的选项……然后设置里面能解开，显示引导的」）。
-       *
-       * 管的就是"参数保存成功 → 该回切片器重切一次"那一屏（`guide/ResliceNotice`）。
-       * ★ 它与那一屏里的「不再显示」**是同一个开关**（`guide/guidesPref` 里那个键），
-       *   不是第二份偏好 —— 一处关、处处关；这一格是把它**重新打开**的地方。
-       *   **参数页与校准页共用**（同一个组件，同一个键）。
-       *
-       * 写盘**立即生效**（与主题 / 自动清理那几格同一条口径 —— 开关本身就是明确的意图）；
-       * 默认（没设过）是**显示**：只有用户明确关掉才不弹。
-       */}
-      <section className={s.section} id="guides" data-sec aria-label={tr('settings.guides.title')}>
-        <h2 className={s.secTitle}>{tr('settings.guides.title')}</h2>
-
+        {/*
+         * 引导（2026-10-17 作者：「能不能做一个不再显示的选项……然后设置里面能解开，显示引导的」）。
+         *
+         * 管的就是"参数保存成功 → 该回切片器重切一次"那一屏（`guide/ResliceNotice`）。
+         * ★ 它与那一屏里的「不再显示」**是同一个开关**（`guide/guidesPref` 里那个键），
+         *   不是第二份偏好 —— 一处关、处处关；这一格是把它**重新打开**的地方。
+         *   **参数页与校准页共用**（同一个组件，同一个键）。
+         *
+         * ★ 2026-11-09 并进「切片与引导」：它本来就只讲"保存完回切片器重切"这一趟，
+         *   之前自己占一章（一整行 + 一个目录项），比它管的事还重。
+         *
+         * 写盘**立即生效**（与主题 / 自动清理那几格同一条口径 —— 开关本身就是明确的意图）；
+         * 默认（没设过）是**显示**：只有用户明确关掉才不弹。
+         */}
         <div className={`${s.field} ${s.fieldRow}`}>
           <div className={s.fieldText}>
             <div className={s.fieldTitle}>
@@ -1689,41 +1840,35 @@ export default function PageSettings({
             onChange={setShowGuides}
           />
         </div>
+
+        {slicerErr !== null && <p className={`${s.note} ${s.noteBad}`}>{say(slicerErr)}</p>}
       </section>
 
       {/*
-       * 执行记录（产品 2026-10-13 那一刀，a07 照搬进来）：后处理每跑一次都在盘上留三件套，
-       * 攒久了很占地方 —— 这一格管"要不要自动清"。
+       * 后处理（2026-11-09 合并大类；2026-11-10 改成一叠卡）：
        *
-       * ★ 措辞刻意**只说"最近 20 条"**，不写"存几天"：清理不按日历天数走
-       *（那会让"停用一个月再回来"的用户连最后一次的记录一起丢），这个口径说不出来。
-       * 也不写"清了多少"——清理是静默的，界面不报账。
+       *   `.group`（透明壳，左目录里的一项）
+       *     ├ 卡 1：后处理模式那四行 + 末尾那颗「重置后处理状态」
+       *     ├ 卡 2：校准与补偿
+       *     └ 卡 3：热床预涂胶（橙卡）
+       *
+       * ★ 三张卡而不是一张大卡：这一段里既有常规偏好又有会改 G-code 的参数，
+       *   还有危险动作 —— 分成三张卡，扫一眼就知道"哪一块是哪种事"。
+       * ★ `.group` 只是给 scrollspy / 搜索一个"这一类从哪到哪"的范围。
        */}
-      <section className={s.section} id="history" data-sec aria-label={tr('settings.history.title')}>
-        <h2 className={s.secTitle}>{tr('settings.history.title')}</h2>
+      <div id="postproc" data-sec className={s.group}>
+        <PostprocModeSection />
+        <CalibSection nested />
+        <BedGlueSection nested />
+      </div>
 
-        <div className={`${s.field} ${s.fieldRow}`}>
-          <div className={s.fieldText}>
-            <div className={s.fieldTitle}>
-              {tr('settings.history.label')}
-              <Tip text={tr('settings.history.note')} />
-            </div>
-          </div>
-          <Switch
-            checked={autoClean ?? false}
-            ariaLabel={tr('settings.history.label')}
-            onChange={(v) => void pickAutoClean(v)}
-            disabled={autoClean === null || autoCleanBusy}
-          />
-        </div>
-
-        {autoCleanErr !== null && (
-          <p className={`${s.note} ${s.noteBad}`}>{say(autoCleanErr)}</p>
-        )}
-      </section>
+      {/* 预设：自己一张卡（`PresetsSection` 自带卡片头） */}
+      <div id="presets" data-sec className={s.group}>
+        <PresetsSection />
+      </div>
 
       {/*
-       * **备份与恢复**（2026-10-17）。
+       * **备份与恢复**（2026-10-17；2026-11-09 把「最近删除」并进来）。
        *
        * 一个 zip = 这台机器的全部家当：设置（app-state）、目录（catalog）、
        * **全部用户预设 toml（含导入的）**、**修改历史**、云端基准与原文镜像、执行归档。
@@ -1732,98 +1877,85 @@ export default function PageSettings({
        * 恢复 = **全量覆盖**（备份里有的一律覆盖、被管的几棵树里备份没有的删掉）——
        * 想回到"某个时间点"就**多留几份备份、挑哪一份恢复**，而不是在一份里挑文件
        * （同名文件"选哪一份"没有天然答案，那是另一整套冲突解决界面）。
+       *
+       * ★ 2026-11-09：一行一颗按钮。原来那两行（备份 / 从备份恢复）+ 两段说明
+       *   全收进 `BackupModal` —— 作者要的是"合并成同一个按钮"与文字极简；
+       *   但**行标题与 `?` 留着**（那是"这一项是什么"，不是说明文字，省不得）。
+       * ★ 「最近删除」原来自己一章（一行 + 一个目录项），现在就是这一类的第二行：
+       *   一个备份、一个回收站，都是"把东西找回来"。
        */}
-      <section className={s.section} id="backup" data-sec aria-label={tr('settings.backup.title')}>
-        <h2 className={s.secTitle}>{tr('settings.backup.title')}</h2>
+      <div id="backup" data-sec className={s.group}>
+        <section className={s.section} aria-label={tr('settings.backup.title')}>
+          <SectionHead
+            icon="download"
+            title={tr('settings.backup.title')}
+            desc={tr('settings.backup.desc')}
+          />
 
-        <div className={`${s.field} ${s.fieldRow}`}>
-          <div className={s.fieldText}>
-            <div className={s.fieldTitle}>
-              {tr('settings.backup.label')}
-              {/* 原来那句里 `noteKeep` 是加粗强调；气泡是一段纯文本，
-                  拼接顺序与原文一致，读起来不缺词 */}
-              <Tip
-                text={`${tr('settings.backup.notePre')}${tr('settings.backup.noteKeep')}${tr('settings.backup.notePost')}`}
-              />
+          {/*
+           * 标准一行：左标题 + `?`，右按钮。
+           * ★ 2026-11-09 作者圈着左边那块空白：「这个肯定是需要的」—— 说明可以短，
+           *   标题与那颗 `?` 不能省（见 eslint 的 `SETTINGS_TITLE_NEEDS_TIP`）。
+           */}
+          <div className={`${s.field} ${s.fieldRow}`}>
+            <div className={s.fieldText}>
+              <div className={s.fieldTitle}>
+                {tr('settings.backup.doLabel')}
+                <Tip text={tr('settings.backup.tip')} />
+              </div>
+            </div>
+            <div className={s.ctl}>
+              <Btn onClick={() => setBackupOpen(true)}>{tr('settings.backup.do')}</Btn>
             </div>
           </div>
-          <div className={s.ctl}>
-            <Btn disabled={backupBusy} onClick={() => void doBackup()}>
-              {backupBusy ? tr('settings.backup.busy') : tr('settings.backup.do')}
-            </Btn>
-          </div>
-        </div>
 
-        <div className={`${s.field} ${s.fieldRow}`}>
-          <div className={s.fieldText}>
-            <div className={s.fieldTitle}>
-              {tr('settings.restore.label')}
-              <Tip
-                text={`${tr('settings.restore.notePre')}${tr('settings.restore.noteKeep')}${tr('settings.restore.notePost')}`}
-              />
-            </div>
-          </div>
-          <div className={s.ctl}>
-            <Btn disabled={restoreBusy} onClick={() => void doRestore()}>
-              {restoreBusy
-                ? tr('settings.restore.busy')
-                : restoreArm === null
-                  ? tr('settings.restore.do')
-                  : tr('settings.restore.confirm')}
-            </Btn>
-            {restoreArm !== null && (
-              <Btn
-                onClick={() => {
-                  setRestoreArm(null)
-                  setBackupNote(null)
-                }}
-              >
-                {tr('settings.restore.cancel')}
-              </Btn>
-            )}
-          </div>
-        </div>
-
-        {backupNote !== null && (
-          <p className={`${s.note} ${backupNote.bad ? s.noteBad : ''}`}>{say(backupNote.text)}</p>
-        )}
-      </section>
+          <RecoverySection host={pageEl} nested />
+        </section>
+      </div>
 
       {/*
-       * 后处理那几块 + 预设 + 数据/卸载（2026-10-17）。
+       * 数据与维护（2026-11-09 合并大类）：预设位置 + 自动清理执行记录 + 清理与卸载。
        *
-       * ★ 作者：「有的事设置页面的，有的到时候我要迁移到其他页面，但是你先都做出来吧，
-       *   都放在设置页面」—— 所以**暂时**全摆在这儿。将来迁走时，把对应的那个
-       *   组件（`PostprocModeSection` / `CalibSection` / `BedGlueSection` /
-       *   `PresetsSection` / `DataSection`）整块搬到目标页就行：它们各自只依赖
-       *   `usePostprocPrefs`（或自己那两条命令）与自己的命令，不依赖这一页。
+       * ★ 「执行记录」原来自己一章，现在并进这里 —— 它管的是"盘上那三件套攒久了
+       *   要不要自动清"，与「预设位置」「清理数据」是同一件事（这块盘怎么维护）。
+       *   措辞刻意**只说"最近 20 条"**，不写"存几天"：清理不按日历天数走
+       *   （那会让"停用一个月再回来"的用户连最后一次的记录一起丢），这个口径说不出来。
+       *   也不写"清了多少"——清理是静默的，界面不报账。
        *
-       * ★ 顺序：后处理模式 → 校准与补偿 → 热床预涂胶 → 预设 → 数据与维护 → 清理与卸载。
-       *   危险块（热床 / 卸载）放在常规块之后 —— 一路读下来先看常规项。
+       * ★ 行由这一页画（这一格的状态住这里），`DataSection` 只提供外壳与
+       *   「清理与卸载」那一块 —— 所以走 children。
        */}
-      {/* 这几块各自住在自己的文件里（迁页时整块搬走）——
-          这里只给它们套一层带 id 的壳，左目录才跳得到、spy 才认得出 */}
-      <div id="postproc" data-sec>
-        <PostprocModeSection />
-      </div>
-      <div id="calib" data-sec>
-        <CalibSection />
-      </div>
-      <div id="glue" data-sec>
-        <BedGlueSection />
-      </div>
-      <div id="presets" data-sec>
-        <PresetsSection />
-      </div>
-      <div id="data" data-sec>
-        <DataSection host={pageEl} />
+      <div id="data" data-sec className={s.group}>
+        <DataSection host={pageEl}>
+          <div className={`${s.field} ${s.fieldRow}`}>
+            <div className={s.fieldText}>
+              <div className={s.fieldTitle}>
+                {tr('settings.history.label')}
+                <Tip text={tr('settings.history.note')} />
+              </div>
+            </div>
+            <Switch
+              checked={autoClean ?? false}
+              ariaLabel={tr('settings.history.label')}
+              onChange={(v) => void pickAutoClean(v)}
+              disabled={autoClean === null || autoCleanBusy}
+            />
+          </div>
+
+          {autoCleanErr !== null && (
+            <p className={`${s.note} ${s.noteBad}`}>{say(autoCleanErr)}</p>
+          )}
+        </DataSection>
       </div>
 
       <section className={s.section} id="advanced" data-sec aria-label={tr('settings.advanced.title')}>
-        <h2 className={s.secTitle}>{tr('settings.advanced.title')}</h2>
-        <p className={s.fieldNote}>{tr('settings.advanced.note')}</p>
+        <SectionHead
+          icon="params"
+          title={tr('settings.advanced.title')}
+          desc={tr('settings.advanced.desc')}
+        />
 
-        {/* 2026-10-30：三行竖排单选 → 一行分段。下面那句就是"现在用的是哪一个"（原在章末） */}
+        {/* 一行：左标题 + 「当前：…」，右侧一只下拉。下面那句就是"现在用的是哪一个"（原在章末） */}
         <div className={`${s.field} ${s.fieldRow}`}>
           <div className={s.fieldText}>
             <div className={s.fieldTitle}>
@@ -1836,77 +1968,108 @@ export default function PageSettings({
               */}
               <Tip text={tr('settings.advanced.sourceNote')} />
             </div>
-            {/* 「现在用的是哪一个」要**常显**（不是说明），所以不走气泡 */}
-            <p className={s.current}>
+            {/* 「现在用的是哪一个」要**常显**（不是说明），所以不走气泡；
+                读不出来的技术原因只挂在悬停气泡上（这一格没读到时才不为空） */}
+            <p className={s.current} data-tip={loadErr ?? undefined}>
               {tr('settings.advanced.current', { text: currentText })}
             </p>
           </div>
-          <div className={s.seg} role="radiogroup" aria-label={tr('settings.advanced.sourceLabel')}>
-            {/* ★ 两个固定档 = 防错第一道：用户没有输错地址的机会。选上**立即生效** */}
-            {(source?.builtin ?? []).map((b) => (
-              <button
-                key={b.id}
-                type="button"
-                role="radio"
-                aria-checked={mode === b.id}
+          <div className={s.ctl}>
+            {/* ★ 两个固定档 = 防错第一道：用户没有输错地址的机会，选上**立即生效**；
+                自定义那一档选上只展开下面的输入区（见 `pick`） */}
+            <span className={s.sourcePick}>
+              <SelectField
+                label={tr('settings.advanced.sourceLabel')}
+                options={sourceOptions}
+                value={sourceShow}
                 disabled={busy}
-                data-tip={
-                  b.id === source?.defaultMode
-                    ? `${b.address} ${tr('settings.advanced.defaultTag')}`
-                    : b.address
-                }
-                onClick={() => void pick(b.id as Mode)}
-              >
-                {b.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              role="radio"
-              aria-checked={mode === 'custom'}
-              disabled={busy}
-              onClick={() => void pick('custom')}
-            >
-              {tr('settings.advanced.customLabel')}
-            </button>
+                onChange={(v) => void pick(v as Mode)}
+              />
+            </span>
           </div>
         </div>
 
-        {/* 自定义：选上只展开（不写）；按「应用」才先探后写 */}
-        {mode === 'custom' && (
-          <div className={`${s.field} ${s.fieldRow}`}>
-            <div className={s.fieldText}>
-              <div className={s.fieldTitle}>
-                {tr('settings.advanced.customLabel')}
-                <Tip text={tr('settings.advanced.hint')} />
+        {/* 自定义：选上只展开（不写）；按「应用」或在框里回车才先探后写。
+            展开与否看 `customOpen` 而不是看打勾 —— 写失败了打勾要退回生效那一档，
+            输入框得留着。
+            ★ 这两块（自定义 + 用过的地址）套在 `.sourceKids` 里：缩进 + 一道左竖线，
+            读起来是上面「预设数据源」那一行的子项，不是并列的另外两条（见 CSS 头注）。 */}
+        {customOpen && (
+          <div className={s.sourceKids}>
+            <div className={`${s.field} ${s.fieldRow}`}>
+              <div className={s.fieldText}>
+                <div className={s.fieldTitle}>
+                  {tr('settings.advanced.customLabel')}
+                  <Tip text={tr('settings.advanced.hint')} />
+                </div>
+              </div>
+              <div className={s.ctl}>
+                <input
+                  ref={draftRef}
+                  className={s.input}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    /* 输入法还在组字：这一下回车是"上屏"，不是"应用"。
+                       `nativeEvent` 本来就是 `KeyboardEvent`（`isComposing` 在这个接口上），
+                       原来转成 `InputEvent` 是转错了 —— TS 5 起这种"不重叠的断言"直接报错。 */
+                    if ((e.nativeEvent as KeyboardEvent).isComposing) return
+                    if (e.key !== 'Enter') return
+                    e.preventDefault()
+                    if (busy || !canSet) return
+                    void apply()
+                  }}
+                  placeholder={tr('settings.advanced.addressPlaceholder')}
+                  aria-label={tr('settings.advanced.addressAria')}
+                />
+                <Btn onClick={() => void apply()} disabled={busy || !canSet}>
+                  {busy ? tr('settings.advanced.checking') : tr('settings.advanced.apply')}
+                </Btn>
               </div>
             </div>
-            <div className={s.ctl}>
-              <input
-                className={s.input}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder={tr('settings.advanced.addressPlaceholder')}
-                aria-label={tr('settings.advanced.addressAria')}
-              />
-              <Btn onClick={() => void apply()} disabled={busy || !canSet}>
-                {busy ? tr('settings.advanced.checking') : tr('settings.advanced.apply')}
-              </Btn>
-            </div>
+
+            {/* 用过的地址：点一下**填回输入框**（不直接应用 —— 与上面同一条约：
+                先探后写，要点「应用」才算数） */}
+            {addrHistory.length > 0 && (
+              <div className={s.addrHistory}>
+                <div className={s.addrHistoryHead}>
+                  <span className={s.addrHistoryLabel}>{tr('settings.advanced.historyLabel')}</span>
+                  <span className={s.noteHint}>{tr('settings.advanced.historyNote')}</span>
+                  {/* 清空：纯动作，用图标替掉那两个字（名字留在 `aria-label` / 气泡里） */}
+                  <button
+                    type="button"
+                    className={s.addrHistoryClear}
+                    aria-label={tr('settings.advanced.historyClear')}
+                    data-tip={tr('settings.advanced.historyClear')}
+                    onClick={() => setAddrHistory([])}
+                  >
+                    <Icon name="trash" size={13} />
+                  </button>
+                </div>
+                <div className={s.addrHistoryList}>
+                  {addrHistory.map((addr) => (
+                    <button
+                      key={addr}
+                      type="button"
+                      className={s.addrChip}
+                      data-tip={addr}
+                      aria-label={tr('settings.advanced.historyPick', { address: addr })}
+                      disabled={busy}
+                      onClick={() => setDraft(addr)}
+                    >
+                      {addr}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
         {note !== null && (
-          <div className={s.noteBlock}>
-            <p className={`${s.note} ${note.bad ? s.noteBad : ''}`}>{say(note.text)}</p>
-            {note.detail !== undefined && (
-              /* 技术细节收进折叠：普通用户只看结论（作者 2026-10-05：
-                 「出了一堆东西我也看不懂，你要给用户看得懂的东西」） */
-              <details className={s.noteDetail}>
-                <summary>{tr('settings.advanced.details')}</summary>
-                <p>{note.detail}</p>
-              </details>
-            )}
-          </div>
+          /* 可见的只有一句结论；技术原因挂在悬停气泡上（`data-tip`），不占版面 */
+          <p className={`${s.note} ${note.bad ? s.noteBad : ''}`} data-tip={note.detail}>
+            {say(note.text)}
+          </p>
         )}
       </section>
           </div>
@@ -1962,6 +2125,61 @@ export default function PageSettings({
         ]}
         onClose={() => setGuide(null)}
       />
+
+      {/*
+       * 备份与恢复那一框（2026-11-09）：一扇框两页 —— 备份 / 恢复在框里自己切，
+       * 这一页只管"开没开"。框里的内务由它自己按"开 / 关"清。
+       */}
+      <BackupModal
+        open={backupOpen}
+        host={pageEl}
+        onClose={() => setBackupOpen(false)}
+      />
     </div>
+  )
+}
+
+/**
+ * 软件更新英雄带右侧那枚插画：一颗**能翻的牌**。
+ *
+ * 正面是更新那枚循环箭头，点一下翻 180° 露出背面（软件图标，绿色），再点翻回来。
+ * 角度走 WAAPI 写 inline `transform`，不用 CSS transition —— WKWebView 上 transition
+ * 不播（与 `SideNav` 那块高亮块同一个理由）。
+ */
+function UpdateArt() {
+  const tr = useT()
+  const spinRef = useRef<HTMLSpanElement | null>(null)
+  const angle = useRef(0)
+
+  const flip = () => {
+    const el = spinRef.current
+    if (el === null) return
+    const from = angle.current
+    const to = from + 180
+    angle.current = to
+    /* 作者点名要看的那一件事：这枚插画的翻转也要在日志里（2026-11-12） */
+    track('update.flip', { face: to % 360 === 0 ? 'front' : 'back' })
+    const anim = el.animate(
+      [{ transform: `rotateY(${from}deg)` }, { transform: `rotateY(${to}deg)` }],
+      { duration: 640, easing: 'cubic-bezier(.22,.68,.2,1)' },
+    )
+    /* 动画本身不留终态：结束后把终点写进 inline style，下一趟才能从当前角度接着转 */
+    anim.onfinish = () => {
+      el.style.transform = `rotateY(${to}deg)`
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className={s.updArt}
+      onClick={flip}
+      aria-label={tr('settings.update.flipArt')}
+    >
+      <span className={s.updArtSpin} ref={spinRef}>
+        <span className={`${s.updArtFace} ${s.updArtFront}`} aria-hidden="true" />
+        <span className={`${s.updArtFace} ${s.updArtBack}`} aria-hidden="true" />
+      </span>
+    </button>
   )
 }

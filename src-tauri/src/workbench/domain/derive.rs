@@ -95,12 +95,13 @@ pub struct Book<'a> {
     /// 字段定义与三层取值全走它
     pub presets: &'a Presets,
     draft: &'a Draft,
-    /// **清单**：有哪些机型、每台有哪些版本。来源是 `presets/machines/*.toml`
-    /// （借自 [`Committed::catalog`]）。
+    /// **清单**：有哪些机型、每台有哪些版本。来源是 `presets`（**编辑态**）。
     ///
-    /// b04 Task 8 之前这里读的是 `up.catalog` —— 那是上游的构建产物，只读，
-    /// 于是「加一个版本」保存之后它在树上看不见。现在清单是我们自己的数据
-    pub(super) catalog: &'a [CatalogMachine],
+    /// 曾经借自 [`Committed::catalog`]（已落盘那一份）—— 那样新建 / 删除版本只
+    /// 在左侧列表里出现，详情卡、参数台、生成页都看不见它（`Book` 里没有这个
+    /// 版本，前端 `pickedNode` 取不到就整块不渲染）。清单必须跟着编辑态走，
+    /// 「保存才落盘」由 `require_clean` 与 `ctx.history` 管，不靠这里装旧数据
+    pub(super) catalog: Vec<CatalogMachine>,
     /// 机型 id → 机型层的那张表（`machineVariants` 的裸键 ⊕ 草稿）
     pub(super) bases: BTreeMap<String, Overrides>,
     /// uid → 版本层的那张表（`machineVariants` 的版本键 ⊕ 草稿）
@@ -140,7 +141,17 @@ impl<'a> Book<'a> {
         let mut versions: Vec<VersionIdentity> = Vec::new();
         let mut overs: BTreeMap<String, Overrides> = BTreeMap::new();
 
-        for m in &committed.catalog {
+        /* 清单读**编辑态**（`presets`），不是 `committed.catalog`。
+         *
+         * `Committed` 是「上次保存时的那一份」，新建版本只写 `presets` + 影子树 ——
+         * 借已落盘那份的话，book 里根本没有新版本：机型页列表有它（读 `ctx.presets`），
+         * 详情卡没有（读 book），用户点了也打不开、改不了（作者 2026-11-12 报的）。
+         *
+         * 名字与角标同样从 `presets` 取：`committed.versions` 里新版本没有记录，
+         * 回落成 id 的话界面上就叫 `NEW1` 而不是用户填的名字。 */
+        let catalog = super::patch::catalog_machines_of(presets);
+
+        for m in &catalog {
             // 归并是派生的（`domain::variants`），每加载一次算一次，不落盘
             let digested = digest(&presets.registry, &m.id, &m.version_ids);
 
@@ -150,7 +161,10 @@ impl<'a> Book<'a> {
 
             for vid in &m.version_ids {
                 let uid = format!("{}/{}", m.id, vid);
-                let declared = committed.versions.get(&uid);
+                let declared = presets
+                    .catalog
+                    .machine(&m.id)
+                    .and_then(|mm| mm.versions.iter().find(|v| v.id == *vid));
                 let mut own = digested.versions.get(vid).cloned().unwrap_or_default();
                 overlay(&mut own, draft, Level::Version, &uid);
                 overs.insert(uid.clone(), own);
@@ -180,7 +194,7 @@ impl<'a> Book<'a> {
         Self {
             presets,
             draft,
-            catalog: &committed.catalog,
+            catalog,
             bases,
             overs,
             versions,
@@ -223,10 +237,10 @@ impl<'a> Book<'a> {
 
     /// 清单里的机型，照文件名顺序
     pub fn machines(&self) -> &[CatalogMachine] {
-        self.catalog
+        &self.catalog
     }
 
-    pub(super) fn machine(&self, id: &str) -> Option<&'a CatalogMachine> {
+    pub(super) fn machine(&self, id: &str) -> Option<&CatalogMachine> {
         self.catalog.iter().find(|m| m.id == id)
     }
 
@@ -242,6 +256,24 @@ impl<'a> Book<'a> {
             base,
             no_overrides(),
         ))
+    }
+
+    /// 这一版**现在跟随基底吗**：草稿层优先，其次盘上 `[params.follows]`。
+    ///
+    /// 与写值那条路的 `cur_follow` 同一个顺序（`patch::apply_one`）。**不要用
+    /// `Layers::has_own` 代替**：同一机型每个版本都写了同一个值时，`digest` 会把它
+    /// 上提成基底，`over` 里就没有这一项了 —— 数据里版本键还在，`has_own` 却说没有。
+    pub fn version_following(&self, uid: &str, key: &str) -> bool {
+        self.draft
+            .pending_follows(Level::Version, uid, key)
+            .unwrap_or_else(|| {
+                self.presets.registry.param(key).map_or(true, |p| {
+                    crate::presetdata::follows::is_following(
+                        p,
+                        &super::patch::variant_key(Level::Version, uid),
+                    )
+                })
+            })
     }
 
     /// 一个版本的三层视图。
@@ -489,7 +521,7 @@ impl<'a> Book<'a> {
         let mut base_items = 0usize;
         let mut over_items = 0usize;
 
-        for m in self.catalog {
+        for m in &self.catalog {
             let ml = self.machine_layers(&m.id);
             // 每层只有一张表，所以"这一层有几项"与"其中自己钉了几项"是同一个数。
             // 以前每层有两半（见 `domain::layer` 的模块文档），才需要两个数
@@ -800,7 +832,7 @@ impl<'a> Book<'a> {
             .map(|c| (c.machine_id.as_str(), c.version_uid.as_deref()))
             .collect();
         let mut out = Vec::new();
-        for m in self.catalog {
+        for m in &self.catalog {
             if wanted.contains(&(m.id.as_str(), None)) {
                 let layers = self.machine_layers(&m.id);
                 out.push(ResolvedCol {
@@ -2728,7 +2760,7 @@ mod tests {
         assert_eq!(m.cols.len(), 1);
         assert_eq!(m.cols[0].level, Level::Machine);
         assert_eq!(m.cols[0].version_uid, None);
-        assert_eq!(m.cols[0].label, "机型基底");
+        assert_eq!(m.cols[0].label, "机型基线");
     }
 
     /// **行取并集不取交集**：只有 P1S 有的那一项，在勾了 P1S 时不该消失
@@ -3121,7 +3153,7 @@ mod tests {
         );
         let tip = row.cells[1].diff_tip.as_deref().expect("差异格要有悬停句");
         assert!(
-            tip.starts_with("机型基底是 ") && tip.ends_with("0 mm"),
+            tip.starts_with("机型基线是 ") && tip.ends_with("0 mm"),
             "悬停句说基准值：{tip}"
         );
 

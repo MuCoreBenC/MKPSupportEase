@@ -36,4 +36,21 @@ export { useModalHeadNoteSlot, useModalHeadSlot } from './modalHeadSlot'
  */
 export { HeadNote } from './HeadNote'
 export type { HeadNoteTone } from './HeadNote'
+/*
+ * **"有事要说"的那张 hero 卡**（2026-11-08，作者：「这种出错的就显示在 HERO 里面……
+ * 这样就不用说上面也显示错误、下面也显示错误」）。
+ *
+ *   <NoticeHero tone="warn" title="警告 · 1 条" lines={[…]} />
+ *
+ * 卡高恒 104、内容多了在卡里滚 —— 摆进框身里那些提示才会把模态框撑高，这一张不会。
+ * 一屏能翻页时（下面那块有多页）它跟下面那页**各有各的 hero**，见 `PageToggle`。
+ */
+export { NoticeHero } from './NoticeHero'
+export type { NoticeHeroProps, NoticeTone } from './NoticeHero'
+/*
+ * 模态框**左下角那颗翻页小钮**（「信息」/「说明」/「警告」）—— 钮上写"点它会去哪一页"。
+ * 靠左由外面那一块带 `margin-right: auto` 的页脚负责，这一颗自己不带。
+ */
+export { PageToggle } from './PageToggle'
+export type { PageToggleProps } from './PageToggle'
 export { summarizeNotes } from './noteText'

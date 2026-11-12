@@ -181,11 +181,20 @@ export function glideTo(
   return takeOver
 }
 
-/** 往上找第一个真正在滚的祖先（不含 `root` 本身） */
+/**
+ * 往上找第一个**真正能纵向滚**的祖先（不含 `root` 本身）。
+ *
+ * `overflow: auto` 不等于"它现在在滚"：对照矩阵那层 `.matrix` 也是 `overflow: auto`，
+ * 但它纵向跟内容一样高、真正滚的是外面的 `.pScroll`。只看 `overflowY` 会选中
+ * 那个滚不动的内层，于是「定位」只闪不滚（作者 2026-11-09 报的
+ * 「点定位的时候，它没有滚动，它只高亮了」）。没有纵向余量就继续往上找。
+ */
 export function scrollParentOf(el: HTMLElement, root: HTMLElement | null = null): HTMLElement | null {
   for (let p = el.parentElement; p !== null && p !== root; p = p.parentElement) {
     const oy = getComputedStyle(p).overflowY
-    if (oy === 'auto' || oy === 'scroll') return p
+    if (oy !== 'auto' && oy !== 'scroll') continue
+    /* 没有余量 ⇒ 这一层滚不动，继续往上 */
+    if (p.scrollHeight - p.clientHeight > 1) return p
   }
   return null
 }
@@ -237,7 +246,15 @@ export function glideIntoView(
   opts: GlideOptions & { align?: Align; offset?: number } = {},
 ): () => void {
   const box = scrollParentOf(el)
-  if (box === null) return () => undefined
+  /*
+   * 没有可滚的祖先（内容本来就全在屏上）：**照样收场** —— 调用方的 `onDone`
+   * 要拿来铺绿底。这里直接 return 的话，界面上就是"点了定位，什么都没发生"。
+   */
+  if (box === null) {
+    opts.onFrame?.()
+    opts.onDone?.()
+    return () => undefined
+  }
 
   const carrier = carrierOf(box, el)
   const boxRect = box.getBoundingClientRect()

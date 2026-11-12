@@ -225,6 +225,86 @@ pub fn known_footprints(profiles: &[ModelProfile], mode: &str) -> String {
     }
 }
 
+/// 按**实测外形**反推这是哪一块校准板（合并 3MF 之后用）。
+///
+/// 一个 3MF 只有**一条** `MKPSE:Calibration`（模型级 metadata）。把 Z 板与 XY 板
+/// 合成一个文件之后，另一块板会读到错的身份 —— 实测外形能把它们分回来：
+/// Z 板是 119.58×13.06 的长条、XY 板是 50.5×50.5 的方块，容差内不会串。
+///
+/// ★ **只在「3MF 已经说是校准件」时调**。普通模型永远不走这条 —— 否则一块
+///   50.5×50.5 的普通方块就会被当成校准板，那正是本表头一直不许「按尺寸猜」的原因。
+///
+/// ★ **只分得开板型，分不开同板的两档**：`xy-square-50` 同时服务 `Precise` 与
+///   `Rough`，命中它时给 `mode` 数组里排在最前面的那个。
+pub fn detect_mode_by_size(
+    profiles: &[ModelProfile],
+    width: f64,
+    height: f64,
+) -> Option<crate::postproc::calibration::Mode> {
+    /* 宽高互换也算命中：板子在切片器里转 90° 时实测出来就是转过来的
+     * （与 `find_profile` 的 `ProfileMatch::Swapped` 同一条规矩） */
+    let hit = |p: &&ModelProfile, w: f64, h: f64| {
+        p.has_footprint()
+            && (p.footprint_w - w).abs() <= p.tolerance
+            && (p.footprint_h - h).abs() <= p.tolerance
+    };
+    let p = profiles
+        .iter()
+        .find(|p| hit(p, width, height) || hit(p, height, width))?;
+    p.mode
+        .first()
+        .and_then(|m| crate::postproc::calibration::parse_mode_id(m))
+}
+
+/// 「这一盘是什么校准件」的判定结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CalibVerdict {
+    /// 普通模型 —— 按正常后处理跑，弹不出校准问句。
+    NotCalibration,
+    /// 是校准件，按这一档跑。
+    Calibration(crate::postproc::calibration::Mode),
+    /// **强制校准模式开着、但外形对不上任何一块板** —— 调用方必须停下（不许静默降级成普通模型）。
+    Unrecognized,
+}
+
+/// 身份定案：**强制开关 + 3MF 身份 + 实测外形** 三者一起说。
+///
+/// - `force == false`（出厂）：3MF 没有身份 ⇒ 普通模型；有身份 ⇒ 能按外形纠就纠
+///   （合并 3MF 里只有一条身份，另一块板会被认错），纠不上就保持原判。
+/// - `force == true`：**不看身份**，只按外形；对不上任何一块板 ⇒ [`CalibVerdict::Unrecognized`]。
+///
+/// `size` 是 `(宽, 高)`（`disk::compute_bbox` 的实测值）。算不出来（`None`）在强制模式下
+/// 与"对不上"同一条路 —— 没有外形就没有依据，不许猜。
+pub fn decide_calibration(
+    force: bool,
+    marker: crate::postproc::calibration::Mode,
+    size: Option<(f64, f64)>,
+    profiles: &[ModelProfile],
+) -> CalibVerdict {
+    use crate::postproc::calibration::{Mode, is_any};
+
+    let by_shape = size.and_then(|(w, h)| detect_mode_by_size(profiles, w, h));
+
+    if force {
+        return match by_shape {
+            Some(m) => CalibVerdict::Calibration(m),
+            None => CalibVerdict::Unrecognized,
+        };
+    }
+    /* 合体文件（`Combined`）只说"这一盘是校准件"，具体哪一盘**必须**靠外形 ——
+     * 认不出来就停（校**准板当模型打出来比停下更糟**），不许把 `Combined` 带进管线。 */
+    if marker == Mode::Combined {
+        return match by_shape {
+            Some(m) => CalibVerdict::Calibration(m),
+            None => CalibVerdict::Unrecognized,
+        };
+    }
+    if !is_any(marker) {
+        return CalibVerdict::NotCalibration;
+    }
+    CalibVerdict::Calibration(by_shape.unwrap_or(marker))
+}
+
 /// 读 `presets/calibration_models.toml`。
 ///
 /// 文件不存在由调用方决定（`machine_dims` 那边给 `None`）—— 这里只管这份文件本身
@@ -346,6 +426,89 @@ mod tests {
             profile("zoffset", &["ZOffset"], 119.58, 13.063),
             profile("zoffset-ext", &["ZOffset"], 119.58, 16.063),
         ]
+    }
+
+    /// 合并 3MF 之后靠**外形**把两块板分开：Z 板是长条、XY 板是方块。
+    #[test]
+    fn detect_mode_by_size_tells_the_plates_apart() {
+        use crate::postproc::calibration::Mode;
+        let ps = vec![
+            profile("zoffset", &["ZOffset"], 119.58, 13.063),
+            profile("xy-square-50", &["Precise", "Rough"], 50.5, 50.5),
+        ];
+        assert_eq!(detect_mode_by_size(&ps, 119.51, 13.06), Some(Mode::ZOffset));
+        assert_eq!(
+            detect_mode_by_size(&ps, 50.52, 50.49),
+            Some(Mode::XyPrecise),
+            "同板两档取表里排在前面的那个"
+        );
+        /* 板子转 90°：宽高互换也要认出来 */
+        assert_eq!(detect_mode_by_size(&ps, 13.06, 119.51), Some(Mode::ZOffset));
+        /* 都不像 ⇒ 不猜（普通模型、或一块没登记的板） */
+        assert_eq!(detect_mode_by_size(&ps, 60.0, 60.0), None);
+    }
+
+    /// 身份定案的三种口径：关着不猜、开着只看外形、外形对不上就判「不是校准件」。
+    #[test]
+    fn decide_calibration_covers_all_three_verdicts() {
+        use crate::postproc::calibration::Mode;
+        let ps = vec![
+            profile("zoffset", &["ZOffset"], 119.58, 13.063),
+            profile("xy-square-50", &["Precise", "Rough"], 50.5, 50.5),
+        ];
+        let z = Some((119.58, 13.063));
+        let xy = Some((50.5, 50.5));
+        let unknown = Some((60.0, 60.0));
+
+        /* 关着：没有身份 ⇒ 普通模型，外形再像也不认 */
+        assert_eq!(
+            decide_calibration(false, Mode::None, z, &ps),
+            CalibVerdict::NotCalibration
+        );
+        /* 关着：有身份 ⇒ 外形能纠正（合并 3MF 里读到错身份的那一盘） */
+        assert_eq!(
+            decide_calibration(false, Mode::XyPrecise, z, &ps),
+            CalibVerdict::Calibration(Mode::ZOffset)
+        );
+        /* 关着：外形纠不上 ⇒ 保持 3MF 那条原判 */
+        assert_eq!(
+            decide_calibration(false, Mode::XyPrecise, unknown, &ps),
+            CalibVerdict::Calibration(Mode::XyPrecise)
+        );
+        /* 开着：不看身份，只看外形 */
+        assert_eq!(
+            decide_calibration(true, Mode::None, z, &ps),
+            CalibVerdict::Calibration(Mode::ZOffset)
+        );
+        assert_eq!(
+            decide_calibration(true, Mode::ZOffset, xy, &ps),
+            CalibVerdict::Calibration(Mode::XyPrecise),
+            "开着时连 3MF 那条也不看"
+        );
+        /* 开着：对不上 / 量不出外形 ⇒ 「不是校准件」，调用方停下 */
+        assert_eq!(
+            decide_calibration(true, Mode::None, unknown, &ps),
+            CalibVerdict::Unrecognized
+        );
+        assert_eq!(
+            decide_calibration(true, Mode::None, None, &ps),
+            CalibVerdict::Unrecognized
+        );
+
+        /* 合体文件（`Combined`）：身份只说"这是校准件"，哪一盘**必须**靠外形 */
+        assert_eq!(
+            decide_calibration(false, Mode::Combined, z, &ps),
+            CalibVerdict::Calibration(Mode::ZOffset)
+        );
+        assert_eq!(
+            decide_calibration(false, Mode::Combined, xy, &ps),
+            CalibVerdict::Calibration(Mode::XyPrecise)
+        );
+        assert_eq!(
+            decide_calibration(false, Mode::Combined, unknown, &ps),
+            CalibVerdict::Unrecognized,
+            "合体文件认不出哪一盘 ⇒ 停下，不许把 Combined 带进管线"
+        );
     }
 
     #[test]

@@ -55,6 +55,12 @@ pub mod registry;
 /// 有效值与来源，而那正是这一份算法 —— **代码共用一份，两边各自的数据根喂给它**。
 pub mod resolve;
 
+/// 测试用的最小 presets 树（演练型判据的自造输入）。
+///
+/// 只编进测试：生产代码拿不到它，也就不会有人顺手把业务数据塞进来。
+#[cfg(test)]
+pub(crate) mod testdata;
+
 use std::path::{Path, PathBuf};
 
 use toml_edit::DocumentMut;
@@ -69,8 +75,8 @@ pub use catalog::{
     PlateFrame, VersionField, Zone,
 };
 pub use registry::{
-    LayoutTab, ParamDef, ParamRegistry, SectionMeta, ShowOp, ShowWhen, TabMeta, UiComponent,
-    ValueType,
+    LayoutTab, ParamDef, ParamRegistry, RawIntLiteral, SectionMeta, ShowOp, ShowWhen, TabMeta,
+    UiComponent, ValueType,
 };
 pub use resolve::{no_overrides, Layers, Level, Origin, Overrides, ValueOrigin};
 
@@ -246,6 +252,27 @@ pub struct AssetUsage {
     pub bundles: Vec<String>,
 }
 
+/// 改一个版本的 id 时，跟着搬到新 uid 的那批记录。
+#[derive(Debug, Clone, Default)]
+pub struct VersionRenamed {
+    /// 搬到新 uid 的参数记录（字段 key）—— 参数四张表里的 `A1:OLD`
+    pub params: Vec<String>,
+    /// 归属跟着搬的资产 id（`mkPreset` 的 `versionId`）
+    pub assets: Vec<String>,
+}
+
+/// 删一个版本时，它那批资产记录的去向。
+///
+/// 返回"摘了谁的引用、删了谁"两件事：日志与界面提示要能说清这一趟动了什么，
+/// 而不是只报一个数量。
+#[derive(Debug, Clone, Default)]
+pub struct VersionAssetsRemoved {
+    /// 真删掉的资产 id
+    pub removed: Vec<String>,
+    /// 从套餐里摘掉的引用：`(套餐 id, 资产 id)`
+    pub detached: Vec<(String, String)>,
+}
+
 /// 一次加载的全部预设数据。
 ///
 /// 现在是机型目录 + 资产定义 + 套餐定义 + 字段定义 + 界面布局。还没搬的只有
@@ -348,6 +375,16 @@ impl From<(String, String, Option<serde_json::Value>)> for ValueEdit {
     }
 }
 
+/// [`Presets::copy_version_with_bundle`] 建出来的两样东西。
+///
+/// 只给日志 / 调用方回执用；**界面读的是清单里的值**，不靠这份回执。
+pub struct CopiedVersionBundle {
+    /// 新套餐 id（`{机型}_{新版本 id}`）
+    pub bundle_id: String,
+    /// 新登记的 MKP 预设资产 id；模板套餐本来就没有 MKP 登记时为 `None`
+    pub asset_id: Option<String>,
+}
+
 pub struct Presets {
     pub catalog: Catalog,
     /// 资产域①层（b05 Task 8）
@@ -409,6 +446,20 @@ impl Presets {
             .items()
             .iter()
             .filter(|b| !self.machine_disabled(&b.machine_id))
+            .collect()
+    }
+
+    /// 被套餐引用到的资产 id（**小写**，与 `Asset.id` 比对时同一条口径）。
+    ///
+    /// 覆盖**全部**套餐，含停用机型的 —— 它答的是"这条资产进没进套餐"。
+    /// "这次会不会交付"是另一问（看 [`Self::delivery_bundles`] 那一侧）。
+    /// 交付检查与资产视图都读这一处：各写一遍的话，"不交付"与"检查说它已进套餐"
+    /// 会同时对同一份文件成立。
+    pub fn bundled_asset_ids(&self) -> std::collections::BTreeSet<String> {
+        self.bundles
+            .items()
+            .iter()
+            .flat_map(|b| b.asset_refs.iter().map(|r| r.trim().to_lowercase()))
             .collect()
     }
 
@@ -989,6 +1040,211 @@ impl Presets {
         Ok(())
     }
 
+    /// **复制版本时顺手复制它指向的套餐**（2026-11-12，作者定「一版一套」）。
+    ///
+    /// 三步，任何一步失败整笔拒绝（内存改了一半的由命令层 `run_struct` 回滚）：
+    ///
+    /// 1. 版本定义照抄（[`Catalog::copy_version`]，行为不变，指针先照抄）；
+    /// 2. 模板套餐复制一份，id = `{机型}_{新版本 id}`；
+    /// 3. 套餐里**属于模板版本**的 `mkPreset` 登记换成本版本自己的
+    ///    （新 id = `{机型小写}-{新版本小写}`，与现有 `a1-fastv3.3` 同形），
+    ///    新版本 `recommendedBundle` 指过去。
+    ///
+    /// 模板没有套餐时什么都不建（`Ok(None)`）；模板套餐本来就没有 MKP 登记时照抄引用、
+    /// 不造第二份（历史数据允许这种形状）；有登记但**不属于模板版本**时整笔拒绝 ——
+    /// 把别的版本的登记挂到新版本上是错归属，不能猜。
+    #[allow(clippy::too_many_arguments)]
+    pub fn copy_version_with_bundle(
+        &mut self,
+        machine_id: &str,
+        template_version_id: &str,
+        new_version_id: &str,
+        name: &str,
+        tag: Option<&str>,
+        description: Option<&str>,
+        now_iso8601: &str,
+    ) -> Result<Option<CopiedVersionBundle>, AppError> {
+        let machine_id = machine_id.trim();
+        let template_vid = template_version_id.trim();
+        let new_vid = new_version_id.trim();
+
+        /* 模板指着哪份套餐 —— 必须在写版本之前读：`copy_version` 会把它照抄到新版本上 */
+        let template_bundle = self
+            .catalog
+            .machine(machine_id)
+            .ok_or_else(|| AppError::not_found(format!("没有机型 {machine_id}")))?
+            .versions
+            .iter()
+            .find(|v| v.id == template_vid)
+            .and_then(|v| v.recommended_bundle.clone())
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
+
+        self.catalog.machine_mut(machine_id)?.copy_version(
+            template_vid,
+            new_vid,
+            name,
+            tag,
+            description,
+        )?;
+
+        let Some(src_bundle_id) = template_bundle else {
+            return Ok(None);
+        };
+        let src = self.bundles.get(&src_bundle_id).cloned().ok_or_else(|| {
+            AppError::corrupted(format!(
+                "版本 {machine_id}/{template_vid} 的 recommendedBundle 指向一个不存在的套餐：{src_bundle_id}"
+            ))
+        })?;
+
+        let bundle_id = format!("{machine_id}_{new_vid}");
+        let new_asset_id = format!("{}-{}", machine_id.to_lowercase(), new_vid.to_lowercase());
+        if self.bundles.get(&bundle_id).is_some() {
+            return Err(AppError::invalid_argument(format!(
+                "套餐 id 已经存在：{bundle_id}"
+            )));
+        }
+        if self.assets.get(&new_asset_id).is_some() {
+            return Err(AppError::invalid_argument(format!(
+                "资产 id 已经存在：{new_asset_id}"
+            )));
+        }
+
+        /* 模板套餐里的 MKP 登记：只认 `mkPreset`；有一条不属于模板版本就拒绝 */
+        let mk_refs: Vec<&str> = src
+            .asset_refs
+            .iter()
+            .map(String::as_str)
+            .filter(|r| {
+                self.assets
+                    .get(r)
+                    .is_some_and(|a| a.kind == AssetKind::MkPreset)
+            })
+            .collect();
+        if !mk_refs.is_empty() {
+            let all_belong = mk_refs.iter().all(|r| {
+                self.assets.get(r).is_some_and(|a| {
+                    a.version_id
+                        .as_deref()
+                        .is_some_and(|v| v.trim().eq_ignore_ascii_case(template_vid))
+                })
+            });
+            if !all_belong {
+                return Err(AppError::invalid_argument(format!(
+                    "模板套餐 {src_bundle_id} 里有不属于版本 {template_vid} 的 MKP 登记"
+                ))
+                .with_detail(
+                    "一版一套：套餐的 mkPreset 应当只归属模板版本 —— 换一份套餐再复制".to_owned(),
+                ));
+            }
+        }
+
+        let asset_id = if mk_refs.is_empty() {
+            None
+        } else {
+            self.assets.add(Asset {
+                id: new_asset_id.clone(),
+                kind: AssetKind::MkPreset,
+                machine_id: Some(machine_id.to_owned()),
+                name: format!("{machine_id} {} 预设", name.trim()),
+                path: String::new(),
+                version_id: Some(new_vid.to_owned()),
+                slicer: None,
+                profile: None,
+                delivery: Default::default(),
+                calibration: String::new(),
+            })?;
+            Some(new_asset_id)
+        };
+
+        let refs: Vec<String> = src
+            .asset_refs
+            .iter()
+            .map(|r| match &asset_id {
+                Some(new_asset)
+                    if self
+                        .assets
+                        .get(r)
+                        .is_some_and(|a| a.kind == AssetKind::MkPreset) =>
+                {
+                    new_asset.clone()
+                }
+                _ => r.clone(),
+            })
+            .collect();
+        self.bundles.add(Bundle {
+            id: bundle_id.clone(),
+            display: format!("{machine_id} {}", name.trim()),
+            machine_id: machine_id.to_owned(),
+            asset_refs: refs,
+            updated_at: Some(now_iso8601.get(..10).unwrap_or(now_iso8601).to_owned()),
+        })?;
+        self.catalog.machine_mut(machine_id)?.set_version_field(
+            new_vid,
+            VersionField::RecommendedBundle,
+            Some(&bundle_id),
+        )?;
+
+        Ok(Some(CopiedVersionBundle {
+            bundle_id,
+            asset_id,
+        }))
+    }
+
+    /// **改版本 id 之后，把它独占的套餐一起改名**（2026-11-12）。
+    ///
+    /// 三条同时成立才动手，否则原样返回 `None`：
+    ///
+    /// 1. 这一版指着套餐（`recommendedBundle`）；
+    /// 2. 套餐 id 就是 `{机型}_{旧版本 id}` 这个约定形状；
+    /// 3. **只有这一版**指着它 —— 共用的套餐不跟着改，否则会把别的版本的指向一起改掉。
+    ///
+    /// 改名走 [`Self::rename_bundle`]：套餐 id 与机型文件里那几处引用一起换。
+    pub fn rename_version_bundle(
+        &mut self,
+        machine_id: &str,
+        old_vid: &str,
+        new_vid: &str,
+        now_iso8601: &str,
+    ) -> Result<Option<(String, String)>, AppError> {
+        let machine_id = machine_id.trim();
+        let new_vid = new_vid.trim();
+        let current = self
+            .catalog
+            .machine(machine_id)
+            .ok_or_else(|| AppError::not_found(format!("没有机型 {machine_id}")))?
+            .versions
+            .iter()
+            .find(|v| v.id == new_vid)
+            .and_then(|v| v.recommended_bundle.clone())
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
+        let Some(bundle_id) = current else {
+            return Ok(None);
+        };
+        let want = format!("{machine_id}_{}", old_vid.trim());
+        if !bundle_id.eq_ignore_ascii_case(&want) {
+            return Ok(None);
+        }
+        let users = self
+            .catalog
+            .machines()
+            .iter()
+            .flat_map(|m| m.versions.iter())
+            .filter(|v| {
+                v.recommended_bundle
+                    .as_deref()
+                    .is_some_and(|b| b.trim().eq_ignore_ascii_case(&bundle_id))
+            })
+            .count();
+        if users != 1 {
+            return Ok(None);
+        }
+        let new_id = format!("{machine_id}_{new_vid}");
+        self.rename_bundle(&bundle_id, &new_id, None, now_iso8601)?;
+        Ok(Some((bundle_id, new_id)))
+    }
+
     /// **删一条套餐**。被机型默认或任何版本指着时**整次拒绝**并点名 ——
     /// 静默删掉会让那些版本生成时一条 BBS 都拿不到（10.8 的静默漏洞）。
     /// 出路：去套餐页把指向逐个取消（版本回到机型默认），或改指别的套餐
@@ -1170,30 +1426,174 @@ impl Presets {
         Ok(AssetUsage { machines, bundles })
     }
 
+    /// 反查这个资产还有谁在用；有人用就拒绝，并说出是谁（b05 Task 9.5）
+    fn refuse_if_used(&self, id: &str) -> Result<(), AppError> {
+        let usage = self.asset_usage(id)?;
+        if usage.machines.is_empty() && usage.bundles.is_empty() {
+            return Ok(());
+        }
+        Err(
+            AppError::invalid_argument(format!("资产 {id} 还被引用着，不能删")).with_detail(
+                format!(
+                    "引用它的机型：{}；套餐：{}",
+                    if usage.machines.is_empty() {
+                        "（无）".to_owned()
+                    } else {
+                        usage.machines.join("、")
+                    },
+                    if usage.bundles.is_empty() {
+                        "（无）".to_owned()
+                    } else {
+                        usage.bundles.join("、")
+                    }
+                ),
+            ),
+        )
+    }
+
     /// 删一条资产，**先反查**（b05 Task 9.5）：有人引用就拒绝，并说出是谁
     pub fn remove_asset(&mut self, id: &str) -> Result<(), AppError> {
-        let usage = self.asset_usage(id)?;
-        if !usage.machines.is_empty() || !usage.bundles.is_empty() {
-            return Err(
-                AppError::invalid_argument(format!("资产 {id} 还被引用着，不能删")).with_detail(
-                    format!(
-                        "引用它的机型：{}；套餐：{}",
-                        if usage.machines.is_empty() {
-                            "（无）".to_owned()
-                        } else {
-                            usage.machines.join("、")
-                        },
-                        if usage.bundles.is_empty() {
-                            "（无）".to_owned()
-                        } else {
-                            usage.bundles.join("、")
-                        }
-                    ),
-                ),
-            );
-        }
+        self.refuse_if_used(id)?;
         self.assets.remove(id)?;
         self.assets.write()
+    }
+
+    /// 归属这一版的资产 id（`mkPreset` 那类，靠「机型 + 版本」定位产物）。
+    ///
+    /// 与 [`Self::remove_assets_of_version`] 同一个筛选口 —— 确认框列出来的那一批
+    /// 必须就是删除时真会动的那一批，两处各写一遍迟早会分叉。
+    pub fn assets_of_version(&self, machine_id: &str, version_id: &str) -> Vec<String> {
+        self.assets
+            .items()
+            .iter()
+            .filter(|a| a.kind == AssetKind::MkPreset)
+            .filter(|a| {
+                a.machine_id.as_deref().map(str::trim) == Some(machine_id.trim())
+                    && a.version_id.as_deref().map(str::trim) == Some(version_id.trim())
+            })
+            .map(|a| a.id.clone())
+            .collect()
+    }
+
+    /// 删掉归属这一版的资产记录（**删版本时的连带**）：先从套餐里摘掉引用，再删记录。
+    ///
+    /// 版本没了，这些记录就指着一个不存在的对象 —— [`Self::check_cross_consistency`]
+    /// 会把整份数据判成 Corrupted，工作台下次启动直接起不来。所以不能留在盘上。
+    ///
+    /// # 为什么先摘套餐的引用
+    ///
+    /// 套餐的 `assetRefs` 指向这一版的 MKP 预设。版本一删那条引用就指向空气，
+    /// 加载期 [`Self::check_bundle_refs`] 当场判错。让用户自己去套餐页摘，
+    /// 是把一次删除拆成两次体力活；这里替他摘掉，确认框已经列给用户看过。
+    ///
+    /// 摘引用走 [`Self::set_bundle_refs`]，所以「至少一条 BBS」（10.8 成套配发）
+    /// 那道闸照样生效：**摘成空套餐时整次拒绝** —— 那条套餐该由人去处理，
+    /// 不是这里替它决定留一份没有 BBS 的套餐。
+    ///
+    /// 仍被机型引用的**不删**：与 [`Self::remove_asset`] 同一道闸（MKP 预设
+    /// 不会被机型直接引用，留着这条是为了"归属 ≠ 引用"两种关系不混）。
+    ///
+    /// 这一版本来就没有归属资产时返回空结果（不是错误）。
+    pub fn remove_assets_of_version(
+        &mut self,
+        machine_id: &str,
+        version_id: &str,
+        now_iso8601: &str,
+    ) -> Result<VersionAssetsRemoved, AppError> {
+        let owned = self.assets_of_version(machine_id, version_id);
+        if owned.is_empty() {
+            return Ok(VersionAssetsRemoved::default());
+        }
+
+        /* ① 先把要摘的套餐算清楚，再动手：中途失败会留下"套餐改了一半、资产还在" */
+        let mut plan: Vec<(String, Vec<String>)> = Vec::new();
+        let mut detached: Vec<(String, String)> = Vec::new();
+        for b in self.bundles.items() {
+            let dropped: Vec<String> = owned
+                .iter()
+                .filter(|o| {
+                    b.asset_refs
+                        .iter()
+                        .any(|r| r.trim().eq_ignore_ascii_case(o))
+                })
+                .cloned()
+                .collect();
+            if dropped.is_empty() {
+                continue;
+            }
+            let next: Vec<String> = b
+                .asset_refs
+                .iter()
+                .filter(|r| !owned.iter().any(|o| r.trim().eq_ignore_ascii_case(o)))
+                .cloned()
+                .collect();
+            for a in dropped {
+                detached.push((b.id.clone(), a));
+            }
+            plan.push((b.id.clone(), next));
+        }
+        for (bid, refs) in plan {
+            self.set_bundle_refs(&bid, &refs, now_iso8601)?;
+        }
+
+        /* ② 摘完之后还会被机型引用的不删（与 remove_asset 同一道闸） */
+        for id in &owned {
+            self.refuse_if_used(id)?;
+        }
+        for id in &owned {
+            self.assets.remove(id)?;
+        }
+        self.assets.write()?;
+        Ok(VersionAssetsRemoved {
+            removed: owned,
+            detached,
+        })
+    }
+
+    /// 删掉这个版本在所有参数表里的记录（值 / 范围 / 跟随），返回动过的字段 key。
+    ///
+    /// 与 [`Self::remove_assets_of_version`] 同一条理由：版本没了，`A1:FAST` 这样的键
+    /// 就指向不存在的对象，下一次加载判 Corrupted。写盘由调用方做 ——
+    /// 删版本要一次提交三个文件（机型 / 参数注册表 / 资产台账）。
+    pub fn drop_version_overrides(
+        &mut self,
+        machine_id: &str,
+        version_id: &str,
+    ) -> Result<Vec<String>, AppError> {
+        self.registry
+            .drop_owner(&format!("{machine_id}:{version_id}"))
+    }
+
+    /// 改一个版本的 id：机型文件那一格 + 参数四张表的键 + 归属资产的 `versionId`。
+    ///
+    /// 三处必须一起改：`A1:OLD` 这种键散在参数表与资产归属里，漏一处下一次加载
+    /// [`Self::check_cross_consistency`] 就判 `Corrupted`（整个工作台起不来）。
+    /// 写盘由调用方做 —— 一条命令三份文件，失败由 `run_struct` 按 before 回滚。
+    ///
+    /// 顺序是先过机型那一关（主键合法性、机型内重名）：它不合法就一个字节都不动。
+    /// 参数与资产只是"跟着搬"，不会反过来让 id 变合法。
+    pub fn rename_version_uid(
+        &mut self,
+        machine_id: &str,
+        old_version_id: &str,
+        new_version_id: &str,
+    ) -> Result<VersionRenamed, AppError> {
+        let old_vid = old_version_id.trim();
+        let new_vid = new_version_id.trim();
+        self.catalog
+            .machine_mut(machine_id)?
+            .rename_version(old_vid, new_vid)?;
+
+        if old_vid == new_vid {
+            return Ok(VersionRenamed::default());
+        }
+        let old_uid = format!("{machine_id}:{old_vid}");
+        let new_uid = format!("{machine_id}:{new_vid}");
+        let params = self.registry.rename_owner(&old_uid, &new_uid)?;
+        let assets = self
+            .assets
+            .rename_version_owner(machine_id, old_vid, new_vid)?;
+        Ok(VersionRenamed { params, assets })
     }
 
     /// 跨文件那一条：`machineVariants` 的键必须是真的机型或真的机型版本。
@@ -1294,7 +1694,7 @@ impl Presets {
         Ok(())
     }
 
-    /// 删掉这个版本之后，`param_registry.toml` 里哪些字段会留下孤儿引用。
+    /// 删掉这个版本会**一起清掉**哪些参数记录。
     ///
     /// # 为什么这件事必须跨层问
     ///
@@ -1302,16 +1702,23 @@ impl Presets {
     /// 后者指向一个具体版本 —— **版本删了，键还在**，于是它成了指向不存在对象的引用。
     ///
     /// 这种损坏的恶性在于它**不报错**：解析照样通过，只是那一项在那台机器上悄悄不生效了。
-    /// 所以删之前要先问一遍并把结果摆给人看，而不是删完再让他自己发现。
+    /// 但真到了删的时候，这些键**必须一起删掉**（见 [`Self::drop_version_overrides`]）——
+    /// 留着它们下一次加载会判 Corrupted。所以这里返回的是"会跟着消失的那几项"，
+    /// 删之前先摆给人看：那是他钉在这一版上的参数值。
     ///
-    /// 返回的是**字段的 key**（`wiping.wiper_x` 这种），因为那是用户能据以行动的单位：
-    /// 他要去那一页把那几项清掉或改掉。
+    /// 返回的是**字段的 key**（`wiping.wiper_x` 这种），因为那是用户能据以行动的单位。
+    /// 判据与 [`Self::drop_version_overrides`] 同一套（四张表）。
     pub fn orphans_if_version_removed(&self, machine_id: &str, version_id: &str) -> Vec<String> {
         let needle = format!("{machine_id}:{version_id}");
         self.registry
             .params()
             .iter()
-            .filter(|p| p.machine_variants.contains_key(&needle) || p.follows.contains_key(&needle))
+            .filter(|p| {
+                p.machine_variants.contains_key(&needle)
+                    || p.machine_min_variants.contains_key(&needle)
+                    || p.machine_max_variants.contains_key(&needle)
+                    || p.follows.contains_key(&needle)
+            })
             .map(|p| p.key.clone())
             .collect()
     }
@@ -1464,6 +1871,163 @@ mod tests {
                 .is_err(),
             "撞 id 拒"
         );
+    }
+
+    /// 给夹具里的 `A1/FAST` 造一份**它自己的套餐**：BBS + 属于它自己的 MKP 登记。
+    /// 形状照真数据（`A1_FASTV3.3` = `a1-fastv3.3` + `a1-bbs-04-020`）。
+    #[cfg(feature = "workbench")]
+    fn give_a1_fast_its_own_bundle(p: &mut Presets) {
+        p.assets
+            .add(Asset {
+                id: "a1-fast".to_owned(),
+                kind: AssetKind::MkPreset,
+                machine_id: Some("A1".to_owned()),
+                name: "A1 高速版 预设".to_owned(),
+                path: String::new(),
+                version_id: Some("FAST".to_owned()),
+                slicer: None,
+                profile: None,
+                delivery: Default::default(),
+                calibration: String::new(),
+            })
+            .expect("mkPreset 登记");
+        p.bundles
+            .add(Bundle {
+                id: "A1_FAST".to_owned(),
+                display: "A1 高速版".to_owned(),
+                machine_id: "A1".to_owned(),
+                asset_refs: vec!["a1-fast".to_owned(), "a1-bbs-04-020".to_owned()],
+                updated_at: Some("2026-07-12".to_owned()),
+            })
+            .expect("套餐");
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .set_version_field("FAST", VersionField::RecommendedBundle, Some("A1_FAST"))
+            .expect("指向");
+    }
+
+    /// **复制版本时顺手复制它的套餐**（2026-11-12，「一版一套」）。
+    ///
+    /// 新套餐 id = `{机型}_{新版本}`，MKP 登记换成本版本自己的（`{机型小写}-{版本小写}`），
+    /// 模板那份一个字节不动。写回去还要能读回来 —— `mkPreset` 带 `path` 会被加载期拦住。
+    #[cfg(feature = "workbench")]
+    #[test]
+    fn copying_a_version_also_copies_its_bundle_and_mkp_registration() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut p = f.presets;
+        give_a1_fast_its_own_bundle(&mut p);
+
+        let copied = p
+            .copy_version_with_bundle("A1", "FAST", "COPYTEST", "复制测试", None, None, &now())
+            .expect("复制")
+            .expect("模板有套餐 → 必须建一份");
+
+        assert_eq!(copied.bundle_id, "A1_COPYTEST");
+        assert_eq!(copied.asset_id.as_deref(), Some("a1-copytest"));
+
+        let v = p
+            .catalog
+            .machine("A1")
+            .unwrap()
+            .versions
+            .iter()
+            .find(|v| v.id == "COPYTEST")
+            .expect("新版本在");
+        assert_eq!(v.recommended_bundle.as_deref(), Some("A1_COPYTEST"));
+
+        let b = p.bundles.get("A1_COPYTEST").expect("新套餐在");
+        assert_eq!(b.display, "A1 复制测试");
+        assert_eq!(
+            b.asset_refs,
+            vec!["a1-copytest".to_owned(), "a1-bbs-04-020".to_owned()],
+            "BBS 照抄；MKP 登记换成新版本自己的"
+        );
+
+        let a = p.assets.get("a1-copytest").expect("新登记在");
+        assert_eq!(a.kind, AssetKind::MkPreset);
+        assert_eq!(a.version_id.as_deref(), Some("COPYTEST"));
+        assert_eq!(a.path, "", "mkPreset 不写 path");
+
+        /* 模板那份不动 */
+        assert_eq!(
+            p.bundles.get("A1_FAST").unwrap().asset_refs,
+            vec!["a1-fast".to_owned(), "a1-bbs-04-020".to_owned()]
+        );
+        assert_eq!(
+            p.assets.get("a1-fast").unwrap().version_id.as_deref(),
+            Some("FAST")
+        );
+
+        /* 写回去再读：`mkPreset` 的 `path` / `versionId` 形状由加载期判据钉着 */
+        p.catalog.write_machine("A1").unwrap();
+        p.bundles.write().unwrap();
+        p.assets.write().unwrap();
+        let again = Presets::load_from(p.root()).expect("写回去要还能读回来");
+        assert_eq!(
+            again
+                .assets
+                .get("a1-copytest")
+                .and_then(|a| a.version_id.clone())
+                .as_deref(),
+            Some("COPYTEST")
+        );
+    }
+
+    /// **改版本 id 时，它独占的套餐跟着改名**（2026-11-12）；多版共用的不碰。
+    #[cfg(feature = "workbench")]
+    #[test]
+    fn renaming_a_version_renames_only_its_own_bundle() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut p = f.presets;
+        give_a1_fast_its_own_bundle(&mut p);
+
+        p.rename_version_uid("A1", "FAST", "FAST_NEW").unwrap();
+        let moved = p
+            .rename_version_bundle("A1", "FAST", "FAST_NEW", &now())
+            .expect("改名");
+        assert_eq!(
+            moved,
+            Some(("A1_FAST".to_owned(), "A1_FAST_NEW".to_owned()))
+        );
+        assert!(p.bundles.get("A1_FAST").is_none(), "旧 id 不该留着");
+        let v = p
+            .catalog
+            .machine("A1")
+            .unwrap()
+            .versions
+            .iter()
+            .find(|v| v.id == "FAST_NEW")
+            .expect("版本在");
+        assert_eq!(
+            v.recommended_bundle.as_deref(),
+            Some("A1_FAST_NEW"),
+            "机型文件里的指向要跟着换"
+        );
+
+        /* 再复制一版共用同一份套餐 → 改名不再动它（别人的指向不能被一起改掉） */
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .add_version("SHARE", "共用版")
+            .unwrap();
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .set_version_field(
+                "SHARE",
+                VersionField::RecommendedBundle,
+                Some("A1_FAST_NEW"),
+            )
+            .unwrap();
+        p.rename_version_uid("A1", "FAST_NEW", "FAST_NEW2").unwrap();
+        assert_eq!(
+            p.rename_version_bundle("A1", "FAST_NEW", "FAST_NEW2", &now())
+                .expect("共用时照样返回"),
+            None,
+            "两版共用的套餐不跟着改名"
+        );
+        assert!(p.bundles.get("A1_FAST_NEW").is_some());
     }
 
     /// 删除：被机型默认或版本指着时整次拒绝并点名；解除之后真删掉
@@ -1993,6 +2557,223 @@ mod tests {
         );
     }
 
+    /// **删版本要把 `A1:FAST` 的参数记录一起清掉**（2026-11-11）。
+    ///
+    /// 不清会怎样：`machineVariants` 里那个键指向一个不存在的版本，
+    /// 下一次 `load_from` 判 Corrupted —— 真机上的样子就是"删版本报错，
+    /// 机型文件已经被改了一半"（写盘在校验之前）。
+    #[cfg(feature = "workbench")]
+    #[test]
+    fn dropping_a_version_clears_its_param_records_and_still_loads() {
+        let f = crate::workbench::domain::testkit::Fixture::load();
+        let mut presets = f.presets;
+        let listed = presets.orphans_if_version_removed("A1", "FAST");
+        assert!(!listed.is_empty(), "夹具里 A1/FAST 该有钉过的参数");
+
+        let dropped = presets
+            .drop_version_overrides("A1", "FAST")
+            .expect("清记录");
+        assert_eq!(dropped, listed, "确认框列出来的与真删的是同一批");
+        presets.registry.write_back().expect("写参数注册表");
+        presets
+            .catalog
+            .machine_mut("A1")
+            .expect("A1 在")
+            .remove_version("FAST")
+            .expect("删版本");
+        presets.catalog.write_machine("A1").expect("写机型");
+
+        let again = Presets::load_from(presets.root()).expect("清干净之后必须读得回来");
+        assert!(
+            again
+                .catalog
+                .machine("A1")
+                .expect("A1 在")
+                .versions
+                .iter()
+                .all(|v| v.id != "FAST"),
+            "版本真的没了"
+        );
+        assert!(
+            again.orphans_if_version_removed("A1", "FAST").is_empty(),
+            "四张表里的 A1:FAST 都要清干净"
+        );
+    }
+
+    /// **真数据副本上的删版本演练**（2026-11-11）。
+    ///
+    /// 钉三件事：
+    ///
+    /// 1. 套餐里指向它的那条引用**自动摘掉**（不用人先去套餐页）；
+    /// 2. 摘完之后套餐本身还在（它还有别的资产，比如 BBS）；
+    /// 3. 三份文件一起清干净，`load_from` 还能读回来。
+    ///
+    /// 样本按前提**动态定位**（有参数记录 + 有归属资产），不写死机型与版本 id；
+    /// 写的是临时副本，所以演练本身仍是可控的。
+    #[test]
+    fn removing_a_version_on_a_copy_of_the_real_data_also_detaches_it_from_bundles() {
+        let tree = crate::presetdata::testdata::minimal_presets_tree();
+        let (machine, version) = (tree.machine.clone(), tree.version_with_assets.clone());
+        let mut p = Presets::load_from(tree.path()).expect("最小树读得通");
+
+        let before_assets = p.assets_of_version(&machine, &version);
+        let mut before_params = p.orphans_if_version_removed(&machine, &version);
+        assert_eq!(
+            before_assets,
+            vec![tree.asset_of_version.clone()],
+            "构造器只给这一个版本配归属资产"
+        );
+        assert!(
+            !before_params.is_empty(),
+            "构造器在版本层钉过参数：{before_params:?}"
+        );
+
+        let out = p
+            .remove_assets_of_version(&machine, &version, "2026-11-11")
+            .expect("归属资产跟着版本一起删");
+        assert_eq!(out.removed, before_assets, "归属资产要全部删掉");
+        assert_eq!(
+            out.detached,
+            vec![(tree.bundle.clone(), tree.asset_of_version.clone())],
+            "套餐里那条引用要摘掉"
+        );
+        assert_eq!(
+            p.bundles.get(&tree.bundle).expect("套餐还在").asset_refs,
+            vec![tree.bbs_asset.clone()],
+            "摘掉 MKP 预设之后还剩它的 BBS"
+        );
+
+        let mut dropped = p
+            .drop_version_overrides(&machine, &version)
+            .expect("清参数记录");
+        dropped.sort();
+        before_params.sort();
+        assert_eq!(dropped, before_params, "四张表里的记录要一条不剩地清掉");
+        p.registry.write_back().expect("写参数注册表");
+        p.catalog
+            .machine_mut(&machine)
+            .expect("机型在")
+            .remove_version(&version)
+            .expect("删版本");
+        p.catalog.write_machine(&machine).expect("写机型");
+
+        // 重读：清干净了才读得回来（少清一张表就是 Corrupted）
+        let again = Presets::load_from(tree.path()).expect("清干净之后必须读得回来");
+        assert!(
+            again
+                .catalog
+                .machine(&machine)
+                .expect("机型在")
+                .versions
+                .iter()
+                .all(|v| v.id != version),
+            "{machine}/{version} 版本真的没了"
+        );
+        assert!(
+            again.assets.get(&tree.asset_of_version).is_none(),
+            "归属资产也删了"
+        );
+        assert!(
+            again
+                .orphans_if_version_removed(&machine, &version)
+                .is_empty(),
+            "参数记录一条都不剩"
+        );
+    }
+
+    /// **真数据副本上的改版本 id 演练**（2026-11-12）。
+    ///
+    /// 改 id 时两样都得跟着搬：四张参数表里的键、资产台账的归属。
+    /// 否则键指向不存在的版本、资产指向不存在的版本 —— 下一次 `load_from` 判 Corrupted。
+    /// 这条同时钉住"名字与写法"：新 id 大小写原样、机型文件里只改那一格。
+    ///
+    /// 样本按前提**动态定位**，新 id 由旧 id 派生，并用断言先确认它原本不存在。
+    #[test]
+    fn renaming_a_version_moves_its_param_records_and_assets() {
+        let tree = crate::presetdata::testdata::minimal_presets_tree();
+        let (machine, version) = (tree.machine.clone(), tree.version_with_assets.clone());
+        let new_id = "V1_RENAMED".to_owned();
+        let mut p = Presets::load_from(tree.path()).expect("最小树读得通");
+
+        let mut before = p.orphans_if_version_removed(&machine, &version);
+        assert!(!before.is_empty(), "构造器在版本层钉过参数");
+        let before_assets = p.assets_of_version(&machine, &version);
+        assert_eq!(before_assets, vec![tree.asset_of_version.clone()]);
+
+        let out = p
+            .rename_version_uid(&machine, &version, &new_id)
+            .expect("改 id");
+        let mut moved = out.params.clone();
+        moved.sort();
+        before.sort();
+        assert_eq!(moved, before, "四张表里的键要原样搬过去");
+        assert_eq!(out.assets, before_assets, "归属资产跟着搬");
+
+        p.registry.write_back().expect("写参数注册表");
+        p.assets.write().expect("写资产台账");
+        p.catalog.write_machine(&machine).expect("写机型");
+
+        let again = Presets::load_from(tree.path()).expect("改完必须读得回来");
+        let versions = &again.catalog.machine(&machine).expect("机型在").versions;
+        assert!(
+            versions.iter().any(|v| v.id == new_id),
+            "新 id 在机型文件里"
+        );
+        assert!(
+            versions.iter().all(|v| v.id != version),
+            "旧 id 不能同时留着"
+        );
+        assert!(
+            again
+                .orphans_if_version_removed(&machine, &version)
+                .is_empty(),
+            "旧 uid 的参数记录一条不剩"
+        );
+        let mut moved_back = again.orphans_if_version_removed(&machine, &new_id);
+        moved_back.sort();
+        assert_eq!(moved_back, before, "参数记录原样搬到新 uid 上");
+        assert_eq!(
+            again
+                .assets
+                .get(&tree.asset_of_version)
+                .expect("资产还在")
+                .version_id
+                .as_deref(),
+            Some(new_id.as_str()),
+            "资产归属也要跟着改"
+        );
+    }
+
+    /// 改 id 撞上同一台机型里已有的版本必须拒绝，且文件一个字节都不动
+    #[test]
+    fn renaming_a_version_onto_an_existing_id_is_refused() {
+        let tree = crate::presetdata::testdata::minimal_presets_tree();
+        let mut p = Presets::load_from(tree.path()).expect("最小树读得通");
+
+        let err = p
+            .rename_version_uid(
+                &tree.machine,
+                &tree.version_with_assets,
+                &tree.other_version,
+            )
+            .expect_err("撞上已有版本必须拒绝");
+        assert!(
+            err.message.contains(&tree.other_version) || err.message.contains("已存在"),
+            "要说出撞的是哪个 id（{}），实测：{}",
+            tree.other_version,
+            err.message
+        );
+        assert!(
+            p.catalog
+                .machine(&tree.machine)
+                .expect("机型在")
+                .versions
+                .iter()
+                .any(|v| v.id == tree.version_with_assets),
+            "被拒之后旧 id 一个都不该动"
+        );
+    }
+
     /// 删一个不存在的资产要**报"没有"**，而不是静默成功
     #[cfg(feature = "workbench")]
     #[test]
@@ -2138,22 +2919,53 @@ mod tests {
             "9 条套餐只对上 {bbs_total} 条 BBS 引用 —— 10.8 的判定在空转"
         );
 
-        // **反查实测**（10.4 判据的反向）：`a1-bbs-04-020` 被 A1 的三份套餐各装一次；
+        /* **反查一致性**（10.4 判据的反向）：挑一条被最多的套餐引用的资产，
+        反查结果必须等于「遍历所有套餐扫出来的那份」—— 两边都是真数据算的，
+        不写死是哪一条资产、哪几份套餐。 */
+        let expected = p
+            .bundles
+            .items()
+            .iter()
+            .flat_map(|b| {
+                b.asset_refs
+                    .iter()
+                    .map(move |r| (r.trim().to_lowercase(), b.id.clone()))
+            })
+            .fold(
+                std::collections::BTreeMap::<String, Vec<String>>::new(),
+                |mut acc, (a, b)| {
+                    acc.entry(a).or_default().push(b);
+                    acc
+                },
+            )
+            .into_iter()
+            .max_by_key(|(_, v)| v.len())
+            .expect("套餐里总该有资产引用");
+        let (asset_id, mut want) = expected;
+        want.sort();
+
+        let u = p.asset_usage(&asset_id).expect("反查");
+        let mut got = u.bundles.clone();
+        got.sort();
+        assert_eq!(got, want, "反查结果要与遍历套餐得出的一致");
         // 换个大小写查同一个资产，结果必须一致
-        let u = p.asset_usage("a1-bbs-04-020").expect("反查");
-        assert_eq!(
-            u.bundles,
-            vec![
-                "A1_STANDARD".to_owned(),
-                "A1_FAST".to_owned(),
-                "A1_FASTV3.3".to_owned()
-            ]
-        );
-        let u2 = p.asset_usage("A1-BBS-04-020").expect("反查（大写）");
+        let u2 = p
+            .asset_usage(&asset_id.to_uppercase())
+            .expect("反查（大写）");
         assert_eq!(u, u2, "反查是大小写不敏感的");
+
         // 图标那一档不被套餐引用：归属 ≠ 引用
-        let u = p.asset_usage("a1-icon").expect("反查");
-        assert_eq!(u.machines, vec!["A1".to_owned()]);
-        assert!(u.bundles.is_empty(), "图标不该出现在套餐的 assetRefs 里");
+        let icon = p
+            .assets
+            .items()
+            .iter()
+            .find(|a| !p.bundled_asset_ids().contains(&a.id.to_lowercase()))
+            .expect("真数据里该有没进套餐的资产（图标那一类）");
+        let u = p.asset_usage(&icon.id).expect("反查");
+        assert!(!u.machines.is_empty(), "它该有归属");
+        assert!(
+            u.bundles.is_empty(),
+            "没进套餐的资产不该出现在 assetRefs 里"
+        );
     }
 }

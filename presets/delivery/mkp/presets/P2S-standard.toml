@@ -2,44 +2,45 @@
 # variant: standard
 
 [toolhead]
-# 自定义工具头获取 G-code
+# 落笔 G-code
 custom_mount_gcode = """
 L803;此处使喷嘴降温
 G92 E0;挤出机归零
-G1 E-10;长回抽
 G92 E0
 L801
 M204 S10000
-G1 X20 Y7 F30000;到驻点
-G1 X1 F300;推到X0，笔尖下落
-G1 X20 Y7 F30000;向左离开
+G1 X{wait} Y{wait_y} F30000;到驻点
+G1 X{target} F{speed};推到底
+G1 X{wait} Y{wait_y} F30000;离开
 G1 F30000
 """
-# 自定义工具头收起 G-code
+# 收笔 G-code
 custom_unmount_gcode = """
 G92 E0
 G1 F30000
-G1 X246 Y0 ;到驻点
-G1 X256 F6000 ; 收笔
+G1 X{wait} Y{wait_y} F30000;到驻点
+G1 X{target} F{speed};收笔
 G1 F30000
 L802
 G1 F1500
-G1 E10.7;填充回抽
 G1 F30000
 M106 P1 S[AUTO] ; 风扇
-;M106 P2 S100
-G1 X70 Y265 F30000;Wipe
-G1 E6;Wipe
-G1 X90 F30000;Wipe
-G1 X120 F30000;Wipe
-G1 X90 F30000;Wipe
 """
 first_pen_revitalization_flag = false # 首笔活化标志
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
-MKP_retract = 0 # 回抽长度(mm)
+MKP_extrude = 0 # 挤出长度(mm)
+MKP_retract = -5 # 回抽长度(mm)
 offset_x = -25.9 # 笔尖偏移
 offset_y = 14 # 笔尖偏移
 offset_z = 1.1 # 笔尖偏移
+pen_mount_speed = 300 # 落笔速度
+pen_mount_wait_x = 20 # 落笔等待位 X
+pen_mount_wait_y = 7 # 落笔等待位 Y
+pen_mount_x = 1 # 落笔位 X
+pen_unmount_speed = 6000 # 收笔速度
+pen_unmount_wait_x = 246 # 收笔等待位 X
+pen_unmount_wait_y = 0 # 收笔等待位 Y
+pen_unmount_x = 256 # 收笔位 X
 prime_length = 100 # 预涂长度(mm) 范围:0~500
 speed_limit = 70 # 涂胶速度限制 (mm/s)
 
@@ -92,7 +93,7 @@ small_feature_factor = 1 # 小特征因子 范围:0~2
 support_extrusion_multiplier = 0.7 # 支撑体挤出倍率
 swap_hop_height = 1 # 换笔脱层高度(mm) 范围:0.2~3
 tower_custom_layer_height = "auto" # 塔层高策略
-tower_extrude_ratio = 1 # 支撑体挤出倍率
+tower_extrude_ratio = 1.2 # 支撑体挤出倍率
 tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
 tower_glue_layer_speed = 35 # 涂胶面层速度
 tower_pen_wipe_interval = 5 # 擦笔间隔层数 范围:1~50

@@ -434,8 +434,18 @@ impl Assets {
         if let Some(m) = &candidate.machine_id {
             t["machineId"] = super::literal_str(m);
         }
+        /* `mkPreset` 写 `versionId`、**不写 `path`**（见 [`AssetKind::MkPreset`] 与
+        `check_one`：文件是生成产物，路径由命名规则算出）；其余类反过来。
+        2026-11-12 之前这里无条件写 `path` —— 复制版本要顺手登记新版本的 MKP 预设，
+        那条路一上来就会被 `check_one` 判「mkPreset 不许有 path」。 */
+        if candidate.kind == AssetKind::MkPreset {
+            if let Some(v) = &candidate.version_id {
+                t["versionId"] = super::literal_str(v);
+            }
+        } else {
+            t["path"] = super::literal_str(&candidate.path);
+        }
         t["name"] = super::literal_str(&candidate.name);
-        t["path"] = super::literal_str(&candidate.path);
         if let Some(s) = &candidate.slicer {
             t["slicer"] = super::literal_str(s);
         }
@@ -569,6 +579,72 @@ impl Assets {
             table["delivery"] = super::literal_str("bundled");
         }
         Ok(())
+    }
+
+    /// 把归属某一版的 `mkPreset` 资产的 `versionId` 改成新 id，返回改动的资产 id。
+    ///
+    /// 给「改版本 id」用：这一类资产靠 `machineId + versionId` 定位那一版的产物，
+    /// 版本键换了它不跟的话，下一次加载 [`super::Presets::check_cross_consistency`]
+    /// 当场判 `Corrupted`（与删版本那条同一种事故）。
+    ///
+    /// 只认 `kind == MkPreset` 且两个 id 都对得上的条目；id 比较大小写不敏感
+    /// （与 [`Self::get`] / [`Self::remove`] 同一口径）。
+    pub fn rename_version_owner(
+        &mut self,
+        machine_id: &str,
+        old_vid: &str,
+        new_vid: &str,
+    ) -> Result<Vec<String>, AppError> {
+        let same = |v: Option<&str>, want: &str| {
+            v.map(str::trim)
+                .is_some_and(|s| s.eq_ignore_ascii_case(want.trim()))
+        };
+        let hits: Vec<String> = self
+            .items
+            .iter()
+            .filter(|a| a.kind == AssetKind::MkPreset)
+            .filter(|a| {
+                same(a.machine_id.as_deref(), machine_id) && same(a.version_id.as_deref(), old_vid)
+            })
+            .map(|a| a.id.clone())
+            .collect();
+        if hits.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let file = self.file.display().to_string();
+        let arr = self
+            .doc
+            .get_mut("assets")
+            .and_then(|i| i.as_array_of_tables_mut())
+            .ok_or_else(|| {
+                AppError::corrupted(messages::text("ui.presetdata.assets.174", &[("v1", &file)]))
+            })?;
+        for id in &hits {
+            if let Some(a) = self
+                .items
+                .iter_mut()
+                .find(|a| a.id.eq_ignore_ascii_case(id))
+            {
+                a.version_id = Some(new_vid.trim().to_owned());
+            }
+            // 文档面同步：只改那一块的 versionId 一格
+            let table = arr
+                .iter_mut()
+                .find(|t| {
+                    t.get("id")
+                        .and_then(|i| i.as_str())
+                        .is_some_and(|s| s.eq_ignore_ascii_case(id))
+                })
+                .ok_or_else(|| {
+                    AppError::corrupted(messages::text(
+                        "ui.presetdata.assets.175",
+                        &[("v1", &id.to_string())],
+                    ))
+                })?;
+            table["versionId"] = super::literal_str(new_vid.trim());
+        }
+        Ok(hits)
     }
 
     /// **新建或改写一个分组**（作者 2026-10-16）。

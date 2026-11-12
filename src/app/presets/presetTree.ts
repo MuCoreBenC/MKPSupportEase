@@ -75,8 +75,8 @@
  * # 两种类型的「生效」是两件不同的事
  *
  * ```
- * MKP     生效 = 设为当前配置（唯一底账 run/active-preset.json）  状态 已应用 / 未应用
- * 切片器   生效 = 复制到切片器目录（copyToSlicer）       状态 已复制 / 未复制
+ * MKP     生效 = 设为当前配置（唯一底账 run/active-preset.json）  状态 在用 / 未使用
+ * 切片器   生效 = 放进切片器目录（copyToSlicer）          状态 已放入 / 未放入
  * ```
  *
  * 切片器 profile 光下到本机没用 —— 它得躺在切片器自己的 profile 目录里才生效。
@@ -143,17 +143,15 @@ export const SCOPE_AXIS_TEXT: Record<PresetScopeAxis, StringKey> = {
 /**
  * 本地表「状态」那一列的词。**两种类型两套词，因为「生效」是两件不同的事**：
  *
- *   MKP     生效 = 设为当前配置（`applyPreset`）      在用 / 未使用
- *   切片器   生效 = 复制到切片器目录（`copyToSlicer`） 已复制 / 未复制
+ *   MKP     生效 = 设为当前配置（`applyPreset`）        在用 / 未使用
+ *   切片器   生效 = 放进切片器目录（`copyToSlicer`）    已放入 / 未放入
  *
  * 曾经两种共用 `已应用 / 本地有` 那一套，等于说「把 profile 下到本机就生效了」——
  * 不成立：切片器只读它自己那个 profile 目录。
  *
- * ★ MKP 那一套 2026-10-10 从「已应用 / 未应用」改成「在用 / 未使用」（作者：
- *   「显示的是已应用，可文案却改了，改成使用没事，先把它都统一一下」）——
- *   动作词是那颗按钮上的「使用」，状态词就得跟它同族。旧词与按钮各说各的，
- *   同一屏上「已应用」和「使用」并排出现，读的人要自己判断这俩是不是一回事。
- *   切片器那一套（已复制 / 未复制）不动：它的动作本来就是「复制」。
+ * ★ 状态词跟**按钮上那个动作**同族：MKP 那颗写「使用」⇒ 在用 / 未使用；
+ *   切片器那颗写「放入」⇒ 已放入 / 未放入。两套并排出现时读的人不用自己判断
+ *   "已应用"和"使用"是不是一回事。
  */
 export const LIVE_TEXT: Record<PresetKindAxis, { on: StringKey; off: StringKey }> = {
   mkp: { on: 'presets.tree.live.mkp.on', off: 'presets.tree.live.mkp.off' },
@@ -718,8 +716,21 @@ export function updateStatusOf(row: {
      * **发布前进了，但这一份没变**：不说「有新版」，也不给动作 ——
      * 它确实没有需要更新的内容；云端时间也不许露头。
      */
+    /*
+     * 发布前进了，字节却没变。
+     *
+     * 原来这一档**不给动作**（"确实没有需要更新的内容"）。但同一句话也盖住了另一种
+     * 情况：本地这份文件虽然 sha 对得上，却缺了注册表新加的键（例如落笔/收笔那 6 个
+     * 字段）—— 那时"内容没变"是真的，可它并不是"完整的最新版"，用户也就永远拿不到
+     * 补齐的机会。所以改成：照旧说"内容一致"，但**允许重新下载**。
+     */
     case 'unchanged':
-      return { ...none, text: 'presets.tree.cloudLocal.unchanged' }
+      return {
+        ...none,
+        text: 'presets.tree.cloudLocal.unchanged',
+        action: 'update',
+        showCloudRelease: true,
+      }
     /*
      * **说不清版本关系**：不声称有新版，也不给「更新」——
      * 建立在猜测上的更新会把用户往错误的方向带。出路是右键重新从云端下载。
@@ -1776,9 +1787,10 @@ export interface PresetLocalRow extends PresetRowBase {
   /**
    * 这一行**生效了没有**。两种类型判据不同（见 `LIVE_TEXT`）：
    *
-   *   MKP     是唯一底账（使用中指针）里那一条 → 已应用 / 未应用
+   *   MKP     是唯一底账（使用中指针）里那一条 → 在用 / 未使用
    *           （**用户的与云端的共用这一条**：指针说 `origin` + 认 `path` / `fileName`）
-   *   切片器   `getSlicerCopied().includes(assetId)`   → 已复制 / 未复制
+   *   切片器   `getSlicerCopied().includes(fileName)`  → 已放入 / 未放入
+   *           （**每一个账号目录里都有**才算：切片器读的是当前登录那个账号的那一份）
    *
    * 原来这里是四档 `status`，但本地表实际只有「生效 / 没生效」两档，而那四档里的
    * `ready`（本地有）对切片器是句废话 —— 在本机不等于切片器看得见它。
@@ -1919,7 +1931,7 @@ export interface PresetRowsInput {
   /** `api.getLocalFiles()` 的结果（同样是固定演示集合） */
   localIds: Set<string>
   /**
-   * `api.getSlicerCopied()` 的结果：**已经复制到切片器 profile 目录**的**文件名**
+   * `api.getSlicerCopied()` 的结果：**已经放进切片器每一个账号目录**的**文件名**
    * （2026-10-09 起，与下载 / 应用 / 读正文同一个取用口径）。
    *
    * 和 `localIds` 是两件事 —— 在本机不等于切片器看得见它。切片器行的「生效」只看这一个。

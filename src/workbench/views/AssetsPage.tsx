@@ -51,6 +51,8 @@ interface Props {
   /** 身份筛选的预选（检查报告的「孤儿文件」跳过来就替人筛好「可选」，C14 第二十七轮） */
   initialAssign?: string | null
   onGoto: (view: string, focus?: GotoFocus) => void
+  /** 写完一笔结构编辑就重取外壳的整本与事务状态（同套餐页那条） */
+  onBookRefresh: () => void
   /**
    * 草稿写入口（改交付身份走它 —— 可见性是唯一进参数草稿的动作，带撤销）。
    *
@@ -147,7 +149,15 @@ const CALIB_MODES: { id: string; label: string }[] = [
 
 const calibLegal = (v: string) => CALIB_MODES.some((m) => m.id === v)
 
-export default function AssetsPage({ words, tick, initialSel, initialAssign, onGoto, onApply }: Props) {
+export default function AssetsPage({
+  words,
+  tick,
+  initialSel,
+  initialAssign,
+  onGoto,
+  onApply,
+  onBookRefresh,
+}: Props) {
   const [list, setList] = useState<AssetList | null>(null)
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof wb.assetUsage>> | null>(null)
   /** 检查面板（第四刀）：盘上那个文件的样子 —— 选中一条才问（重字段要读真实字节） */
@@ -342,12 +352,14 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
     }
   }
 
-  /** 改交付档位（download ↔ bundled）。即时落盘（清单编辑，不走参数草稿） */
+  /** 改交付档位（download ↔ bundled）。走草稿（保存后写入）（清单编辑，不走参数草稿） */
   const applyDelivery = async (id: string, v: 'download' | 'bundled') => {
     try {
       setList(await wb.setAssetDelivery(id, v))
       /* 清单动过了 ⇒ 敲一下信号：标注台那些常驻页要重取（见 `assetsBus.ts`） */
       assetsBus.bump()
+      /* 这一笔是结构草稿：外壳那份「未保存 N」得当场跟上，不能等 800ms 轮询 */
+      onBookRefresh()
       toasts.push(
         v === 'bundled'
           ? `已把 ${id} 设为随包（构建期打进客户端，客户端不再单独下载）`

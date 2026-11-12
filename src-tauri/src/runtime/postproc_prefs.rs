@@ -63,6 +63,34 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
 
     /* 热床预涂胶同理：`bed_glue.go` 那一套的开关也住在 `state` 这一带，
     这里先只写 `prefs`（生成器读的是它）。等 `state` 那边加了字段再一并写。 */
+
+    /* 调试模式：开关打开时把这一趟的动作参数塞进 IR。
+     * `None` 才是正常后处理 —— 关掉开关必须把它清回 `None`，否则上一次调试的参数会留在
+     * 复用同一个 IR 的下一趟里。 */
+    ir.debug = if prefs.debug_mode_enabled {
+        Some(postprocess::ir::types::DebugIr {
+            wait_x: prefs.debug_wait_x,
+            wait_y: prefs.debug_wait_y,
+            mount_wait_x: prefs.debug_mount_wait_x,
+            mount_wait_y: prefs.debug_mount_wait_y,
+            unmount_wait_x: prefs.debug_unmount_wait_x,
+            unmount_wait_y: prefs.debug_unmount_wait_y,
+            mount_y: prefs.debug_mount_y,
+            unmount_y: prefs.debug_unmount_y,
+            mount_x: prefs.debug_mount_x,
+            unmount_x: prefs.debug_unmount_x,
+            speed: prefs.debug_speed,
+            test_mount: true,
+            test_unmount: true,
+            custom_gcode: prefs.debug_custom_gcode.clone(),
+            travel_speed: prefs.debug_travel_speed,
+            use_travel_speed: prefs.debug_use_travel_speed,
+            repeat: prefs.debug_repeat,
+            move_y: prefs.debug_move_y,
+        })
+    } else {
+        None
+    };
 }
 
 #[cfg(test)]
@@ -158,10 +186,31 @@ mod tests {
             skip_vibration_calibration: true,
             begin_stage_retract_enabled: false,
             begin_stage_retract_z_lift_mm: 42,
+            debug_mode_enabled: false,
+            debug_wait_x: 20.0,
+            debug_mount_wait_x: Some(256.0),
+            debug_mount_x: 267.0,
+            debug_unmount_wait_x: Some(256.0),
+            debug_unmount_x: 276.0,
+            debug_speed: 10000.0,
+            /* 落笔 / 收笔的 Y 为 `None` = 跟随各自那一档等待位，与界面上的「跟随」勾一致 */
+            debug_wait_y: 0.0,
+            debug_mount_wait_y: None,
+            debug_mount_y: None,
+            debug_unmount_wait_y: None,
+            debug_unmount_y: None,
+            debug_custom_gcode: None,
+            debug_travel_speed: 30000.0,
+            debug_use_travel_speed: false,
+            debug_repeat: 1,
+            debug_move_y: false,
             z_calibration_dwell_sec: 7,
             xy_calibration_dwell_sec: 9,
             bed_glue_enabled: true,
             bed_glue_all_models: true,
+            /* 强制校准模式**不进 IR**：它只在钩子那一步参与"这一盘是什么校准件"的定案
+             * （`decide_calibration`），管线里没有对应的格 —— 写进来是给人看的。 */
+            force_calibration_mode: false,
             auto_tower_position: TowerRelocateMode::Auto,
         };
         let mut ir = Ir::default();

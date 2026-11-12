@@ -1,0 +1,103 @@
+/*
+ * 浅色窗底：铺满 `.shell`，盖住 `::before` 那三层浅色渐变；深色时组件不渲染。
+ * 与 `::before` 同为 z-index 0，靠 DOM 顺序压在它上面，内容又在它上面。
+ *
+ * 波浪是一张离线算好的 SVG 背景（`assets/hero/breeze-light.svg`，无滤镜），
+ * 整层只用 transform 做极慢循环；运行时没有逐帧计算，也没有 SVG 模糊。
+ */
+.root {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateZ(0);
+  background: #fcfdfc;
+}
+
+/*
+ * 调板确认的「我的方案」：椭圆径向底色 + 色阶抖动 + 原版流动线条，
+ * 由离线 SVG 资源提供；运行时仍只做整层极慢呼吸。
+ */
+.waves {
+  position: absolute;
+  inset: 0;
+  background: url('../assets/hero/breeze-tuned-base.svg') center / 100% 100% no-repeat;
+  animation: breeze-breathe 48s ease-in-out infinite;
+}
+
+.decor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.dots {
+  animation: dots-float 22s ease-in-out infinite;
+}
+
+.leaf {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: leaf-sway var(--leaf-duration, 24s) ease-in-out var(--leaf-delay, 0s) infinite;
+}
+
+.leafShimmer {
+  animation: leaf-shimmer 9s ease-in-out infinite;
+}
+
+@keyframes breeze-breathe {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes dots-float {
+  0%,
+  100% {
+    transform: translate(0, 0);
+    opacity: 0.72;
+  }
+  50% {
+    transform: translate(-10px, 7px);
+    opacity: 1;
+  }
+}
+
+@keyframes leaf-sway {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  35% {
+    transform: translate(var(--leaf-sway-x, 12px), var(--leaf-sway-y, -6px));
+  }
+  70% {
+    transform: translate(calc(var(--leaf-sway-x, 12px) * -0.55), calc(var(--leaf-sway-y, -6px) * -0.6));
+  }
+}
+
+@keyframes leaf-shimmer {
+  0%,
+  100% {
+    opacity: 0.12;
+  }
+  50% {
+    opacity: 0.52;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waves,
+  .dots,
+  .leaf,
+  .leafShimmer {
+    animation: none;
+  }
+}

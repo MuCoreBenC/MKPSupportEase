@@ -66,6 +66,66 @@ function devPostProcessRun(): PostProcessRun | null {
     }
   }
 
+  /*
+   * 带警告的结果屏（2026-11-08）：警告住在**上面那张 hero 卡**里，框身里不再另起一块。
+   * 这一屏就是探针拿来量"多了一页警告，框还是一样高"的那一屏
+   * （`?pp=warn`；钮在左下角，警告 ↔ 信息）。
+   */
+  if (which === 'warn') {
+    return {
+      ...base,
+      question: null,
+      finished: {
+        ok: true,
+        cancelled: false,
+        message: t('mock.ask.done'),
+        code: null,
+        stage: null,
+        exitCode: 0,
+        elapsedMs: 11_840,
+        output: null,
+        warnings: [
+          /* 与内核那一条**逐字一致**（`messages.toml` 的 `postproc.scarf_joint_seam`）：
+             这一屏就是量"那句话在这张卡里放不放得下"的，抄短了等于没量。
+             四本字典里都要同步（真机上这句由内核按语言给，这里只是浏览器里没有后端）。 */
+          t('mock.warn.scarf'),
+        ],
+        result: { penX: -1, penY: 18.6, penZ: 3.8, glueSpeed: 70 },
+      },
+    }
+  }
+
+  /*
+   * **可变层高**那一屏（2026-11-08）：`result.layerHeightMin/Max` 两头不一样 ⇒
+   * 「层高」那一格摆 `0.08 – 0.28 mm`；固定层高那几屏（`?pp=result` 等）不给这两格，
+   * 摆的就是标称的 `0.20 mm`。真机上这两个数由 pass1 数 `; Z_HEIGHT:` 量出来。
+   */
+  if (which === 'vh') {
+    return {
+      ...base,
+      question: null,
+      finished: {
+        ok: true,
+        cancelled: false,
+        message: t('mock.ask.done'),
+        code: null,
+        stage: null,
+        exitCode: 0,
+        elapsedMs: 11_840,
+        output: null,
+        warnings: [],
+        result: {
+          penX: -1,
+          penY: 18.6,
+          penZ: 3.8,
+          glueSpeed: 70,
+          layerHeightMin: 0.08,
+          layerHeightMax: 0.28,
+        },
+      },
+    }
+  }
+
   if (which === 'mismatch') {
     return {
       ...base,
@@ -211,7 +271,9 @@ import {
   reportSummaries,
   resolveParams,
   resolveVersionFiles,
+  removeSlicerCopiesIn,
   slicerCopied,
+  slicerPlacements,
   slicerPresetText,
 } from './mockServer'
 
@@ -1553,7 +1615,8 @@ export const mockApi: MkpApi = {
    *
    * ★ 只有 **dev 且 URL 带 `?pp=…`** 时给一份假快照 —— 那是给探针用的
    *   （`scripts/probes/pp-modal-height.mjs`：量「结果」与「挪塔那一问」两屏是不是一样高）。
-   *   `?pp=result` / `?pp=relocate` / `?pp=mismatch`。生产构建里这函数直接 `null`
+   *   `?pp=result` / `?pp=warn` / `?pp=vh`（可变层高）/ `?pp=relocate` / `?pp=mismatch`。
+   *   生产构建里这函数直接 `null`
    *   （`import.meta.env.DEV` 在 build 里是常量 false，整段被摇掉）。
    */
   async getPostProcessRun(): Promise<PostProcessRun | null> {
@@ -1804,6 +1867,57 @@ export const mockApi: MkpApi = {
       'restoreBackup',
       t('mock.preview.noRestore'),
     )
+  },
+
+  /**
+   * 备份框的默认落点。浏览器里没有"系统桌面"这回事：给一个**看得出来是演示**的位置，
+   * 与导出计划里那个假桌面同住 `${HOME}/Desktop`。
+   */
+  async defaultBackupDir() {
+    return '/Users/wzy/Desktop'
+  },
+
+  /** 「打开位置」在浏览器里没有系统文件管理器：照实说它在真机上会定位哪一份 */
+  async revealBackup(path) {
+    throw new Error(t('mock.reveal.finder', { path }))
+  },
+
+  /* ——— 交互记录 + 导出日志（2026-11-12）———
+     浏览器里没有 `ui.log`，也没有盘上的日志目录：清单给一份**看得出是演示**的
+     假数据（最近三天、三条流各一份），导出照常走完流程，落点还是那个假桌面。 */
+  async logUiEvents() {},
+
+  async logExportPlan() {
+    const day = (offset: number) => {
+      const d = new Date(Date.now() - offset * 86_400_000)
+      return d.toISOString().slice(0, 10)
+    }
+    const files = [2, 1, 0].flatMap((offset) =>
+      (['app', 'ui', 'hook'] as const).map((stream) => ({
+        name: `${stream === 'app' ? 'supportease.log' : `${stream}.log`}.${day(offset)}`,
+        stream,
+        day: day(offset),
+        bytes: stream === 'hook' ? 4_096 : 18_432,
+      })),
+    )
+    return {
+      files,
+      bytes: files.reduce((sum, f) => sum + f.bytes, 0),
+      from: day(2),
+      to: day(0),
+    }
+  },
+
+  async defaultLogDir() {
+    return '/Users/wzy/Desktop'
+  },
+
+  async exportLogs(dir) {
+    return { path: `${dir}/MKP-Logs-demo.zip`, files: 9, bytes: 122_880 }
+  },
+
+  async revealLogExport(path) {
+    throw new Error(t('mock.reveal.finder', { path }))
   },
 
   /** 云端线：另存成 `presets-local/<原名>（已修改）.toml`（与 Rust 侧 `local::edited_name` 同一条规则） */
@@ -2359,10 +2473,19 @@ export const mockApi: MkpApi = {
     return slicerCopied()
   },
 
-  async copyToSlicer(fileName) {
-    /* 只改内存，刷新还原。传错类型会抛 —— 静默成功比报错难查得多。
-       同一份复制第二遍就是「替换」（真机上切片器目录里那份被换成我们这份） */
-    return { replaced: copyToSlicerIn(fileName) }
+  async getSlicerPlacements(fileName) {
+    return slicerPlacements(fileName)
+  },
+
+  async copyToSlicer(fileName, slicer, account) {
+    /* 只改内存，刷新还原。传错类型 / 认不出的切片器或账号会抛 —— 静默成功比报错难查得多。
+       同一份再放一遍就是「替换」（真机上切片器目录里那份被换成我们这份） */
+    return copyToSlicerIn(fileName, slicer, account)
+  },
+
+  async removeSlicerCopies(fileName) {
+    /* 同上：只改内存；返回删了几份（真机上就是那几个账号目录里的同名文件） */
+    return removeSlicerCopiesIn(fileName)
   },
 
   /*
@@ -2687,7 +2810,15 @@ export const mockApi: MkpApi = {
    * 所以「使用内置云端源」在这里 = 回到"没配"。
    */
   async getPresetSource() {
-    return mockSource
+    /*
+     * 名字**每次读的时候按当前语言现拼**（真机就是这样：`runtime::source::label()`
+     * 现取文案表）。存成旧字符串的话，「切了界面语言、源的名字不跟着翻」这个毛病
+     * 在浏览器里就演示不出来，也就验不了设置页那条重读。
+     */
+    if (mockSource === null) return null
+    return mockSource.mode === 'custom'
+      ? { ...mockSource, label: t('mock.settings.customUrl') }
+      : mockSource
   },
 
   async setPresetSource(mode, customUrl) {
@@ -2811,11 +2942,29 @@ export const mockApi: MkpApi = {
       glueBottomEnabled: mockPostproc.glueBottomEnabled ?? false,
       skipVibrationCalibration: mockPostproc.skipVibrationCalibration ?? false,
       beginStageRetractEnabled: mockPostproc.beginStageRetractEnabled ?? true,
-      beginStageRetractZLiftMm: mockPostproc.beginStageRetractZLiftMm ?? 30,
+      beginStageRetractZLiftMm: mockPostproc.beginStageRetractZLiftMm ?? 5,
+      debugModeEnabled: mockPostproc.debugModeEnabled ?? false,
+      debugWaitX: mockPostproc.debugWaitX ?? 20,
+      debugMountWaitX: mockPostproc.debugMountWaitX ?? null,
+      debugMountX: mockPostproc.debugMountX ?? 267,
+      debugUnmountWaitX: mockPostproc.debugUnmountWaitX ?? null,
+      debugUnmountX: mockPostproc.debugUnmountX ?? 276,
+      debugSpeed: mockPostproc.debugSpeed ?? 10000,
+      debugWaitY: mockPostproc.debugWaitY ?? 0,
+      debugMountWaitY: mockPostproc.debugMountWaitY ?? null,
+      debugMountY: mockPostproc.debugMountY ?? null,
+      debugUnmountWaitY: mockPostproc.debugUnmountWaitY ?? null,
+      debugUnmountY: mockPostproc.debugUnmountY ?? null,
+      debugMoveY: mockPostproc.debugMoveY ?? false,
+      debugRepeat: mockPostproc.debugRepeat ?? 1,
+      debugTravelSpeed: mockPostproc.debugTravelSpeed ?? 30000,
+      debugUseTravelSpeed: mockPostproc.debugUseTravelSpeed ?? false,
+      debugCustomGcode: mockPostproc.debugCustomGcode ?? null,
       zCalibrationDwellSec: mockPostproc.zCalibrationDwellSec ?? 2,
       xyCalibrationDwellSec: mockPostproc.xyCalibrationDwellSec ?? 3,
       bedGlueEnabled: mockPostproc.bedGlueEnabled ?? false,
       bedGlueAllModels: mockPostproc.bedGlueAllModels ?? false,
+      forceCalibrationMode: mockPostproc.forceCalibrationMode ?? false,
       autoTowerPosition: mockPostproc.autoTowerPosition ?? 'ask',
     }
     return {
@@ -2871,7 +3020,15 @@ export const mockApi: MkpApi = {
   },
 
   async setLocale(locale: LocalePref) {
-    if (locale !== 'system' && locale !== 'zh-CN' && locale !== 'en') {
+    /* 四本字典就四种语言（`LocalePref` 里的 `system` 另算）：演示里少一档就等于
+       "切到日语没反应"，看着像产品坏了 —— 认档跟真机同一个集合 */
+    if (
+      locale !== 'system' &&
+      locale !== 'zh-CN' &&
+      locale !== 'zh-TW' &&
+      locale !== 'ja' &&
+      locale !== 'en'
+    ) {
       throw new Error(t('mock.settings.badLocale', { value: locale }))
     }
     mockLocale = locale
@@ -3334,7 +3491,8 @@ export const mockApi: MkpApi = {
       hasUpdate: MOCK_NEW_VERSION !== MOCK_APP_VERSION,
       currentVersion: MOCK_APP_VERSION,
       latestVersion: MOCK_NEW_VERSION,
-      notes: t('mock.demo.updateChain'),
+      /* ★ 不给 `notes`：真机上这一格来自 release.json 的发布说明，没有就是没有。
+         预览里塞一句「演示：…」会让版面多出一行、跟真机对不上（作者 2026-11-11）。 */
       url: 'https://example.com/supportease/releases',
       /* 演示带安装包 ⇒ 界面会摆「在应用内下载」；删掉这一格就退回"打开下载页" */
       asset: {
@@ -3349,7 +3507,7 @@ export const mockApi: MkpApi = {
         {
           channel: 'stable',
           version: MOCK_NEW_VERSION,
-          notes: t('mock.demo.updateChain'),
+          /* 同上：不塞演示说明，卡里那一行与真机一样只在真有 notes 时出现 */
           url: 'https://example.com/supportease/releases',
           asset: {
             name: 'SupportEase_demo.app.zip',

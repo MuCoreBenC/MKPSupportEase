@@ -157,7 +157,7 @@ export function PresetFilter({
               }}
             >
               <span className={s.check} aria-hidden>
-                ✓
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </span>
               {allMenuText}
               {allMeta !== undefined && <span className={s.mid}>{allMeta}</span>}
@@ -174,7 +174,7 @@ export function PresetFilter({
                 }}
               >
                 <span className={s.check} aria-hidden>
-                  ✓
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 </span>
                 {o.label}
                 {o.meta !== undefined && <span className={s.mid}>{o.meta}</span>}

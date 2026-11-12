@@ -39,7 +39,8 @@ use classifier::{LineClass, classify_line};
 use glue_block::emit_glue_block;
 use metadata::filament_type_from_line;
 use scan::{
-    detect_variable_layer_height, find_prev_position_cmd, strip_e_from_g1, trim_end_idx_before_wipe,
+    detect_variable_layer_height, find_prev_position_cmd, layer_height_range, strip_e_from_g1,
+    trim_end_idx_before_wipe,
 };
 use validity::check_validity_interface_set;
 
@@ -133,6 +134,14 @@ pub struct ProcessStats {
     pub total_z_height_layers: i64,
     #[serde(rename = "variableLayerHeight")]
     pub variable_layer_height: bool,
+    /// 层厚的**最小 / 最大**（mm）—— 可变层高时两头不一样，界面「层高」那一格摆 `min – max`。
+    ///
+    /// `0` = 量不出来（层数太少），界面退回切片器标称那个数。取法见
+    /// [`crate::postproc::pass1::scan::layer_height_range`]。
+    #[serde(rename = "layerHeightMin", default)]
+    pub layer_height_min: f64,
+    #[serde(rename = "layerHeightMax", default)]
+    pub layer_height_max: f64,
     #[serde(rename = "originalPrintTime")]
     pub original_print_time: String,
     #[serde(rename = "totalLayerNumber")]
@@ -1277,6 +1286,11 @@ pub fn first_pass(
     crate::ir::fill_defaults(ir_data);
     tracing::info!(valid = valid_count, invalid = invalid_count, "Pass1完成");
     stats.variable_layer_height = detect_variable_layer_height(&z_height_values);
+    /* 层高范围（界面那一格）：可变层高时摆 `min – max`，见 `layer_height_range` 的窗口口径 */
+    if let Some((min, max)) = layer_height_range(&z_height_values) {
+        stats.layer_height_min = min;
+        stats.layer_height_max = max;
+    }
 
     Ok(Pass1Output {
         lines: sink.lines,

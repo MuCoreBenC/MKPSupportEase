@@ -188,6 +188,56 @@ text_ja = "モデルが接着剤の範囲を超えています、{sides}"
 slicer = "模型超出涂胶范围，{sides} —— 回切片器挪一下模型再切"
 params = ["sides"]
 
+# ---------------------------------------------------------------- 内核警告（W_*：跑完了，但有件事用户必须知道）
+#
+# 不是故障：这一趟成功了，句子进 `ir.warnings`，由钩子原样摆到模态框、执行记录、
+# 报告页。**不许**在业务代码里拼中文 —— 那样英文 / 日文界面会突然夹一句中文。
+
+["postproc.scarf_joint_seam"]
+code = "W_SCARF_JOINT_SEAM_001"
+text = "这份文件开了斜拼接缝，Bambu Studio 2.7.1 及以后的版本会漏掉一部分：预览只显示一半，打印出来也可能缺一块。建议切片时把「斜拼接缝」关掉重切一次；不方便改就换 2.6.0 及更早的版本。"
+text_en = "This file uses scarf joint seams. Bambu Studio 2.7.1 and later can drop part of it: the preview shows only half, and the printed part may be missing a chunk. Turn scarf seams off and slice again, or use 2.6.0 or earlier."
+text_zh_tw = "這份檔案開了斜拼接縫，Bambu Studio 2.7.1 及以後的版本會漏掉一部分：預覽只顯示一半，列印出來也可能缺一塊。建議切片時把「斜拼接縫」關掉重切一次；不方便改就換 2.6.0 及更早的版本。"
+text_ja = "このファイルは斜め継ぎ目が有効です。Bambu Studio 2.7.1 以降では一部が欠けます：プレビューは半分しか表示されず、印刷物も欠けることがあります。スライス時に斜め継ぎ目をオフにして切り直すか、2.6.0 以前をご利用ください。"
+note = "说人话：**不写「层表」「后处理」这些内部机制**，只说用户看得见的（预览少一半 / 打印缺一块）与两条处置。处置**顺序就是优先级**（先关开关 → 再退版本），别把换旧版排第一。四句话都压到「模态框那张 104px 的 hero 卡里放得下三行」为止 —— 每加一句都要回去量（`?pp=warn` 那一屏 + scripts/probes/pp-modal-height.mjs 同款量法）。分界 2.7.1 来自 BackgroundSlicingProcess.cpp 的比对；2.9.1 仍然坏，所以只说「换旧版」，不许写「升级就好」。"
+# 改口吻之前的旧句（报告页翻老记录时靠这几句认回本条，见 `key_of_exact_text`）。
+# 第一条是 2026-11-08 那次 `-dirty` 构建写进执行记录的原话（带 markdown 记号），
+# 后四条是 `b3038e3` 里那一版四语言。**新写法不要再往这里加** —— 这张表是历史，不是草稿本。
+legacy = [
+  "成品把 `; has_scarf_joint_seam` 置成了 0：Bambu Studio 只在这一格为 1 时按 `; CHANGE_LAYER` 定层，那种层表会让预览把模型与擦料塔的上半截画不出来。置 0 后它按 Z 平台段数层 —— 层数会比模型层数多（斜接缝的 Z 斜坡被逐段数开），但每一段都对得上实际几何。",
+  "这个件开了斜拼接缝。Bambu Studio 会在「切片完成」的那一屏沿用切片时的层表（它跑完后处理只更新走线、不更新层表），于是预览只画得出半截 —— 这是 Bambu 的缺陷，文件本身没问题。成品已把 `; has_scarf_joint_seam` 置 0，**重新打开（或拖入）这份 G-code** 就能看到完整图形；那一屏的层数会比模型层数多，因为斜接缝的 Z 斜坡被逐段数开了。",
+  "本次切片开启了斜拼接缝。Bambu Studio 2.7.1 及以后版本在后处理后不刷新层表，已确认会导致打印成品缺失。建议优先关闭斜拼接缝，或改用 2.6.0 及更早版本，或等待官方修复。",
+  "Scarf joint seam is on. Bambu Studio 2.7.1+ leaves the layer table stale, so printed parts come out broken. Turn the seam off, use 2.6.0 or earlier, or wait for an official fix.",
+  "本次切片開啟了斜拼接縫。Bambu Studio 2.7.1 及以後版本在後處理後不更新層表，已確認會造成列印成品缺失。建議優先關閉斜拼接縫，或改用 2.6.0 及更早版本，或等待官方修復。",
+  "斜め継ぎ目が有効です。Bambu Studio 2.7.1 以降は後処理後にレイヤー表を更新せず、印刷物が欠けます。斜め継ぎ目をオフにするか、2.6.0 以前を使うか、公式修正をお待ちください。",
+]
+
+["postproc.header_layer_declared"]
+code = "W_HEADER_LAYER_001"
+text = "这个文件没写总层数，已按实际的 {layers} 层补上。"
+text_en = "This file had no total layer count, so it now says {layers} layers — the number actually in the file."
+text_zh_tw = "這個檔案沒寫總層數，已按實際的 {layers} 層補上。"
+text_ja = "このファイルには総層数の記載がなかったため、実際の {layers} 層で補いました。"
+params = ["layers"]
+note = "层数声明补写：采集侧按实测层数写回去，报告与文件说同一个数（见 pipeline 的 `finalized.layers`）。**不写 G-code 里的注释名**（`; total layer number:` 是内部写法，用户看不懂）"
+
+["postproc.range_check.first_pen"]
+code = "W_RANGE_FIRST_PEN_001"
+text = "涂胶的路径超出了这台机器能走到的范围"
+text_en = "The glue path goes beyond what this machine can reach"
+text_zh_tw = "塗膠的路徑超出了這台機器能走到的範圍"
+text_ja = "接着剤の経路がこの機種の可動範囲を超えています"
+note = "XY 越界那条警告的**主语**（下面是它的整句），参数 `{source}` 由这里给"
+
+["postproc.range_violation"]
+code = "W_RANGE_VIOLATION_001"
+text = "{source}：往 {dir} 方向最多只能到 {bound} mm，实际要走 {actual} mm"
+text_en = "{source}: it can only reach {bound} mm toward {dir}, but the path needs {actual} mm"
+text_zh_tw = "{source}：往 {dir} 方向最多只能到 {bound} mm，實際要走 {actual} mm"
+text_ja = "{source}：{dir} 方向は {bound} mm までしか動けませんが、{actual} mm 必要です"
+params = ["source", "dir", "actual", "bound"]
+note = "XY 越界：`{dir}` 是 X+/X-/Y+/Y-，`{bound}` 是机型给的边界值。**不再把「机型最大 X」当零件拼进去** —— 那是内部口径，`{dir}` 已经说明了哪一侧。两条都带 mm（坐标值不带单位，用户不知道是毫米还是格）"
+
 # 边界那一句的几个零件（合起来才是上面 `{sides}`）—— 它们同样是文案，所以也住这里
 ["boundary.clause"]
 text = "当前{axis}：{current}mm，允许范围：{limit}"
@@ -281,6 +331,16 @@ text_zh_tw = "已停下（{kind}校準件，沒有選校準方式）—— 原�
 text_ja = "停止しました（{kind}のキャリブレーション造形、実行方法が未選択）— 元ファイルは変更されていません"
 slicer = "校准件没有选校准方式，按你的选择停下：原文件没有被改动"
 params = ["kind"]
+
+["hook.calib_not_recognized"]
+code = "E_CALIB_UNRECOGNIZED_001"
+text = "这一盘不是校准件：外形对不上任何一块校准板。请在设置里关掉「强制校准模式」，再正常后处理。"
+text_en = "This plate isn't a calibration part — its shape doesn't match any calibration plate. Turn off “Force calibration mode” in the settings, then post-process normally."
+text_zh_tw = "這一盤不是校準件：外形對不上任何一塊校準板。請在設定裡關掉「強制校準模式」，再正常後處理。"
+text_ja = "このプレートはキャリブレーション造形ではありません（形状がどのキャリブレーション板とも一致しません）。設定で「強制キャリブレーションモード」をオフにしてから、通常の後処理を行ってください。"
+slicer = "不是校准件 —— 请在设置里关闭强制校准模式，再正常后处理"
+params = []
+note = "2026-11-12：**强制校准模式**（设置页开关）开着、而这一盘的实测外形对不上任何一块校准板时报这一条。此时**停下、原文件不动** —— 静默降级成普通模型会把校准板当模型打出来。句子写两件事：不是校准件 + 下一步（去关开关）；不写包围盒、footprint 这些内部判据"
 
 ["hook.calib_done_print"]
 code = "N_CALIB_PRINT_001"
@@ -410,49 +470,49 @@ params = ["text"]
 # 归档那一路的降级警告（产物优先：这些句子的意思都是"记录没落成，但 G-code 是好的"）
 ["hook.archive_unavailable"]
 code = "W_ARCHIVE_UNAVAILABLE_001"
-text = "归档不可用：找不到应用数据目录（这一次不落执行记录）"
-text_en = "Archive unavailable: cannot find the application data folder (no run record was written this time)"
-text_zh_tw = "歸檔不可用：找不到應用資料目錄（這一次不落執行記錄）"
-text_ja = "アーカイブを利用できません：アプリのデータディレクトリが見つかりません（今回は実行記録を残しません）"
+text = "这次没留下执行记录：找不到保存位置。G-code 已经处理好了。"
+text_en = "No run record was kept this time: the save location could not be found. The G-code was processed fine."
+text_zh_tw = "這次沒留下執行記錄：找不到儲存位置。G-code 已經處理好了。"
+text_ja = "今回は実行記録を残せませんでした：保存先が見つかりません。G-code の処理は完了しています。"
 
 ["hook.archive_backup_failed"]
 code = "W_ARCHIVE_BACKUP_001"
-text = "原件备份失败（这一次不落执行记录）：{detail}"
-text_en = "Failed to back up the original (no run record was written this time): {detail}"
-text_zh_tw = "原件備份失敗（這一次不落執行記錄）：{detail}"
-text_ja = "原本のバックアップに失敗（今回は実行記録を残しません）：{detail}"
+text = "原文件没能备份，这次没留下执行记录（{detail}）。G-code 已经处理好了。"
+text_en = "The original file could not be backed up, so no run record was kept ({detail}). The G-code was processed fine."
+text_zh_tw = "原檔案沒能備份，這次沒留下執行記錄（{detail}）。G-code 已經處理好了。"
+text_ja = "元ファイルをバックアップできなかったため、今回は実行記録を残していません（{detail}）。G-code の処理は完了しています。"
 params = ["detail"]
 
 ["hook.archive_output_failed"]
 code = "W_ARCHIVE_OUTPUT_001"
-text = "输出归档失败：{detail}"
-text_en = "Failed to archive the output: {detail}"
-text_zh_tw = "輸出歸檔失敗：{detail}"
-text_ja = "出力のアーカイブに失敗：{detail}"
+text = "处理后的文件没能存进记录里（{detail}）。"
+text_en = "The processed file could not be stored with the record ({detail})."
+text_zh_tw = "處理後的檔案沒能存進記錄裡（{detail}）。"
+text_ja = "処理後のファイルを記録に保存できませんでした（{detail}）。"
 params = ["detail"]
 
 ["hook.archive_fact_failed"]
 code = "W_ARCHIVE_FACT_001"
-text = "输出文件事实读不出来：{detail}"
-text_en = "Cannot read the output file facts: {detail}"
-text_zh_tw = "輸出檔案事實讀不出來：{detail}"
-text_ja = "出力ファイルの情報を読み取れません：{detail}"
+text = "读不出处理后文件的信息（{detail}）。"
+text_en = "Could not read the details of the processed file ({detail})."
+text_zh_tw = "讀不出處理後檔案的資訊（{detail}）。"
+text_ja = "処理後のファイルの情報を読み取れませんでした（{detail}）。"
 params = ["detail"]
 
 ["hook.archive_sha_failed"]
 code = "W_ARCHIVE_SHA_001"
-text = "输出文件摘要算不出来：{detail}"
-text_en = "Cannot compute the output file digest: {detail}"
-text_zh_tw = "輸出檔案摘要算不出來：{detail}"
-text_ja = "出力ファイルのダイジェストを計算できません：{detail}"
+text = "算不出处理后文件的校验值（{detail}）。"
+text_en = "Could not compute a checksum for the processed file ({detail})."
+text_zh_tw = "算不出處理後檔案的校驗值（{detail}）。"
+text_ja = "処理後のファイルのチェックサムを計算できませんでした（{detail}）。"
 params = ["detail"]
 
 ["hook.archive_meta_failed"]
 code = "W_ARCHIVE_META_001"
-text = "执行记录写入失败：{detail}"
-text_en = "Failed to write the run record: {detail}"
-text_zh_tw = "執行記錄寫入失敗：{detail}"
-text_ja = "実行記録の書き込みに失敗：{detail}"
+text = "执行记录没写成（{detail}）。G-code 已经处理好了。"
+text_en = "The run record could not be written ({detail}). The G-code was processed fine."
+text_zh_tw = "執行記錄沒寫成（{detail}）。G-code 已經處理好了。"
+text_ja = "実行記録を書き込めませんでした（{detail}）。G-code の処理は完了しています。"
 params = ["detail"]
 
 # ---------------------------------------------------------------- 结论行的框子
@@ -757,6 +817,83 @@ text = "那份备份不在了 —— 重新挑一份"
 text_en = "That backup is gone — pick another one"
 text_zh_tw = "那份備份不在了 —— 重新挑一份"
 text_ja = "そのバックアップは存在しません — 選び直してください"
+
+["ui.ipc.backup.041"]
+text = "这一步没能收回来 —— 再试一次（细节在日志里）"
+text_en = "This step didn’t come back — try again (details are in the log)"
+text_zh_tw = "這一步沒能收回來 —— 再試一次（細節在日誌裡）"
+text_ja = "この処理を回収できませんでした — もう一度お試しください（詳細はログにあります）"
+
+["ui.ipc.backup.042"]
+text = "定位备份要给一个 zip 文件的绝对路径"
+text_en = "Locating a backup needs an absolute path to a zip file"
+text_zh_tw = "定位備份要給一個 zip 檔案的絕對路徑"
+text_ja = "バックアップの位置を開くには zip ファイルの絶対パスが必要です"
+
+["ui.ipc.backup.043"]
+text = "那份备份不在了（{v1}）—— 重新打一份"
+text_en = "That backup is gone ({v1}) — make a new one"
+text_zh_tw = "那份備份不在了（{v1}）—— 重新做一份"
+text_ja = "そのバックアップは存在しません（{v1}）— 新しく作成してください"
+params = ["v1"]
+
+["ui.ipc.backup.044"]
+text = "建不出备份文件夹（{v1}）"
+text_en = "Couldn’t create the backup folder ({v1})"
+text_zh_tw = "建不出備份資料夾（{v1}）"
+text_ja = "バックアップフォルダーを作成できません（{v1}）"
+params = ["v1"]
+
+["ui.ipc.backup.045"]
+text = "打不开那个文件夹 —— 去系统里看一眼"
+text_en = "Couldn’t open that folder — take a look in your file manager"
+text_zh_tw = "打不開那個資料夾 —— 去系統裡看一下"
+text_ja = "そのフォルダーを開けませんでした — ファイルマネージャーで確認してください"
+
+["ui.ipc.backup.046"]
+text = "不认识的恢复范围：{v1}"
+text_en = "Unknown restore scope: {v1}"
+text_zh_tw = "不認識的還原範圍：{v1}"
+text_ja = "不明な復元範囲：{v1}"
+params = ["v1"]
+
+["ui.ipc.log.001"]
+text = "日志包没打成"
+text_en = "Couldn't build the log bundle"
+text_zh_tw = "日誌包沒打成"
+text_ja = "ログのまとめを作成できませんでした"
+
+["ui.ipc.log.002"]
+text = "还没有日志可以导出"
+text_en = "There are no logs to export yet"
+text_zh_tw = "還沒有日誌可以匯出"
+text_ja = "書き出せるログがまだありません"
+
+["ui.ipc.log.003"]
+text = "这个位置写不进去（{v1}）"
+text_en = "Can't write to this location ({v1})"
+text_zh_tw = "這個位置寫不進去（{v1}）"
+text_ja = "この場所に書き込めません（{v1}）"
+params = ["v1"]
+
+["ui.ipc.log.004"]
+text = "定位日志包要给一个 zip 文件的绝对路径"
+text_en = "Locating the log bundle needs an absolute path to a zip file"
+text_zh_tw = "定位日誌包要給一個 zip 檔案的絕對路徑"
+text_ja = "ログのまとめを開くには zip ファイルの絶対パスが必要です"
+
+["ui.ipc.log.005"]
+text = "日志包不在了（{v1}）"
+text_en = "That log bundle is gone ({v1})"
+text_zh_tw = "日誌包不在了（{v1}）"
+text_ja = "そのログのまとめは存在しません（{v1}）"
+params = ["v1"]
+
+["ui.ipc.log.006"]
+text = "打不开那个文件夹"
+text_en = "Couldn't open that folder"
+text_zh_tw = "打不開那個資料夾"
+text_ja = "そのフォルダーを開けませんでした"
 
 ["ui.ipc.bbs.041"]
 text = "{v1} —— 先在 Bambu Studio 里另存一份工艺预设，再回来重扫"
@@ -1290,16 +1427,16 @@ text_ja = "{file_name} はスライサープリセットではありません �
 params = ["file_name"]
 
 ["ui.ipc.presets.122"]
-text = "没找到 Bambu Studio 的用户配置目录（user/*/process）—— 装好切片器、至少打开过一次再来"
-text_en = "Cannot find Bambu Studio’s user profile folder (user/*/process) — install the slicer and open it at least once, then come back"
-text_zh_tw = "沒找到 Bambu Studio 的使用者設定目錄（user/*/process）—— 裝好切片器、至少開啟過一次再來"
-text_ja = "Bambu Studio のユーザー設定フォルダー（user/*/process）が見つかりません — スライサーをインストールして一度起動してからお試しください"
+text = "没找到切片器的用户配置目录（user/<账号>/process）—— 装好切片器、至少打开过一次再来"
+text_en = "Cannot find the slicer’s user profile folder (user/<account>/process) — install the slicer and open it at least once, then come back"
+text_zh_tw = "沒找到切片器的使用者設定目錄（user/<帳號>/process）—— 裝好切片器、至少開啟過一次再來"
+text_ja = "スライサーのユーザー設定フォルダー（user/<アカウント>/process）が見つかりません — スライサーをインストールして一度起動してからお試しください"
 
 ["ui.ipc.presets.123"]
-text = "{file_name} 还没复制进切片器目录 —— 先在行上点「复制」"
-text_en = "{file_name} has not been copied into the slicer folder yet — click Copy on its row first"
-text_zh_tw = "{file_name} 還沒複製進切片器目錄 —— 先在行上點「複製」"
-text_ja = "{file_name} はまだスライサーフォルダーにコピーされていません — 先に行の「コピー」をクリック"
+text = "{file_name} 还没放入切片器目录 —— 先在行上点「放入」"
+text_en = "{file_name} has not been put into the slicer folder yet — click Put in on its row first"
+text_zh_tw = "{file_name} 還沒放入切片器目錄 —— 先在行上點「放入」"
+text_ja = "{file_name} はまだスライサーフォルダーに入っていません — 先に行の「入れる」をクリック"
 params = ["file_name"]
 
 ["ui.ipc.presets.124"]
@@ -1316,37 +1453,71 @@ text_ja = "カタログにこのファイルがありません：{file_name}"
 params = ["file_name"]
 
 ["ui.ipc.presets.126"]
-text = "{file_name} 是 MKP 预设，不用复制到切片器 —— 它走「启用」"
+text = "{file_name} 是 MKP 预设，不用放进切片器 —— 它走「启用」"
 text_en = "{file_name} is an MKP preset and does not go into the slicer — it is used through Enable"
-text_zh_tw = "{file_name} 是 MKP 預設，不用複製到切片器 —— 它走「啟用」"
-text_ja = "{file_name} は MKP プリセットです。スライサーへのコピーは不要 — 「使用」で有効になります"
+text_zh_tw = "{file_name} 是 MKP 預設，不用放進切片器 —— 它走「啟用」"
+text_ja = "{file_name} は MKP プリセットです。スライサーに入れる必要はありません — 「使用」で有効になります"
 params = ["file_name"]
 
 ["ui.ipc.presets.127"]
-text = "{file_name} 不是切片器配置，复制进切片器目录没有意义"
-text_en = "{file_name} is not a slicer profile; copying it into the slicer folder would be meaningless"
-text_zh_tw = "{file_name} 不是切片器設定，複製進切片器目錄沒有意義"
-text_ja = "{file_name} はスライサープリセットではないため、スライサーフォルダーにコピーしても意味がありません"
+text = "{file_name} 不是切片器配置，放进切片器目录没有意义"
+text_en = "{file_name} is not a slicer profile; putting it into the slicer folder would be meaningless"
+text_zh_tw = "{file_name} 不是切片器設定，放進切片器目錄沒有意義"
+text_ja = "{file_name} はスライサープリセットではないため、スライサーフォルダーに入れても意味がありません"
 params = ["file_name"]
 
 ["ui.ipc.presets.128"]
-text = "本机还没有 {file_name} —— 先「下载」再复制"
-text_en = "{file_name} is not on this machine yet — download it, then copy"
-text_zh_tw = "本機還沒有 {file_name} —— 先「下載」再複製"
-text_ja = "本機にまだ {file_name} がありません — 先に「ダウンロード」してからコピーしてください"
+text = "本机还没有 {file_name} —— 先「下载」再放入"
+text_en = "{file_name} is not on this machine yet — download it, then put it in"
+text_zh_tw = "本機還沒有 {file_name} —— 先「下載」再放入"
+text_ja = "本機にまだ {file_name} がありません — 先に「ダウンロード」してから入れてください"
 params = ["file_name"]
 
 ["ui.ipc.presets.129"]
-text = "没找到 Bambu Studio 的用户配置目录（user/*/process）—— 装好切片器、至少打开过一次再来"
-text_en = "Cannot find Bambu Studio’s user profile folder (user/*/process) — install the slicer and open it at least once, then come back"
-text_zh_tw = "沒找到 Bambu Studio 的使用者設定目錄（user/*/process）—— 裝好切片器、至少開啟過一次再來"
-text_ja = "Bambu Studio のユーザー設定フォルダー（user/*/process）が見つかりません — スライサーをインストールして一度起動してからお試しください"
+text = "没找到切片器的用户配置目录（user/<账号>/process）—— 装好切片器、至少打开过一次再来"
+text_en = "Cannot find the slicer’s user profile folder (user/<account>/process) — install the slicer and open it at least once, then come back"
+text_zh_tw = "沒找到切片器的使用者設定目錄（user/<帳號>/process）—— 裝好切片器、至少開啟過一次再來"
+text_ja = "スライサーのユーザー設定フォルダー（user/<アカウント>/process）が見つかりません — スライサーをインストールして一度起動してからお試しください"
 
 ["ui.ipc.presets.130"]
 text = "读不出这一份的字节"
 text_en = "Cannot read the bytes of this copy"
 text_zh_tw = "讀不出這一份的位元組"
 text_ja = "このファイルのバイト列を読み取れません"
+
+["ui.ipc.presets.131"]
+text = "{account} 不是本机的账号目录 —— 切片器那边的目录由本程序扫出来，只认扫到的那几个"
+text_en = "{account} is not an account folder on this machine — the slicer’s folders are scanned by this app, and only those are accepted"
+text_zh_tw = "{account} 不是本機的帳號目錄 —— 切片器那邊的目錄由本程式掃出來，只認掃到的那幾個"
+text_ja = "{account} はこのマシンのアカウントフォルダーではありません — スライサーのフォルダーは本アプリが走査したものだけを使います"
+params = ["account"]
+
+["ui.ipc.presets.132"]
+text = "一个账号目录都没放成 —— 切片器那边可能刚把目录删掉或没有写权限"
+text_en = "Could not put it into a single account folder — the slicer folder may have just been removed, or is not writable"
+text_zh_tw = "一個帳號目錄都沒放成 —— 切片器那邊可能剛把目錄刪掉或沒有寫入權限"
+text_ja = "どのアカウントフォルダーにも入れられませんでした — スライサー側でフォルダーが消えたか、書き込み権限がありません"
+
+["ui.ipc.presets.133"]
+text = "有 {failed} 个账号目录没放成（第一个：{first}）"
+text_en = "{failed} account folder(s) did not get it (first: {first})"
+text_zh_tw = "有 {failed} 個帳號目錄沒放成（第一個：{first}）"
+text_ja = "{failed} 個のアカウントフォルダーに入れられませんでした（最初：{first}）"
+params = ["failed", "first"]
+
+["ui.ipc.presets.134"]
+text = "认不出的切片器：{slicer}（只认 bambu / orca）"
+text_en = "Unknown slicer: {slicer} (only bambu / orca are accepted)"
+text_zh_tw = "認不出的切片器：{slicer}（只認 bambu / orca）"
+text_ja = "不明なスライサー：{slicer}（bambu / orca のみ）"
+params = ["slicer"]
+
+["ui.ipc.presets.135"]
+text = "切片器目录里那份没删成：{file_name}（本地那份已经删了）"
+text_en = "Could not delete the slicer copy of {file_name} (the local copy is already gone)"
+text_zh_tw = "切片器目錄裡那份沒刪成：{file_name}（本機那份已經刪了）"
+text_ja = "{file_name} のスライサー側のコピーを削除できませんでした（ローカル側は削除済み）"
+params = ["file_name"]
 
 ["ui.ipc.report.131"]
 text = "没有这条执行记录：{id}"
@@ -3044,6 +3215,19 @@ text_en = "This zip cannot be read"
 text_zh_tw = "這份 zip 讀不動"
 text_ja = "この zip を読み取れません"
 
+["ui.runtime.backup.368"]
+text = "这份备份里没有预设 —— 换个范围，或重新打一份带预设的"
+text_en = "This backup has no presets — pick another scope, or make a new backup with presets"
+text_zh_tw = "這份備份裡沒有預設 —— 換個範圍，或重新做一份帶預設的"
+text_ja = "このバックアップにはプリセットがありません — 範囲を変えるか、プリセット込みで作り直してください"
+
+["ui.runtime.backup.369"]
+text = "这份备份来自更新的版本（{v1}），当前是 {v2} —— 先升级客户端再恢复"
+text_en = "This backup comes from a newer version ({v1}); this app is {v2}. Update the app before restoring."
+text_zh_tw = "這份備份來自更新的版本（{v1}），目前是 {v2} —— 先升級客戶端再還原"
+text_ja = "このバックアップは新しいバージョン（{v1}）のものです。現在は {v2} です — アプリを更新してから復元してください"
+params = ["v1", "v2"]
+
 ["ui.runtime.baseline.368"]
 text = "血统里的摘要不是一个 sha256：{sha256}"
 text_en = "The digest in the lineage is not a sha256: {sha256}"
@@ -3878,6 +4062,18 @@ text_ja = "ダウンロード完了後に改名できませんでした"
 
 # ── 校准页那几张模型卡（`src-tauri/src/ipc/mod.rs` 的 `MODEL_DEFS`）──────────────
 # 名称与说明直接显示在校准页；这三张卡是预设的一部分，不是日志。
+
+["ui.ipc.calib_models.combined.name"]
+text = "校准模型（二合一）"
+text_en = "Calibration models (two-in-one)"
+text_zh_tw = "校準模型（二合一）"
+text_ja = "キャリブレーションモデル（2-in-1）"
+
+["ui.ipc.calib_models.combined.desc"]
+text = "一个文件装下 Z 与 XY 两块校准板；切哪一盘就按那一盘校准"
+text_en = "One file holds both the Z and the XY calibration plate — each plate runs its own calibration"
+text_zh_tw = "一個檔案裝下 Z 與 XY 兩塊校準板；切哪一盤就按那一盤校準"
+text_ja = "Z と XY のキャリブレーション板を 1 ファイルに収録。切ったプレートごとにその校正を実行します"
 
 ["ui.ipc.calib_models.z.name"]
 text = "Z 轴校准"
@@ -5085,3 +5281,258 @@ text_en = "{rel} could not be read, so its origin could not be recorded — the 
 text_zh_tw = "{rel} 讀不出來，沒法記下它是從哪一份複製來的 —— 這次複製已撤銷，母本沒有動過"
 text_ja = "{rel} を読み取れないため、どのファイルから複製したかを記録できませんでした — この複製は取り消され、元のファイルは変更されていません"
 params = ["rel"]
+
+# ---------------------------------------------------------------- 应用层（src-tauri）剩下的用户可见文案
+#
+# 这一批是 2026-11-08 补的：同批六百多条早已走表（`ui.ipc.*` / `ui.runtime.*` 那些），
+# 这几句是散在代码里没搬的。**日志 / CLI / 开发台 / `AppError.detail` 不在此列** ——
+# 那些是给开发看的，保持中文（作者 2026-11-08：「只是开发者看的话就不需要多语言了」）。
+
+["ui.guide.unavailable"]
+text = "屏幕引导只在 macOS / Windows 上有（要读切片器的窗口坐标）"
+text_en = "On-screen guidance is only available on macOS and Windows (it reads the slicer's window geometry)"
+text_zh_tw = "螢幕引導只在 macOS / Windows 上有（要讀切片器的視窗座標）"
+text_ja = "画面ガイドは macOS / Windows でのみ利用できます（スライサーのウィンドウ座標を読み取ります）"
+
+["ui.guide.no_ax_permission"]
+text = "还没有辅助功能权限：打开「系统设置 → 隐私与安全性 → 辅助功能」，把 SupportEase 勾上"
+text_en = "Accessibility permission is not granted yet: open System Settings → Privacy & Security → Accessibility and turn SupportEase on"
+text_zh_tw = "還沒有輔助使用權限：打開「系統設定 → 隱私權與安全性 → 輔助使用」，把 SupportEase 勾選"
+text_ja = "アクセシビリティ権限がありません：「システム設定 → プライバシーとセキュリティ → アクセシビリティ」で SupportEase をオンにしてください"
+
+["ui.guide.slicer_not_running"]
+text = "没看到切片器在跑 —— 先打开 Bambu Studio，再点「查看引导」"
+text_en = "The slicer does not seem to be running — open Bambu Studio first, then click “View guide”"
+text_zh_tw = "沒看到切片器在執行 —— 先打開 Bambu Studio，再點「查看引導」"
+text_ja = "スライサーが起動していないようです —— 先に Bambu Studio を開いてから「ガイドを見る」を押してください"
+
+["ui.guide.window_unreadable"]
+text = "读不到切片器的窗口（它可能正在启动，稍等一下再试）"
+text_en = "Cannot read the slicer window (it may still be starting; try again in a moment)"
+text_zh_tw = "讀不到切片器的視窗（它可能正在啟動，稍等一下再試）"
+text_ja = "スライサーのウィンドウを取得できません（起動中かもしれません。少し待って再試行してください）"
+
+["ui.guide.no_project_window"]
+text = "切片器没有打开的工程窗口"
+text_en = "The slicer has no project window open"
+text_zh_tw = "切片器沒有開啟的工程視窗"
+text_ja = "スライサーに開いているプロジェクトウィンドウがありません"
+
+["ui.guide.window_pos_unreadable"]
+text = "读不到窗口位置"
+text_en = "Cannot read the window position"
+text_zh_tw = "讀不到視窗位置"
+text_ja = "ウィンドウの位置を取得できません"
+
+["ui.guide.window_size_unreadable"]
+text = "读不到窗口大小"
+text_en = "Cannot read the window size"
+text_zh_tw = "讀不到視窗大小"
+text_ja = "ウィンドウのサイズを取得できません"
+
+["ui.guide.control_unreadable"]
+text = "读不到窗口里的控件"
+text_en = "Cannot read the controls inside the window"
+text_zh_tw = "讀不到視窗裡的控件"
+text_ja = "ウィンドウ内のコントロールを取得できません"
+
+["ui.guide.bed_type_missing"]
+text = "在窗口里没找到板子类型的位置（切片器界面换过了？）—— 这一版的引导暂时指不了"
+text_en = "Could not find the build-plate control in the window (has the slicer UI changed?) — guidance cannot point at it in this version"
+text_zh_tw = "在視窗裡沒找到板子類型的位置（切片器介面換過了？）—— 這一版的引導暫時指不了"
+text_ja = "ウィンドウ内にプレート種類の位置が見つかりません（スライサーの UI が変わった？）—— このバージョンのガイドでは指し示せません"
+
+["ui.guide.control_mismatch"]
+text = "挑出来的控件对不上（不该发生）"
+text_en = "The selected control does not match (this should not happen)"
+text_zh_tw = "挑出來的控件對不上（不該發生）"
+text_ja = "選択したコントロールが一致しません（本来起きないはずです）"
+
+["ui.runtime.path.empty"]
+text = "路径是空的"
+text_en = "The path is empty"
+text_zh_tw = "路徑是空的"
+text_ja = "パスが空です"
+
+["ui.runtime.path.absolute"]
+text = "路径是绝对地址（以 / 开头）"
+text_en = "The path is absolute (starts with /)"
+text_zh_tw = "路徑是絕對位址（以 / 開頭）"
+text_ja = "パスが絶対パスです（/ で始まっています）"
+
+["ui.runtime.path.backslash"]
+text = "路径里有反斜杠（Windows 写法不该出现在交付面）"
+text_en = "The path contains a backslash (Windows form must not appear in the delivery tree)"
+text_zh_tw = "路徑裡有反斜線（Windows 寫法不該出現在交付面）"
+text_ja = "パスにバックスラッシュが含まれています（配信面に Windows 形式は入れられません）"
+
+["ui.runtime.path.dotdot"]
+text = "路径里有 .. 段 —— 交付面禁止路径穿越"
+text_en = "The path contains a “..” segment — traversal is forbidden in the delivery tree"
+text_zh_tw = "路徑裡有 .. 段 —— 交付面禁止路徑穿越"
+text_ja = "パスに .. セグメントがあります（配信面ではパストラバーサル禁止）"
+
+["ui.runtime.path.absolute_url"]
+text = "路径里写的是绝对 URL —— 交付面只收相对路径"
+text_en = "The path is an absolute URL — the delivery tree only accepts relative paths"
+text_zh_tw = "路徑裡寫的是絕對 URL —— 交付面只收相對路徑"
+text_ja = "パスが絶対 URL です（配信面は相対パスのみ）"
+
+["ui.runtime.resolver.sub_path"]
+text = "content 子路径"
+text_en = "the content sub-path"
+text_zh_tw = "content 子路徑"
+text_ja = "content のサブパス"
+note = "`ui.runtime.resolver.443` 的 `{what}` 参数：要能直接接在那句里当主语"
+
+["ui.runtime.source.gitee"]
+text = "Gitee（国内直连）"
+text_en = "Gitee (direct in mainland China)"
+text_zh_tw = "Gitee（國內直連）"
+text_ja = "Gitee（中国国内から直結）"
+
+["ui.runtime.source.custom"]
+text = "自定义地址"
+text_en = "Custom URL"
+text_zh_tw = "自訂位址"
+text_ja = "カスタム URL"
+
+["ui.runtime.import.source_missing"]
+text = "找不到源文件 —— 它可能已经被移走或删掉"
+text_en = "Source file not found — it may have been moved or deleted"
+text_zh_tw = "找不到來源檔案 —— 它可能已經被移走或刪掉"
+text_ja = "元のファイルが見つかりません —— 移動または削除された可能性があります"
+
+["ui.runtime.local.toml_syntax_plain"]
+text = "TOML 语法不对"
+text_en = "TOML syntax error"
+text_zh_tw = "TOML 語法不對"
+text_ja = "TOML の構文エラーです"
+note = "`ui.runtime.local.toml_syntax` 认不出行列时的兜底句"
+
+["ui.runtime.local.unreadable"]
+text = "读不出来（文件不在了 / 读不动）"
+text_en = "Cannot read it (the file is gone or unreadable)"
+text_zh_tw = "讀不出來（檔案不在了 / 讀不動）"
+text_ja = "読み取れません（ファイルがない、または読み取れません）"
+
+["ui.runtime.local.not_utf8"]
+text = "不是 UTF-8 文本，读不出来"
+text_en = "Not UTF-8 text, so it cannot be read"
+text_zh_tw = "不是 UTF-8 文字，讀不出來"
+text_ja = "UTF-8 のテキストではないため読み取れません"
+
+["ui.runtime.delivery.sha_stale"]
+text = "{name} 的内容对不上 —— 本机目录停在 {local}，云端已是 {remote}，先点「检查更新」再重试"
+text_en = "{name} does not match — this machine is on {local} while the cloud is already at {remote}; click “Check for updates” and try again"
+text_zh_tw = "{name} 的內容對不上 —— 本機目錄停在 {local}，雲端已是 {remote}，先點「檢查更新」再重試"
+text_ja = "{name} の内容が一致しません —— この端末は {local}、クラウドは既に {remote} です。「アップデートを確認」を押してから再試行してください"
+params = ["name", "local", "remote"]
+
+["ui.runtime.delivery.sha_mismatch"]
+text = "{name} 的内容对不上（和本机目录登记的那份不是同一版）—— 文件可能在源头被改过或传坏了，先重下一遍；还不行就找我们要一份"
+text_en = "{name} does not match (it is not the version this machine has on record) — the file may have been changed or corrupted at the source; download it once more, and if that still fails, ask us for a copy"
+text_zh_tw = "{name} 的內容對不上（和本機目錄登記的那份不是同一版）—— 檔案可能在源頭被改過或傳壞了，先重新下載一遍；還不行就跟我們要一份"
+text_ja = "{name} の内容が一致しません（この端末に登録されている版と違います）—— 配布元で書き換えられたか破損した可能性があります。もう一度ダウンロードし、直らない場合はお問い合わせください"
+params = ["name"]
+
+["ui.presetdata.registry.want_number"]
+text = "要数字"
+text_en = "a number"
+text_zh_tw = "要數字"
+text_ja = "数値"
+note = "`ui.presetdata.registry.308` 的 `{v2}`：值类型要求，拼在括号里，所以要短"
+
+["ui.presetdata.registry.want_bool"]
+text = "要 true/false"
+text_en = "true or false"
+text_zh_tw = "要 true/false"
+text_ja = "true または false"
+
+["ui.presetdata.registry.want_text"]
+text = "要字符串"
+text_en = "text"
+text_zh_tw = "要字串"
+text_ja = "文字列"
+
+["ui.guide.no_project_window_open"]
+text = "切片器没有打开的工程窗口 —— 先打开一个工程，再点「查看引导」"
+text_en = "The slicer has no project window open — open a project first, then click “View guide”"
+text_zh_tw = "切片器沒有開啟的工程視窗 —— 先開啟一個工程，再點「查看引導」"
+text_ja = "スライサーに開いているプロジェクトウィンドウがありません —— 先にプロジェクトを開いてから「ガイドを見る」を押してください"
+
+["ui.guide.all_minimized"]
+text = "切片器在跑，但它的窗口都最小化了 —— 先还原 Bambu Studio 的窗口，再点「查看引导」"
+text_en = "The slicer is running but all of its windows are minimised — restore the Bambu Studio window first, then click “View guide”"
+text_zh_tw = "切片器在執行，但它的視窗都最小化了 —— 先還原 Bambu Studio 的視窗，再點「查看引導」"
+text_ja = "スライサーは起動していますが、ウィンドウがすべて最小化されています —— Bambu Studio のウィンドウを元に戻してから「ガイドを見る」を押してください"
+
+["ui.guide.window_minimized"]
+text = "切片器窗口最小化了 —— 先还原它，再点「查看引导」"
+text_en = "The slicer window is minimised — restore it first, then click “View guide”"
+text_zh_tw = "切片器視窗最小化了 —— 先還原它，再點「查看引導」"
+text_ja = "スライサーのウィンドウが最小化されています —— 元に戻してから「ガイドを見る」を押してください"
+
+# ---- 调试那一问（2026-11-11）----
+["hook.question_debug_plan"]
+code = "Q_DEBUG_PLAN_001"
+text = "这一趟测哪些动作？"
+text_en = "Which actions should this run test?"
+text_zh_tw = "這一趟測哪些動作？"
+text_ja = "この実行ではどの動作を試しますか？"
+params = []
+note = "调试模式下开跑前那一问的正文"
+
+["hook.debug_plan_summary"]
+code = "Q_DEBUG_PLAN_006"
+text = "驻点 X{wait} · 落笔 {mw} → {mx} · 收笔 {uw} → {ux} · {speed} mm/min"
+text_en = "Park X{wait} · pen-down {mw} → {mx} · pen-up {uw} → {ux} · {speed} mm/min"
+text_zh_tw = "駐點 X{wait} · 落筆 {mw} → {mx} · 收筆 {uw} → {ux} · {speed} mm/min"
+text_ja = "待機位置 X{wait} · 着座 {mw} → {mx} · 離座 {uw} → {ux} · {speed} mm/min"
+params = ["wait", "mw", "mx", "uw", "ux", "speed"]
+note = "调试开跑前那一问的坐标概要：两段各报「等待位 → 目标位」"
+
+["hook.debug_plan_summary_repeat"]
+code = "Q_DEBUG_PLAN_007"
+text = "驻点 X{wait} · 落笔 {mw} → {mx} · 收笔 {uw} → {ux} · {speed} mm/min · 测 {repeat} 遍"
+text_en = "Park X{wait} · pen-down {mw} → {mx} · pen-up {uw} → {ux} · {speed} mm/min · repeated {repeat} times"
+text_zh_tw = "駐點 X{wait} · 落筆 {mw} → {mx} · 收筆 {uw} → {ux} · {speed} mm/min · 測 {repeat} 遍"
+text_ja = "待機位置 X{wait} · 着座 {mw} → {mx} · 離座 {uw} → {ux} · {speed} mm/min · {repeat} 回繰り返し"
+params = ["wait", "mw", "mx", "uw", "ux", "speed", "repeat"]
+note = "同上，末尾多一句测几遍（只有 repeat > 1 时用这条）"
+
+["hook.choice_debug_mount"]
+code = "Q_DEBUG_PLAN_002"
+text = "只测落笔"
+text_en = "Pen-down only"
+text_zh_tw = "只測落筆"
+text_ja = "着座のみ"
+params = []
+note = "只碰一下落笔位"
+
+["hook.choice_debug_unmount"]
+code = "Q_DEBUG_PLAN_003"
+text = "只测收笔"
+text_en = "Pen-up only"
+text_zh_tw = "只測收筆"
+text_ja = "離座のみ"
+params = []
+note = "只碰一下收笔位"
+
+["hook.choice_debug_both"]
+code = "Q_DEBUG_PLAN_004"
+text = "落笔和收笔都测"
+text_en = "Both pen-down and pen-up"
+text_zh_tw = "落筆和收筆都測"
+text_ja = "着座と離座の両方"
+params = []
+note = "主按钮；超时也按这一档"
+
+["hook.debug_plan_stopped"]
+code = "Q_DEBUG_PLAN_005"
+text = "调试那一问没有作答，这一趟已停下"
+text_en = "The debug question went unanswered — this run was stopped"
+text_zh_tw = "調試那一問沒有作答，這一趟已停下"
+text_ja = "デバッグの問いに回答がなかったため、この実行は停止しました"
+params = []
+note = "超时/没答时终止处理的那句"

@@ -107,7 +107,7 @@ import CellEditor from '../views/CellEditor'
 import CompareMatrix from '../views/CompareMatrix'
 import ParamDefModal from '../views/ParamDefModal'
 import { nextSectionId } from '../views/sectionId'
-import ParamDetail, { StatusDot } from '../views/ParamDetail'
+import ParamDetail, { StatusDot, type DetailLayer } from '../views/ParamDetail'
 /* 分组抽屉：改名 / 换位 / 这一组的参数清单都在里头（卡头只负责打开它） */
 /* 组件卡里的画布占位（作者 2026-11-01：「它就占个位置就可以了」） */
 import ComponentSlot from '../views/ComponentSlot'
@@ -927,7 +927,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       copy.delete(cellKey)
       return copy
     })
-    queue.enqueue(cellKey, `跟随基底 · ${paramOf(key)?.label ?? key}`, {
+    queue.enqueue(cellKey, `跟随基线 · ${paramOf(key)?.label ?? key}`, {
       kind: 'setValue',
       level: layerUid !== null ? 'version' : 'machine',
       owner: layerUid ?? col.machineId,
@@ -992,21 +992,29 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
     scrollRef.current?.scrollTo({ top: 0 })
   }, [tabSel, mode, machineId, target, bodyReady])
 
+  /*
+   * 换机型**不清右栏**：同一条参数在新机型上一样有各版本取值，面板跟着换过去即可；
+   * 只有新这一屏里查不到它（`selRow === null`）时，才由 `asideShown` 自然收起。
+   */
   const switchMachine = (next: string) => {
     const m = book.machines.find((x) => x.id === next)
     setMachineId(next)
     setTarget(m?.versions[0]?.uid ?? BASE)
     setCompareCols([])
-    setSel(null)
     setFocusUid(null)
     setBatchTab(false)
     setTabSel(null)
   }
 
-  /** 换正在改的那一版（`null` = 取消选择）。那枚「正在编辑」提示跟着作废 */
+  /**
+   * 换正在改的那一版（`null` = 取消选择）。那枚「正在编辑」提示跟着作废。
+   *
+   * 换到另一版时**留着右栏**（面板跟着换到那一版的取值）；取消选择则连它一起收掉 ——
+   * 那一屏已经没有版本，右栏也没有格子可显示。
+   */
   const switchTarget = (next: Target) => {
     setTarget(next)
-    setSel(null)
+    if (next === null) setSel(null)
     setFocusUid(null)
   }
 
@@ -1152,7 +1160,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
         : cell === null
           ? '这一行还没有格子（矩阵还在拉）'
           : !cell.own
-            ? '这一层本来就没有自己的值 —— 它已经在跟随基底'
+            ? '这一层本来就没有自己的值 —— 它已经在跟随基线'
             : !cell.editable
               ? cell.deprecated
                 ? '这一项在这台机型上已弃用'
@@ -1173,7 +1181,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       {
         id: 'follow',
         /* 只有"这一层写过"时才可用：删掉那一行，让它重新跟着基底 */
-        label: '跟随默认基底',
+        label: '跟随默认基线',
         disabled: followWhy,
         onSelect: () => {
           setSel(key)
@@ -1190,6 +1198,15 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       },
     ]
   })()
+  /**
+   * 「定位」：把正文滚到这一条参数那一行。
+   *
+   * 单版本 = 卡片里的那一行（`t-param-*`）；对照 = 矩阵里那一行（`t-mrow-*`）。
+   * 右栏把正文遮住时，这是确认「我改的是哪一行」的唯一办法。
+   */
+  const locateParam = (key: string) => {
+    locateAnchor(mode === 'single' ? `t-param-${key}` : `t-mrow-${key}`, { row: true })
+  }
   const batchable = selParam !== null && selParam.uiComponent !== 'gcode' && !selParam.deprecated
   const asideShown =
     sel !== null &&
@@ -1200,33 +1217,74 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       : /* 对照：详情要基准机型的行；批量只要参数能批量 */
         (batchTab && batchable) || (!batchTab && selRow !== null))
 
-  /** 批量目标：勾选列里的**版本列**（基底不进目标，C14 文件头第 1 条），可跨机型 */
+  /**
+   * 批量目标：勾选里的**每一列**（机型基线也在其中），可跨机型。
+   *
+   * 基线必须能进目标 —— 作者 2026-11-09「我明显都把基线都选中了」：
+   * 勾了它却只改版本，等于把人的选择悄悄丢掉。基线写进去之后，跟随它的版本
+   * 自动同值（`BulkEffect.followsBase`），不必每个版本各写一份。
+   */
   const batchTargets: BatchTarget[] = useMemo(() => {
     /* 抽屉要那一行在这一项上的格子：预填「设置新值」、判「有没有变化」，
        以及「恢复修改前的」该写回什么。行还没到（矩阵在拉）就是空态 */
     const row = sel !== null ? (matrixOv?.rows.find((r) => r.key === sel) ?? null) : null
-    return compareCols
-      .filter((id) => colSplit(id).uid !== '')
-      .map((id) => {
-        const { m, uid } = colSplit(id)
-        const machine = book.machines.find((x) => x.id === m)
-        const v = machine?.versions.find((x) => x.uid === uid)
-        /* 后端重排后的列记号就是版本 uid（见下 id 注） */
-        const ci = matrixOv?.cols.findIndex((c) => c.key === uid) ?? -1
-        const cell = row !== null && ci >= 0 ? (row.cells[ci] ?? null) : null
-        return {
-          /* id = 后端 BatchEffect.col 的记号（机型 id 或版本 uid = patch 的 owner），
-             不是左树的 `机器|版本` 记号 —— 两套记号混用会让确认写入对不上列 */
-          id: uid,
-          name: `${machine?.display ?? m} · ${v?.name ?? uid}`,
-          machineId: m,
-          uid,
-          raw: cell?.raw ?? null,
-          rest: cell?.rest ?? null,
-          dirty: cell?.dirty ?? false,
-        }
-      })
+    return compareCols.map((id) => {
+      const { m, uid } = colSplit(id)
+      const machine = book.machines.find((x) => x.id === m)
+      const v = uid === '' ? null : machine?.versions.find((x) => x.uid === uid)
+      /* 后端重排后的列记号：机型基线 = 机型 id，版本 = 版本 uid */
+      const key = uid === '' ? m : uid
+      const ci = matrixOv?.cols.findIndex((c) => c.key === key) ?? -1
+      const cell = row !== null && ci >= 0 ? (row.cells[ci] ?? null) : null
+      return {
+        /* id = 后端 BatchEffect.col 的记号（机型 id 或版本 uid = patch 的 owner），
+           不是左树的 `机器|版本` 记号 —— 两套记号混用会让确认写入对不上列 */
+        id: key,
+        name:
+          uid === ''
+            ? `${machine?.display ?? m} · 机型基线`
+            : `${machine?.display ?? m} · ${v?.name ?? uid}`,
+        machineId: m,
+        uid: uid === '' ? null : uid,
+        raw: cell?.raw ?? null,
+        rest: cell?.rest ?? null,
+        dirty: cell?.dirty ?? false,
+        /* 「这一层跟不跟随」只认后端徽章那一档（`[params.follows]` 的唯一实现）。
+           `Cell.own` 不能拿来判：同机型各版本写了同一个值时 `digest` 会把它上提成
+           基线，`own` 变 false 而状态仍是"不跟随"。基线是根，恒 false */
+        follows: uid === '' ? false : cell?.badge === 'follow',
+      }
+    })
   }, [compareCols, book.machines, matrixOv, sel])
+
+  /**
+   * 对照模式「参数详情」要列的层：**勾选的每一列一层**（可跨机型）。
+   *
+   * 以前只取基准机型的 `drawerDesk`，于是勾了 A1 mini / P1S / P2S / X1C 之后，
+   * 右栏仍只显示基准机那几版 —— 作者 2026-11-08：「其他我选中的都没有显示出来」。
+   * 数据取自矩阵那一行（它本来就有每一列的格子）。
+   */
+  const detailLayers = useMemo<DetailLayer[] | null>(() => {
+    if (mode !== 'compare' || sel === null || matrixOv === null) return null
+    const row = matrixOv.rows.find((r) => r.key === sel) ?? null
+    if (row === null) return null
+    const out: DetailLayer[] = []
+    matrixOv.cols.forEach((c, i) => {
+      const cell = row.cells[i]
+      if (cell === undefined) return
+      const base = c.level === 'machine'
+      out.push({
+        owner: base ? '' : (c.versionUid ?? ''),
+        machineId: c.machineId,
+        name: base ? `${c.machine} 基底` : `${c.machine} · ${c.label}`,
+        title: base ? `${c.machine} 基底` : `${c.machine} / ${c.label}`,
+        versionId: base ? null : (c.versionUid?.split('/')[1] ?? null),
+        base,
+        cell,
+      })
+    })
+    return out
+  }, [mode, sel, matrixOv])
 
   /* 模态框要的那几样，全部现推（值改一次它就跟着变，不存会过期的副本） */
   const gcodeParam = gcodeOpen !== null ? (paramOf(gcodeOpen.key) ?? null) : null
@@ -1426,7 +1484,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
             {/* 没选就是没选 —— 不摆一台假的当前机型（C14 第十七轮） */}
             {machine === null || target === null
               ? '还没选机型'
-              : `${machine.display} / ${target === BASE ? '机型基底' : (machine.versions.find((v) => v.uid === target)?.name ?? target)}`}
+              : `${machine.display} / ${target === BASE ? '机型基线' : (machine.versions.find((v) => v.uid === target)?.name ?? target)}`}
           </span>
           <span className={s.cardNote}>
             {mode === 'single' && machine !== null && target !== null && desk !== null
@@ -1551,7 +1609,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                       <em>{m.versions.length}</em>
                     </div>
                     {/* 基底永远排这一组的第一行（C14 第十七轮：「基底放最上面」） */}
-                    {railRow(m, BASE, '机型基底', '', '改一次动一片')}
+                    {railRow(m, BASE, '机型基线', '', '改一次动一片')}
                     {m.versions.map((v) =>
                       railRow(m, v.uid, v.name || v.uid, v.versionId, v.tag ?? undefined),
                     )}
@@ -1842,7 +1900,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                   }}
                   aria-label="收起"
                 >
-                  ×
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                 </button>
               </div>
             )}
@@ -1862,6 +1920,8 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                     book.machines[0]!
                   }
                   words={words}
+                  /* 对照：勾选的每一列一层（跨机型）；单版本自己按 `machine.versions` 拼 */
+                  layers={detailLayers}
                   groupLabel={groupLabelOf(registry, selRow)}
                   /*
                    * 「组内顺序」（2026-11-02）：这一条在它所属分组里的同级清单，
@@ -1873,28 +1933,39 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                      「放弃」照样撤得掉；与定义框的差别只是撤销栈粒度（它攒一次「确认」发一笔） */
                   onMoveOrder={(dir) => void moveOrderOf(sel, dir)}
                   onClose={() => setSel(null)}
+                  onLocate={sel === null ? undefined : () => locateParam(sel)}
                   /* 「属于 X 的子参数」点 X 就换到 X —— 那一行是入口，不是注解 */
                   onPick={(key) => setSel(key)}
-                  /* 「编辑定义」：名称/单位/类型/范围/条件/弃用那条改的路（即时落盘） */
+                  /* 「编辑定义」：名称/单位/类型/范围/条件/弃用那条改的路（走草稿（保存后写入）） */
                   onEditDef={selParam ? () => setDefEditKey(sel) : undefined}
                   /* 「各版本取值」每一层各有一枚按钮 —— 进来的那一层就是它 */
-                  onOpenGcode={(key, layerUid) => {
+                  onOpenGcode={(key, layerUid, layerMachineId) => {
                     const mid =
-                      mode === 'single'
+                      layerMachineId ??
+                      (mode === 'single'
                         ? (machineId ?? '')
                         : (drawerDesk?.cols.find((c) => (c.versionUid ?? null) === layerUid)?.machineId ??
-                          baseMachineId)
+                          baseMachineId))
                     setGcodeOpen({ key, mid, uid: layerUid })
                   }}
-                  onWriteLayer={(layerUid, next) => {
+                  onWriteLayer={(layerUid, next, layerMachineId) => {
                     const ownerMid =
-                      mode === 'single'
+                      layerMachineId ??
+                      (mode === 'single'
                         ? (machineId ?? '')
                         : (drawerDesk?.cols.find((c) => (c.versionUid ?? null) === layerUid)?.machineId ??
-                          baseMachineId)
+                          baseMachineId))
                     const row = mode === 'single' ? rowOf(shownDesk, sel) : rowOf(shownDrawerDesk, sel)
                     const idx = cellIndexOf(mode === 'single' ? shownDesk : shownDrawerDesk, layerUid)
-                    const cell = row?.cells[idx] ?? null
+                    /* 跨机型时那一格来自矩阵（`detailLayers`）—— 基准机型的 desk 里没有它 */
+                    const cell =
+                      (detailLayers !== null
+                        ? (detailLayers.find(
+                            (l) =>
+                              l.machineId === ownerMid &&
+                              (l.base ? null : l.owner) === layerUid,
+                          )?.cell ?? null)
+                        : (row?.cells[idx] ?? null)) ?? null
                     writeValue(
                       row ?? selRow,
                       selParam,
@@ -1913,6 +1984,21 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                 param={selParam}
                 words={words}
                 targets={batchTargets}
+                onLocate={sel === null ? undefined : () => locateParam(sel)}
+                /* 被条件关着的那一行点「去改」：选中那个阻塞参数、翻回详情、滚到它那一行 */
+                onGoFix={(key) => {
+                  setSel(key)
+                  setBatchTab(false)
+                  const anchor = `t-mrow-${key}`
+                  /* 被搜索 / 领域过滤挡着时先放开过滤，等这一帧画完再滚 */
+                  if (document.getElementById(anchor) === null) {
+                    if (q.trim() !== '') setQ('')
+                    setTabSel(null)
+                    window.setTimeout(() => locateAnchor(anchor, { row: true }), 0)
+                    return
+                  }
+                  locateAnchor(anchor, { row: true })
+                }}
                 onApply={async (label, patches) => {
                   /*
                    * 批量是**一整块手势**（一次 apply、一次撤销）—— 走 quiet：
@@ -1925,6 +2011,8 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                   if (out.ok && out.matrix !== null && refreshKeyOf(r) === refreshKeyRef.current) {
                     setMatrix(out.matrix)
                   }
+                  /* 批量那几个动作靠它决定要不要弹「已写 …」的回执 */
+                  return out.ok
                 }}
               />
             )}

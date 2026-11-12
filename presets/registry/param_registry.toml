@@ -272,17 +272,47 @@ label = "回抽长度"
 labelEn = "Retract length"
 labelJa = "リトラクト長"
 labelTw = "回抽長度"
-desc = "涂胶笔回抽长度(mm)，负值=回抽。优先使用此值，为0时从装载G-code自动解析"
-descEn = "Glue pen retract length (mm); negative = retract. This value takes priority; when 0 it is parsed from the load G-code"
-descJa = "塗布ペンのリトラクト長（mm）。負値＝リトラクト。この値を優先し、0 のときはロード G-code から自動で解析します"
-descTw = "塗膠筆回抽長度（mm），負值＝回抽。優先使用此值，為 0 時從裝載 G-code 自動解析"
+desc = "涂胶笔回抽长度(mm)，负值=回抽。落笔/收笔的 G-code 里不再写 E，改由这里统一管"
+descEn = "Glue pen retract length (mm); negative = retract. The mount/unmount G-code no longer carries E — this is the only place it comes from"
+descJa = "塗布ペンのリトラクト長（mm）。負値＝リトラクト。マウント/アンマウント G-code は E を持たず、ここで一元管理します"
+descTw = "塗膠筆回抽長度（mm），負值＝回抽。落筆/收筆的 G-code 裡不再寫 E，改由這裡統一管"
 tomlComment = "回抽长度(mm)"
+valueType = "float"
+uiComponent = "number"
+defaultValue = -5.0
+scope = "universal"
+section = "toolhead"
+layout = { "order" = 200.0, "sectionId" = "motion" }
+min = -50.0
+max = 50.0
+step = 0.1
+unit = "mm"
+choices = []
+deprecated = false
+machineMinVariants = {  }
+machineMaxVariants = {  }
+pinned = false
+
+[[params]]
+key = "toolhead.MKP_extrude"
+configKey = "MKPExtrude"
+tomlKey = "MKP_extrude"
+jsonKey = "MKP_extrude"
+label = "挤出长度"
+labelEn = "Extrude length"
+labelJa = "押出長"
+labelTw = "擠出長度"
+desc = "收笔时回填的挤出量(mm)。填 0 = 自动按「回抽长度绝对值 + 0.5」算；填了别的数就按这个数，不再联动"
+descEn = "Extrusion pushed back on pen-up (mm). 0 = auto (|retract| + 0.5); any other value is used as-is and the link is off"
+descJa = "ペンを戻すときの押し出し量（mm）。0 ＝「リトラクト長の絶対値 + 0.5」で自動。それ以外はその値を使い、連動しません"
+descTw = "收筆時回填的擠出量（mm）。填 0 ＝ 自動按「回抽長度絕對值 + 0.5」算；填了別的數就按這個數，不再聯動"
+tomlComment = "挤出长度(mm)"
 valueType = "float"
 uiComponent = "number"
 defaultValue = 0.0
 scope = "universal"
 section = "toolhead"
-layout = { "order" = 200.0, "sectionId" = "motion" }
+layout = { "order" = 201.0, "sectionId" = "motion" }
 min = -50.0
 max = 50.0
 step = 0.1
@@ -298,15 +328,15 @@ key = "toolhead.custom_mount_gcode"
 configKey = "CustomMountGcode"
 tomlKey = "custom_mount_gcode"
 jsonKey = "custom_mount_gcode"
-label = "装载胶箱 G-code"
-labelEn = "Load glue box G-code"
-labelJa = "接着剤ボックスの装着 G-code"
-labelTw = "裝載膠箱 G-code"
-desc = "用于挂载涂胶笔的自定义指令，支持 [AUTO] 变量"
-descEn = "Custom command used to mount the glue pen; supports the [AUTO] variable"
-descJa = "塗布ペンを取り付けるためのカスタム命令。[AUTO] 変数に対応します"
-descTw = "用於掛載塗膠筆的自訂指令，支援 [AUTO] 變數"
-tomlComment = "自定义工具头获取 G-code"
+label = "落笔 G-code"
+labelEn = "Lower pen G-code"
+labelJa = "ペン降ろし G-code"
+labelTw = "落筆 G-code"
+desc = "让笔尖落下的自定义指令（碰一下右端机构完成切换），支持 [AUTO] 变量"
+descEn = "Custom command that lowers the pen tip (one bump against the right-end mechanism); supports the [AUTO] variable"
+descJa = "ペン先を降ろすカスタム命令（右端の機構に一度当てて切り替え）。[AUTO] 変数に対応します"
+descTw = "讓筆尖落下的自訂指令（碰一下右端機構完成切換），支援 [AUTO] 變數"
+tomlComment = "落笔 G-code"
 valueType = "string"
 uiComponent = "gcode"
 defaultValue = ""
@@ -322,43 +352,43 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
-"A1" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000"
-"A1:FAST" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000"
-"A1:FASTV3.3" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000"
-"A1:STANDARD" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000"
-"A1_MINI" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000"
-"A1_MINI:FAST" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000"
-"A1_MINI:FASTV3.3" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000"
-"A1_MINI:STANDARD" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000"
-"P1S:LITE" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000"
-"P2S:STANDARD" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000"
-"X1C:LITE" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000"
+"A1" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000"
+"A1:STANDARD" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000"
+"A1_MINI" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000"
+"A1_MINI:STANDARD" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000"
+"P1S:LITE" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000"
+"P2S:STANDARD" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000"
+"X1C:LITE" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000"
+"A1:FAST261111" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000"
+"A1:FAST260326" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000"
+"A1_MINI:FAST260326" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000"
+"A1_MINI:FAST261111" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000"
 
 [params.follows]
-"A1:FAST" = false
-"A1:FASTV3.3" = false
 "A1:STANDARD" = false
-"A1_MINI:FAST" = false
-"A1_MINI:FASTV3.3" = false
 "A1_MINI:STANDARD" = false
 "P1S:LITE" = false
 "P2S:STANDARD" = false
 "X1C:LITE" = false
+"A1:FAST261111" = false
+"A1:FAST260326" = false
+"A1_MINI:FAST260326" = false
+"A1_MINI:FAST261111" = false
 
 [[params]]
 key = "toolhead.custom_unmount_gcode"
 configKey = "CustomUnmountGcode"
 tomlKey = "custom_unmount_gcode"
 jsonKey = "custom_unmount_gcode"
-label = "卸载胶箱 G-code"
-labelEn = "Unload glue box G-code"
-labelJa = "接着剤ボックスの取り外し G-code"
-labelTw = "卸載膠箱 G-code"
-desc = "用于卸载涂胶笔的自定义指令，支持 [AUTO] 变量"
-descEn = "Custom command used to unmount the glue pen; supports the [AUTO] variable"
-descJa = "塗布ペンを取り外すためのカスタム命令。[AUTO] 変数に対応します"
-descTw = "用於卸載塗膠筆的自訂指令，支援 [AUTO] 變數"
-tomlComment = "自定义工具头收起 G-code"
+label = "收笔 G-code"
+labelEn = "Retract pen G-code"
+labelJa = "ペン戻し G-code"
+labelTw = "收筆 G-code"
+desc = "把笔尖收起的自定义指令（再碰一次右端机构完成切换），支持 [AUTO] 变量"
+descEn = "Custom command that retracts the pen tip (one more bump against the right-end mechanism); supports the [AUTO] variable"
+descJa = "ペン先を収めるカスタム命令（右端の機構にもう一度当てて切り替え）。[AUTO] 変数に対応します"
+descTw = "把筆尖收起的自訂指令（再碰一次右端機構完成切換），支援 [AUTO] 變數"
+tomlComment = "收笔 G-code"
 valueType = "string"
 uiComponent = "gcode"
 defaultValue = ""
@@ -374,28 +404,486 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
-"A1" = "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
-"A1:FAST" = "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
-"A1:FASTV3.3" = "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X273 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
-"A1:STANDARD" = "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
-"A1_MINI" = "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
-"A1_MINI:FAST" = "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
-"A1_MINI:FASTV3.3" = "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
-"A1_MINI:STANDARD" = "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
-"P1S:LITE" = "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe"
-"P2S:STANDARD" = "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe"
-"X1C:LITE" = "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe"
+"A1" = "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000"
+"A1:STANDARD" = "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000"
+"A1_MINI" = "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000"
+"A1_MINI:STANDARD" = "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000"
+"P1S:LITE" = "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 F30000\nM106 P1 S[AUTO] ; 风扇"
+"P2S:STANDARD" = "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 F30000\nM106 P1 S[AUTO] ; 风扇"
+"X1C:LITE" = "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 F30000\nM106 P1 S[AUTO] ; 风扇"
+"A1:FAST261111" = "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000"
+"A1:FAST260326" = "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000"
+"A1_MINI:FAST260326" = "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000"
+"A1_MINI:FAST261111" = "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000"
 
 [params.follows]
-"A1:FAST" = false
-"A1:FASTV3.3" = false
 "A1:STANDARD" = false
-"A1_MINI:FAST" = false
-"A1_MINI:FASTV3.3" = false
 "A1_MINI:STANDARD" = false
 "P1S:LITE" = false
 "P2S:STANDARD" = false
 "X1C:LITE" = false
+"A1:FAST261111" = false
+"A1:FAST260326" = false
+"A1_MINI:FAST260326" = false
+"A1_MINI:FAST261111" = false
+
+[[params]]
+key = "toolhead.pen_mount_wait_x"
+configKey = "PenMountWaitX"
+tomlKey = "pen_mount_wait_x"
+jsonKey = "pen_mount_wait_x"
+label = "落笔等待位 X"
+labelEn = "Pen mount wait X"
+labelJa = "ペン降ろし待機 X"
+labelTw = "落筆等待位 X"
+desc = "落笔前停住的那个 X 坐标，对应落笔骨架里的 {wait}"
+descEn = "X where the head stops before the pen-down bump; feeds {wait} in the mount skeleton"
+descJa = "ペンを降ろす前に停止する X 座標。マウント用スケルトンの {wait} に入ります"
+descTw = "落筆前停住的那個 X 座標，對應落筆骨架裡的 {wait}"
+tomlComment = "落笔等待位 X"
+valueType = "float"
+uiComponent = "number"
+defaultValue = 0.0
+scope = "machine_specific"
+section = "toolhead"
+layout = { "order" = 0.6, "sectionId" = "custom_gcode" }
+min = -20.0
+max = 320.0
+step = 0.1
+unit = "mm"
+choices = []
+variantMode = "per_variant"
+machineFilter = "A1,A1_MINI,P1S,P2S,X1C"
+deprecated = false
+machineMinVariants = {  }
+machineMaxVariants = {  }
+pinned = false
+
+[params.machineVariants]
+"A1" = 256.0
+"A1_MINI" = 168.0
+"A1:STANDARD" = 256.0
+"A1_MINI:STANDARD" = 168.0
+"P1S" = 20.0
+"P1S:LITE" = 20.0
+"P2S" = 20.0
+"P2S:STANDARD" = 20.0
+"X1C" = 20.0
+"X1C:LITE" = 20.0
+"A1:FAST261111" = 256.0
+"A1:FAST260326" = 256.0
+"A1_MINI:FAST260326" = 168.0
+"A1_MINI:FAST261111" = 168.0
+
+[params.follows]
+"A1:STANDARD" = false
+"A1_MINI:STANDARD" = false
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
+"A1:FAST261111" = false
+"A1:FAST260326" = false
+"A1_MINI:FAST260326" = false
+"A1_MINI:FAST261111" = false
+
+[[params]]
+key = "toolhead.pen_mount_wait_y"
+configKey = "PenMountWaitY"
+tomlKey = "pen_mount_wait_y"
+jsonKey = "pen_mount_wait_y"
+label = "落笔等待位 Y"
+labelEn = "Pen mount wait Y"
+labelJa = "ペン降ろし待機 Y"
+labelTw = "落筆等待位 Y"
+desc = "落笔等待位的 Y 坐标，对应骨架里的 {wait_y}。A 系列不动这个轴，留 0"
+descEn = "Y of the mount wait position; feeds {wait_y} in the skeleton. A-series keeps this axis still, so it stays 0"
+descJa = "ペン降ろし待機位置の Y。スケルトンの {wait_y} に入ります。A シリーズはこの軸を動かさないため 0"
+descTw = "落筆等待位的 Y 座標，對應骨架裡的 {wait_y}。A 系列不動這個軸，留 0"
+tomlComment = "落笔等待位 Y"
+valueType = "float"
+uiComponent = "number"
+defaultValue = 0.0
+scope = "machine_specific"
+section = "toolhead"
+layout = { "order" = 0.7, "sectionId" = "custom_gcode" }
+min = -20.0
+max = 320.0
+step = 0.1
+unit = "mm"
+choices = []
+variantMode = "per_variant"
+machineFilter = "A1,A1_MINI,P1S,P2S,X1C"
+deprecated = false
+machineMinVariants = {  }
+machineMaxVariants = {  }
+omitWhenUnset = true
+pinned = false
+
+[params.machineVariants]
+"P1S" = 7.0
+"P1S:LITE" = 7.0
+"P2S" = 7.0
+"P2S:STANDARD" = 7.0
+"X1C" = 7.0
+"X1C:LITE" = 7.0
+
+[params.follows]
+"A1:STANDARD" = false
+"A1_MINI:STANDARD" = false
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
+"A1:FAST261111" = false
+"A1:FAST260326" = false
+"A1_MINI:FAST260326" = false
+"A1_MINI:FAST261111" = false
+
+[[params]]
+key = "toolhead.pen_mount_x"
+configKey = "PenMountX"
+tomlKey = "pen_mount_x"
+jsonKey = "pen_mount_x"
+label = "落笔位 X"
+labelEn = "Pen mount X"
+labelJa = "ペン降ろし位置 X"
+labelTw = "落筆位 X"
+desc = "推到底、笔尖真正挂上工具头的那个 X，对应落笔骨架里的 {target}"
+descEn = "X where the pen actually latches onto the toolhead; feeds {target} in the mount skeleton"
+descJa = "ペン先がツールヘッドに実際に掛かる X。マウント用スケルトンの {target} に入ります"
+descTw = "推到底、筆尖真正掛上工具頭的那個 X，對應落筆骨架裡的 {target}"
+tomlComment = "落笔位 X"
+valueType = "float"
+uiComponent = "number"
+defaultValue = 0.0
+scope = "machine_specific"
+section = "toolhead"
+layout = { "order" = 0.8, "sectionId" = "custom_gcode" }
+min = -20.0
+max = 320.0
+step = 0.1
+unit = "mm"
+choices = []
+variantMode = "per_variant"
+machineFilter = "A1,A1_MINI,P1S,P2S,X1C"
+deprecated = false
+machineMinVariants = {  }
+machineMaxVariants = {  }
+pinned = false
+
+[params.machineVariants]
+"A1" = 267.0
+"A1_MINI" = 182.0
+"A1:STANDARD" = 267.0
+"A1_MINI:STANDARD" = 185.0
+"P1S" = 1.0
+"P1S:LITE" = 1.0
+"P2S" = 1.0
+"P2S:STANDARD" = 1.0
+"X1C" = 1.0
+"X1C:LITE" = 1.0
+"A1:FAST261111" = 267.0
+"A1:FAST260326" = 267.0
+"A1_MINI:FAST260326" = 185.0
+"A1_MINI:FAST261111" = 182.0
+
+[params.follows]
+"A1:STANDARD" = false
+"A1_MINI:STANDARD" = false
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
+"A1:FAST261111" = false
+"A1:FAST260326" = false
+"A1_MINI:FAST260326" = false
+"A1_MINI:FAST261111" = false
+
+[[params]]
+key = "toolhead.pen_mount_speed"
+configKey = "PenMountSpeed"
+tomlKey = "pen_mount_speed"
+jsonKey = "pen_mount_speed"
+label = "落笔速度"
+labelEn = "Pen mount speed"
+labelJa = "ペン降ろし速度"
+labelTw = "落筆速度"
+desc = "落笔时推到动作位那一段的进给速度，对应骨架里的 {speed}"
+descEn = "Feedrate of the final bump toward the mount position; feeds {speed} in the skeleton"
+descJa = "ペン降ろし位置へ押し込む区間の送り速度。スケルトンの {speed} に入ります"
+descTw = "落筆時推到動作位那一段的進給速度，對應骨架裡的 {speed}"
+tomlComment = "落笔速度"
+valueType = "float"
+uiComponent = "number"
+defaultValue = 0.0
+scope = "machine_specific"
+section = "toolhead"
+layout = { "order" = 0.9, "sectionId" = "custom_gcode" }
+min = 0.0
+max = 100000.0
+step = 100.0
+unit = "mm/min"
+choices = []
+variantMode = "per_variant"
+machineFilter = "A1,A1_MINI,P1S,P2S,X1C"
+deprecated = false
+machineMinVariants = {  }
+machineMaxVariants = {  }
+pinned = false
+
+[params.machineVariants]
+"A1" = 10000.0
+"A1_MINI" = 10000.0
+"A1:STANDARD" = 10000.0
+"A1_MINI:STANDARD" = 10000.0
+"P1S" = 300.0
+"P1S:LITE" = 300.0
+"P2S" = 300.0
+"P2S:STANDARD" = 300.0
+"X1C" = 300.0
+"X1C:LITE" = 300.0
+"A1:FAST261111" = 10000.0
+"A1:FAST260326" = 10000.0
+"A1_MINI:FAST260326" = 10000.0
+"A1_MINI:FAST261111" = 10000.0
+
+[params.follows]
+"A1:STANDARD" = false
+"A1_MINI:STANDARD" = false
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
+"A1:FAST261111" = false
+"A1:FAST260326" = false
+"A1_MINI:FAST260326" = false
+"A1_MINI:FAST261111" = false
+
+[[params]]
+key = "toolhead.pen_unmount_wait_x"
+configKey = "PenUnmountWaitX"
+tomlKey = "pen_unmount_wait_x"
+jsonKey = "pen_unmount_wait_x"
+label = "收笔等待位 X"
+labelEn = "Pen unmount wait X"
+labelJa = "ペン戻し待機 X"
+labelTw = "收筆等待位 X"
+desc = "收笔前停住的那个 X 坐标，对应收笔骨架里的 {wait}"
+descEn = "X where the head stops before the pen-up bump; feeds {wait} in the unmount skeleton"
+descJa = "ペンを戻す前に停止する X 座標。アンマウント用スケルトンの {wait} に入ります"
+descTw = "收筆前停住的那個 X 座標，對應收筆骨架裡的 {wait}"
+tomlComment = "收笔等待位 X"
+valueType = "float"
+uiComponent = "number"
+defaultValue = 0.0
+scope = "machine_specific"
+section = "toolhead"
+layout = { "order" = 1.1, "sectionId" = "custom_gcode" }
+min = -20.0
+max = 320.0
+step = 0.1
+unit = "mm"
+choices = []
+variantMode = "per_variant"
+machineFilter = "A1,A1_MINI,P1S,P2S,X1C"
+deprecated = false
+machineMinVariants = {  }
+machineMaxVariants = {  }
+pinned = false
+
+[params.machineVariants]
+"A1" = 256.0
+"A1_MINI" = 168.0
+"A1:STANDARD" = 256.0
+"A1_MINI:STANDARD" = 168.0
+"P1S" = 246.0
+"P1S:LITE" = 246.0
+"P2S" = 246.0
+"P2S:STANDARD" = 246.0
+"X1C" = 246.0
+"X1C:LITE" = 246.0
+"A1:FAST261111" = 256.0
+"A1:FAST260326" = 256.0
+"A1_MINI:FAST260326" = 168.0
+"A1_MINI:FAST261111" = 168.0
+
+[params.follows]
+"A1:STANDARD" = false
+"A1_MINI:STANDARD" = false
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
+"A1:FAST261111" = false
+"A1:FAST260326" = false
+"A1_MINI:FAST260326" = false
+"A1_MINI:FAST261111" = false
+
+[[params]]
+key = "toolhead.pen_unmount_wait_y"
+configKey = "PenUnmountWaitY"
+tomlKey = "pen_unmount_wait_y"
+jsonKey = "pen_unmount_wait_y"
+label = "收笔等待位 Y"
+labelEn = "Pen unmount wait Y"
+labelJa = "ペン戻し待機 Y"
+labelTw = "收筆等待位 Y"
+desc = "收笔等待位的 Y 坐标，对应骨架里的 {wait_y}。A 系列不动这个轴，留 0"
+descEn = "Y of the unmount wait position; feeds {wait_y} in the skeleton. A-series keeps this axis still, so it stays 0"
+descJa = "ペン戻し待機位置の Y。スケルトンの {wait_y} に入ります。A シリーズはこの軸を動かさないため 0"
+descTw = "收筆等待位的 Y 座標，對應骨架裡的 {wait_y}。A 系列不動這個軸，留 0"
+tomlComment = "收笔等待位 Y"
+valueType = "float"
+uiComponent = "number"
+defaultValue = 0.0
+scope = "machine_specific"
+section = "toolhead"
+layout = { "order" = 1.2, "sectionId" = "custom_gcode" }
+min = -20.0
+max = 320.0
+step = 0.1
+unit = "mm"
+choices = []
+variantMode = "per_variant"
+machineFilter = "A1,A1_MINI,P1S,P2S,X1C"
+deprecated = false
+machineMinVariants = {  }
+machineMaxVariants = {  }
+omitWhenUnset = true
+pinned = false
+
+[params.machineVariants]
+"P1S" = 0.0
+"P1S:LITE" = 0.0
+"P2S" = 0.0
+"P2S:STANDARD" = 0.0
+"X1C" = 0.0
+"X1C:LITE" = 0.0
+
+[params.follows]
+"A1:STANDARD" = false
+"A1_MINI:STANDARD" = false
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
+"A1:FAST261111" = false
+"A1:FAST260326" = false
+"A1_MINI:FAST260326" = false
+"A1_MINI:FAST261111" = false
+
+[[params]]
+key = "toolhead.pen_unmount_x"
+configKey = "PenUnmountX"
+tomlKey = "pen_unmount_x"
+jsonKey = "pen_unmount_x"
+label = "收笔位 X"
+labelEn = "Pen unmount X"
+labelJa = "ペン戻し位置 X"
+labelTw = "收筆位 X"
+desc = "碰一下把笔尖收回去的那个 X，对应收笔骨架里的 {target}"
+descEn = "X whose bump releases the pen tip; feeds {target} in the unmount skeleton"
+descJa = "当ててペン先を戻す X。アンマウント用スケルトンの {target} に入ります"
+descTw = "碰一下把筆尖收回去的那個 X，對應收筆骨架裡的 {target}"
+tomlComment = "收笔位 X"
+valueType = "float"
+uiComponent = "number"
+defaultValue = 0.0
+scope = "machine_specific"
+section = "toolhead"
+layout = { "order" = 1.3, "sectionId" = "custom_gcode" }
+min = -20.0
+max = 320.0
+step = 0.1
+unit = "mm"
+choices = []
+variantMode = "per_variant"
+machineFilter = "A1,A1_MINI,P1S,P2S,X1C"
+deprecated = false
+machineMinVariants = {  }
+machineMaxVariants = {  }
+pinned = false
+
+[params.machineVariants]
+"A1" = 274.0
+"A1_MINI" = 189.0
+"A1:STANDARD" = 271.0
+"A1_MINI:STANDARD" = 189.0
+"P1S" = 256.0
+"P1S:LITE" = 256.0
+"P2S" = 256.0
+"P2S:STANDARD" = 256.0
+"X1C" = 256.0
+"X1C:LITE" = 256.0
+"A1:FAST261111" = 274.0
+"A1:FAST260326" = 271.0
+"A1_MINI:FAST260326" = 189.0
+"A1_MINI:FAST261111" = 189.0
+
+[params.follows]
+"A1:STANDARD" = false
+"A1_MINI:STANDARD" = false
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
+"A1:FAST261111" = false
+"A1:FAST260326" = false
+"A1_MINI:FAST260326" = false
+"A1_MINI:FAST261111" = false
+
+[[params]]
+key = "toolhead.pen_unmount_speed"
+configKey = "PenUnmountSpeed"
+tomlKey = "pen_unmount_speed"
+jsonKey = "pen_unmount_speed"
+label = "收笔速度"
+labelEn = "Pen unmount speed"
+labelJa = "ペン戻し速度"
+labelTw = "收筆速度"
+desc = "收笔时推到动作位那一段的进给速度，对应骨架里的 {speed}"
+descEn = "Feedrate of the bump toward the unmount position; feeds {speed} in the skeleton"
+descJa = "ペン戻し位置へ当てる区間の送り速度。スケルトンの {speed} に入ります"
+descTw = "收筆時推到動作位那一段的進給速度，對應骨架裡的 {speed}"
+tomlComment = "收笔速度"
+valueType = "float"
+uiComponent = "number"
+defaultValue = 0.0
+scope = "machine_specific"
+section = "toolhead"
+layout = { "order" = 1.4, "sectionId" = "custom_gcode" }
+min = 0.0
+max = 100000.0
+step = 100.0
+unit = "mm/min"
+choices = []
+variantMode = "per_variant"
+machineFilter = "A1,A1_MINI,P1S,P2S,X1C"
+deprecated = false
+machineMinVariants = {  }
+machineMaxVariants = {  }
+pinned = false
+
+[params.machineVariants]
+"A1" = 10000.0
+"A1_MINI" = 10000.0
+"A1:STANDARD" = 10000.0
+"A1_MINI:STANDARD" = 10000.0
+"P1S" = 6000.0
+"P1S:LITE" = 6000.0
+"P2S" = 6000.0
+"P2S:STANDARD" = 6000.0
+"X1C" = 6000.0
+"X1C:LITE" = 6000.0
+"A1:FAST261111" = 10000.0
+"A1:FAST260326" = 10000.0
+"A1_MINI:FAST260326" = 10000.0
+"A1_MINI:FAST261111" = 10000.0
+
+[params.follows]
+"A1:STANDARD" = false
+"A1_MINI:STANDARD" = false
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
+"A1:FAST261111" = false
+"A1:FAST260326" = false
+"A1_MINI:FAST260326" = false
+"A1_MINI:FAST261111" = false
 
 [[params]]
 key = "toolhead.first_pen_revitalization_flag"
@@ -488,11 +976,7 @@ pinned = true
 serialization = { "subfieldsOrder" = ["x", "y", "z"] }
 
 [params.machineVariants]
-"A1:FAST" = -0.7
-"A1:FASTV3.3" = -0.7
 "A1:STANDARD" = -1.0
-"A1_MINI:FAST" = -0.5
-"A1_MINI:FASTV3.3" = -0.9
 "A1_MINI:STANDARD" = -0.3
 "P1S" = -25.9
 "P1S:LITE" = -25.9
@@ -500,17 +984,21 @@ serialization = { "subfieldsOrder" = ["x", "y", "z"] }
 "P2S:STANDARD" = -25.9
 "X1C" = -25.9
 "X1C:LITE" = -25.9
+"A1:FAST261111" = -0.7
+"A1:FAST260326" = -0.7
+"A1_MINI:FAST260326" = -0.5
+"A1_MINI:FAST261111" = -0.9
 
 [params.follows]
-"A1:FAST" = false
-"A1:FASTV3.3" = false
 "A1:STANDARD" = false
-"A1_MINI:FAST" = false
-"A1_MINI:FASTV3.3" = false
 "A1_MINI:STANDARD" = false
 "P1S:LITE" = false
 "P2S:STANDARD" = false
 "X1C:LITE" = false
+"A1:FAST261111" = false
+"A1:FAST260326" = false
+"A1_MINI:FAST260326" = false
+"A1_MINI:FAST261111" = false
 
 [[params]]
 key = "toolhead.offset.y"
@@ -546,11 +1034,7 @@ mergeGroup = "offset"
 pinned = true
 
 [params.machineVariants]
-"A1:FAST" = 26.3
-"A1:FASTV3.3" = 24.4
 "A1:STANDARD" = 18.6
-"A1_MINI:FAST" = 24.0
-"A1_MINI:FASTV3.3" = 23.0
 "A1_MINI:STANDARD" = 18.1
 "P1S" = 14.0
 "P1S:LITE" = 14.0
@@ -558,17 +1042,21 @@ pinned = true
 "P2S:STANDARD" = 14.0
 "X1C" = 14.0
 "X1C:LITE" = 14.0
+"A1:FAST261111" = 24.4
+"A1:FAST260326" = 26.3
+"A1_MINI:FAST260326" = 24.0
+"A1_MINI:FAST261111" = 23.0
 
 [params.follows]
-"A1:FAST" = false
-"A1:FASTV3.3" = false
 "A1:STANDARD" = false
-"A1_MINI:FAST" = false
-"A1_MINI:FASTV3.3" = false
 "A1_MINI:STANDARD" = false
 "P1S:LITE" = false
 "P2S:STANDARD" = false
 "X1C:LITE" = false
+"A1:FAST261111" = false
+"A1:FAST260326" = false
+"A1_MINI:FAST260326" = false
+"A1_MINI:FAST261111" = false
 
 [[params]]
 key = "toolhead.offset.z"
@@ -606,8 +1094,6 @@ pinned = true
 [params.machineVariants]
 "A1" = 3.9
 "A1_MINI" = 3.9
-"A1_MINI:FAST" = 3.9
-"A1_MINI:FASTV3.3" = 3.9
 "A1_MINI:STANDARD" = 3.9
 "P1S" = 1.1
 "P1S:LITE" = 1.1
@@ -616,8 +1102,10 @@ pinned = true
 "X1C" = 1.1
 "X1C:LITE" = 1.1
 "A1:STANDARD" = 3.9
-"A1:FAST" = 3.9
-"A1:FASTV3.3" = 3.9
+"A1:FAST261111" = 3.9
+"A1:FAST260326" = 3.9
+"A1_MINI:FAST260326" = 3.9
+"A1_MINI:FAST261111" = 3.9
 
 [params.follows]
 "P1S:LITE" = false
@@ -997,7 +1485,7 @@ descTw = "同一區域的塗膠遍數，多次塗膠可增加黏合力但延長�
 tomlComment = "涂胶次数 范围:1~10"
 valueType = "int"
 uiComponent = "number"
-defaultValue = 1.0
+defaultValue = 1
 scope = "universal"
 section = "wiping"
 layout = { "order" = 2.0, "sectionId" = "glue_params" }
@@ -1762,14 +2250,14 @@ pinned = false
 
 [params.machineVariants]
 "A1" = "auto"
-"A1:FASTV3.3" = "auto"
 "A1:STANDARD" = "auto"
-"A1_MINI:FASTV3.3" = "auto"
+"A1:FAST261111" = "auto"
+"A1_MINI:FAST261111" = "auto"
 
 [params.follows]
-"A1:FASTV3.3" = false
 "A1:STANDARD" = false
-"A1_MINI:FASTV3.3" = false
+"A1:FAST261111" = false
+"A1_MINI:FAST261111" = false
 
 [[params]]
 key = "wiping.ironing_suppress_expand"
@@ -2039,7 +2527,7 @@ descTw = "超過此層數未塗膠時自動觸發潤筆"
 tomlComment = "预涂触发层数 范围:0~999"
 valueType = "int"
 uiComponent = "number"
-defaultValue = 30.0
+defaultValue = 30
 scope = "universal"
 section = "wiping"
 layout = { "order" = 4.0, "sectionId" = "pen_revitalization" }
@@ -2195,7 +2683,7 @@ descTw = "護套從底層膨脹逐漸收斂到塔體外輪廓的層數"
 tomlComment = "鞘收敛层数 范围:1~200"
 valueType = "int"
 uiComponent = "number"
-defaultValue = 50.0
+defaultValue = 50
 scope = "universal"
 section = "wiping"
 layout = { "order" = 60.0, "sectionId" = "tower_structure" }
@@ -2426,7 +2914,20 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
-"A1" = 1.0
+"A1" = 1.2
+"A1:STANDARD" = 1.2
+A1_MINI = 1.2
+"A1_MINI:STANDARD" = 1.2
+P1S = 1.2
+"P1S:LITE" = 1.2
+P2S = 1.2
+"P2S:STANDARD" = 1.2
+X1C = 1.2
+"X1C:LITE" = 1.2
+"A1:FAST261111" = 1.2
+"A1:FAST260326" = 1.2
+"A1_MINI:FAST260326" = 1.2
+"A1_MINI:FAST261111" = 1.2
 
 [[params]]
 key = "wiping.tower_first_layer_flow"
@@ -2717,7 +3218,7 @@ descTw = "塗膠後額外等待乾燥的時間（秒），讓膠水充分固化"
 tomlComment = "额外干燥时间"
 valueType = "int"
 uiComponent = "number"
-defaultValue = 0.0
+defaultValue = 0
 scope = "universal"
 section = "wiping"
 layout = { "order" = 2.0, "sectionId" = "fan_control" }
@@ -2760,8 +3261,8 @@ showWhen = { "key" = "wiping.have_wiping_components", "op" = "eq", "value" = "to
 choices = []
 variantMode = "shared"
 deprecated = false
-machineMinVariants = { "A1:FAST" = 10.0, "A1:STANDARD" = 10.0, "A1_MINI:FAST" = 10.0, "A1_MINI:FASTV3.3" = 10.0, "A1_MINI:STANDARD" = 10.0, "P1S:LITE" = 10.0, "P2S:STANDARD" = 10.0, "X1C:LITE" = 10.0 }
-machineMaxVariants = { "A1:FAST" = 226.0, "A1:STANDARD" = 226.0, "A1_MINI:FAST" = 150.0, "A1_MINI:FASTV3.3" = 150.0, "A1_MINI:STANDARD" = 150.0, "P1S:LITE" = 226.0, "P2S:STANDARD" = 226.0, "X1C:LITE" = 226.0 }
+machineMinVariants = { "A1:STANDARD" = 10.0, "A1_MINI:STANDARD" = 10.0, "P1S:LITE" = 10.0, "P2S:STANDARD" = 10.0, "X1C:LITE" = 10.0 , "A1:FAST260326" = 10.0, "A1_MINI:FAST260326" = 10.0, "A1_MINI:FAST261111" = 10.0}
+machineMaxVariants = { "A1:STANDARD" = 226.0, "A1_MINI:STANDARD" = 150.0, "P1S:LITE" = 226.0, "P2S:STANDARD" = 226.0, "X1C:LITE" = 226.0 , "A1:FAST260326" = 226.0, "A1_MINI:FAST260326" = 150.0, "A1_MINI:FAST261111" = 150.0}
 mergeGroup = "wiper"
 pinned = false
 
@@ -2794,8 +3295,8 @@ showWhen = { "key" = "wiping.have_wiping_components", "op" = "eq", "value" = "to
 choices = []
 variantMode = "shared"
 deprecated = false
-machineMinVariants = { "A1:FAST" = 10.0, "A1_MINI:FAST" = 10.0, "A1_MINI:FASTV3.3" = 10.0, "A1_MINI:STANDARD" = 10.0, "P1S:LITE" = 10.0, "P2S:STANDARD" = 10.0, "X1C:LITE" = 10.0 }
-machineMaxVariants = { "A1:FAST" = 226.0, "A1_MINI:FAST" = 150.0, "A1_MINI:FASTV3.3" = 150.0, "A1_MINI:STANDARD" = 150.0, "P1S:LITE" = 226.0, "P2S:STANDARD" = 226.0, "X1C:LITE" = 226.0 }
+machineMinVariants = { "A1_MINI:STANDARD" = 10.0, "P1S:LITE" = 10.0, "P2S:STANDARD" = 10.0, "X1C:LITE" = 10.0 , "A1:FAST260326" = 10.0, "A1_MINI:FAST260326" = 10.0, "A1_MINI:FAST261111" = 10.0}
+machineMaxVariants = { "A1_MINI:STANDARD" = 150.0, "P1S:LITE" = 226.0, "P2S:STANDARD" = 226.0, "X1C:LITE" = 226.0 , "A1:FAST260326" = 226.0, "A1_MINI:FAST260326" = 150.0, "A1_MINI:FAST261111" = 150.0}
 mergeGroup = "wiper"
 pinned = false
 

@@ -34,6 +34,7 @@
 
 /// 热床预涂胶（`bed_glue.go` 那 607 行的移植，2026-10-17）。挂在 `hooks` 那个空壳上。
 pub mod bed_glue;
+pub mod debug;
 pub mod hooks;
 pub mod progress;
 
@@ -44,6 +45,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::config;
+use crate::diag::messages::MessageRef;
 use crate::diag::{CancelToken, PostprocError};
 use crate::ir::{Ir, TowerRelocateModeIr};
 use crate::postproc::calibration::Mode;
@@ -52,7 +54,7 @@ use crate::postproc::disk::{TowerAsk, TowerAskOutcome};
 /// write hooks 的偏好默认值（Go preferences/service.go:165-180；CLI 无偏好通道）。
 pub const DEFAULT_SKIP_VIBRATION: bool = true;
 pub const DEFAULT_BEGIN_STAGE_RETRACT: bool = true;
-pub const DEFAULT_BEGIN_STAGE_RETRACT_Z_LIFT_MM: i64 = 20;
+pub const DEFAULT_BEGIN_STAGE_RETRACT_Z_LIFT_MM: i64 = 5;
 /// Z/XY 校准停留秒数（application_defaults [calibration] SSOT：Z=2, XY=3）。
 pub const DEFAULT_Z_DWELL_SEC: i64 = 2;
 pub const DEFAULT_XY_DWELL_SEC: i64 = 3;
@@ -160,13 +162,16 @@ pub struct ProcessResult {
     pub output_path: PathBuf,
     pub stats: Stats,
     pub print_time: Option<crate::postproc::printtime::Result>,
-    pub warnings: Vec<String>,
+    /// 警告的**指代**（键 + 参数）—— 谁显示谁按自己的语言渲（见 [`MessageRef`]）。
+    pub warnings: Vec<MessageRef>,
     /// 实际执行到的步骤，供顺序断言与展示。
     pub executed_steps: Vec<Step>,
     /// 逐步骤耗时（与 `executed_steps` 同序、同集合）。报告页「管线计时」区与 CLI
     /// 的逐阶段打印都读它 —— 在此之前只有整跑总耗时。
     pub step_timings: Vec<StepTiming>,
     pub input_sha256: String,
+    /// 调试那一趟的参数；普通那趟是 `None`。归档要写它，所以随结果带出来。
+    pub debug: Option<crate::ir::types::DebugIr>,
     pub detail_facts: DetailFacts,
     /// 输入 G-code 头部刮出来的 5 个事实（机型预设名 / 工艺预设名 / 熨平开关 / 3mf 名 /
     /// 3MF 模型名）。
@@ -559,7 +564,9 @@ fn run(
     checkpoint(cancel)?;
     timer.begin(Step::Collision, "碰撞检测...");
     executed.push(Step::Collision);
-    if crate::postproc::calibration::need_collision_check(calib_mode) {
+    /* 调试那一趟整段产物都要被替换掉，碰撞结论没有去处；而且它会在调试之前
+     * 就把这一趟判成失败（作者 2026-11-12：调试模式下这些都别管）。 */
+    if ir.debug.is_none() && crate::postproc::calibration::need_collision_check(calib_mode) {
         let collision = crate::postproc::disk::detect_tower_collision(&content, &ir);
         if collision.has_collision {
             /* 码仍是 `E_GCODE_COLLISION_001`，句子在 `messages.toml`（旧形态把码拼进正文，
@@ -708,7 +715,7 @@ fn run(
         cancel_check_interval,
     )?;
     let final_tower_height = p1.stats.max_z_height;
-    let pass1_stats = p1.stats.clone();
+    let mut pass1_stats = p1.stats.clone();
 
     // ---- step 9: pass2（消耗式吃 Pass1Output）----
     checkpoint(cancel)?;
@@ -760,6 +767,26 @@ fn run(
         )?;
     }
 
+    /* 调试模式：把前面那套结果整段换成「只跑动作」的骨架。
+     *
+     * 动作块不依赖 pass1/pass2 的任何产出（它只用等待位/动作位/速度），所以这里
+     * 直接替换 `out_lines`；写盘、MKP 标记收尾、sha 与正常那一趟共用同一条路。
+     * 代价是白跑了一遍后处理 —— 换来的是零分叉，不会出现两套写盘逻辑。 */
+    if let Some(dbg) = ir.debug.clone() {
+        tracing::info!(
+            machine = machine_type.as_str(),
+            wait = dbg.wait_x,
+            wait_y = dbg.wait_y,
+            mount = dbg.mount_x,
+            unmount = dbg.unmount_x,
+            speed = dbg.speed,
+            test_mount = dbg.test_mount,
+            test_unmount = dbg.test_unmount,
+            "调试模式：生成动作测试产物"
+        );
+        out_lines = debug::build_debug_gcode(&content, &dbg);
+    }
+
     // ---- step 11: write —— 三个 hooks + .part + rename ----
     // 最后一道取消检查点：此后开始落盘，写就写完。
     checkpoint(cancel)?;
@@ -767,20 +794,49 @@ fn run(
     executed.push(Step::Write);
     /* 这三处以前各读一个 `DEFAULT_*` 常量 —— 也就是"设置页那几档从来没被读过"。
     现在全部走 `ir.prefs`（`runtime::postproc_prefs::apply_to_ir` 是唯一写入点）。 */
-    out_lines = hooks::apply_begin_stage_retract(
-        out_lines,
-        &ir,
-        ir.prefs.begin_stage_retract_enabled,
-        ir.prefs.begin_stage_retract_z_lift_mm,
-    );
-    out_lines =
-        hooks::apply_skip_vibration_calibration(out_lines, ir.prefs.skip_vibration_calibration);
-    /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从旧侧移植） */
-    out_lines = bed_glue::apply_bed_glue(out_lines, &ir, calib_mode);
+    /* 调试产物自带归零与动作，这三个钩子一律不跑：
+     * 再插一次收笔块 / 涂胶 / 跳过震动，都会往调试产物里塞它不需要的东西。 */
+    if ir.debug.is_none() {
+        out_lines = hooks::apply_begin_stage_retract(
+            out_lines,
+            &ir,
+            ir.prefs.begin_stage_retract_enabled,
+            ir.prefs.begin_stage_retract_z_lift_mm,
+        );
+        out_lines =
+            hooks::apply_skip_vibration_calibration(out_lines, ir.prefs.skip_vibration_calibration);
+        /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从旧侧移植） */
+        out_lines = bed_glue::apply_bed_glue(out_lines, &ir, calib_mode);
+    }
 
-    // MKP 标记协议 v1 收尾：ev 按落盘行序重编号 + 文件头 ;MKP_INFO + 文件尾 ;MKP_STATS。
+    // MKP 标记协议 v1 收尾：ev 按落盘行序重编号 + 文件头 ;MKP_INFO + 文件尾 ;MKP_STATS，
+    // 同时把层数声明改成与成品内容一致。
     // 必须是最后一道行变换 —— STATS 数的就是落盘的那份，STATS_MATCH 靠这个成立。
-    out_lines = crate::postproc::marks::finalize(out_lines, &machine_type);
+    let finalized = crate::postproc::marks::finalize(out_lines, &machine_type)?;
+    if finalized.header_added {
+        ir.warnings.push(MessageRef::new(
+            "postproc.header_layer_declared",
+            &[("layers", &finalized.layers.to_string())],
+        ));
+    }
+    /*
+     * **只在会踩到缺陷的那一侧才提醒**（2026-11-08 作者：「如果他能识别到的话，你就智能一点，
+     * 它没有这个错误，你就不用显示警告……如果不能识别到，你就只能按版本分」）。
+     *
+     * 判据 = 切片器版本：**2.7.1 起**那一侧后处理完只回填 `moves` / `lines_ends`，
+     * 漏了 `spiral_vase_layers` ⇒ 预览 / 打印沿用旧层表；2.6.0 及更早**没有这段刷新逻辑**，
+     * 按切片时那份层表画本来就自洽 ⇒ 不打扰用户。
+     *
+     * 文件本身照旧一律压平 `; has_scarf_joint_seam = 0`（`marks::finalize` 那一步）：
+     * 那是"以后任何版本重新打开都正确"的修法，与这一句提示是两件事。
+     */
+    if finalized.scarf_flattened && scarf_viewer_is_affected(&pass1_stats.slicer_version) {
+        ir.warnings
+            .push(MessageRef::new("postproc.scarf_joint_seam", &[]));
+    }
+    // 报告与文件必须说同一个层数：采集侧改过声明，统计也跟着实测值走。
+    pass1_stats.total_layer_number = finalized.layers;
+    out_lines = finalized.lines;
 
     let final_output_path = match &output_path {
         Some(p) if p != &gcode_path => p.clone(),
@@ -829,6 +885,7 @@ fn run(
         },
         print_time,
         warnings: ir.warnings.clone(),
+        debug: ir.debug.clone(),
         executed_steps: executed,
         step_timings,
         input_sha256,
@@ -1002,5 +1059,56 @@ pub fn assert_step_order(executed: &[Step]) {
             executed.contains(&required),
             "必含步骤 {required:?} 缺失（executed={executed:?}）"
         );
+    }
+}
+/// 斜拼接缝那个缺陷从哪一版开始（Bambu Studio）：**2.7.1 起**那一侧的后处理回填
+/// （`BackgroundSlicingProcess.cpp`）只搬 `moves` / `lines_ends`，漏了 `spiral_vase_layers`。
+const SCARF_STALE_LAYER_SINCE: (u32, u32, u32) = (2, 7, 1);
+
+/// 这个切片器版本会不会踩到「后处理完不刷新层表」（斜拼接缝那一条）。
+///
+/// 缺陷不在我们改的文件里，在读文件的那一侧 —— 我们看不见对方的代码，但**看得见它自报的
+/// 版本**（头里 `; BambuStudio 02.08.02.60`，pass1 已摘成 `stats.slicer_version`）。
+///
+/// - 认得出且 `< 2.7.1` ⇒ 那一侧没有这段刷新逻辑，预览按切片时那份层表画本来就自洽 ⇒ 不提醒；
+/// - 认得出且 `>= 2.7.1` ⇒ 会错层 / 被切半截 ⇒ 提醒；
+/// - **认不出**（老文件没写版本 / 写法不认得）⇒ 仍然提醒：宁可多一句话，
+///   也不要让人把可能残缺的件打到机器上。
+fn scarf_viewer_is_affected(slicer_version: &str) -> bool {
+    match version_triple(slicer_version) {
+        Some(v) => v >= SCARF_STALE_LAYER_SINCE,
+        None => true,
+    }
+}
+
+/// 从 `"BambuStudio 02.08.02.60"` 取 `(2, 8, 2)`；认不出就是 `None`（兜不兜由调用方定）。
+fn version_triple(raw: &str) -> Option<(u32, u32, u32)> {
+    let token = raw.split_whitespace().last()?;
+    let mut parts = token.split('.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: u32 = parts.next()?.parse().ok()?;
+    /* 第三段缺省按 0（`2.7` 这种写法）：只会让判据更保守地"算旧" */
+    let patch: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 版本分界：2.7.1 起才提醒 —— 2.6.0 的用户不该看见这句话（作者 2026-11-08：
+    /// 「它能识别到的话就智能一点，没有这个错误就不用显示警告」）。
+    #[test]
+    fn scarf_warning_follows_the_slicer_version() {
+        assert!(!scarf_viewer_is_affected("BambuStudio 02.05.03.61"));
+        assert!(!scarf_viewer_is_affected("BambuStudio 02.06.00.51"));
+        assert!(scarf_viewer_is_affected("BambuStudio 02.07.01.62"));
+        assert!(scarf_viewer_is_affected("BambuStudio 02.08.02.60"));
+        assert!(scarf_viewer_is_affected("BambuStudio 02.09.01.70"));
+        /* 版本认不出 ⇒ 宁可提醒，也别放过去 */
+        assert!(scarf_viewer_is_affected(""));
+        assert!(scarf_viewer_is_affected("BambuStudio"));
+        /* 两段式版本号：第三段按 0 算 */
+        assert!(!scarf_viewer_is_affected("BambuStudio 02.07"));
     }
 }

@@ -67,10 +67,12 @@ fn the_diverged_copy_is_gone_and_must_not_come_back() {
 #[test]
 fn the_only_source_actually_carries_the_registry() {
     let reg = preset::load_param_registry();
-    assert_eq!(
-        reg.params.len(),
-        83,
-        "真源应有 83 条 [[params]]（实测基线）；条数变了就该在提交里说清为什么"
+    // 反空转只防「注册表被读空 / 读漏」，不钉「永远 83 条」：真源后来加过参数
+    // （2026-11-12 实测 92 条），写死条数会让每次加字段都变成一次判据改动。
+    assert!(
+        reg.params.len() >= 83,
+        "真源参数被读漏了，实测 {} 条",
+        reg.params.len()
     );
     // c888a5e 在工作台里删掉了 settings tab（分组结构编辑），实测基线同步成 7。
     assert_eq!(reg.tabs.len(), 7, "真源应有 7 个 [[tabs]]（实测基线）");

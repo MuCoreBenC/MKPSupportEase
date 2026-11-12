@@ -29,7 +29,10 @@ use std::path::{Path, PathBuf};
 use preset::{CalibrationExecMode, build, load_param_registry, read_preset};
 use serde_json::Value;
 
-/// 9 份夹具的文件名主干（= `{机型 id}-{版本 id 小写}`，b05 Task 5 统一命名）。
+/// 9 份**冻结夹具**的文件名主干（`fixtures/ir/presets/*.toml`）。
+///
+/// 这些是测试资产的固定名字，不是当前业务版本 id —— 业务改 id / 改产物名不会碰它们
+/// （它们与 `ir/build9/*.json` 成对冻结）。
 ///
 /// 快照里的段落名就是这些 —— 改名要让快照跟着改，**并在提交信息里说明为什么**
 /// （见文件头那条规矩）。
@@ -103,7 +106,7 @@ fn compute_report() -> String {
     let reg = load_param_registry();
     let mut lines = Vec::new();
     for name in NAMES {
-        let file = read_preset(&core_fixtures(format!("presets/{name}.toml")))
+        let file = read_preset(&core_fixtures(format!("ir/presets/{name}.toml")))
             .unwrap_or_else(|e| panic!("{name}: 预设读不到：{e}"));
         let ir_none = build(&file.config, None, CalibrationExecMode::Fallback)
             .unwrap_or_else(|e| panic!("{name}: None 支 build 失败：{e}"));

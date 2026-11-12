@@ -293,7 +293,7 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
         <div className={s.chain} role="list">
           {steps.map((st) => (
             <div key={st.key} className={s.step} data-state={st.state} role="listitem">
-              <span className={s.stepMark}>{st.state === 'done' ? '✓' : '·'}</span>
+              <span className={s.stepMark}>{st.state === 'done' ? <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg> : '·'}</span>
               <b className={s.stepLabel}>{st.label}</b>
               <span className={s.stepNote}>{st.note}</span>
             </div>

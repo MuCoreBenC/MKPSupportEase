@@ -1244,41 +1244,40 @@ fn classify_type(type_tag: &str) -> Option<&'static str> {
         || t.eq_ignore_ascii_case("externalperimeter")
         || t.eq_ignore_ascii_case("outer wall")
     {
-        "外墙"
+        "outer-wall"
     } else if t.eq_ignore_ascii_case("wall-inner")
         || t.eq_ignore_ascii_case("perimeter")
         || t.eq_ignore_ascii_case("inner wall")
     {
-        "内墙"
+        "inner-wall"
     } else if t.eq_ignore_ascii_case("skin")
         || t.eq_ignore_ascii_case("solidinfill")
         || t.eq_ignore_ascii_case("topsolidinfill")
         || t.eq_ignore_ascii_case("bottomsolidinfill")
         || t.eq_ignore_ascii_case("top surface")
     {
-        "顶/底面"
+        "skin"
     } else if t.eq_ignore_ascii_case("fill")
         || t.eq_ignore_ascii_case("internalinfill")
         || t.eq_ignore_ascii_case("infill")
     {
-        "填充"
+        "infill"
     } else if t.eq_ignore_ascii_case("support")
         || t.eq_ignore_ascii_case("support-interface")
         || t.eq_ignore_ascii_case("supportinterface")
     {
-        "支撑"
+        "support"
     } else if t.eq_ignore_ascii_case("skirt") || t.eq_ignore_ascii_case("brim") {
-        "裙边/包边"
+        "skirt-brim"
     } else if t.eq_ignore_ascii_case("gapfill") || t.eq_ignore_ascii_case("gap fill") {
-        "缝隙填充"
+        "gap-fill"
     } else if t.eq_ignore_ascii_case("priming") {
-        // Go 表里 priming → "清洗/ priming"
-        "清洗/ priming"
+        "priming"
     } else if t.eq_ignore_ascii_case("wipe")
         || t.eq_ignore_ascii_case("wipe tower")
         || t.eq_ignore_ascii_case("prime tower")
     {
-        "擦拭塔"
+        "wipe-tower"
     } else {
         return None;
     };
@@ -1288,10 +1287,10 @@ fn classify_type(type_tag: &str) -> Option<&'static str> {
 /// type 表没命中时按运动类别分类（原 `classify` 的后半段，逐条同 Go 表）。
 fn classify_kind(kind: &str) -> &'static str {
     match kind {
-        "retract" => "回抽/换料",
-        "travel" => "空驶移动",
-        "extrude" => "其他挤出",
-        _ => "其他",
+        "retract" => "retract",
+        "travel" => "travel",
+        "extrude" => "other-extrude",
+        _ => "other",
     }
 }
 
@@ -1399,10 +1398,11 @@ pub struct Options {
 
 /// `Serialize` 的理由同 [`CategoryStat`]。
 ///
-/// `by_type` 的键是 [`classify_type`] / [`classify_kind`] 给的**中文类别名**（「外墙」「非运动等待(G4/M400)」…），
-/// 落进 JSON 就是对象键，原样、不转义 —— 这不违反「中文步骤名只许在 UI 一处」那条：
-/// 那条管的是 12 步的**步骤名**（`pipeline/progress.rs:6`），而这些类别名是
-/// 打印时间估算自己的分类结果，本来就只在这一处产生。
+/// `by_type` 的键是 [`classify_type`] / [`classify_kind`] 给的 **ASCII 类别键**
+/// （`outer-wall` / `non-motion-wait` …）—— 它们会原样落进 `_meta.json` 的
+/// `detail.printTime.byType`，属于**归档契约**，不是给人读的句子：
+/// 显示名要在界面那一侧翻译（2026-11-08 作者：「那就用英文，ascii 也可以」）。
+/// 改键 = 改归档格式，别顺手动。
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Result {
@@ -1442,7 +1442,7 @@ pub fn estimate(content: &str, opts: &Options) -> Result {
     let non_motion = overhead.g4_dwell + overhead.m400_wait;
     total += non_motion;
     if non_motion > 0.0 {
-        let d = by_type.entry("非运动等待(G4/M400)").or_default();
+        let d = by_type.entry("non-motion-wait").or_default();
         d.seconds = non_motion;
         d.count = (overhead.g4_dwell > 0.0) as i64 + (overhead.m400_wait > 0.0) as i64;
     }
@@ -1484,7 +1484,7 @@ mod serialize_tests {
     fn the_archive_gets_all_eight_keys_in_camel_case() {
         let mut by_type = BTreeMap::new();
         by_type.insert(
-            "外墙",
+            "outer-wall",
             CategoryStat {
                 seconds: 12.5,
                 count: 3,
@@ -1523,8 +1523,11 @@ mod serialize_tests {
             obj["bambuAnchorSeconds"].is_null(),
             "算不出来要落 null，不许缺键"
         );
-        // 中文类别名原样做对象键（不转义、不改名）
-        assert_eq!(v["byType"]["外墙"]["count"], serde_json::json!(3));
-        assert_eq!(v["byType"]["外墙"]["percent"], serde_json::json!(25.0));
+        // 类别键是 **ASCII 契约**（`outer-wall` 之类）：原样做对象键，不转义、不改名
+        assert_eq!(v["byType"]["outer-wall"]["count"], serde_json::json!(3));
+        assert_eq!(
+            v["byType"]["outer-wall"]["percent"],
+            serde_json::json!(25.0)
+        );
     }
 }

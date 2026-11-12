@@ -716,6 +716,18 @@ export interface BulkEffect {
   before: string
   after: string
   kind: BulkKind
+  /** 这一列所属机型**基线的当前值**（人话） */
+  base: string
+  /**
+   * 要写的值**恰好等于基线** ⇒ 这一列不钉住，改成「跟随基线」：
+   * 值一样，但少一行 `machineVariants` + 一行 `follows`。
+   */
+  sameAsBase: boolean
+  /**
+   * 这一列的机型基线**也在这一批里** ⇒ 跟着基线走（写 `null`）。
+   * 一批里把基线设成 1.2，跟随它的版本结果也是 1.2。
+   */
+  followsBase: boolean
 }
 
 /** `preview::BulkSkip` */
@@ -735,6 +747,44 @@ export interface BulkPreview {
   blockedReason: string | null
   effects: BulkEffect[]
   skipped: BulkSkip[]
+}
+
+/**
+ * `preview::AttachPreview` —— **把这些列挂回跟随**会落到哪几列。
+ *
+ * 与 `BulkPreview` 是同一个问题的另一半：那个问"设成这个值"，
+ * 这个问"让它重新跟着基线"（写 `null` = 让这一层重新跟随）。
+ *
+ * `effects` 里**包含本来就在跟随的列** —— 基线值要摊给人看：
+ * 全部已在跟随时也不能只剩一句"本来就是继承来的"。
+ */
+export interface AttachPreview {
+  key: string
+  label: string
+  allowed: boolean
+  blockedReason: string | null
+  /** 勾选里的每一列版本（适用的、没被条件关着的），含已在跟随的 */
+  effects: AttachEffect[]
+  skipped: BulkSkip[]
+}
+
+export interface AttachEffect {
+  /** 列的 key（机型 id 或版本 uid） */
+  col: string
+  machine: string
+  label: string
+  level: Level
+  /** 这一层现在的值（人话）—— 已在跟随的，就是它跟随到的基线值 */
+  before: string
+  /**
+   * 挂回之后这一层**显示的值** = 这一层不跟随继承到的那个（机型基线 → 出厂默认）。
+   * 与 `BulkEffect.base` 同一处取值 —— 两种预览对"基线是多少"必须同一个数。
+   */
+  after: string
+  /** 这一层**本来就在跟随**（写下去是空操作，只是把基线值摊出来） */
+  following: boolean
+  /** 挂回去**值会不会变**（归一化后的值比较，不比格式化文本） */
+  changes: boolean
 }
 
 /** `app::DiffLine` */
@@ -778,15 +828,15 @@ export const WHY_LABEL: Record<string, string> = {
   user: '用户修改',
   /* **2026-11-03 起不再单独显示**：它是"我们为保住这个值多写了几个版本键"的
      存储解释，用户不关心。后端已统一归成 `follows`；留在这里只为兼容老数据。 */
-  promoted: '随基底生效',
+  promoted: '随基线生效',
   copy: '复制快照',
   empty: '空表清理',
   unknown: '来源不明',
   structural: '改定义',
-  /* 跟着基底变。**这一种涵盖"写没写版本键"两种情况** —— 那是存储细节，
-     用户看到的都是"我改了基底，这一圈跟着变"。 */
-  follows: '随基底生效',
-  inherited: '随基底生效',
+  /* 跟着基线变。**这一种涵盖"写没写版本键"两种情况** —— 那是存储细节，
+     用户看到的都是"我改了基线，这一圈跟着变"。 */
+  follows: '随基线生效',
+  inherited: '随基线生效',
 }
 
 /* ---------- 写 ---------- */
@@ -796,7 +846,7 @@ export const WHY_LABEL: Record<string, string> = {
  *
  * `kind` 是 serde 的内部标签，所以这里也用它做可辨识联合。
  *
- * b04 Task 12 之后结构手势就归了「机型与版本」页即时落盘（REPORT §7）；
+ * b04 Task 12 之后结构手势就归了「机型与版本」页走草稿（保存后写入）（REPORT §7）；
  * 2026-10-06 状态机修正又删掉了第四种 `markBuilt` —— 生成记录是**台账**
  * （`workbench/built.json`），由生成事务直接落盘，从来不进草稿。
  */
@@ -858,8 +908,21 @@ export interface TxnState {
   canUndo: boolean
   canRedo: boolean
   ops: TxnOp[]
+  /**
+   * 撤销栈顶那一条：标签 + 它改了几处。
+   *
+   * 「未保存改动」框的「撤销这一笔（N 处）」读它 —— 与 `onUndo` 真会弹掉的是同一条。
+   */
+  topOp: TopOp | null
   /** 刚跑完那一笔的回执；`null` = 这一轮没跑过命令（取走即清，不会重复） */
   receipt: CommandReceipt | null
+}
+
+/** `app::TopOp` */
+export interface TopOp {
+  label: string
+  /** 这一笔改了几处字段（同一格合并之后的条数） */
+  fields: number
 }
 
 export interface SaveResult {
@@ -887,6 +950,14 @@ export interface IssueWhere {
   key: string | null
 }
 
+/**
+ * `issues::IssueAction` —— 这一条能不能就地修。
+ *
+ * 后端说，前端不按 id 猜：`fixable` 才带就地按钮，`none` 只告知，
+ * 其余给「去处理」。判据只在一处，加新检查项不必改视图。
+ */
+export type IssueAction = 'goto' | 'rerun' | 'fixable' | 'needsDecision' | 'none'
+
 /** `issues::Issue` */
 export interface Issue {
   id: string
@@ -895,6 +966,7 @@ export interface Issue {
   /** 「怎么办」。不是把标题换个说法重复一遍 */
   detail: string
   at: IssueWhere
+  action: IssueAction
 }
 
 /** `issues::Report`。`blocks > 0` = 生成该全禁用 */
@@ -1966,6 +2038,11 @@ export interface Words {
    * 未保存由那一格的还原按钮 + 右上角「未保存 N」表达。
    */
   paramStatus: Record<'follow' | 'own', Word>
+  /**
+   * 检查三档的中文标签（阻断 / 待办 / 提示）。**唯一出口** ——
+   * 检查卡与导航徽标都读它，不在视图里再写一遍 `block → '阻断'`
+   */
+  severity: Record<Severity, Word>
   /** 「已弃用」参数级那一枚（C14 §五）。判据来自上游注册表的 `deprecated` */
   paramDeprecated: Word
   /** 「已弃用」选项级那一枚。判据是后端推出来的（这一档放开的参数全弃用） */
@@ -2129,6 +2206,13 @@ export interface MachineList {
   machines: MachineView[]
   /** 数据根的绝对路径 */
   root: string
+}
+
+/** `machines::VersionAssetView` —— 归属某版本的资产，以及谁在引用它 */
+export interface VersionAssetRef {
+  id: string
+  machines: string[]
+  bundles: string[]
 }
 
 /* ---------- 资产库（`app::assets` / `presets::assets`） ---------- */
@@ -2752,7 +2836,7 @@ export const wb = {
   registry: () => invoke<RegistryView>('wb_registry'),
   /**
    * 改一条参数的**定义**（名称 / 说明 / 单位 / 值类型 / 控件 / 范围 / 步进 /
-   * 出厂默认 / 属于 / 前置条件 / 弃用）。**即时落盘**（与机型尺寸那套一致），
+   * 出厂默认 / 属于 / 前置条件 / 弃用）。**走草稿（保存后写入）**（与机型尺寸那套一致），
    * 不走参数草稿 —— 定义与值在撤销语义上不是一件事。返回重读后的注册表
    */
   setParamMeta: (key: string, edit: ParamMetaEdit) =>
@@ -2820,7 +2904,7 @@ export const wb = {
   /** 删一条资产。反查守卫在后端：有人引用整次拒绝（界面把它转成拦截页） */
   removeAsset: (assetId: string) => invoke<AssetList>('wb_remove_asset', { assetId }),
 
-  /** 改一条资产的交付档位（download ↔ bundled）。即时落盘；mkPreset 不许随包 */
+  /** 改一条资产的交付档位（download ↔ bundled）。走草稿（保存后写入）；mkPreset 不许随包 */
   /**
    * **补标 / 改写 / 移除一份校准 3MF 的身份**（2026-10-19）。
    *
@@ -2836,7 +2920,7 @@ export const wb = {
     invoke<AssetList>('wb_set_asset_delivery', { assetId, delivery }),
 
   /**
-   * **新建或改写一个分组**（2026-10-16）。即时落盘，回一份新清单。
+   * **新建或改写一个分组**（2026-10-16）。走草稿（保存后写入），回一份新清单。
    *
    * 分组 = "哪几张图共用同一份标注源稿"，登记在台账 `[[groups]]` 里 ——
    * 跟资产一起入库、跟仓库走、编进 catalog（客户端按 `role` 挑图，不认文件名）。
@@ -2884,7 +2968,7 @@ export const wb = {
   bundles: (query: string | null) => invoke<BundleList>('wb_bundles', { query }),
 
   /**
-   * 换一份套餐的文件清单（P4 套餐内容编辑）。**即时落盘**，不走参数草稿 ——
+   * 换一份套餐的文件清单（P4 套餐内容编辑）。**走草稿（保存后写入）**，不走参数草稿 ——
    * 悬空引用 / 「没有一条 BBS」在后端拦；MKP 预设也在 `assetIds` 里
    * （2026-10-03 进资产库，`type = 'mkPreset'`，**文件在不在都能选**）；
    * `updatedAt` 由那次写盖上当天
@@ -2905,7 +2989,7 @@ export const wb = {
     invoke<BundleList>('wb_copy_bundle', { bundleId, newId, display }),
 
   /** **把一批版本指到这份套餐**（多选 + 确认）。不限机型；已经指着它的跳过。
-   *  即时落盘，界面在确认前先摆影响预览 */
+   *  走草稿（保存后写入），界面在确认前先摆影响预览 */
   assignBundleVersions: (bundleId: string, uids: string[]) =>
     invoke<BundleList>('wb_assign_bundle_versions', { bundleId, uids }),
 
@@ -2954,13 +3038,13 @@ export const wb = {
     invoke<MachineList>('wb_set_machine_field', { machineId, field, value }),
 
   /**
-   * 改品牌的一格（`name` / `logo`）。**即时落盘**（同机型那一套：没有草稿、没有撤销）。
+   * 改品牌的一格（`name` / `logo`）。走草稿（保存后写入），与机型那一套一致。
    * `logo = null` 是**清空**（删键，消费侧回落内置字标）；`name` 不许清空
    */
   setBrandField: (brandId: string, field: 'name' | 'logo', value: string | null) =>
     invoke<MachineList>('wb_set_brand_field', { brandId, field, value }),
 
-  /** 新建一个品牌（id + 显示名；品牌图后配）。**即时落盘**，撞名（含仅大小写不同）当场拒 */
+  /** 新建一个品牌（id + 显示名；品牌图后配）。**走草稿（保存后写入）**，撞名（含仅大小写不同）当场拒 */
   addBrand: (id: string, name: string) => invoke<MachineList>('wb_add_brand', { id, name }),
 
   /**
@@ -2971,7 +3055,7 @@ export const wb = {
     invoke<MachineList>('wb_move_machine_to_brand', { machineId, brandId }),
 
   /**
-   * **写一台机型的整张 `[dimensions]`**（六组一起）。即时落盘。
+   * **写一台机型的整张 `[dimensions]`**（六组一起）。走草稿（保存后写入）。
    * 校验在后端：床身宽深必须为正、数字必须有限；全零的可选组由后端写零值（不删子表）
    */
   setMachineDimensions: (machineId: string, dimensions: MachineDimensions) =>
@@ -2985,15 +3069,27 @@ export const wb = {
     invoke<MachineList>('wb_set_machine_zones', { machineId, zones }),
 
   /**
-   * 删这个版本会让哪些字段留下孤儿引用。**删之前先问这一条。**
+   * 删这个版本会一起清掉哪些参数记录。**删之前先问这一条。**
    * 返回的是字段 key（`wiping.wiper_x` 这种）—— 那是用户能据以行动的单位
    */
   versionOrphans: (machineId: string, versionId: string) =>
     invoke<string[]>('wb_version_orphans', { machineId, versionId }),
 
+  /** 这一版还挂着哪些资产、谁在引用 —— 删版本会连带删掉它们，确认框里要先摆出来 */
+  versionAssets: (machineId: string, versionId: string) =>
+    invoke<VersionAssetRef[]>('wb_version_assets', { machineId, versionId }),
+
   /** 删一个版本。**不可逆**，所以界面上是两步确认 */
   removeVersion: (machineId: string, versionId: string) =>
     invoke<MachineList>('wb_remove_version', { machineId, versionId }),
+
+  /**
+   * 改一个版本的 id（**主键**）。参数四张表与归属资产一起搬到新 id；
+   * 产物名按新 id 变、旧产物留盘，这一版会判「待重新生成」。
+   * 有未保存的参数改动时后端拒绝（先保存再改）
+   */
+  setVersionId: (machineId: string, oldVersionId: string, newVersionId: string) =>
+    invoke<MachineList>('wb_set_version_id', { machineId, oldVersionId, newVersionId }),
 
   /**
    * 加一个版本。**立刻落盘，没有草稿也没有撤销** ——
@@ -3023,6 +3119,8 @@ export const wb = {
     }),
   previewBulk: (key: string, value: unknown, cols: ColRef[]) =>
     invoke<BulkPreview>('wb_preview_bulk', { key, value, cols }),
+  previewAttach: (key: string, cols: ColRef[]) =>
+    invoke<AttachPreview>('wb_preview_attach', { key, cols }),
   diffDraft: () => invoke<DiffLine[]>('wb_diff_draft'),
 
   /**
@@ -3280,9 +3378,9 @@ export const wb = {
   devMatrixClear: () => invoke<number>('wb_dev_matrix_clear'),
 
   /**
-   * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——
-   * `recommendedBundle` 抄模板；
-   * `tag` / `description` 前端拿模板值预填。返回刷新后的清单
+   * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义**。
+   * 除 id 与名称外各格照抄模板（套餐指向、三册译名、角标、说明、备注、版图）——
+   * `tag` / `description` 不给就是照抄。返回刷新后的清单
    */
   copyVersion: (machineId: string, templateVersionId: string, id: string, name: string, tag?: string, description?: string) =>
     invoke<MachineList>('wb_copy_version', {

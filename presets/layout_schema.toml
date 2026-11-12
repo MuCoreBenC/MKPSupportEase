@@ -27,6 +27,10 @@ paramKey = 'toolhead.speed_limit'
 id = 'item_0_1_1'
 paramKey = 'toolhead.MKP_retract'
 
+[[tabs.sections.items]]
+id = 'item_0_1_2'
+paramKey = 'toolhead.MKP_extrude'
+
 [[tabs]]
 id = 'wiping'
 
@@ -276,8 +280,40 @@ id = 'item_4_0_0'
 paramKey = 'toolhead.custom_mount_gcode'
 
 [[tabs.sections.items]]
+id = 'item_4_0_2'
+paramKey = 'toolhead.pen_mount_wait_x'
+
+[[tabs.sections.items]]
+id = 'item_4_0_3'
+paramKey = 'toolhead.pen_mount_wait_y'
+
+[[tabs.sections.items]]
+id = 'item_4_0_4'
+paramKey = 'toolhead.pen_mount_x'
+
+[[tabs.sections.items]]
+id = 'item_4_0_5'
+paramKey = 'toolhead.pen_mount_speed'
+
+[[tabs.sections.items]]
 id = 'item_4_0_1'
 paramKey = 'toolhead.custom_unmount_gcode'
+
+[[tabs.sections.items]]
+id = 'item_4_0_6'
+paramKey = 'toolhead.pen_unmount_wait_x'
+
+[[tabs.sections.items]]
+id = 'item_4_0_7'
+paramKey = 'toolhead.pen_unmount_wait_y'
+
+[[tabs.sections.items]]
+id = 'item_4_0_8'
+paramKey = 'toolhead.pen_unmount_x'
+
+[[tabs.sections.items]]
+id = 'item_4_0_9'
+paramKey = 'toolhead.pen_unmount_speed'
 
 [[tabs]]
 id = 'advanced'

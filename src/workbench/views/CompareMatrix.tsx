@@ -187,7 +187,11 @@ export default function CompareMatrix({
         const dep = row.deprecated
         return (
           <div key={row.key}>
-            <div className={`${s.mRow} ${sel === row.key ? s.mRowOn : ''}`}>
+            {/* 定位锚点：右栏那颗「定位」按它滚过来（与单版本列表 `t-param-*` 同一习惯） */}
+            <div
+              id={`t-mrow-${row.key}`}
+              className={`${s.mRow} ${sel === row.key ? s.mRowOn : ''}`}
+            >
               {/*
                 行首那枚**单选圆点**（C14 第十五轮）：「一行就是对应的多个版本」。
                 gcode / 弃用这类没有批量的行，这一格空着（没有入口好过灰入口）。

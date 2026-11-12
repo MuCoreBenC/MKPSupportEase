@@ -34,6 +34,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from '../Icon'
 import { useT } from '../../i18n'
+import { track } from '../../app/log/track'
 import { ModalHeadNoteSlotContext, ModalHeadSlotContext } from './modalHeadSlot'
 import s from './Modal.module.css'
 
@@ -159,6 +160,18 @@ export default function Modal({
   /* 这一层在 Esc 栈里的身份（见文件头 `openLayers`）：一个实例一个，重渲染不换 */
   const layerId = useRef(Symbol('modal-layer'))
 
+  /*
+   * 弹框开关进交互日志（2026-11-12）：全站几扇框都过这一处，收口比每处埋点可靠。
+   * 标题用 ref 读 —— 它不该让"开一次"因为文案变化被记成两次开。
+   */
+  const titleRef = useRef(title)
+  titleRef.current = title
+  useEffect(() => {
+    if (!open) return
+    track('modal.open', titleRef.current)
+    return () => track('modal.close', titleRef.current)
+  }, [open])
+
   useEffect(() => {
     if (!open) {
       const back = returnTo.current
@@ -260,7 +273,13 @@ export default function Modal({
               <strong className={s.title}>{title}</strong>
               <span ref={setHeadNoteSlot} className={s.headNote} />
             </span>
-            {subtitle !== undefined && <span className={s.sub}>{subtitle}</span>}
+            {/* 副标题恒是「文件名 / 预览 · 文件名」这类可长可短的动态文本：省略号截了就
+                悬停看全（2026-11-08 作者：「会被截断的长文本都用 data-tip」） */}
+            {subtitle !== undefined && (
+              <span className={s.sub} data-tip={subtitle}>
+                {subtitle}
+              </span>
+            )}
           </span>
           {/* 标题栏右边：**动作槽**（框里想往头上塞按钮就往这儿 portal）+ 关闭 */}
           <span className={s.headActs}>

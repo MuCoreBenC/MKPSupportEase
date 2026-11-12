@@ -30,17 +30,22 @@ const VENDORED: &[(&str, &str, u64)] = &[
         // 同一对 Z/F 从回位后挪到首条涂胶行前；1038c7b 再删掉段首与回位同点的 0mm 定位行
         // （各 -17 行）。两次都有人工 diff 审查（docs/GLUE-PATH-CONTINUITY-2026-11-03.md §14），
         // 复验：golden_g1 / golden_g2 / end_to_end 与当前管线逐行一致。
+        // 2026-11-12 再生（第六次）：落笔补回抽 —— `glue_block::mount_toolhead` 在
+        // `;Mounting Toolhead` 与 `;Toolhead Mounted` 之间补 `G1 E{mkp_retract} F1500`。
+        // 此前只有收笔侧补 E，落笔不补，撞笔时笔尖带着料。10 次挂载 ↔ 新增 10 行，
+        // 字节 +150 = 10 × 15，无其他改动。
         "42274.2.expected.gcode",
-        "7f2ab6bd86f87c4c42c9c87a6587df2fb5bcde36284ca66a498a66fb13f412fa",
-        532_233,
+        "276255b8b8da9089e7606159dee7d8c7d90938a70986fdcfedd471e01a085831",
+        532_383,
     ),
     (
         // 2026-09-12 再生：同上。
         // 2026-10-21 再生：与 G1 同一次改动（pass1 产物进 pass2，只有换笔块不同）。
         // 2026-11-03 再生：与 G1 同两笔改动，diff 逐行同源。
+        // 2026-11-12 再生：与 G1 同一次改动（落笔补回抽 10 行，字节 +150）。
         "42274.2.pass2.expected.gcode",
-        "a647e089d815244821334cd0f5c4f9fd985726d782c9ff56e4dda1ce908e357b",
-        571_905,
+        "c53f6c585efde98ee1413ebbbc25e35921451eefa8d556862699bb7649c7ce63",
+        572_055,
     ),
     (
         // 2026-09-11 再生：`find_closest_point_index` 的起点选择改成确定性的
@@ -50,6 +55,14 @@ const VENDORED: &[(&str, &str, u64)] = &[
         "tower_matrix.golden",
         "b728eb05722761fd896df31d567b11d48a7615b77de358ee428670dfadf0eca6",
         129_693,
+    ),
+    (
+        // 2026-11-12：整链自有基线 —— `tests/golden/42274.2.gcode` +
+        // `tests/fixtures/config/A1.toml` 原样进管线，出来的字节。判据纯逐字节，
+        // 不做任何剔除。再生入口在 `tests/end_to_end.rs` 头部。
+        "42274.2.e2e-A1.config.gcode",
+        "58178b52ac71d5585ccb0c90df3c61c8be3b5d757b0c3032d89bfb53baf83b1a",
+        672_282,
     ),
 ];
 

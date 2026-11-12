@@ -279,7 +279,9 @@ impl SourceResolver {
                 Ok(self.answer(join(&self.delivery, rel), None))
             }
             ResourceRef::Content(rel) => {
-                validate_rel_ref(rel).map_err(|_| invalid_rel("content 子路径", rel))?;
+                validate_rel_ref(rel).map_err(|_| {
+                    invalid_rel(&messages::text("ui.runtime.resolver.sub_path", &[]), rel)
+                })?;
                 let dir = self
                     .manifest
                     .content
@@ -358,22 +360,22 @@ fn validate_rel_ref(rel: &str) -> Result<(), String> {
 /// `rejects_traversal_in_catalog_path` 的同一块禁地，寻址层再拦一道。
 fn validate_entry_path(path: &str) -> Result<(), String> {
     if path.is_empty() {
-        return Err("路径是空的".to_owned());
+        return Err(messages::text("ui.runtime.path.empty", &[]));
     }
     if path.starts_with('/') {
-        return Err("路径是绝对地址（以 / 开头）".to_owned());
+        return Err(messages::text("ui.runtime.path.absolute", &[]));
     }
     if path.contains('\\') {
-        return Err("路径里有反斜杠（Windows 写法不该出现在交付面）".to_owned());
+        return Err(messages::text("ui.runtime.path.backslash", &[]));
     }
     if path.split('/').any(|seg| seg == "..") {
-        return Err("路径里有 .. 段 —— 交付面禁止路径穿越".to_owned());
+        return Err(messages::text("ui.runtime.path.dotdot", &[]));
     }
     if ["http://", "https://", "file://"]
         .iter()
         .any(|s| path.starts_with(s))
     {
-        return Err("路径里写的是绝对 URL —— 交付面只收相对路径".to_owned());
+        return Err(messages::text("ui.runtime.path.absolute_url", &[]));
     }
     Ok(())
 }

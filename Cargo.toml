@@ -90,3 +90,20 @@ toml_edit = { version = "0.22", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 ctrlc = "3"
 tempfile = "3"
+
+# ============ 构建产物体积（2026-11-11）============
+#
+# `target/debug` 一度长到 233G：dev profile 默认 `debug = 2`，每个 crate 都带
+# 完整的变量/类型 DWARF，链接器每次要在 GB 级符号里做重定位 —— 那才是
+# "改一行要等两分钟"的真正来源，不是测试本身慢。
+#
+# `line-tables-only` 保留**行号**（panic 栈、断点都还能落到行），砍掉变量与类型
+# 那部分：体积大约减半，链接明显变快。如果哪天真要单步看变量，临时用
+# `CARGO_PROFILE_DEV_DEBUG=2 cargo build` 覆盖即可，不必改这一行。
+[profile.dev]
+debug = "line-tables-only"
+
+# 依赖（tauri / wry / 那几百个 crate）**不带**调试信息：
+# 它们不参与我们的断点，但每次链接都被迫搬一遍它们的 DWARF。
+[profile.dev.package."*"]
+debug = false

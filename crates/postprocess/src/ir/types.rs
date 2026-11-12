@@ -7,6 +7,7 @@
 //! 字段缺失依旧报错。
 
 use crate::diag::Diagnostic;
+use crate::diag::messages::MessageRef;
 use serde::{Deserialize, Serialize};
 
 /// Go 的 nil 切片/map 序列化为 `null`；Rust 侧收成空集合（字段缺失仍报错）。
@@ -373,8 +374,16 @@ pub struct Ir {
     pub safety: SafetyIr,
     pub meta: MetaIr,
     pub state: StateIr,
+    /// **警告的指代**（键 + 参数），不是渲好的句子：语言到了**读它的人**手上才定。
+    ///
+    /// 与 `_meta.json` 的 `errorKey` 同一条口径：存事实不存句子。老的做法是在
+    /// 管线里就渲成字符串，于是执行记录里那句永远是写入那一刻的语言 —— 钩子由
+    /// 切片器拉起、默认简体，日文 / 英文界面上翻旧记录就会冒中文。
+    ///
+    /// ★ 每一条都要在 `messages.toml` 里登记：渲的时候查不到会渲成
+    ///   `［未登记的文案 …］`，一眼看得见（不返回空串）。
     #[serde(deserialize_with = "null_to_empty")]
-    pub warnings: Vec<String>,
+    pub warnings: Vec<MessageRef>,
     #[serde(deserialize_with = "null_to_empty")]
     pub warning_diagnostics: Vec<Diagnostic>,
     /// **用户在设置页里点出来的那几档**（2026-10-17）。
@@ -388,6 +397,83 @@ pub struct Ir {
     /// 名字带 `prefs` 是为了在 IR 里一眼看出"这不是工艺参数"。
     #[serde(default)]
     pub prefs: PrefsIr,
+
+    /// **调试模式那一趟的动作参数**（2026-11-11）。
+    ///
+    /// `None` = 正常后处理。有值时 `pipeline::run` 在 Parse 之后直接走
+    /// [`crate::pipeline::debug`]，只产出「文件头 → 抬 Z 段 → 落笔/收笔动作 → 文件尾」，
+    /// 不预热、不清嘴、不打印模型。
+    ///
+    /// 它不来自预设：是切片时用户在那扇弹框里填的，只对本次生效，
+    /// 所以带着 `skip_serializing_if` —— 正常那一趟的 IR 里连这个键都不出现。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<DebugIr>,
+}
+
+/// 一次调试运行的动作参数（见 [`Ir::debug`]）。
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct DebugIr {
+    /// 驻点位：调试循环从这里出发，收口也回到这里。
+    pub wait_x: f64,
+    /// 驻点位的 Y。A 系列不用，留 0。
+    pub wait_y: f64,
+    /// 落笔等待位 X。`None` = 跟随驻点位。
+    #[serde(default)]
+    pub mount_wait_x: Option<f64>,
+    /// 落笔等待位 Y。`None` = 跟随驻点位。
+    #[serde(default)]
+    pub mount_wait_y: Option<f64>,
+    /// 落笔位。
+    pub mount_x: f64,
+    /// 收笔等待位 X。`None` = 跟随驻点位。
+    #[serde(default)]
+    pub unmount_wait_x: Option<f64>,
+    /// 收笔等待位 Y。`None` = 跟随驻点位。
+    #[serde(default)]
+    pub unmount_wait_y: Option<f64>,
+    /// 收笔位。
+    pub unmount_x: f64,
+    /// 动作行的移动速度（mm/min）。
+    pub speed: f64,
+    /// 要不要测落笔。
+    pub test_mount: bool,
+    /// 要不要测收笔。
+    pub test_unmount: bool,
+    /// 落笔位的 Y。`None` = 跟随落笔等待位（它又跟随驻点位）。
+    #[serde(default)]
+    pub mount_y: Option<f64>,
+    /// 收笔位的 Y。`None` = 跟随收笔等待位。
+    #[serde(default)]
+    pub unmount_y: Option<f64>,
+    /// **高级模式：整段动作块直接由用户写**（2026-11-11 作者：
+    /// 「我有时候希望最后落点不是 20，而是我自己想要的落点」）。
+    ///
+    /// `Some` 且非空 ⇒ **完全替代** `action_block` 生成的那一段（含 `G28`）；
+    /// `None` 或空白 ⇒ 按上面那些字段算。空行会被丢掉。
+    #[serde(default)]
+    pub custom_gcode: Option<String>,
+    /// **到驻点 / 回驻点那一趟的速度**（mm/min）。只在 `use_travel_speed` 为真时用它。
+    ///
+    /// 原版模板里到驻点是 `F42000`、落笔是 `F{speed}` —— 两档本来就不一样
+    /// （作者：「到驻点的速度和落笔收笔的速度不一样，模仿得一模一样」）。
+    #[serde(default)]
+    pub travel_speed: f64,
+    /// 要不要用上面那个单独的驻点速度。`false` = 全用 `speed`（与改造前一致）。
+    #[serde(default)]
+    pub use_travel_speed: bool,
+    /// **这一趟把「落笔→驻点→收笔→驻点」重复几遍**（2026-11-11 作者：「想多测几遍」）。
+    ///
+    /// `0` 与 `1` 等价（至少跑一遍）。头尾那两个驻点不参与重复 ——
+    /// 那是"到位"与"回位"，不是被测的动作。
+    #[serde(default)]
+    pub repeat: u32,
+    /// **要不要动 Y 轴**（2026-11-11）。
+    ///
+    /// A 系列的笔动作只走 X，Y 应当停在原地；P 系列要站到 `wait_y` 才有得撞。
+    /// 所以不按机型猜（猜错就是把工具头横甩），交给用户显式勾：
+    /// `false` = 全程不出现 Y，`true` = 到驻点时连 Y 一起去 `wait_y`。
+    #[serde(default)]
+    pub move_y: bool,
 }
 
 /// 用户偏好落到 IR 上的那几个开关（见 [`Ir::prefs`]）。
@@ -401,9 +487,9 @@ pub struct PrefsIr {
     pub glue_bottom_enabled: bool,
     /// 跳过 G-code 里的震动补偿校准检测（M970/M974）。
     pub skip_vibration_calibration: bool,
-    /// 开头插入工具头收起序列。
+    /// 开头插入收笔序列。
     pub begin_stage_retract_enabled: bool,
-    /// 收笔抬升的 Z 高度（mm）。
+    /// 收笔时在原版抬 Z 之上再补抬的相对高度（mm）。
     pub begin_stage_retract_z_lift_mm: i64,
     /// Z 轴校准停留秒数。
     pub z_calibration_dwell_sec: i64,
@@ -442,7 +528,7 @@ impl Default for PrefsIr {
             glue_bottom_enabled: false,
             skip_vibration_calibration: false,
             begin_stage_retract_enabled: true,
-            begin_stage_retract_z_lift_mm: 30,
+            begin_stage_retract_z_lift_mm: 5,
             z_calibration_dwell_sec: 2,
             xy_calibration_dwell_sec: 3,
             bed_glue_enabled: false,

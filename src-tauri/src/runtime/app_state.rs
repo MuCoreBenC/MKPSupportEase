@@ -292,12 +292,64 @@ pub struct PostprocPrefs {
     /// **跳过震动补偿校准检测**（G-code 里的 M970/M974），省掉打印准备时间。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skip_vibration_calibration: Option<bool>,
-    /// **开始阶段收笔**：开头插入工具头收起序列（抬升 Z 并收笔）。
+    /// **开始阶段收笔**：在原版抬 Z 段之后插入收笔序列（补抬 Z、归零 X、收笔）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub begin_stage_retract_enabled: Option<bool>,
-    /// 收笔抬升的 Z 高度（mm）。`None` = 出厂 30。
+    /// 收笔块自己抬 Z 的高度（mm）。`None` = 出厂 30。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub begin_stage_retract_z_lift_mm: Option<i64>,
+    /// **调试模式**：切片只产出「只跑落笔/收笔」的骨架，不打印模型。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_mode_enabled: Option<bool>,
+    /// 调试动作的驻点位 X。`None` = 出厂 20（喷嘴待命位）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_wait_x: Option<f64>,
+    /// 落笔等待位 X。`None` = 跟随驻点位。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_mount_wait_x: Option<f64>,
+    /// 调试动作的落笔位 X。`None` = 出厂 267（A1 系列）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_mount_x: Option<f64>,
+    /// 收笔等待位 X。`None` = 跟随驻点位。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_unmount_wait_x: Option<f64>,
+    /// 调试动作的收笔位 X。`None` = 出厂 276（A1 系列）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_unmount_x: Option<f64>,
+    /// 调试动作的移动速度（mm/min）。`None` = 出厂 10000。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_speed: Option<f64>,
+    /// 驻点位的 Y 坐标。只有勾了「移动 Y」才进产物。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_wait_y: Option<f64>,
+    /// 落笔等待位的 Y。`None` = 跟随驻点位。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_mount_wait_y: Option<f64>,
+    /// 落笔位的 Y。`None` = 跟随落笔等待位。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_mount_y: Option<f64>,
+    /// 收笔等待位的 Y。`None` = 跟随驻点位。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_unmount_wait_y: Option<f64>,
+    /// 收笔位的 Y。`None` = 跟随收笔等待位。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_unmount_y: Option<f64>,
+    /// **高级模式：整段动作块自己写**。`None` = 按字段生成。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_custom_gcode: Option<String>,
+    /// 到驻点 / 回驻点的速度（mm/min）。`None` = 30000。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_travel_speed: Option<f64>,
+    /// 要不要单独用驻点速度。`None` = false（全用落笔速度）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_use_travel_speed: Option<bool>,
+    /// **这一趟重复几遍**。`None` = 1。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_repeat: Option<u32>,
+    /// **调试时动不动 Y 轴**。`None` = 出厂 false（Y 保持原地）。
+    /// 不按机型猜：猜错就是把工具头横甩到某个 Y 上。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_move_y: Option<bool>,
     /// Z 轴校准每层测量后的停留秒数（1–20）。`None` = 出厂 2。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub z_calibration_dwell_sec: Option<i64>,
@@ -310,6 +362,16 @@ pub struct PostprocPrefs {
     /// 热床涂胶是**只涂擦料塔位置**（`false`，出厂）还是**所有模型首层都涂**（`true`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bed_glue_all_models: Option<bool>,
+    /// **强制校准模式**（2026-11-12）：不看 3MF 里那条身份，只按模型实测外形认校准件。
+    ///
+    /// 用途是"手上只有模型文件、不是从我们这里下的"那一类 —— 3MF 里没有
+    /// `MKPSE:Calibration`，但有对应的 STL/3MF。打开后：
+    /// - 外形命中某块校准板 ⇒ 按那一档跑；
+    /// - 几块都对不上 ⇒ **停下**（原文件不动），报「不是校准件」并提示关掉这个开关。
+    ///
+    /// ★ 出厂 `false`：普通模型永远不该被外形猜成校准件，所以必须用户显式打开。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force_calibration_mode: Option<bool>,
     /// **智能塔位置**（2026-10-18 引入，2026-11-04 改成三档）：模型与擦料塔相撞时怎么办。
     ///
     /// | 档 | 撞了之后 | 用户看到 |
@@ -402,6 +464,23 @@ impl PostprocPrefs {
                     BEGIN_STAGE_RETRACT_Z_LIFT_MIN,
                     BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
                 ),
+            debug_mode_enabled: self.debug_mode_enabled.unwrap_or(false),
+            debug_wait_x: self.debug_wait_x.unwrap_or(DEBUG_WAIT_X_DEFAULT),
+            debug_mount_wait_x: self.debug_mount_wait_x,
+            debug_mount_x: self.debug_mount_x.unwrap_or(DEBUG_MOUNT_X_DEFAULT),
+            debug_unmount_wait_x: self.debug_unmount_wait_x,
+            debug_unmount_x: self.debug_unmount_x.unwrap_or(DEBUG_UNMOUNT_X_DEFAULT),
+            debug_speed: self.debug_speed.unwrap_or(DEBUG_SPEED_DEFAULT),
+            debug_wait_y: self.debug_wait_y.unwrap_or(0.0),
+            debug_mount_wait_y: self.debug_mount_wait_y,
+            debug_mount_y: self.debug_mount_y,
+            debug_unmount_wait_y: self.debug_unmount_wait_y,
+            debug_unmount_y: self.debug_unmount_y,
+            debug_custom_gcode: self.debug_custom_gcode.clone(),
+            debug_travel_speed: self.debug_travel_speed.unwrap_or(30000.0),
+            debug_use_travel_speed: self.debug_use_travel_speed.unwrap_or(false),
+            debug_repeat: self.debug_repeat.unwrap_or(1),
+            debug_move_y: self.debug_move_y.unwrap_or(false),
             z_calibration_dwell_sec: self
                 .z_calibration_dwell_sec
                 .unwrap_or(Z_DWELL_DEFAULT)
@@ -412,6 +491,7 @@ impl PostprocPrefs {
                 .clamp(XY_DWELL_MIN, XY_DWELL_MAX),
             bed_glue_enabled: self.bed_glue_enabled.unwrap_or(false),
             bed_glue_all_models: self.bed_glue_all_models.unwrap_or(false),
+            force_calibration_mode: self.force_calibration_mode.unwrap_or(false),
             auto_tower_position: self.auto_tower_position.unwrap_or_default(),
         }
     }
@@ -458,20 +538,35 @@ pub const XY_DWELL_DEFAULT: i64 = 3;
 pub const XY_DWELL_MIN: i64 = 1;
 pub const XY_DWELL_MAX: i64 = 10;
 
-/// 开始阶段收笔抬升高度（mm，**绝对 Z**）的出厂值与量程。
+/// 开始阶段收笔在原版抬 Z 之上再补抬的相对高度（mm）的出厂值与量程。
 ///
 /// ★ 量程必须与内核那一份（`postprocess::pipeline::hooks::BEGIN_STAGE_RETRACT_Z_LIFT_*_MM`）
-///   一致：管线对越界值不是夹取、而是**回落到 20**（原厂口径）。界面这边要是宽容到 300，
-///   用户填 150 就会看到"设置里写着 150、切出来却是 20" —— 由 `postproc_prefs` 的测试咬住。
-pub const BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT: i64 = 30;
-pub const BEGIN_STAGE_RETRACT_Z_LIFT_MIN: i64 = 20;
-pub const BEGIN_STAGE_RETRACT_Z_LIFT_MAX: i64 = 100;
+///   一致：管线对越界值不是夹取、而是**回落到下限 5**（原厂口径）。界面这边要是宽容到 300，
+///   用户填 150 就会看到"设置里写着 150、切出来却是 5" —— 由 `postproc_prefs` 的测试咬住。
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT: i64 = 5;
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_MIN: i64 = 5;
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_MAX: i64 = 30;
+
+/// 调试动作的出厂值 —— A1 系列那一组（驻点 `X20`、落笔 `X267`、收笔 `X276`、`F10000`）。
+///
+/// 与 `hooks.rs` 里那三组硬编码收笔位是**两件事**：那里是「开始阶段收笔」用的固定序列，
+/// 这里是调试弹窗的初值，用户可以现场改。默认值只是让第一次打开有理可依。
+pub const DEBUG_WAIT_X_DEFAULT: f64 = 20.0;
+pub const DEBUG_MOUNT_X_DEFAULT: f64 = 267.0;
+pub const DEBUG_UNMOUNT_X_DEFAULT: f64 = 276.0;
+pub const DEBUG_SPEED_DEFAULT: f64 = 10000.0;
 
 /// [`PostprocPrefs::resolved`] 的结果：每一项都是**确定的**值（`Option` 已经解掉、量程已经夹住）。
 ///
 /// 管线只认这个类型 —— 于是"量程/默认值"这一层判断只在这里做一次，
 /// 下游不会各夹各的。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/*
+ * 不 derive `Eq`：调试那几个坐标是 `f64`，浮点没有全序 —— 有它反而给不了任何保证。
+ *
+ * 不 derive `Copy`（2026-11-11）：高级模式那一格是 `Option<String>`
+ * （用户直接写的那段动作块），字符串不是 `Copy`。按值搬的地方改 `clone()`。
+ */
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedPostprocPrefs {
     pub notify_on_finish: bool,
     pub ui_mode: PostprocUiMode,
@@ -479,12 +574,51 @@ pub struct ResolvedPostprocPrefs {
     pub skip_vibration_calibration: bool,
     pub begin_stage_retract_enabled: bool,
     pub begin_stage_retract_z_lift_mm: i64,
+    pub debug_mode_enabled: bool,
+    pub debug_wait_x: f64,
+    /// `None` = 跟随驻点位
+    pub debug_mount_wait_x: Option<f64>,
+    pub debug_mount_x: f64,
+    /// `None` = 跟随驻点位
+    pub debug_unmount_wait_x: Option<f64>,
+    pub debug_unmount_x: f64,
+    pub debug_speed: f64,
+    pub debug_wait_y: f64,
+    /// `None` = 跟随驻点位
+    pub debug_mount_wait_y: Option<f64>,
+    /// `None` = 跟随落笔等待位
+    pub debug_mount_y: Option<f64>,
+    /// `None` = 跟随驻点位
+    pub debug_unmount_wait_y: Option<f64>,
+    /// `None` = 跟随收笔等待位
+    pub debug_unmount_y: Option<f64>,
+    pub debug_custom_gcode: Option<String>,
+    pub debug_travel_speed: f64,
+    pub debug_use_travel_speed: bool,
+    pub debug_repeat: u32,
+    pub debug_move_y: bool,
     pub z_calibration_dwell_sec: i64,
     pub xy_calibration_dwell_sec: i64,
     pub bed_glue_enabled: bool,
     pub bed_glue_all_models: bool,
+    /// **强制校准模式**：只看外形认校准件（见 [`PostprocPrefs::force_calibration_mode`]）
+    pub force_calibration_mode: bool,
     /// 撞塔三档（见 [`TowerRelocateMode`]）：`Off` / `Auto` / `Ask`
     pub auto_tower_position: TowerRelocateMode,
+}
+
+/// **上一次由我们拉起来的切片器窗口**（2026-11-12）。
+///
+/// 为什么要记 PID 而不是按名字找：用户可能同时开着几个切片器，按名字激活会拉到
+/// 别人的那一个。只在"我们启的那个还活着"时才有意义 —— 它关掉之后这一格清掉，
+/// 下次照常启动。
+///
+/// ★ 只记**我们启的**：用户自己从程序坞开的那个不进这一格（那正是作者要求的
+///   「如果是用户自己手动从其他地方打开的，我们就不要拿其他那个新的」）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlicerWindow {
+    pub pid: u32,
 }
 
 /// 一次窗口几何（**逻辑点**，左上角 + 宽高）：`run/app-state.json` 的 `lastWindowBox` 格。
@@ -602,6 +736,11 @@ pub struct AppStateFile {
     /// 读它的只有"退出窄窗"那一下。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_window_box: Option<WindowBox>,
+    /// 上一次由**我们**拉起来的切片器窗口（见 [`SlicerWindow`]）。
+    ///
+    /// 只用来回答一件事："点打开模型时，要不要把那个窗口拉到前台（而不是重新打开文件）"。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slicer_window: Option<SlicerWindow>,
     /// **进窄窗之前用户自己选的那一档置顶**（2026-10-17）。
     ///
     /// 窄窗会替用户打开置顶（作者：「点击窄窗的时候自动置顶」），退出时要把置顶
@@ -641,6 +780,7 @@ impl Default for AppStateFile {
             pin: None,
             compact: None,
             last_window_box: None,
+            slicer_window: None,
             pin_before_compact: None,
             postproc: None,
             presets: None,
@@ -826,6 +966,8 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         pin: None,
         compact: None,
         last_window_box: None,
+        /* 切片器窗口这一格是 2026-11-12 才有的：旧档里本来就没有它（没记过 = None） */
+        slicer_window: None,
         pin_before_compact: None,
         /* 后处理偏好这一格是 2026-10-17 才有的：旧档里本来就没有它（没动过 = 出厂档） */
         postproc: None,
@@ -1298,6 +1440,21 @@ pub fn set_postproc_prefs(root: &Path, prefs: PostprocPrefs) -> Result<PostprocP
     with_state(root, |state| {
         state.postproc = Some(prefs.clone());
         Ok(prefs)
+    })
+}
+
+/* ---------- 切片器窗口：我们启的那一个（2026-11-12） ---------- */
+
+/// 上一次由我们拉起来的切片器 PID（`None` = 没记过）。
+pub fn slicer_window_pid(root: &Path) -> Result<Option<u32>, AppError> {
+    Ok(load(root)?.slicer_window.map(|w| w.pid))
+}
+
+/// 记下 / 清掉那个 PID（整份状态原子替换，别的格一个不动）。
+pub fn set_slicer_window_pid(root: &Path, pid: Option<u32>) -> Result<(), AppError> {
+    with_state(root, |state| {
+        state.slicer_window = pid.map(|pid| SlicerWindow { pid });
+        Ok(())
     })
 }
 

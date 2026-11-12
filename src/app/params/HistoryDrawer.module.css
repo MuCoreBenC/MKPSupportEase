@@ -320,19 +320,24 @@
 }
 
 /* 「清空历史」武装态（二次确认的第二下之前）：红的，一眼知道再点就没了。
-   底色照 PageParams 的 `.danger`（#e5484d 实心 + 白字）——同一个 app 里危险按钮只有一张脸 */
+   底色走 `--danger-fill`（与 `Btn variant="danger"` / PageParams 的 `.danger` 同一支）
+   ——同一个 app 里危险按钮只有一张脸（2026-11-09 收进 token） */
 .clearArm {
   flex-shrink: 0;
   height: 24px;
   padding: 0 9px;
   border: 0;
   border-radius: var(--r-sm);
-  background: #e5484d;
+  background: var(--danger-fill);
   font: inherit;
   font-size: var(--fs-label);
   color: #fff;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.clearArm:hover {
+  background: var(--danger-fill-hover);
 }
 
 /* 聚焦不再另画一圈（作者：「点了之后不要有一个绿色描边」） */

@@ -364,8 +364,29 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "xyCalibrationDwellSec": r.xy_calibration_dwell_sec,
                 "bedGlueEnabled": r.bed_glue_enabled,
                 "bedGlueAllModels": r.bed_glue_all_models,
+                /* 强制校准模式（2026-11-12）：只按外形认校准件，认不出就停下 */
+                "forceCalibrationMode": r.force_calibration_mode,
                 /* 智能塔位置三档（2026-11-04）：`off` / `auto` / `ask` */
                 "autoTowerPosition": r.auto_tower_position.wire(),
+                /* 调试模式（2026-11-11）：开关 + 四个动作坐标。
+                 * 这一格是**手写列字段**的，结构里加了不写在这里，界面就拿到 undefined。 */
+                "debugModeEnabled": r.debug_mode_enabled,
+                "debugWaitX": r.debug_wait_x,
+                "debugMountWaitX": r.debug_mount_wait_x,
+                "debugMountX": r.debug_mount_x,
+                "debugUnmountWaitX": r.debug_unmount_wait_x,
+                "debugUnmountX": r.debug_unmount_x,
+                "debugSpeed": r.debug_speed,
+                "debugWaitY": r.debug_wait_y,
+                "debugMountWaitY": r.debug_mount_wait_y,
+                "debugMountY": r.debug_mount_y,
+                "debugUnmountWaitY": r.debug_unmount_wait_y,
+                "debugUnmountY": r.debug_unmount_y,
+                "debugCustomGcode": r.debug_custom_gcode,
+                "debugTravelSpeed": r.debug_travel_speed,
+                "debugUseTravelSpeed": r.debug_use_travel_speed,
+                "debugRepeat": r.debug_repeat,
+                "debugMoveY": r.debug_move_y,
             },
             /* 量程（界面画数字框要用，**不另写一份**在 TS 里） */
             "limits": {

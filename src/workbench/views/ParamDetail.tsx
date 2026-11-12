@@ -160,6 +160,28 @@ const MARK: Record<'own' | 'follow' | 'dep' | 'off', ReactNode> = {
   off: <path d="M5.5 18.5 18.5 5.5" />,
 }
 
+/**
+ * 「各版本取值」里的一行。
+ *
+ * 单版本模式由本组件自己按 `machine.versions` 拼；**对照模式由调用方给**（勾选的
+ * 每一列一层，可以跨机型）—— 那一屏里"版本"不止一台机器的，只看基准机型等于
+ * 把另外几台勾掉的列藏起来。
+ */
+export interface DetailLayer {
+  /** 写值用的 owner：版本 uid（`A1/STANDARD`）或机型 id */
+  owner: string
+  machineId: string
+  /** 行内主文本：单版本 = `标准版`；对照 = `A1 · 标准版`（跨机型必须带机型） */
+  name: string
+  /** 完整身份，给 tooltip / aria 用：`A1 / 标准版`、`A1 基底` */
+  title: string
+  /** 版本 id（名字下面那行小字）。基底为 `null` */
+  versionId: string | null
+  /** 机型基底那一层 */
+  base: boolean
+  cell: Cell
+}
+
 interface Props {
   /** 左侧选中的工作上下文。`null` = 机型基底 */
   uid: string | null
@@ -175,17 +197,27 @@ interface Props {
   groupLabel: string
   /** 收起编辑区 —— 右栏按需出现，这个 × 就是「收起来」 */
   onClose: () => void
+  /**
+   * 滚到正文里这一条参数那一行（右栏遮着列表时，先看一眼再改）。
+   * 不给就不画那颗按钮。
+   */
+  onLocate?: () => void
+  /**
+   * 对照模式：**勾选的每一列一层**（可跨机型）。给了就按它画「各版本取值」，
+   * 不给就按 `machine.versions` 画（单版本模式）。
+   */
+  layers?: DetailLayer[] | null
   /** 对照模式**不画这枚 ×**（那一栏顶上有一排页签，× 长在页签行右端）（P3） */
   hideClose?: boolean
   /** 换一个参数来看 —— 抽屉里「属于 X 的子参数」点 X 就去那儿 */
   onPick?: (key: string) => void
   /**
    * 「编辑定义」（2026-10-03）：名称 / 单位 / 值类型 / 范围 / 前置条件 / 弃用
-   * 那些只读格子如今有一条改的路 —— 弹出定义编辑模态框（即时落盘）
+   * 那些只读格子如今有一条改的路 —— 弹出定义编辑模态框（走草稿（保存后写入））
    */
   onEditDef?: () => void
   /** 某一层那枚「打开编辑器」按钮 —— 每层各一枚，开的都是自己那层 */
-  onOpenGcode?: (key: string, uid: string | null) => void
+  onOpenGcode?: (key: string, uid: string | null, machineId?: string) => void
   /**
    * 这一条在**它所属分组里**的同级清单（已按 `layout.order` 排好，含自己）。
    *
@@ -202,8 +234,12 @@ interface Props {
    * 区别只在撤销栈的粒度（这边连挪三次 = 三笔）。
    */
   onMoveOrder?: (dir: -1 | 1) => void
-  /** 写某一层的值。`null` = 挂回继承（删键）。弃用闸在那条路上 */
-  onWriteLayer: (uid: string | null, next: string | null) => void
+  /**
+   * 写某一层的值。`null` = 挂回继承。弃用闸在那条路上。
+   *
+   * `machineId` 只有对照模式跨机型时才有意义（那一层属于哪台机），单版本不用给。
+   */
+  onWriteLayer: (uid: string | null, next: string | null, machineId?: string) => void
 }
 
 export default function ParamDetail({
@@ -217,6 +253,7 @@ export default function ParamDetail({
   words,
   groupLabel,
   onClose,
+  onLocate,
   hideClose = false,
   onPick,
   onEditDef,
@@ -224,6 +261,7 @@ export default function ParamDetail({
   onWriteLayer,
   siblings = null,
   onMoveOrder,
+  layers = null,
 }: Props) {
   /*
    * 「各版本取值」的行形态跟着**这块面板的实际宽度**走（C14 第十二轮，
@@ -271,17 +309,65 @@ export default function ParamDetail({
       ? `${machine.display} 基底`
       : `${machine.display} / ${machine.versions.find((v) => v.uid === layerUid)?.name ?? layerUid}`
 
+  /**
+   * 「各版本取值」要画的那几行。
+   *
+   * 对照模式读调用方给的 `layers`（勾选的每一列，可跨机型）；单版本按这一台的
+   * 基底 + 各版本现拼。两种模式最后走同一个 `layerRow`。
+   */
+  const layerList: DetailLayer[] = (() => {
+    if (layers !== null) return layers
+    const out: DetailLayer[] = []
+    const baseCell = cellAt(null)
+    if (baseCell !== undefined) {
+      out.push({
+        owner: '',
+        machineId: machine.id,
+        name: `${machine.display} 基底`,
+        title: `${machine.display} 基底`,
+        versionId: null,
+        base: true,
+        cell: baseCell,
+      })
+    }
+    for (const v of machine.versions) {
+      const cell = cellAt(v.uid)
+      if (cell !== undefined) {
+        out.push({
+          owner: v.uid,
+          machineId: machine.id,
+          /* 单版本模式下这一屏只有一台机，行内只写版本名（机型在页头已经说了） */
+          name: v.name,
+          title: `${machine.display} / ${v.name}`,
+          versionId: v.versionId,
+          base: false,
+          cell,
+        })
+      }
+    }
+    return out
+  })()
+
   /*
    * 已弃用（C14 §五）：抽屉是「这东西到底是什么」的地方，所以它必须在这里说清楚 ——
    * 作者：「我打开右侧的抽屉，里面它也应该显示弃用 什么什么呀」。
    * 判据只有一处，且**按当前这一层的机型**：`Cell.deprecated` / `Cell.deadChoices`
    * （含推定）。`Row.deprecated` 是全机型口径，只在拿不到格子时兜底。
    */
-  const curCell = cellAt(uid)
+  const curCell =
+    (uid === null
+      ? layerList.find((l) => l.base)
+      : layerList.find((l) => !l.base && l.owner === uid)
+    )?.cell ?? cellAt(uid)
   const deprecated = curCell?.deprecated ?? row.deprecated
   const deadSet = new Set(curCell?.deadChoices ?? [])
+  /* 对照模式这些行可能来自好几台机型 —— 任一台弃用这一档，就按弃用显示 */
+  const involved = new Set(layerList.map((l) => l.machineId))
   const deadChoices = param.choices.filter(
-    (c) => deadSet.has(String(c.value)) || c.deprecated || c.deprecatedMachines.includes(machine.id),
+    (c) =>
+      deadSet.has(String(c.value)) ||
+      c.deprecated ||
+      c.deprecatedMachines.some((id) => involved.has(id)),
   )
 
   /**
@@ -311,16 +397,20 @@ export default function ParamDetail({
    *
    * 行内顺序照作者画的最终样子：**徽章在最前**，名字跟上，控件、↶ 殿后。
    */
-  const layerRow = (layerUid: string | null) => {
-    const cell = cellAt(layerUid)
-    if (!cell) return null
+  const layerRow = (l: DetailLayer) => {
+    const { cell } = l
     /* 「改之前的值」= 盘上那一份里这一格的有效值（后端按版本→机型→出厂算好）。
        `null` 才是"没有可回的值"（见 `Cell.rest` 的注）。 */
     const before = cell.rest ?? null
     const on = cell.editable
-    const isCur = layerUid === uid
-    /* 「挂回继承」之后落到哪一层：版本层 → 机型基底那格；基底 → 出厂默认 */
-    const below = layerUid !== null ? cellAt(null) : null
+    const isCur = l.base ? uid === null : l.owner === uid
+    /* 「挂回继承」之后落到哪一层：版本层 → **同一台机型**的基底那格；基底 → 出厂默认 */
+    const below = l.base
+      ? undefined
+      : layerList.find((x) => x.base && x.machineId === l.machineId)?.cell
+    /** 写这一层：基底写 `null` = 回出厂；版本写 `null` = 跟随基底 */
+    const write = (next: string | null) =>
+      onWriteLayer(l.base ? null : l.owner, next, l.machineId)
     /* 已经在跟随（徽章那档）：版本层才有意义，基底列 `badge` 恒 null */
     const following = cell.badge === 'follow'
     /* 「跟随」会跟到哪个数 —— **基底的当前值**（可能还没保存），不是保存值。
@@ -328,22 +418,19 @@ export default function ParamDetail({
        单位在控件框里已经有一份） */
     const followTo = below != null ? rawOf(below.raw) : ''
     return (
-      <div key={layerUid ?? 'base'} className={`${s.pEdRow} ${isCur ? s.pEdRowOn : ''}`}>
+      <div
+        key={`${l.machineId}|${l.owner}`}
+        className={`${s.pEdRow} ${isCur ? s.pEdRowOn : ''}`}
+      >
         {/* identity：我是谁。徽章 + 版本身份，**一个整体**，不拆散、不折行 */}
         <span className={s.pEdIdentity}>
           <StatusTag cell={cell} words={words} short />
           <span
             className={s.pEdName}
-            data-tip={`${machineLabel(layerUid)} —— ${on ? param.desc : (cell.blockedNote ?? '')}`}
+            data-tip={`${l.title} —— ${on ? param.desc : (cell.blockedNote ?? '')}`}
           >
-            {layerUid === null
-              ? `${machine.display} 基底`
-              : (machine.versions.find((v) => v.uid === layerUid)?.name ?? layerUid)}
-            <em>
-              {layerUid === null
-                ? '改一次动一片'
-                : (machine.versions.find((v) => v.uid === layerUid)?.versionId ?? undefined)}
-            </em>
+            {l.name}
+            <em>{l.base ? '改一次动一片' : (l.versionId ?? undefined)}</em>
           </span>
         </span>
         {/* editor：怎么改。**一个整体**（两颗回去 + 控件）—— 窄态整块挪到第二行右对齐 */}
@@ -378,24 +465,24 @@ export default function ParamDetail({
                       /* **总是写回那个值**：这颗叫「回到保存值」，点完就是那个数、且不跟随。
                          以前还看 `restPinned`，没钉着就发 null（= 挂回继承 = 跟随）——
                          于是"点保存值"变成了"跟随基底"（作者 2026-11-03 报的）。 */
-                      onWriteLayer(layerUid, rawOf(cell.rest))
+                      write(rawOf(cell.rest))
                     }
                   >
                     保存值 {rawOf(before)}
                   </button>
                 )}
-                {layerUid !== null ? (
+                {!l.base ? (
                   <button
                     type="button"
                     className={s.pFollow}
                     disabled={following}
                     data-tip={
                       following
-                        ? `已经在跟随${machineLabel(layerUid)}的基底 —— 值就是基底那格（${followTo}），不用再点`
+                        ? `已经在跟随 ${l.title} 的基底 —— 值就是基底那格（${followTo}），不用再点`
                         : `回到跟随的值 —— 跟到${words.level.machine.label}基底现在的 ${followTo}（基底自己还没保存的改动也算）`
                     }
-                    aria-label={`让 ${machineLabel(layerUid)} 跟随基底`}
-                    onClick={() => onWriteLayer(layerUid, null)}
+                    aria-label={`让 ${l.title} 跟随基底`}
+                    onClick={() => write(null)}
                   >
                     {following ? '已跟随' : `跟随 ${followTo}`}
                   </button>
@@ -405,7 +492,7 @@ export default function ParamDetail({
                     className={s.pFollow}
                     data-kind="factory"
                     data-tip={`恢复出厂默认 ${rawOf(param.defaultValue)} —— 删掉基底这一行，值回到注册表里的 defaultValue`}
-                    onClick={() => onWriteLayer(layerUid, null)}
+                    onClick={() => write(null)}
                   >
                     出厂 {rawOf(param.defaultValue)}
                   </button>
@@ -417,8 +504,12 @@ export default function ParamDetail({
                   param={param}
                   cell={cell}
                   form="row"
-                  onWrite={(next) => onWriteLayer(layerUid, next)}
-                  onOpenGcode={onOpenGcode ? () => onOpenGcode(paramKey, layerUid) : undefined}
+                  onWrite={(next) => write(next)}
+                  onOpenGcode={
+                    onOpenGcode
+                      ? () => onOpenGcode(paramKey, l.base ? null : l.owner, l.machineId)
+                      : undefined
+                  }
                 />
               </span>
             </>
@@ -440,7 +531,7 @@ export default function ParamDetail({
     )
   }
 
-  const currentCell = row.cells[cur]
+  const currentCell = curCell ?? row.cells[cur]
   /* 前置条件不成立时这里与行上写着同一句话（同一个来源：后端的 blockedHint） */
   const blocked = currentCell?.blocked[0] ?? null
 
@@ -463,9 +554,19 @@ export default function ParamDetail({
             )}
           </span>
         </div>
+        {onLocate !== undefined && (
+          <button
+            type="button"
+            className={s.pMiniBtn}
+            data-tip="滚到正文里这一条参数那一行"
+            onClick={onLocate}
+          >
+            定位
+          </button>
+        )}
         {!hideClose && (
           <button type="button" className={s.pCardX} onClick={onClose} aria-label="收起">
-            ×
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
           </button>
         )}
       </div>
@@ -475,16 +576,17 @@ export default function ParamDetail({
         <section className={s.pDSection}>
           <div className={s.pDSecTitle}>各版本取值</div>
           <div className={s.pEdRows} ref={edRowsRef}>
-            {layerRow(null)}
-            {machine.versions.map((v) => layerRow(v.uid))}
+            {layerList.map((l) => layerRow(l))}
           </div>
           <p className={s.cardNote}>
-            每一行都能直接改；左侧选中的是 <b>{machineLabel(uid)}</b>
+            {layers !== null
+              ? '每一行都能直接改；这里列的是对照里勾选的每一列（可跨机型）'
+              : <>每一行都能直接改；左侧选中的是 <b>{machineLabel(uid)}</b></>}
           </p>
         </section>
 
         {/* 基本信息：说明书该有的几行，没有键名。标题行右侧挂「编辑定义」——
-            那些格子从这里从只读变成可改（即时落盘，判据见 ParamDefModal） */}
+            那些格子从这里从只读变成可改（走草稿（保存后写入），判据见 ParamDefModal） */}
         <section className={s.pDSection}>
           <div className={s.pDSecTitleRow}>
             <span className={s.pDSecTitle}>基本信息</span>
@@ -492,7 +594,7 @@ export default function ParamDetail({
               <button
                 type="button"
                 className={s.pDefEdit}
-                title="改名称、单位、值类型、范围、出厂默认、前置条件、弃用 —— 即时落盘，不进草稿"
+                title="改名称、单位、值类型、范围、出厂默认、前置条件、弃用 —— 先进草稿，保存后写入"
                 onClick={onEditDef}
               >
                 编辑定义
@@ -610,7 +712,7 @@ export default function ParamDetail({
             </span>
             {row.impact && row.impact.followers.length > 0 && (
               <>
-                <span className={s.pKvK}>跟着基底走</span>
+                <span className={s.pKvK}>跟着基线走</span>
                 <span className={s.pKvV}>{row.impact.followers.join('、')}</span>
               </>
             )}

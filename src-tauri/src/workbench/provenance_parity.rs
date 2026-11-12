@@ -14,13 +14,16 @@
 //! 混大小写键 —— 造的样例盖不到这些。
 
 use crate::runtime::provenance as app;
-use preset::generate::fixtures_dir;
 use preset::model::SourceRef;
 use preset::provenance as lib;
 
 /// 入库产物：`(文件名, 全文)`
+///
+/// 读 `crates/preset/assets/presets/`（编进二进制的那份真字节），不读对照基线 ——
+/// 基线会被生成动作跟着业务改名搬走，做不了稳定锚点。
 fn fixtures() -> Vec<(String, String)> {
-    let dir = fixtures_dir();
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../crates/preset/assets/presets");
     let mut out: Vec<(String, String)> = std::fs::read_dir(&dir)
         .expect("读入库产物目录")
         .flatten()

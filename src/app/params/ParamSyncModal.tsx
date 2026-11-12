@@ -39,6 +39,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useT, type StringKey } from '../../i18n'
 import { Modal } from '../../components/modal'
+/* 云端发布时刻是 ISO/UTC，副标题上要按本机时区写成「2026-11-10 17:19」—— 与预设页同一支格式化 */
+import { longStatText } from '../store/package'
 /* 勾选共用件（2026-10-17「统一全站的勾和框」）：行勾 / 全选那只原生绿勾换成墨色，
    半选（`indeterminate`）也由它现设 —— 见它头注释 */
 import { Check } from '../../components/check'
@@ -221,7 +223,11 @@ export default function ParamSyncModal({
         sync === null
           ? tr('params.sync.reading')
           : tr('params.sync.summary', {
-              release: sync.currentReleaseTime ?? tr('params.sync.newRelease'),
+              /* 发布时刻是 RFC3339/UTC：直接摆上去就是 `2026-11-10T17:19:31Z`，
+                 副标题一上来先念一串机器时间。按本机时区写成 `2026-11-10 17:19`。 */
+              release:
+                longStatText(sync.currentReleaseTime ?? undefined) ??
+                tr('params.sync.newRelease'),
               count: all,
             })
       }
@@ -289,10 +295,6 @@ export default function ParamSyncModal({
                     const localText = e.local === null ? null : text(e.key, e.local)
                     /* 「上次云端」用滚动记录；没有才退回水位那格（2026-10-31） */
                     const cloudOld = e.origin ?? e.baselineOld
-                    const diff =
-                      cloudOld !== null && e.cloudNew !== null
-                        ? `${text(e.key, cloudOld)} → ${text(e.key, e.cloudNew)}`
-                        : tr('params.sync.unknownCloud')
                     return (
                       <div key={e.key} className={on ? `${s.row} ${s.rowOn}` : s.row}>
                         <Check
@@ -305,19 +307,38 @@ export default function ParamSyncModal({
                             {def?.label ?? e.key}
                             {def?.unit !== undefined && <span className={s.unit}>{def.unit}</span>}
                           </div>
+                          {/*
+                           * 三方值这一行：**标签是小的、值是大的**。
+                           * 旧值与新值分开着色 —— `0.00 mm → -5.00 mm` 连成一串时，
+                           * 谁是被换掉的那个、哪一个是云端新值，得读箭头两遍才认得出。
+                           */}
                           <div className={s.vals}>
                             {localText !== null && e.local !== cloudOld && (
                               <>
-                                {tr('params.sync.local')}{' '}
+                                <span className={s.valsTag}>{tr('params.sync.local')}</span>{' '}
                                 <span className={s.local}>{localText}</span>
-                                {' · '}
+                                <i className={s.dot} aria-hidden="true">
+                                  ·
+                                </i>
                               </>
                             )}
-                            {tr('params.sync.cloud')} {diff}
+                            {cloudOld !== null && e.cloudNew !== null ? (
+                              <>
+                                <span className={s.valsTag}>{tr('params.sync.cloud')}</span>{' '}
+                                <span className={s.oldVal}>{text(e.key, cloudOld)}</span>
+                                <i className={s.arrow} aria-hidden="true">
+                                  →
+                                </i>
+                                <span className={s.newVal}>{text(e.key, e.cloudNew)}</span>
+                              </>
+                            ) : (
+                              tr('params.sync.unknownCloud')
+                            )}
                           </div>
                         </div>
-                        <div className={s.after}>
-                          {tr('params.sync.after')}{' '}
+                        {/* 「确认后」与参数名同一条基线；勾 / 不勾当场换值、也换这一格的轻重 */}
+                        <div className={s.after} data-on={on ? 'true' : 'false'}>
+                          <span className={s.afterLabel}>{tr('params.sync.after')}</span>
                           <span className={s.afterVal}>{afterOf(e)}</span>
                         </div>
                       </div>

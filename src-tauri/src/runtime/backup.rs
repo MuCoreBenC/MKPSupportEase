@@ -21,6 +21,11 @@
 //! `logs/`（日志）、`user/exports` 与 `user/reports`（生成的产物，可重出）。
 //! 备份要的是"丢了就再也回不来的东西"，不是"缓存"。
 //!
+//! ★ 2026-11-09：跟"预设"有关的那几棵（[`PRESET_DIRS`]：用户 toml / 修改历史 / 云端原文
+//! 镜像 / 原文备份 / 回收站）可以**不**进（`include_presets = false`，界面上那颗
+//! 「连同预设一起备份」）。没带预设的那份备份，恢复时也不许动现在这几棵 ——
+//! 判断依据是说明书里自己写的 `presets`。
+//!
 //! # 恢复：**全量覆盖**（作者认可的第一版口径）
 //!
 //! 作者问「要不要选择性恢复」。这里不做，理由与成熟方案的选择一致：
@@ -41,17 +46,24 @@
 //! 一样 —— 备份存的是**字节原样**（含来源记录 `based_on`），恢复就是原样放回去。
 //! 后续更新照常：更新判据走的是来源记录与目录对齐那条正路（`local.revision != remote.revision`、
 //! 随包资产兜底），恢复回来的文件带着自己的来源记录与 SHA，进预设页照常参与对齐。
+//!
+//! # 进度（2026-11-09）
+//!
+//! 两条路都收一个 [`Progress`] 回调：备份按**字节**报（分母是这几份文件的大小和），
+//! 恢复按**文件条数**报（分母是说明书里自己写的份数）。这一层不认识 IPC / Channel ——
+//! 谁要进度谁自己把回调接过去（见 `ipc::backup` 那两条命令）。
 
 use postprocess::diag::messages;
 
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::error::AppError;
-use crate::fsx::atomic::atomic_write;
+use crate::fsx::atomic::atomic_write_stamped;
 
 /// 备份格式的代次。加条目不升号，改语义才升
 pub const BACKUP_SCHEMA: u32 = 1;
@@ -76,6 +88,52 @@ const MANAGED_FILES: [&str; 3] = [
     "run/delivery-index.json",
 ];
 
+/// 跟"预设"有关的那几棵（2026-11-09：界面上可以**不**带上它们）。
+///
+/// 口径是"用户眼里的预设库"：自己的 toml（含导入的）、这些文件的修改历史、
+/// 云端原文镜像、原文备份、回收站。**执行归档**（`user/gcode_history`）不在这里 ——
+/// 那是打印过程，不是预设。于是这颗开关关掉时，包里只剩"设置 + 执行归档"。
+const PRESET_DIRS: [&str; 5] = [
+    "user/presets-local",
+    "run/preset-history",
+    "content",
+    "baseline-local",
+    "recovery",
+];
+
+/// 这一条 zip 条目是不是落在 `PRESET_DIRS` 里（`user/presets-local/…` 这种）
+fn is_preset_entry(name: &str) -> bool {
+    PRESET_DIRS
+        .iter()
+        .any(|d| name.len() > d.len() && name.starts_with(d) && name.as_bytes()[d.len()] == b'/')
+}
+
+/// **恢复范围**（2026-11-09）：界面恢复页那颗下拉的三档。
+///
+/// 只决定"动不动那一块"：选中范围内仍是**整棵换掉**（回到那一刻），范围外一个都不碰。
+/// 分类只有两类 —— 预设（[`PRESET_DIRS`]）与"设置 / 记录"（其余被管的树与单文件）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    /// 设置 + 预设 + 执行记录，全都放回（原来的"全量覆盖"）
+    All,
+    /// 只动预设那几棵
+    Presets,
+    /// 只动设置与执行记录（catalog / app-state / delivery-index / 执行归档）
+    Settings,
+}
+
+impl Scope {
+    /// 这一档要不要动 [`PRESET_DIRS`] 那几棵
+    fn presets(self) -> bool {
+        matches!(self, Scope::All | Scope::Presets)
+    }
+
+    /// 这一档要不要动"设置与记录"（其余被管的树与单文件）
+    fn settings(self) -> bool {
+        matches!(self, Scope::All | Scope::Settings)
+    }
+}
+
 /// 备份里那份说明书
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,6 +145,16 @@ pub struct BackupInfo {
     pub created_unix: i64,
     /// 里面一共几个文件
     pub files: usize,
+    /// 这份里有没有"用户自己的预设"（见 [`PRESET_DIRS`]）。
+    ///
+    /// 老备份（这一格加进来之前打的）没有它 —— 那时**一律**把预设打进去，
+    /// 所以缺省是 `true`：这是那批文件的**事实**，不是拿默认值圆过去。
+    #[serde(default = "presets_included_by_default")]
+    pub presets: bool,
+}
+
+fn presets_included_by_default() -> bool {
+    true
 }
 
 /// 打完 / 恢复完的回执
@@ -96,8 +164,48 @@ pub struct BackupSummary {
     /// **备份文件自己的绝对路径**（界面照原样显示给用户：他要知道东西落在哪了）
     pub path: String,
     pub files: usize,
+    /// **打包前**那些文件的字节和（界面拿它说"原始多大 → 压缩后多大"）
+    pub source_bytes: u64,
+    /// zip 本身的字节数（恢复时 = 那份包多大）
     pub bytes: u64,
     pub created_unix: i64,
+}
+
+/// 这一趟走到哪一步了。
+///
+/// 只有两档：**清点 / 准备**（还没开始搬运）与**搬运**（打包是往 zip 里写、恢复是往外解）。
+/// 不按"备份 / 恢复"分成两套 —— 两边要做的事一样：告诉界面"我在动，量到哪儿了"。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stage {
+    /// 清点文件 / 认说明书 / 删旧树：总量还不知道或还在准备
+    Scan,
+    /// 真在搬字节 / 解条目
+    Pack,
+}
+
+/// 一次进度回执（**只给界面看**，不是账本、不落盘）。
+///
+/// `done` / `total` 的单位**按动作定**：打包是字节数，恢复是文件条数。
+/// 界面只做一件事：`total > 0` 时画百分比，否则说"正在清点"。
+#[derive(Debug, Clone)]
+pub struct Progress {
+    pub stage: Stage,
+    /// 正在处理的那一份（相对内部根；清点阶段是空串）
+    pub file: String,
+    pub done: u64,
+    /// 总量。**清点阶段是 0**（还不知道）—— 界面据此不画百分比，不拿 0 当分母
+    pub total: u64,
+}
+
+impl Progress {
+    fn scanning() -> Self {
+        Self {
+            stage: Stage::Scan,
+            file: String::new(),
+            done: 0,
+            total: 0,
+        }
+    }
 }
 
 /// 备份文件名：`SupportEase-备份-20261017-153000.zip`。
@@ -187,12 +295,105 @@ fn walk(dir: &Path) -> Result<Vec<std::io::Result<PathBuf>>, AppError> {
     Ok(out)
 }
 
+/// 搬字节时每一跳读多大（越大越省事、越小越平滑；256 KB 是"几百 MB 也不至于刷爆 IPC"那一档）
+const COPY_CHUNK: usize = 256 * 1024;
+
+/// 两次进度之间至少隔这么久（文件多的时候按"一份一跳"报，文件大时按时间来 ——
+/// 不然一个 400 MB 的归档会让界面好几十秒没有动静，看着就像卡死了）。
+const TICK_EVERY: Duration = Duration::from_millis(120);
+
+/// 备份里那几种**压得动**的扩展名（其余按原样存，不做 deflate）。
+///
+/// 为什么按扩展名分：图片 / 3MF / zip 本来就不缩，deflate 一遍只是把时间烧在 CPU 上 ——
+/// 实测 17 MB 不可压数据：Deflate 3.6 s、Stored 几十毫秒；而文本（gcode / toml / json）
+/// 反过来，几 MB 能压到几百 KB。2026-11-09 作者问「17 MB 怎么要十几秒」，这就是主因之一。
+const COMPRESSIBLE: [&str; 6] = ["gcode", "toml", "json", "txt", "md", "csv"];
+
+fn compression_for(name: &str) -> zip::CompressionMethod {
+    let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if COMPRESSIBLE.contains(&ext.as_str()) {
+        zip::CompressionMethod::Deflated
+    } else {
+        zip::CompressionMethod::Stored
+    }
+}
+
+/// 本机现在的时区偏移（解析不到按 UTC —— 与 `archive::now_local` 同一条回落）。
+fn local_offset() -> time::UtcOffset {
+    crate::archive::now_local().offset()
+}
+
+/// 文件 mtime → zip 的时间字段。
+///
+/// zip 的时间字段是**本地墙钟**、不带时区（MS-DOS 那套格式），所以先按系统时区换算
+/// 再拆成 y/m/d h:m:s —— macOS 与 Windows 都走这里，不各自算一套。
+/// 出了 zip 能表示的年份（1980–2107）就返回 `None`，调用方落回默认值。
+fn zip_time(t: SystemTime) -> Option<zip::DateTime> {
+    let local = time::OffsetDateTime::from(t).to_offset(local_offset());
+    zip::DateTime::from_date_and_time(
+        u16::try_from(local.year()).ok()?,
+        u8::from(local.month()),
+        local.day(),
+        local.hour(),
+        local.minute(),
+        local.second(),
+    )
+    .ok()
+}
+
+/// zip 的时间字段 → 文件 mtime（按**本地墙钟**解释）。
+///
+/// `1980-01-01 00:00` 是 zip 的"没记时间"哨兵（老备份全是它）—— 认出来就返回 `None`，
+/// 免得把恢复出来的文件统统按到 1980 年。
+fn file_time(dt: zip::DateTime) -> Option<SystemTime> {
+    if dt.year() == 1980
+        && dt.month() == 1
+        && dt.day() == 1
+        && dt.hour() == 0
+        && dt.minute() == 0
+        && dt.second() == 0
+    {
+        return None;
+    }
+    let month = time::Month::try_from(dt.month()).ok()?;
+    let date = time::Date::from_calendar_date(i32::from(dt.year()), month, dt.day()).ok()?;
+    let clock = time::Time::from_hms(dt.hour(), dt.minute(), dt.second()).ok()?;
+    Some(SystemTime::from(
+        time::PrimitiveDateTime::new(date, clock).assume_offset(local_offset()),
+    ))
+}
+
+/// 一条 zip 条目的选项：压缩方式按扩展名，时间用**文件自己的 mtime**
+/// （量不到就落回默认 —— 那是老的 1980，不是我们编的时间）。
+fn entry_options(name: &str, modified: Option<SystemTime>) -> zip::write::SimpleFileOptions {
+    let opts = zip::write::SimpleFileOptions::default().compression_method(compression_for(name));
+    match modified.and_then(zip_time) {
+        Some(when) => opts.last_modified_time(when),
+        None => opts,
+    }
+}
+
 /// **打一份备份**：把上面那些树与文件收进 zip，落在 `dest_dir`。
 ///
 /// `dest_dir` 是用户挑的文件夹（界面那侧用系统文件选择框要的），文件名由这里定 ——
 /// 用户不需要想它叫什么。
-pub fn create(internal: &Path, dest_dir: &Path) -> Result<BackupSummary, AppError> {
+///
+/// `include_presets = false`：跟预设有关的那几棵（[`PRESET_DIRS`]）**不进包**。
+/// 这份包恢复时也不许动它们 —— 判断依据写在说明书的 `presets` 那一格。
+///
+/// `on_progress` 每一跳报一次（见 [`Progress`]）：打包按**字节**报，于是界面上那根条
+/// 与盘上真写出去的量是同一个数，不是按文件个数估出来的。
+pub fn create(
+    internal: &Path,
+    dest_dir: &Path,
+    include_presets: bool,
+    on_progress: &mut dyn FnMut(&Progress),
+) -> Result<BackupSummary, AppError> {
     let created_unix = OffsetDateTime::now_utc().unix_timestamp();
+    /* 清点要一个个 stat（几千个文件时不是一瞬间）—— 先报一句，界面才不是"点了没反应" */
+    on_progress(&Progress::scanning());
+    let scan_start = Instant::now();
+
     let mut names: Vec<String> = Vec::new();
     for f in MANAGED_FILES {
         if internal.join(f).is_file() {
@@ -200,9 +401,27 @@ pub fn create(internal: &Path, dest_dir: &Path) -> Result<BackupSummary, AppErro
         }
     }
     for d in MANAGED_DIRS {
+        /* 「不连同预设」：那两棵整个不进（界面上那颗开关就是这一格） */
+        if !include_presets && PRESET_DIRS.contains(&d) {
+            continue;
+        }
         files_under(internal, d, &mut names)?;
     }
     names.sort();
+
+    /*
+     * 每份文件的 stat 只做一次：字节数（进度分母）与 mtime（zip 里那一格时间）都要它。
+     * 量不到的单份按 0 / 没有时间算 —— 它照样会被打开（真读不出来会在下面报）。
+     */
+    let metas: Vec<Option<std::fs::Metadata>> = names
+        .iter()
+        .map(|n| std::fs::metadata(internal.join(n)).ok())
+        .collect();
+    let total_bytes: u64 = metas
+        .iter()
+        .map(|m| m.as_ref().map(|m| m.len()).unwrap_or(0))
+        .sum();
+    let scan_ms = scan_start.elapsed().as_millis();
 
     let dest = dest_dir.join(backup_name(created_unix));
     let info = BackupInfo {
@@ -210,6 +429,7 @@ pub fn create(internal: &Path, dest_dir: &Path) -> Result<BackupSummary, AppErro
         app_version: env!("CARGO_PKG_VERSION").to_owned(),
         created_unix,
         files: names.len(),
+        presets: include_presets,
     };
     let info_bytes = serde_json::to_vec_pretty(&info)?;
 
@@ -217,16 +437,20 @@ pub fn create(internal: &Path, dest_dir: &Path) -> Result<BackupSummary, AppErro
      * 写盘仍走全仓唯一出口（`fsx::atomic`）—— 只是走**流式**那一档：
      * 备份可能几百 MB（执行归档三件套），不该先整个进内存再落。
      */
+    let mut pack_ms = 0u128;
     crate::fsx::atomic::atomic_write_stream(&dest, |file| {
+        let pack_start = Instant::now();
         let mut zip = zip::ZipWriter::new(file);
-        let opts = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
 
-        zip.start_file(INFO_FILE, opts).map_err(zip_err)?;
+        zip.start_file(INFO_FILE, entry_options(INFO_FILE, Some(SystemTime::now())))
+            .map_err(zip_err)?;
         zip.write_all(&info_bytes).map_err(io_err)?;
-        for name in &names {
+        let mut written = 0u64;
+        for (i, name) in names.iter().enumerate() {
             safe_rel(name)?;
-            zip.start_file(name.as_str(), opts).map_err(zip_err)?;
+            let modified = metas[i].as_ref().and_then(|m| m.modified().ok());
+            zip.start_file(name.as_str(), entry_options(name, modified))
+                .map_err(zip_err)?;
             let mut reader = std::fs::File::open(internal.join(name)).map_err(|e| {
                 AppError::io(messages::text(
                     "ui.runtime.backup.357",
@@ -234,34 +458,111 @@ pub fn create(internal: &Path, dest_dir: &Path) -> Result<BackupSummary, AppErro
                 ))
                 .with_detail(e.to_string())
             })?;
-            std::io::copy(&mut reader, &mut zip).map_err(|e| {
-                AppError::io(messages::text(
-                    "ui.runtime.backup.358",
-                    &[("name", &name.to_string())],
-                ))
-                .with_detail(e.to_string())
-            })?;
+            /* `on_progress` 在这里是重借用（`&mut dyn` 不会因为传参被移走） */
+            copy_into_zip(
+                &mut reader,
+                &mut zip,
+                name,
+                &mut written,
+                total_bytes,
+                on_progress,
+            )?;
         }
         zip.finish().map_err(zip_err)?;
+        pack_ms = pack_start.elapsed().as_millis();
         Ok(())
     })?;
 
     let bytes = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
+    /*
+     * 三段分开记（作者 2026-11-09：「17 MB 怎么要十几秒」）：
+     *   scan  = 清点 + stat；
+     *   pack  = 压缩 + 写 zip；
+     *   其余  = sync_all / rename（写盘落稳那一段，落在慢盘或同步盘上会明显）。
+     */
+    tracing::info!(
+        files = names.len(),
+        source_bytes = total_bytes,
+        zip_bytes = bytes,
+        scan_ms,
+        pack_ms,
+        total_ms = scan_start.elapsed().as_millis(),
+        "备份耗时"
+    );
     Ok(BackupSummary {
         path: dest.display().to_string(),
         files: names.len(),
+        source_bytes: total_bytes,
         bytes,
         created_unix,
     })
 }
 
-/// **从一份备份恢复**（全量覆盖）。
+/// 把一份文件搬进 zip，顺手报进度。
+///
+/// 不用 `std::io::copy`：它一次搬完、中间没有插话的地方，几百 MB 的那一份会让界面
+/// 从头僵到尾。这里按块搬、按时间节流报；**一份搬完总是补报一次** —— 小文件靠这一下
+/// 走完进度（只按时间节流会把它们全漏掉，进度条就停在原地）。
+fn copy_into_zip(
+    from: &mut std::fs::File,
+    to: &mut zip::ZipWriter<&mut std::fs::File>,
+    name: &str,
+    written: &mut u64,
+    total: u64,
+    on_progress: &mut dyn FnMut(&Progress),
+) -> Result<(), AppError> {
+    let mut buf = vec![0u8; COPY_CHUNK];
+    let mut last = Instant::now();
+    loop {
+        let n = from.read(&mut buf).map_err(|e| {
+            AppError::io(messages::text("ui.runtime.backup.358", &[("name", name)]))
+                .with_detail(e.to_string())
+        })?;
+        if n == 0 {
+            break;
+        }
+        to.write_all(&buf[..n]).map_err(|e| {
+            AppError::io(messages::text("ui.runtime.backup.358", &[("name", name)]))
+                .with_detail(e.to_string())
+        })?;
+        *written += n as u64;
+        if last.elapsed() >= TICK_EVERY {
+            last = Instant::now();
+            on_progress(&Progress {
+                stage: Stage::Pack,
+                file: name.to_owned(),
+                done: *written,
+                total,
+            });
+        }
+    }
+    on_progress(&Progress {
+        stage: Stage::Pack,
+        file: name.to_owned(),
+        done: *written,
+        total,
+    });
+    Ok(())
+}
+
+/// **从一份备份恢复**：按 [`Scope`] 只动选中的那一块。
 ///
 /// 三步：① 认说明书（不是我们的备份 / 代次读不懂 ⇒ 拒，一个字都不动）；
 /// ② 把被管的几棵树整棵删掉；③ 逐条解开覆盖回去。
 ///
 /// ★ 先认说明书再动手 —— 中途报错会留下"恢复了一半"的现场，越早拒越好。
-pub fn restore(internal: &Path, zip_path: &Path) -> Result<BackupSummary, AppError> {
+/// ★ 说明书说这份**没带预设**（`presets = false`）时，`PRESET_DIRS` 那几棵既不删也不碰；
+///   这时还硬要「仅预设」⇒ 当场报错，不静默什么都不做。
+///
+/// `on_progress` 按**文件条数**报；分母是**这一档**真正会解开的条目数（不是全包，
+/// 否则按范围恢复时那条永远走不满）。
+pub fn restore(
+    internal: &Path,
+    zip_path: &Path,
+    scope: Scope,
+    on_progress: &mut dyn FnMut(&Progress),
+) -> Result<BackupSummary, AppError> {
+    on_progress(&Progress::scanning());
     let file = std::fs::File::open(zip_path).map_err(|e| {
         AppError::not_found(messages::text(
             "ui.runtime.backup.359",
@@ -290,8 +591,50 @@ pub fn restore(internal: &Path, zip_path: &Path) -> Result<BackupSummary, AppErr
         )));
     }
 
-    /* ② 整棵换掉（"回到那一刻"的语义） */
+    /*
+     * **更新的版本打的包，老客户端不许恢复**（2026-11-09 作者问「旧版备份 + 新版软件怎么办」）。
+     *
+     * 反方向是安全的：新客户端读旧数据有兜底 —— `app-state` 每一格都是 `Option` +
+     * `serde(default)`（缺的那一段 = 没设过，走默认），预设文件是字节原样。
+     * 但老客户端读新数据没有兜底（新字段、新的 catalog 代次它不认识），
+     * 所以只拦这一头，并让用户先升级。
+     */
+    let current = env!("CARGO_PKG_VERSION");
+    if crate::runtime::release_info::is_newer_version(&info.app_version, current) {
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.backup.369",
+            &[("v1", &info.app_version), ("v2", current)],
+        )));
+    }
+
+    /*
+     * 要预设、可这份当初就没带 ⇒ **明说**（不静默什么都不做 —— 那让人以为恢复了）。
+     */
+    if scope == Scope::Presets && !info.presets {
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.backup.368",
+            &[],
+        )));
+    }
+
+    /*
+     * 这一趟动不动那两块。`take_presets` 还要看说明书：**没带预设**的包，
+     * 就算选「全部」也不许动 [`PRESET_DIRS`] 里那几棵 —— 用户当初就是不想把它们卷进来，
+     * 恢复时更不该顺手清掉（那会把"没备份的预设"变成"删掉的预设"）。
+     */
+    let take_presets = scope.presets() && info.presets;
+    let take_settings = scope.settings();
+
+    /* ② 整棵换掉（"回到那一刻"的语义）：只换这一档管的那几棵 */
     for d in MANAGED_DIRS {
+        let want = if PRESET_DIRS.contains(&d) {
+            take_presets
+        } else {
+            take_settings
+        };
+        if !want {
+            continue;
+        }
         let at = internal.join(d);
         if at.is_dir() {
             std::fs::remove_dir_all(&at).map_err(|e| {
@@ -301,12 +644,36 @@ pub fn restore(internal: &Path, zip_path: &Path) -> Result<BackupSummary, AppErr
         }
     }
 
-    /* ③ 逐条解开 */
+    /*
+     * ③ 先数分母：**这一档**真正会解开的条目数。
+     *
+     * 不用说明书里的 `files` —— 那是全包的份数，按范围恢复时那条会永远走不满。
+     * 这一趟只读 zip 头（名字 / 是不是目录），不解压、不进内存。
+     */
+    let mut total_files = 0u64;
+    for i in 0..archive.len() {
+        let entry = archive.by_index(i).map_err(zip_err)?;
+        let name = entry.name();
+        if name == INFO_FILE || entry.is_dir() {
+            continue;
+        }
+        let preset = is_preset_entry(name);
+        if (preset && take_presets) || (!preset && take_settings) {
+            total_files += 1;
+        }
+    }
+
+    /* ④ 逐条解开（只解这一档管的那些；范围外一个都不碰） */
     let mut count = 0usize;
+    let mut source_bytes = 0u64;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(zip_err)?;
         let name = entry.name().to_owned();
         if name == INFO_FILE || entry.is_dir() {
+            continue;
+        }
+        let preset = is_preset_entry(&name);
+        if (preset && !take_presets) || (!preset && !take_settings) {
             continue;
         }
         let rel = safe_rel(&name)?;
@@ -320,15 +687,26 @@ pub fn restore(internal: &Path, zip_path: &Path) -> Result<BackupSummary, AppErr
                 .with_detail(e.to_string())
             })?;
         }
+        /* 备份里记着这一份的时间（老备份是 1980 哨兵 ⇒ `None`，那就按写入时刻） */
+        let modified = entry.last_modified().and_then(file_time);
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes).map_err(io_err)?;
-        atomic_write(&target, &bytes)?;
+        /* 写盘仍走唯一出口；时间在 persist 之前钉上（见 `atomic_write_stamped`） */
+        atomic_write_stamped(&target, &bytes, modified)?;
+        source_bytes += bytes.len() as u64;
         count += 1;
+        on_progress(&Progress {
+            stage: Stage::Pack,
+            file: rel.to_owned(),
+            done: count as u64,
+            total: total_files,
+        });
     }
 
     Ok(BackupSummary {
         path: zip_path.display().to_string(),
         files: count,
+        source_bytes,
         bytes: std::fs::metadata(zip_path).map(|m| m.len()).unwrap_or(0),
         created_unix: info.created_unix,
     })
@@ -353,6 +731,8 @@ fn zip_err(e: zip::result::ZipError) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /* 只有测试会直接铺原始文件（产品代码一律走 create / restore 那两条） */
+    use crate::fsx::atomic::atomic_write;
 
     fn seed(internal: &Path) {
         atomic_write(&internal.join("catalog.json"), b"{\"catalogSchema\":1}").unwrap();
@@ -385,7 +765,7 @@ mod tests {
 
         let out = d.path().join("out");
         std::fs::create_dir_all(&out).unwrap();
-        let sum = create(&internal, &out).unwrap();
+        let sum = create(&internal, &out, true, &mut |_| {}).unwrap();
 
         let mut names = Vec::new();
         let mut archive = zip::ZipArchive::new(std::fs::File::open(&sum.path).unwrap()).unwrap();
@@ -426,7 +806,7 @@ mod tests {
         let zip_at = {
             let out = d.path().join("out");
             std::fs::create_dir_all(&out).unwrap();
-            create(&internal, &out).unwrap().path
+            create(&internal, &out, true, &mut |_| {}).unwrap().path
         };
 
         /* 现状被搞坏 / 多了东西 */
@@ -437,7 +817,13 @@ mod tests {
         )
         .unwrap();
 
-        let sum = restore(&internal, std::path::Path::new(&zip_at)).unwrap();
+        let sum = restore(
+            &internal,
+            std::path::Path::new(&zip_at),
+            Scope::All,
+            &mut |_| {},
+        )
+        .unwrap();
         assert!(sum.files >= 4);
 
         let catalog = std::fs::read_to_string(internal.join("catalog.json")).unwrap();
@@ -459,6 +845,249 @@ mod tests {
         );
     }
 
+    /// 「不连同预设」：那两棵不进包；拿这份恢复时，现在的预设也**原样不动**
+    #[test]
+    fn a_backup_can_leave_presets_out_and_restore_keeps_them() {
+        let d = tempfile::tempdir().unwrap();
+        let internal = d.path().join("appdata");
+        seed(&internal);
+        let out = d.path().join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let sum = create(&internal, &out, false, &mut |_| {}).unwrap();
+
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&sum.path).unwrap()).unwrap();
+        let entries = archive.len();
+        let names: Vec<String> = (0..entries)
+            .map(|i| archive.by_index(i).unwrap().name().to_owned())
+            .collect();
+        assert!(names.contains(&"catalog.json".to_owned()), "该有的还在");
+        assert!(
+            !names.iter().any(|n| is_preset_entry(n)),
+            "开关关了就不该有预设：{names:?}"
+        );
+
+        /* 打完这份之后用户又写了新预设 —— 恢复不许碰它们 */
+        atomic_write(
+            &internal.join("user/presets-local/后来写的.toml"),
+            b"# later\n",
+        )
+        .unwrap();
+        restore(
+            &internal,
+            std::path::Path::new(&sum.path),
+            Scope::All,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(
+            internal.join("user/presets-local/后来写的.toml").is_file(),
+            "没带预设的备份，恢复时不许动预设"
+        );
+        assert!(
+            internal.join("user/presets-local/A1 涂胶.toml").is_file(),
+            "原有的那份也还在"
+        );
+    }
+
+    /// 「仅预设」：只换预设那几棵，设置 / 目录一个都不碰
+    #[test]
+    fn restoring_only_presets_leaves_settings_alone() {
+        let d = tempfile::tempdir().unwrap();
+        let internal = d.path().join("appdata");
+        seed(&internal);
+        let zip_at = {
+            let out = d.path().join("out");
+            std::fs::create_dir_all(&out).unwrap();
+            create(&internal, &out, true, &mut |_| {}).unwrap().path
+        };
+
+        /* 备份之后：设置被改坏、又多写了一份预设 */
+        atomic_write(&internal.join("catalog.json"), b"{\"catalogSchema\":9}").unwrap();
+        atomic_write(
+            &internal.join("user/presets-local/后来写的.toml"),
+            b"# later\n",
+        )
+        .unwrap();
+
+        let sum = restore(
+            &internal,
+            std::path::Path::new(&zip_at),
+            Scope::Presets,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(sum.files >= 2, "至少那两份预设条目");
+
+        /* 预设整棵换回那一刻：后来写的没了、原来那份回来 */
+        assert!(
+            !internal.join("user/presets-local/后来写的.toml").exists(),
+            "选中范围内仍是整棵换掉"
+        );
+        assert!(internal.join("user/presets-local/A1 涂胶.toml").is_file());
+        /* 设置没被碰：坏掉的目录还是坏的 */
+        let catalog = std::fs::read_to_string(internal.join("catalog.json")).unwrap();
+        assert!(
+            catalog.contains("\"catalogSchema\":9"),
+            "选「仅预设」时不许动设置：{catalog}"
+        );
+    }
+
+    /// 「仅设置」：只换设置与执行记录，预设原样不动
+    #[test]
+    fn restoring_only_settings_leaves_presets_alone() {
+        let d = tempfile::tempdir().unwrap();
+        let internal = d.path().join("appdata");
+        seed(&internal);
+        let zip_at = {
+            let out = d.path().join("out");
+            std::fs::create_dir_all(&out).unwrap();
+            create(&internal, &out, true, &mut |_| {}).unwrap().path
+        };
+
+        /* 备份之后：设置被改坏、又多写了一份预设 */
+        atomic_write(&internal.join("catalog.json"), b"{\"catalogSchema\":9}").unwrap();
+        atomic_write(
+            &internal.join("user/presets-local/后来写的.toml"),
+            b"# later\n",
+        )
+        .unwrap();
+
+        restore(
+            &internal,
+            std::path::Path::new(&zip_at),
+            Scope::Settings,
+            &mut |_| {},
+        )
+        .unwrap();
+
+        /* 设置回到备份那一刻 */
+        let catalog = std::fs::read_to_string(internal.join("catalog.json")).unwrap();
+        assert!(
+            catalog.contains("\"catalogSchema\":1"),
+            "「仅设置」要把目录换回来：{catalog}"
+        );
+        /* 预设一个都没动：后来写的与原来那份都在 */
+        assert!(internal.join("user/presets-local/后来写的.toml").is_file());
+        assert!(internal.join("user/presets-local/A1 涂胶.toml").is_file());
+        assert!(internal.join("run/preset-history/abc.json").is_file());
+    }
+
+    /// 没带预设的包还要「仅预设」⇒ 当场报错，一个字都不动（不静默当成功）
+    #[test]
+    fn asking_for_presets_from_a_backup_without_them_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let internal = d.path().join("appdata");
+        seed(&internal);
+        let zip_at = {
+            let out = d.path().join("out");
+            std::fs::create_dir_all(&out).unwrap();
+            create(&internal, &out, false, &mut |_| {}).unwrap().path
+        };
+
+        let err = restore(
+            &internal,
+            std::path::Path::new(&zip_at),
+            Scope::Presets,
+            &mut |_| {},
+        )
+        .expect_err("没带预设还要仅预设，该拒");
+        assert_eq!(err.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(
+            internal.join("user/presets-local/A1 涂胶.toml").is_file(),
+            "拒了就不许动预设"
+        );
+    }
+
+    /// 每份文件的时间进 zip、恢复时再放回去（作者 2026-11-09：文件时间全是 1980）
+    #[test]
+    fn each_entry_keeps_its_own_time_and_restore_puts_it_back() {
+        let d = tempfile::tempdir().unwrap();
+        let internal = d.path().join("appdata");
+        seed(&internal);
+
+        /* 给一份文件钉一个"本地墙钟"的时间（zip 只有 2 秒精度，秒取偶数） */
+        let want = {
+            let date = time::Date::from_calendar_date(2026, time::Month::January, 2).unwrap();
+            let clock = time::Time::from_hms(3, 4, 6).unwrap();
+            SystemTime::from(
+                time::PrimitiveDateTime::new(date, clock).assume_offset(local_offset()),
+            )
+        };
+        /* 铺一份带时间的：与恢复走同一条出口（`atomic_write_stamped`） */
+        atomic_write_stamped(
+            &internal.join("catalog.json"),
+            b"{\"catalogSchema\":1}",
+            Some(want),
+        )
+        .unwrap();
+
+        let zip_at = {
+            let out = d.path().join("out");
+            std::fs::create_dir_all(&out).unwrap();
+            create(&internal, &out, true, &mut |_| {}).unwrap().path
+        };
+
+        {
+            let mut archive = zip::ZipArchive::new(std::fs::File::open(&zip_at).unwrap()).unwrap();
+            let entry = archive.by_name("catalog.json").unwrap();
+            let dt = entry.last_modified().expect("这一条该带时间");
+            assert_eq!(
+                (dt.year(), dt.month(), dt.day(), dt.hour(), dt.minute()),
+                (2026, 1, 2, 3, 4),
+                "zip 里记的应是**本地墙钟**"
+            );
+        }
+
+        restore(
+            &internal,
+            std::path::Path::new(&zip_at),
+            Scope::All,
+            &mut |_| {},
+        )
+        .unwrap();
+        let got = std::fs::metadata(internal.join("catalog.json"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let delta = got.duration_since(want).unwrap_or_else(|e| e.duration());
+        assert!(
+            delta < Duration::from_secs(2),
+            "文件时间没还原：差 {delta:?}"
+        );
+    }
+
+    /// 更新的版本打的包 ⇒ 老客户端拒绝恢复（先升级再说）
+    #[test]
+    fn a_backup_from_a_newer_version_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let internal = d.path().join("appdata");
+        seed(&internal);
+
+        let zip_at = d.path().join("未来的.zip");
+        {
+            #[allow(clippy::disallowed_methods)]
+            let f = std::fs::File::create(&zip_at).unwrap();
+            let mut zip = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default();
+            zip.start_file(INFO_FILE, opts).unwrap();
+            zip.write_all(
+                br#"{"schema":1,"appVersion":"99.0.0","createdUnix":0,"files":0,"presets":true}"#,
+            )
+            .unwrap();
+            zip.finish().unwrap();
+        }
+
+        let err =
+            restore(&internal, &zip_at, Scope::All, &mut |_| {}).expect_err("更新的版本，该拒");
+        assert_eq!(err.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(
+            std::fs::read_to_string(internal.join("catalog.json"))
+                .unwrap()
+                .contains("\"catalogSchema\":1"),
+            "拒了就一个字都不许动"
+        );
+    }
+
     /// 不是我们的备份 ⇒ 一个字都不动（先认说明书再动手）
     #[test]
     fn a_zip_that_is_not_ours_is_refused_before_anything_is_touched() {
@@ -476,7 +1105,7 @@ mod tests {
             zip.write_all(b"hi").unwrap();
             zip.finish().unwrap();
         }
-        let err = restore(&internal, &foreign).expect_err("该拒");
+        let err = restore(&internal, &foreign, Scope::All, &mut |_| {}).expect_err("该拒");
         assert_eq!(err.code, crate::error::ErrorCode::Corrupted);
         assert!(
             std::fs::read_to_string(internal.join("catalog.json"))
@@ -484,6 +1113,60 @@ mod tests {
                 .contains("\"catalogSchema\":1"),
             "拒了就一个字都不许动"
         );
+    }
+
+    /// 备份会一跳一跳报进度，**最后那一跳走满总量**（界面那根条就是这么来的）
+    #[test]
+    fn a_backup_reports_progress_that_ends_at_the_total() {
+        let d = tempfile::tempdir().unwrap();
+        let internal = d.path().join("appdata");
+        seed(&internal);
+        let out = d.path().join("out");
+        std::fs::create_dir_all(&out).unwrap();
+
+        let mut ticks: Vec<Progress> = Vec::new();
+        create(&internal, &out, true, &mut |p| ticks.push(p.clone())).unwrap();
+
+        assert!(
+            ticks.iter().any(|p| p.stage == Stage::Scan),
+            "清点要有一跳（界面据此说\"正在清点\"，不是 0%）"
+        );
+        let packed: Vec<&Progress> = ticks.iter().filter(|p| p.stage == Stage::Pack).collect();
+        assert!(!packed.is_empty(), "打包阶段一条都没有");
+        let last = packed.last().expect("上面判过非空");
+        assert!(last.total > 0, "分母是这几份文件的大小和");
+        assert_eq!(
+            last.done, last.total,
+            "最后一跳要走满（盘上那个包确实写完了）"
+        );
+    }
+
+    /// 恢复也报进度：一条文件一跳，最后一条走满说明书里的份数
+    #[test]
+    fn a_restore_reports_one_tick_per_file() {
+        let d = tempfile::tempdir().unwrap();
+        let internal = d.path().join("appdata");
+        seed(&internal);
+        let zip_at = {
+            let out = d.path().join("out");
+            std::fs::create_dir_all(&out).unwrap();
+            create(&internal, &out, true, &mut |_| {}).unwrap().path
+        };
+
+        let mut ticks: Vec<Progress> = Vec::new();
+        let sum = restore(
+            &internal,
+            std::path::Path::new(&zip_at),
+            Scope::All,
+            &mut |p| ticks.push(p.clone()),
+        )
+        .unwrap();
+
+        let packed: Vec<&Progress> = ticks.iter().filter(|p| p.stage == Stage::Pack).collect();
+        assert_eq!(packed.len(), sum.files, "一份一跳");
+        let last = packed.last().expect("至少一份");
+        assert_eq!(last.done, sum.files as u64);
+        assert_eq!(last.total, sum.files as u64);
     }
 
     /// 穿出根的那种路径不许进来（名字是用户能改的东西）

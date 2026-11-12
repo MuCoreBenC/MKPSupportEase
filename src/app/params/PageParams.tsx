@@ -37,6 +37,7 @@ import { FieldLayer } from '../../components/field'
  */
 import { useModalHeadNoteSlot, useModalHeadSlot } from '../../components/modal'
 import CategoryPills from './CategoryPills'
+import SyncBanner from './SyncBanner'
 import GcodeBlock from './GcodeBlock'
 import HistoryDrawer from './HistoryDrawer'
 import type { DrawerMode, HistoryView } from './HistoryDrawer'
@@ -55,6 +56,8 @@ import { invalidNumberText, useParams, valueText } from './useParams'
 import type { HistoryEntry, ParamDef } from './useParams'
 /* 两态框架那两颗按钮的词 —— 与「编辑文件」/「参数对比台」**同一个源**（作者要的"三处同一句话"） */
 import { EDIT_TEXT } from '../presets/presetTree'
+/* 云端发布时刻是 ISO/UTC —— 与「选择要更新的参数」副标题同一支格式化，两处念同一个时间 */
+import { longStatText } from '../store/package'
 import s from './PageParams.module.css'
 
 interface Props {
@@ -743,6 +746,42 @@ export default function PageParams({
   /** 云端更新里**还没表态**的项数（0 = 都选好了，只差保存） */
   const syncUndecided = Math.max(0, u.pendingCount - u.syncDirty)
   /*
+   * 云端那一版的发布时刻：ISO/UTC → 本机时区的 `2026-11-10 17:19`。
+   * 横幅那两档都要缀这一段，只在这儿翻一次（原来两处各摆一遍原始 ISO）。
+   */
+  const cloudTimeText =
+    u.sync?.currentReleaseTime != null
+      ? (longStatText(u.sync.currentReleaseTime) ?? u.sync.currentReleaseTime)
+      : ''
+  /** 我这份当初基于的那一版：同样只在这儿翻一次，别把原始 ISO 摆到界面 */
+  const basedOnTimeText =
+    u.sync?.basedOnReleaseTime != null
+      ? (longStatText(u.sync.basedOnReleaseTime) ?? u.sync.basedOnReleaseTime)
+      : ''
+
+  /*
+   * 「忽略这次的云端更新」—— **只藏横幅，不丢数据**。
+   *
+   * 签名用「待选几项 + 云端发布时刻」：这两个一变（云端真的发了新版），
+   * 忽略就自动失效、横幅自己回来。所以不需要用户手动解除，也不会漏掉新版本。
+   * 存在 localStorage：这是纯界面偏好，不该占 `app-state.json` 的位置，
+   * 更不该跟着预设文件走。
+   */
+  const syncDismissSig = `mkp:sync-dismissed:${u.pendingCount}:${cloudTimeText}:${basedOnTimeText}`
+  const [syncDismissTick, setSyncDismissTick] = useState(0)
+  const syncDismissed = useMemo(
+    () => localStorage.getItem(syncDismissSig) === '1',
+    [syncDismissSig, syncDismissTick],
+  )
+  const dismissSync = () => {
+    localStorage.setItem(syncDismissSig, '1')
+    setSyncDismissTick((n) => n + 1)
+  }
+  const restoreSync = () => {
+    localStorage.removeItem(syncDismissSig)
+    setSyncDismissTick((n) => n + 1)
+  }
+  /*
    * 底栏那句状态：值改动与**云端更新的表态**分开数（2026-10-20）。
    * 只点了「用新值 / 保持原样」而没手改任何值时，`dirtyCount` 是 0 —— 但那一笔
    * 同样没保存，底栏必须说出来，否则「保存」亮着而左边写着"没有未保存的改动"。
@@ -847,8 +886,8 @@ export default function PageParams({
       ? undefined
       : { [tower.xKey]: String(towerDrag.x), [tower.yKey]: String(towerDrag.y) }
 
-  const renderCards = (cards: ShownCard[]) =>
-    cards.map(({ id, title, subtitle, fields }) => (
+  const renderCards = (cards: ShownCard[]) => {
+    const list = cards.map(({ id, title, subtitle, fields }) => (
       <ParamCard
         key={id}
         title={title}
@@ -895,12 +934,37 @@ export default function PageParams({
             dirty={u.dirtyOf(def.key)}
             disabled={u.blockedBy(def.key) !== null}
             savedValue={u.savedValueOf(def.key)}
+            /* 落笔/收笔的骨架要靠兄弟字段的值才能渲染成真值 */
+            valueOf={u.valueOf}
+            /* 云端更新这一条：G-code 走 renderBlock，不经过 ParamRow，得自己接 */
+            sync={u.sync === null ? undefined : u.syncOf(def.key)}
+            syncBusy={u.syncBusy}
+            onAdoptSync={ro ? undefined : () => u.adoptSync(def.key)}
             onEdit={u.edit}
             onRevertToSaved={u.revertToSaved}
           />
         )}
       />
     ))
+
+    /*
+     * 「更多」这一页的最末尾留一个入口：被忽略的云端更新从这里找回。
+     * 不放在底栏 —— 作者「不想随时看到它」，但也不能点完就再也找不到。
+     */
+    if (categoryId === 'advanced' && syncDismissed && (u.pendingCount > 0 || u.syncNeedsFetch)) {
+      list.push(
+        <div key="sync-dismissed" className={s.syncRestoreRow}>
+          <span className={s.syncRestoreText}>
+            {tr('params.sync.dismissedHint')}
+          </span>
+          <button type="button" className={s.textBtn} onClick={restoreSync}>
+            {tr('params.sync.showDismissed')}
+          </button>
+        </div>,
+      )
+    }
+    return list
+  }
 
   /*
    * 键盘入口（撤销 / 重做 / 保存 / 搜索 / Esc）。
@@ -1170,7 +1234,9 @@ export default function PageParams({
                     }
                     onClick={() => setPickerOpen((v) => !v)}
                   >
-                    <span className={s.presetName}>{pillLabel}</span>
+                    <span className={s.presetName} data-tip={pillLabel}>
+                      {pillLabel}
+                    </span>
                     <span className={s.presetSwitch}>{tr('params.pill.switch')}</span>
                   </button>
                 )}
@@ -1257,22 +1323,22 @@ export default function PageParams({
               ★ 又说清**选了几项**（同日）：表态只进草稿，不点保存一个字节都不写 ——
                 横幅必须让人知道"选完了还要保存"，否则他会以为已经生效了。
             */}
-            {u.pendingCount > 0 && (
-              <div className={s.syncBar} role="status">
+            {u.pendingCount > 0 && !syncDismissed && (
+              <SyncBanner onDismiss={dismissSync}>
                 <span className={s.syncBarText}>
                   {syncUndecided === 0 ? (
                     <>
                       {tr('params.sync.noticeDirty', { count: u.syncDirty })}
-                      {u.sync?.currentReleaseTime != null
-                        ? tr('params.sync.cloudTime', { time: u.sync.currentReleaseTime })
-                        : ''}
+                      {cloudTimeText === ''
+                        ? ''
+                        : tr('params.sync.cloudTime', { time: cloudTimeText })}
                     </>
                   ) : (
                     <>
                       {tr('params.sync.noticePending', { count: syncUndecided })}
-                      {u.sync?.currentReleaseTime != null
-                        ? tr('params.sync.cloudTime', { time: u.sync.currentReleaseTime })
-                        : ''}
+                      {cloudTimeText === ''
+                        ? ''
+                        : tr('params.sync.cloudTime', { time: cloudTimeText })}
                       {u.syncDirty > 0 && (
                         <span className={s.syncBarHint}>
                           {tr('params.sync.noticeChosen', { count: u.syncDirty })}
@@ -1300,20 +1366,20 @@ export default function PageParams({
                 >
                   {tr('params.sync.title')}
                 </button>
-              </div>
+              </SyncBanner>
             )}
             {/*
               「云端换了新版，但它的正文还没取回来」：一条**陈述**，不是错误。
               两件事分得开：云端有新版本（来源记录说的，本机就知道）与
               逐项改了什么（要拿到云端新版字节才比得出来）—— 后者要用户点了才去取。
             */}
-            {u.pendingCount === 0 && u.syncNeedsFetch && (
-              <div className={s.syncBar} role="status">
+            {u.pendingCount === 0 && u.syncNeedsFetch && !syncDismissed && (
+              <SyncBanner onDismiss={dismissSync}>
                 <span className={s.syncBarText}>
                   {tr('params.sync.newVersion')}
-                  {u.sync?.basedOnReleaseTime != null
-                    ? tr('params.sync.basedOn', { time: u.sync.basedOnReleaseTime })
-                    : ''}
+                  {basedOnTimeText === ''
+                    ? ''
+                    : tr('params.sync.basedOn', { time: basedOnTimeText })}
                   <span className={s.syncBarHint}>{tr('params.sync.peekHint')}</span>
                 </span>
                 <button
@@ -1328,7 +1394,7 @@ export default function PageParams({
                 >
                   {u.syncFetching ? tr('params.sync.fetching') : tr('params.sync.title')}
                 </button>
-              </div>
+              </SyncBanner>
             )}
             {u.syncError !== null && (
               <p className={s.warn}>{tr('params.sync.error', { detail: u.syncError })}</p>
@@ -1448,6 +1514,10 @@ export default function PageParams({
                 <span className={s.state} data-tip={stateText}>
                   {stateText}
                 </span>
+                {/*
+                 * 被忽略的云端更新藏在这里 —— 不在正文里占一条横幅的位置，
+                 * 但也不会「点完就再也找不到」。云端再发新版时横幅会自己回来。
+                 */}
               </div>
 
               <div className={s.footRight}>

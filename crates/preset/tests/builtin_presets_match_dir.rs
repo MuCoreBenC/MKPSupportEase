@@ -52,11 +52,10 @@ fn the_handwritten_table_matches_the_directory() {
         "BUILTIN_PRESETS 表里有、但 assets/presets/ 里没有：{extra:?}\n\
          （这种情况其实编译就过不去，除非文件刚被删而没重新编译）"
     );
-    assert_eq!(
-        in_table.len(),
-        9,
-        "内置预设应是 9 份（实测基线）；条数变了就该在提交里说清为什么"
-    );
+    // 份数刻意不写死：版本增删由 `presets/machines/*.toml` 决定。
+    // 表由 `build.rs` 扫目录生成，这里要盯的是「两边一份不差」（上面两条），
+    // 不是「永远 9 份」—— 写死 9 会在每次改 id 之后变成一次手工改判据。
+    assert!(!in_table.is_empty(), "内置预设表空了，判据在空转");
 }
 
 #[test]

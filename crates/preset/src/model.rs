@@ -35,10 +35,37 @@ pub struct ToolheadConfig {
     /// 大小写混排键名（不是 snake_case），逐字对照 dto 标签。
     #[serde(rename = "MKP_retract", default)]
     pub mkp_retract: f64,
+    /// 收笔时回填的挤出量。`0` = 按 `|回抽| + 0.5` 自动，非 0 = 用它（联动关闭）。
+    #[serde(rename = "MKP_extrude", default)]
+    pub mkp_extrude: f64,
     #[serde(default)]
     pub custom_mount_gcode: String,
     #[serde(default)]
     pub custom_unmount_gcode: String,
+    /// 落笔的等待位 X（落笔骨架里的 `{wait}`）。
+    #[serde(default)]
+    pub pen_mount_wait_x: f64,
+    /// 落笔的等待位 Y（骨架里的 `{wait_y}`）。A 系列不用，留 0。
+    #[serde(default)]
+    pub pen_mount_wait_y: f64,
+    /// 落笔位 X（落笔骨架里的 `{target}`）。
+    #[serde(default)]
+    pub pen_mount_x: f64,
+    /// 落笔动作行的速度（`{speed}`，mm/min）。
+    #[serde(default)]
+    pub pen_mount_speed: f64,
+    /// 收笔的等待位 X（收笔骨架里的 `{wait}`）。
+    #[serde(default)]
+    pub pen_unmount_wait_x: f64,
+    /// 收笔的等待位 Y（`{wait_y}`）。A 系列不用，留 0。
+    #[serde(default)]
+    pub pen_unmount_wait_y: f64,
+    /// 收笔位 X（收笔骨架里的 `{target}`）。
+    #[serde(default)]
+    pub pen_unmount_x: f64,
+    /// 收笔动作行的速度（`{speed}`，mm/min）。
+    #[serde(default)]
+    pub pen_unmount_speed: f64,
     #[serde(default)]
     pub first_pen_revitalization_flag: bool,
     #[serde(default)]

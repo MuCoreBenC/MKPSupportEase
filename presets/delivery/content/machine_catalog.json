@@ -28,18 +28,18 @@
           "mkpPresetAssetId": "A1-standard.toml"
         },
         {
-          "id": "FAST",
-          "name": "快拆版6月以前",
-          "tag": "热门",
-          "recommendedBundle": "A1_FAST",
-          "mkpPresetAssetId": "A1-fast.toml"
+          "id": "FAST260326",
+          "name": "快拆版260326",
+          "tag": "旧版",
+          "recommendedBundle": "A1_FAST260326",
+          "mkpPresetAssetId": "A1-fast260326.toml"
         },
         {
-          "id": "FASTV3.3",
-          "name": "快拆版260628",
+          "id": "FAST261111",
+          "name": "快拆版261111",
           "tag": "最新",
-          "recommendedBundle": "A1_FASTV3.3",
-          "mkpPresetAssetId": "A1-fastv3.3.toml"
+          "recommendedBundle": "A1_FAST261111",
+          "mkpPresetAssetId": "A1-fast261111.toml"
         }
       ]
     },
@@ -67,18 +67,18 @@
           "mkpPresetAssetId": "A1_MINI-standard.toml"
         },
         {
-          "id": "FAST",
-          "name": "快拆版6月以前",
-          "tag": "热门",
-          "recommendedBundle": "A1_MINI_FAST",
-          "mkpPresetAssetId": "A1_MINI-fast.toml"
+          "id": "FAST260326",
+          "name": "快拆版260326",
+          "tag": "旧版",
+          "recommendedBundle": "A1_MINI_FAST260326",
+          "mkpPresetAssetId": "A1_MINI-fast260326.toml"
         },
         {
-          "id": "FASTV3.3",
-          "name": "快拆版260628",
+          "id": "FAST261111",
+          "name": "快拆版261111",
           "tag": "最新",
-          "recommendedBundle": "A1_MINI_FASTV3.3",
-          "mkpPresetAssetId": "A1_MINI-fastv3.3.toml"
+          "recommendedBundle": "A1_MINI_FAST261111",
+          "mkpPresetAssetId": "A1_MINI-fast261111.toml"
         }
       ]
     },

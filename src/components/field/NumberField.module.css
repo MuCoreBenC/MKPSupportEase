@@ -129,9 +129,14 @@
 .unit {
   display: flex;
   align-items: center;
-  min-width: 26px;
+  /* 单位有长有短（`mm` / `mm/min`）：允许被压到 0，但**不许折行**、也不许溢出到框外。
+   * 参数行是 132px 定宽，`mm/min` 按原字号会把箭头挤出去（2026-11-10 作者截图为证）。 */
+  flex: 0 0 auto;
   padding: 0 2px;
-  font-size: var(--fs-label);
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: -0.2px;
+  white-space: nowrap;
   color: var(--text-3);
 }
 

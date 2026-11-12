@@ -1,0 +1,48 @@
+/*
+ * 还原 chip 的唯一一份样式。
+ *
+ * 与警告同色（`--warn-*`）：它不是「危险操作」，只是「回到我上次存的那一版」，
+ * 用主色会让人以为是推荐动作。
+ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-sm);
+  background: var(--warn-surface);
+  font: inherit;
+  font-size: var(--fs-label);
+  /* 行高压成 1：不压的话，图标与文字各自的基线会再错一次 */
+  line-height: 1;
+  color: var(--warn-ink);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip:hover {
+  /* 同 ParamRow 的旧注释：反馈走边框加深（token 化后没有「再亮一档」的底色） */
+  border-color: var(--warn-ink);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--warn-ink);
+  outline-offset: 1px;
+}
+
+.chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/*
+ * `↩` 在字符框里偏上，与中文差约 2px。单独下移，
+ * 这样换字号（`--fs-label` 在不同主题下会变）也只需要动这一个数。
+ */
+.icon {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1;
+}

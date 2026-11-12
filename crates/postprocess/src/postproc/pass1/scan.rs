@@ -66,6 +66,33 @@ pub(crate) fn detect_variable_layer_height(z_height_values: &[f64]) -> bool {
     false
 }
 
+/// 层厚的**范围**（最小 / 最大）—— 界面「层高」那一格在可变层高时摆 `min – max`。
+///
+/// 取相邻两条 `; Z_HEIGHT:` 的差（与 pass1 里 `layer_thickness` 同一个算法），**从第 3 条差
+/// 起算**：与 [`detect_variable_layer_height`] 同一个窗口。前两条刻意不算 —— 切片器的
+/// 头两层厚度常与后面不同（首层 + 过渡层），算进来会让一盘 0.2mm 的件显示成
+/// `0.15 – 0.20 mm`（`tests/golden/42274.2.gcode` 实测就是 0.2 / 0.35 / 0.5 …）。
+///
+/// 层数太少（凑不够 3 条差）⇒ `None`：界面退回切片器标称那个数，不瞎猜范围。
+pub(crate) fn layer_height_range(z_height_values: &[f64]) -> Option<(f64, f64)> {
+    let mut min = f64::INFINITY;
+    let mut max = f64::NEG_INFINITY;
+    let mut diffs = 0usize;
+    for i in 1..z_height_values.len() {
+        let thickness = z_height_values[i] - z_height_values[i - 1];
+        if thickness <= 0.0 {
+            continue;
+        }
+        diffs += 1;
+        if diffs < 3 {
+            continue;
+        }
+        min = min.min(thickness);
+        max = max.max(thickness);
+    }
+    (max > 0.0).then_some((min, max))
+}
+
 /// `findPrevPositionCmd`（pass1_emit.go:201）：向前找最近的 "G1 X"（不带 E）定位行。
 /// 注意 Go 循环条件是 `j > 0`（非 `j >= 0`）——索引 0 刻意不被检查，逐字保留。
 pub(crate) fn find_prev_position_cmd(content: &[String], feature_idx: usize) -> String {
@@ -185,5 +212,23 @@ mod tests {
         assert!(!detect_variable_layer_height(&[0.2, 0.4, 0.6, 0.8]));
         assert!(detect_variable_layer_height(&[0.2, 0.4, 0.6, 0.9]));
         assert!(!detect_variable_layer_height(&[0.2, 0.4]));
+    }
+
+    /// 层高范围：**前两条差不参与**（真实件 `42274.2.gcode` 的头两层是 0.15，
+    /// 算进来一盘 0.2mm 的件会显示成 `0.15 – 0.20 mm`）。
+    #[test]
+    fn layer_height_range_skips_the_first_two_layers() {
+        /* 0.2 / 0.35 / 0.5 之后一路 0.2：真实那份的样子 —— 范围应当只有一个 0.2
+        （浮点减法带 1e-16 的噪声，比容差，不比字面量） */
+        let (min, max) = layer_height_range(&[0.2, 0.35, 0.5, 0.7, 0.9, 1.1]).unwrap();
+        assert!((min - 0.2).abs() < 1e-9, "min={min}");
+        assert!((max - 0.2).abs() < 1e-9, "max={max}");
+        /* 自适应层高：后面确实在变，范围要抓得到 */
+        let (min, max) = layer_height_range(&[0.2, 0.28, 0.48, 0.56, 0.70, 0.78]).unwrap();
+        assert!((min - 0.08).abs() < 1e-9, "min={min}");
+        assert!((max - 0.14).abs() < 1e-9, "max={max}");
+        /* 层数太少 ⇒ 没有范围（界面退回标称值） */
+        assert_eq!(layer_height_range(&[0.2, 0.4]), None);
+        assert_eq!(layer_height_range(&[]), None);
     }
 }

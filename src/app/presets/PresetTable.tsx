@@ -52,7 +52,7 @@
  *   MKP 本地行   状态 已应用 / 未应用              操作 [使用] → 唯一底账（run/active-preset.json）
  *   MKP 云端行   状态 未获取 / 本地已有 / 有新版    操作 [下载] / [更新] / 灰字（本地已有不给）
  *                → `api.fetchCloudPreset()`（取回云端 + 落一份你的本地文件，**不改当前使用**）
- *   切片器本地行 状态 已复制 / 未复制              操作 [复制] → `api.copyToSlicer()`
+ *   切片器本地行 状态 已放入 / 未放入              操作 [放入] → `api.copyToSlicer()`
  *   切片器云端行 状态 已下载 / 未下载              操作 [下载] → `api.downloadFiles()`（**照抛未实现**）
  *
  * 已生效 / 已下载 / 本地已有那一行的操作列是**灰字，不是按钮**：没有可点的动作。
@@ -1070,7 +1070,7 @@ export default function PresetTable({
                      * 照旧（他要卡片显示名字）：两边都读得到，不再隐来隐去。
                      */}
                     <span className={s.nameLine}>
-                      <span className={s.nameText}>
+                      <span className={s.nameText} data-tip={row.fileName}>
                         {row.fileName}
                       </span>
                       {/*
@@ -1198,7 +1198,9 @@ export default function PresetTable({
                   */}
                   <td className={s.machine}>
                     {row.machineText !== DASH_ && (
-                      <span className={s.machineChip}>{row.machineText}</span>
+                      <span className={s.machineChip} data-tip={row.machineText}>
+                        {row.machineText}
+                      </span>
                     )}
                   </td>
 
@@ -1206,7 +1208,7 @@ export default function PresetTable({
                     /* a03：版本列空着不渲染「—」 */
                     <td className={s.version}>
                       {row.versions.length > 0 && (
-                        <span>{version.text}</span>
+                        <span data-tip={version.text}>{version.text}</span>
                       )}
                     </td>
                   ) : (
@@ -2562,7 +2564,7 @@ function ComboField(props: {
                 onClick={() => pick(o.value)}
               >
                 <span className={s.comboCheck} aria-hidden>
-                  ✓
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 </span>
                 <span className={s.comboText}>
                   <span className={s.comboTitle}>{o.title}</span>

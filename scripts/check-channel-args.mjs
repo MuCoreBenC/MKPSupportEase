@@ -137,7 +137,12 @@ function checkCallSites(bridge) {
 /* ---------------- ② 兜底闸 ---------------- */
 
 function checkWithTick(bridge) {
-  const start = bridge.indexOf('function withTick(')
+  /*
+   * 找 `function withTick` 而不带左括号：2026-11-09 起它是泛型
+   * （`function withTick<T>(…)`，备份与下载各一套 tick 形状）——
+   * 这里只认"函数在不在、里面挂没挂 Channel"，签名带不带 `<T>` 不改那条判据。
+   */
+  const start = bridge.indexOf('function withTick')
   if (start === -1) {
     return [{ where: BRIDGE, line: '', why: '找不到 `function withTick` —— 契约的可选参数没人兑现了' }]
   }

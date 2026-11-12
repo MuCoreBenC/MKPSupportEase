@@ -185,6 +185,33 @@ impl Draft {
         self.dirty_count() == 0
     }
 
+    /// 把草稿里指向旧 uid（`机型/版本`）的键**重指到新 uid**（改版本 id 时用）。
+    ///
+    /// 键的形状是 `v:{uid}:{key}`。不重指的话，保存那一刻这批格子会按旧 uid 写进
+    /// `machineVariants` —— 而那个版本已经没了，下一次加载判 Corrupted（与
+    /// [`super::txn::Txn`] 里 `A1:FAST` 那些键同一条事故）。
+    ///
+    /// 只动版本层的键；机型层（`m:A1:key`）与 uid 无关，一个字节都不碰。
+    pub fn retarget_version_uid(&mut self, old_uid: &str, new_uid: &str) {
+        fn move_keys<V>(map: &mut BTreeMap<String, V>, old: &str, new: &str) {
+            if !map.keys().any(|k| k.starts_with(old)) {
+                return;
+            }
+            let taken = std::mem::take(map);
+            *map = taken
+                .into_iter()
+                .map(|(k, v)| match k.strip_prefix(old) {
+                    Some(rest) => (format!("{new}{rest}"), v),
+                    None => (k, v),
+                })
+                .collect();
+        }
+        let old = format!("v:{old_uid}:");
+        let new = format!("v:{new_uid}:");
+        move_keys(&mut self.values, &old, &new);
+        move_keys(&mut self.follows, &old, &new);
+    }
+
     /// 某一层在草稿里挂着的值改动
     pub fn pending(&self, level: Level, owner: &str, key: &str) -> Option<&Option<Value>> {
         self.values.get(&value_key(level, owner, key))
@@ -302,6 +329,73 @@ pub struct CatalogMachine {
     /// 版本 id，**照机型文件里的顺序**。
     /// 不用 `BTreeSet` 是因为顺序会直接进界面，而字典序不是作者写下的顺序
     pub version_ids: Vec<String>,
+}
+
+/// 从**编辑态**的预设数据里摊出清单 —— [`CatalogMachine`] 构造的唯一实现。
+///
+/// 两个调用方：
+///
+/// - `app::storage::load`：开会话 / 保存后把「已落盘那一份」记成 [`Committed`]；
+/// - `domain::derive::Book::new`：界面读的那一份，**必须跟着编辑态走**。
+///
+/// 两处共用一条是因为 `Book` 曾经自己从 `Committed.catalog` 取清单：新建的版本
+/// 只写进 `presets` 与影子树，`Committed` 要等保存才更新 —— 于是「新增版本」
+/// 只在左侧列表里出现，详情卡、参数台、生成页都看不见它（作者 2026-11-12 报的
+/// 「新增的这些展开不了详情」）。
+pub fn catalog_machines_of(presets: &crate::workbench::presets::Presets) -> Vec<CatalogMachine> {
+    presets
+        .catalog
+        .machines()
+        .iter()
+        .map(|m| CatalogMachine {
+            id: m.id.clone(),
+            display: m.display.clone(),
+            icon: m.icon.clone(),
+            default_bundle: m.default_bundle.clone(),
+            has_dimensions: m.has_dimensions,
+            version_ids: m.versions.iter().map(|v| v.id.clone()).collect(),
+        })
+        .collect()
+}
+
+/// **校验与值编辑要看的「当前清单」**：机型与版本取**编辑态**（`presets`），
+/// `visibility` / `bundles` / `built` 仍是已落盘基线。
+///
+/// # 为什么不能直接用 `Committed`
+///
+/// `Committed` 是「打开工作台那一刻 / 上次保存后」的那一份。新建版本、改版本 id
+/// **只改 `presets` 与影子树**（保存才写真源）—— 拿旧清单去校验，本会话里新建或
+/// 改过 id 的版本一写值就报「版本不存在」，撤销/重做更是静默什么都不做
+/// （作者 2026-11-12 报的「改了 id 参数全没了」与「撤了没反应」）。
+///
+/// 三格不能一起换：`visibility` / `bundles` 的"改回已落盘那一档"要拿真基线比，
+/// 换掉的话同一格会被记成"没改"。
+pub fn live_committed(
+    presets: &crate::workbench::presets::Presets,
+    committed: &Committed,
+) -> Committed {
+    Committed {
+        versions: presets
+            .catalog
+            .machines()
+            .iter()
+            .flat_map(|m| {
+                m.versions.iter().map(move |v| {
+                    (
+                        format!("{}/{}", m.id, v.id),
+                        CommittedVersion {
+                            machine_id: m.id.clone(),
+                            version_id: v.id.clone(),
+                            name: v.name.clone(),
+                            tag: v.tag.clone(),
+                        },
+                    )
+                })
+            })
+            .collect(),
+        catalog: catalog_machines_of(presets),
+        ..committed.clone()
+    }
 }
 
 /// 应用的结果
@@ -452,6 +546,7 @@ fn validate(committed: &Committed, registry: &Registry, patches: &[Patch]) -> Re
             Ok(())
         } else {
             Err(AppError::not_found(format!("版本 {uid} 不存在"))
+                .with_message_code("E_WB_VERSION_MISSING_001")
                 .with_detail("整批改动已拒绝，草稿没有变"))
         }
     };

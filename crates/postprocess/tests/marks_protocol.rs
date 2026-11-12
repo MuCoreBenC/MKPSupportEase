@@ -83,6 +83,8 @@ fn run_pass2_chain(input: &str) -> Vec<String> {
     )
     .expect("second_pass 失败");
     postprocess::postproc::marks::finalize(p2.lines, &toml_machine)
+        .expect("finalize 失败")
+        .lines
 }
 
 fn kv(line: &str, key: &str) -> Option<String> {

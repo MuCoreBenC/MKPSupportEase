@@ -478,6 +478,33 @@ pub struct Detail {
     /// 只加不改：旧记录没有这个键 ⇒ 报告页整组不摆（不编）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot: Option<ParamSnapshot>,
+    /// **调试模式那一趟**（`detail.debug`，2026-11-11）。
+    ///
+    /// 只加不改：普通那一趟恒为 `null`，前端整块不摆。有它时报告页多一组，
+    /// 写明「本次是调试模式」以及用了哪几个位置与速度。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug: Option<DebugFacts>,
+}
+
+/// 调试那一趟的参数（见 [`Detail::debug`]）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugFacts {
+    pub wait_x: f64,
+    pub wait_y: f64,
+    /// 落笔等待位 X。`null` = 跟随驻点位。
+    ///
+    /// ★ **不加** `skip_serializing_if`：新记录一定写这个键（跟随时是 `null`），
+    ///   旧记录根本没有这个键 —— 写回要靠"有没有这个键"分出「跟随」与「没记」，
+    ///   两者混成一个值就会把 P 系列的 246 当成 20。
+    pub mount_wait_x: Option<f64>,
+    /// 收笔等待位 X。`null` = 跟随驻点位（同上）。
+    pub unmount_wait_x: Option<f64>,
+    pub mount_x: f64,
+    pub unmount_x: f64,
+    pub speed: f64,
+    pub test_mount: bool,
+    pub test_unmount: bool,
 }
 
 /// **校准件这一趟的证据链**（2026-10-18）。
@@ -591,8 +618,26 @@ pub struct Meta {
     /// ★ **只加不改**：旧记录没有这个键 ⇒ 读到 `null` ⇒ 引导退回"最前那份"，
     /// 与 `collision` / `relocation` 同一套习惯。**拿不到就落 `null`，不编数**。
     pub slicer_pid: Option<i32>,
+    /// **写这一份产物的是哪一次编译**（`档位 · 提交 · 编译于 …`，与启动日志同一串）。
+    ///
+    /// 回答的是「这份文件是不是新代码处理的」—— 以前只能靠启动日志按时间反推，
+    /// 而日志会被轮转、会被同名进程搞混。落进记录之后，任意一份产物自己就能答。
+    ///
+    /// **只加不改**：旧记录没有这个键 ⇒ 读到 `null`。
+    pub build: Option<String>,
     pub invocation: Invocation,
+    /// 写记录**那一刻**渲好的句子（这一趟的语言）。
+    ///
+    /// 它不再是真值：真值是下面的 `warning_refs`。留着这一格是因为①旧版本读得懂、
+    /// ②人肉打开 `_meta.json` 时一眼能读；报告页只在拿不到指代时才退回它。
     pub warnings: Vec<String>,
+    /// 每条警告的**指代**（键 + 参数，2026-11-09）。
+    ///
+    /// 与 `errorKey` 同一条口径：**存事实不存句子** —— 记录要活过语言切换。
+    /// 新记录一律写（没警告就是空数组）；旧记录没有这一格 ⇒ `null` ⇒ 读口退回
+    /// "拿那句原文去表里反查键"（见 `ipc::report::localized_warnings_in`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning_refs: Option<Vec<postprocess::diag::messages::MessageRef>>,
     /// 成功 ⇒ `None`（落 `null`，不是缺键：报告页按"有没有 error"判 `ok`）。
     pub error: Option<String>,
     /// 那句"为什么没成"的**字典键**（2026-10-27）。有了它，报告页就能按当前语言
@@ -1825,11 +1870,16 @@ mod tests {
             gcode_path: "/tmp/.63288.1.gcode".into(),
             model_name: Some("帕姆".into()),
             slicer_pid: Some(4242),
+            build: Some("client · abc1234 · 编译于 2026-11-08 11:10:23 +08:00".into()),
             invocation: Invocation {
                 exe: "SupportEase.exe".into(),
                 args: vec!["--Gcode".into()],
             },
             warnings: vec!["这一盘没有支撑".into()],
+            warning_refs: Some(vec![postprocess::diag::messages::MessageRef::new(
+                "postproc.scarf_joint_seam",
+                &[],
+            )]),
             error: None,
             error_key: None,
             error_args: None,
@@ -1863,6 +1913,7 @@ mod tests {
             }),
             relocation: None,
             detail: Detail {
+                debug: None,
                 input_file: FileFact {
                     path: "/tmp/.63288.1.gcode".into(),
                     size_bytes: 23_758_782,
@@ -1892,8 +1943,10 @@ mod tests {
             "presetPath",
             "gcodePath",
             "modelName",
+            "build",
             "invocation",
             "warnings",
+            "warningRefs",
             "error",
             "cancelled",
             "pipeline",
@@ -1901,6 +1954,10 @@ mod tests {
         ] {
             assert!(v.get(key).is_some(), "缺键：{key}");
         }
+        assert_eq!(
+            v["build"], "client · abc1234 · 编译于 2026-11-08 11:10:23 +08:00",
+            "构建指纹原样进记录（\"明明修了还在\"时看这一格）"
+        );
         assert_eq!(v["pipeline"][0]["id"], "input");
         assert_eq!(v["pipeline"][0]["elapsedMs"], 96);
         assert_eq!(v["pipeline"][0]["status"], "complete");
@@ -1945,8 +2002,12 @@ mod tests {
             // 三级兜底都没拿到 ⇒ 落 null（**不是缺键**：报告页读口按同一把尺子取它）
             model_name: None,
             slicer_pid: Some(99),
+            // 旧记录没有这一格 ⇒ 落 null（报告页读口按同一把尺子取它）
+            build: None,
             invocation: invocation(),
             warnings: Vec::new(),
+            /* 旧记录那一档：没有指代这一格 ⇒ 落 `null`（读口退回按原文反查键） */
+            warning_refs: None,
             error: Some("E_GCODE_BOUNDARY_001: 越界".into()),
             error_key: None,
             error_args: None,
@@ -1958,6 +2019,7 @@ mod tests {
             model_map: None,
             relocation: None,
             detail: Detail {
+                debug: None,
                 input_file: FileFact {
                     path: "/tmp/x.gcode".into(),
                     size_bytes: 3,

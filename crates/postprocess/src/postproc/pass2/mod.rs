@@ -117,6 +117,90 @@ struct CachedLine {
     raw_line: String,
 }
 
+/// 按 `; Z_HEIGHT:` 分批，取出每层**切片器自己写过的**那个 Z 字面量。
+///
+/// 取哪一条：该层所有**挤出移动**里 Z 最大的那一条（`E>0` 且有 X/Y，与 Bambu 的
+/// `EMoveType::Extrude` 同口径）。为什么是最大值：有斜接缝时一层的挤出 Z 是一条斜坡
+/// （0.436…0.6），Bambu 的 tag 口径取的正是每层挤出 Z 的**最大**值
+/// （`GCodeProcessor.cpp:4409-4421`）；塔跟着这个值走，才既落在层顶、又不改变它的层表。
+///
+/// 为什么必须是**原文**而不是重新格式化：`; Z_HEIGHT:` 只印 4~5 位，切片器的 `G1 Z`
+/// 是 3 位，半值处两边对不上（`18.3455` 它写 `18.345`、`17.2545` 它写 `17.255`），
+/// 从注释反推任何一种舍入都会错一批层；而 Bambu 的层判定容差只有 `1e-4`
+/// （`libslic3r.h:52`），差 0.001 就是多一层。
+///
+/// 某层没有挤出移动时不补 —— 调用方退回 `; Z_HEIGHT:` 解析出来的那个值。
+fn collect_layer_z_literals(lines: &[String]) -> Vec<Option<String>> {
+    let mut out: Vec<Option<String>> = Vec::new();
+    // 模态 Z：最后一条带 Z 的移动写下的值，以及它的原文。
+    let mut z: f64 = 0.0;
+    let mut z_text = String::new();
+    let mut relative_z = false;
+    // 本层目前见过的最大挤出 Z。
+    let mut best: Option<(f64, String)> = None;
+    let mut layer_open = false;
+
+    for text in lines {
+        let trimmed = text.trim();
+        if match_slicer_comment(trimmed, "Z_HEIGHT: ") {
+            if layer_open {
+                out.push(best.take().map(|(_, t)| t));
+            }
+            layer_open = true;
+            best = None;
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with(';') {
+            continue;
+        }
+        let code = trimmed.split(';').next().unwrap_or("").trim();
+        let mut cmd = "";
+        let mut nx = false;
+        let mut ny = false;
+        let mut nz: Option<&str> = None;
+        let mut extrudes = false;
+        for (i, tok) in code.split_whitespace().enumerate() {
+            if i == 0 {
+                cmd = tok;
+                continue;
+            }
+            match tok.split_at(1) {
+                ("X", _) => nx = true,
+                ("Y", _) => ny = true,
+                ("Z", v) if v.parse::<f64>().is_ok() => nz = Some(v),
+                ("E", v) if v.parse::<f64>().is_ok_and(|e| e > 0.0) => extrudes = true,
+                _ => {}
+            }
+        }
+        if cmd == "G90" {
+            relative_z = false;
+            continue;
+        }
+        if cmd == "G91" {
+            relative_z = true;
+            continue;
+        }
+        if !matches!(cmd, "G0" | "G1" | "G2" | "G3") {
+            continue;
+        }
+        if let Some(v) = nz {
+            let parsed = v.parse::<f64>().unwrap_or(z);
+            z = if relative_z { z + parsed } else { parsed };
+            z_text = v.to_string();
+        }
+        if !extrudes || !(nx || ny) {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(top, _)| z > *top) && !z_text.is_empty() {
+            best = Some((z, z_text.clone()));
+        }
+    }
+    if layer_open {
+        out.push(best.map(|(_, t)| t));
+    }
+    out
+}
+
 /// `precomputeTowerLayer`（pass2.go:79）。
 fn precompute_tower_layer(
     ir_data: &Ir,
@@ -241,9 +325,22 @@ struct Ctx<'a> {
 
     current_layer_height: f64,
     last_layer_height: f64,
-    curr_max_tower_height: f64,
-    last_max_tower_height: f64,
+    /// 塔的**记账高度**：按 `suggested_lh` 累加，只用来决定「这一层要不要出塔块」
+    /// （`tower_flag`）。它**不是**打印高度 —— 成品里任何 `G1 Z` 都不读它。
+    ///
+    /// 塔一律打在 [`Self::current_layer_height`]（本层模型层顶）。为什么不能各打各的：
+    /// Bambu Studio 的预览按「挤出移动的 Z」数层（`AdvancedRenderer.cpp:947-960`），
+    /// 开斜接缝时取每层挤出 Z 的最大值（`GCodeProcessor.cpp:4409-4421`）。
+    /// 塔比模型层低一截会把本层 Z 拉低，高出去会把本层顶高 —— 两种都会让
+    /// 预览的层表与内容对不上。
+    nominal_tower_height: f64,
+    last_nominal_tower_height: f64,
+    /// 上一次真正打印塔块时的模型层顶（算塔层厚用）。
     last_tower_z: f64,
+    /// 每层**切片器自己写过的**那个 Z 字面量（见 [`collect_layer_z_literals`]）。
+    layer_z_literals: Vec<Option<String>>,
+    /// 现在走到第几层（`; Z_HEIGHT:` 的序号，从 0 起）。
+    layer_seq: usize,
     tower_flag: bool,
     first_layer_tower_flag: bool,
     first_layer_flag: bool,
@@ -336,6 +433,19 @@ impl<'a> Ctx<'a> {
         self.ir_data.wiping.wiper_y - self.tower_bbox.min_y
     }
 
+    /// 塔块落地用的层 Z：**本层切片器原文那串数**（拿不到才退回解析值）。
+    ///
+    /// 不是简单的 `current_layer_height`：那一格是 `; Z_HEIGHT:` 的文本（4~5 位小数），
+    /// 重新印成 3 位时半值处会与切片器自己的 `G1 Z` 差 0.001，而 Bambu 的层判定
+    /// 容差只有 `1e-4` —— 差这一点就会多算一层（`AdvancedRenderer.cpp:947-960`）。
+    fn layer_z(&self) -> f64 {
+        self.layer_z_literals
+            .get(self.layer_seq)
+            .and_then(|l| l.as_deref())
+            .and_then(|l| l.parse::<f64>().ok())
+            .unwrap_or(self.current_layer_height)
+    }
+
     /// `handlePrepareNextTower`（pass2.go:447）。
     fn handle_prepare_next_tower(&mut self) -> Result<(), PostprocError> {
         self.remove_g3_flag = true;
@@ -412,7 +522,7 @@ impl<'a> Ctx<'a> {
                 "G1 F{}",
                 format_speed(self.ir_data.tower.travel_speed * MM_PER_MINUTE)
             ));
-            self.write_line(&format!("G1 Z{}", format_z(self.curr_max_tower_height)));
+            self.write_line(&format!("G1 Z{}", format_z(self.nominal_tower_height)));
             let variable_wipe_code = format!("G1 X15 Y2{}", crate::gcode::get_pseudo_random());
             let (x_off, y_off) = (self.tower_x_off(), self.tower_y_off());
             if self.ir_data.filament.filament_type == "PLA" {
@@ -583,6 +693,9 @@ pub fn second_pass(
     // 预扫描：涂胶事件标记 + 按层收集未来碰撞墙体
     let mut has_glue_event = false;
     let mut future_collision_layers: Vec<FutureCollisionLayer> = Vec::new();
+    /* 每层「切片器自己写过的那个 Z 字面量」：塔块要原样复用它，不许自己算一个
+    （差 0.001 就会被 Bambu 数成多一层，见 `format_layer_z`）。 */
+    let layer_z_literals = collect_layer_z_literals(&pass1_lines);
     {
         let mut cur_z = 0.0f64;
         let mut cur_walls: Vec<String> = Vec::new();
@@ -652,8 +765,8 @@ pub fn second_pass(
         tower_bbox,
         current_layer_height: 0.0,
         last_layer_height: 0.0,
-        curr_max_tower_height: 0.0, // 占位，下方按 Go 初值设置
-        last_max_tower_height: 0.0,
+        nominal_tower_height: 0.0, // 占位，下方按 Go 初值设置
+        last_nominal_tower_height: 0.0,
         last_tower_z: 0.0,
         tower_flag: false,
         first_layer_tower_flag: true,
@@ -665,6 +778,8 @@ pub fn second_pass(
         remove_timelapse_flag: false,
         suggested_lh: 0.0,
         local_thickness: 0.0,
+        layer_z_literals,
+        layer_seq: 0,
         adjust_support_flag: false,
         switch_tower_type: 0,
         pen_change_flag: false,
@@ -690,7 +805,7 @@ pub fn second_pass(
         slicer_feature: None,
         future_collision_layers,
     };
-    ctx.curr_max_tower_height = ctx.ir_data.machine.first_layer_height;
+    ctx.nominal_tower_height = ctx.ir_data.machine.first_layer_height;
     ctx.suggested_lh = TOWER_SUGGESTED_LAYER_COEFF * ctx.ir_data.machine.nozzle_diameter;
 
     // 读队列（Go 的 scanner + peekBuffer 合并成一条队列）：
@@ -707,6 +822,8 @@ pub fn second_pass(
     let mut last_progress: i64 = -1;
     let mut support_extrusion_count = 0i64;
     let mut line_num: i64 = 0;
+    /* `; Z_HEIGHT:` 的序号 —— 与 `layer_z_literals` 的下标一一对应。 */
+    let mut layer_seq: usize = 0;
 
     let read_next = |q: &mut VecDeque<String>, read: &mut usize| -> Option<String> {
         let l = q.pop_front()?;
@@ -890,6 +1007,8 @@ pub fn second_pass(
             if let Some(&n) = nums.first() {
                 ctx.current_layer_height = n;
             }
+            ctx.layer_seq = layer_seq;
+            layer_seq += 1;
             ctx.bottom_glue_inserted_this_layer = false;
             ctx.skip_slicer_wipe = false;
 
@@ -936,16 +1055,16 @@ pub fn second_pass(
                 next_glue_layer_distance,
             );
 
-            ctx.last_max_tower_height = ctx.curr_max_tower_height;
+            ctx.last_nominal_tower_height = ctx.nominal_tower_height;
             if ctx.current_layer_height < ctx.last_key + TOWER_HEIGHT_THRESHOLD {
-                if ctx.curr_max_tower_height + ctx.suggested_lh < ctx.current_layer_height
+                if ctx.nominal_tower_height + ctx.suggested_lh < ctx.current_layer_height
                     || ctx.next_tj
                 {
                     ctx.next_tj = false;
-                    ctx.curr_max_tower_height =
-                        math_round(ctx.curr_max_tower_height + ctx.suggested_lh, 3);
+                    ctx.nominal_tower_height =
+                        math_round(ctx.nominal_tower_height + ctx.suggested_lh, 3);
                 }
-                if ctx.last_max_tower_height < ctx.curr_max_tower_height {
+                if ctx.last_nominal_tower_height < ctx.nominal_tower_height {
                     ctx.tower_flag = true;
                 }
             }
@@ -1053,7 +1172,7 @@ pub fn second_pass(
                 }
             }
             ctx.ir_data.tower.layer_count += 1;
-            ctx.last_tower_z = ctx.curr_max_tower_height;
+            ctx.last_tower_z = ctx.layer_z();
         }
 
         // 第二个 CHANGE_LAYER：首层模型打完 → 首笔活化（校准模式禁用）
@@ -1089,8 +1208,7 @@ pub fn second_pass(
             ));
             ctx.ir_data.tower.extrude_ratio = math_round(ctx.suggested_lh / 0.2, 3);
             let ratio = ctx.ir_data.tower.extrude_ratio;
-            let safe_z = ctx.current_layer_height.max(ctx.curr_max_tower_height)
-                + ctx.ir_data.tower.safe_z_offset;
+            let safe_z = ctx.layer_z() + ctx.ir_data.tower.safe_z_offset;
             let processed = process_gcode_offset(
                 "G1 X20 Y20",
                 ctx.tower_x_off(),
@@ -1157,10 +1275,7 @@ pub fn second_pass(
                 } else if cl.is_placeholder {
                     match cl.placeholder_key {
                         "NOZZLE_HEIGHT_ADJUST" => {
-                            ctx.write_line(&format!(
-                                "G1 Z{};Tower Z",
-                                format_z(ctx.curr_max_tower_height)
-                            ));
+                            ctx.write_line(&format!("G1 Z{};Tower Z", format_z(ctx.layer_z())));
                         }
                         "EXTRUDER_REFILL" => {
                             ctx.write_line("G92 E0");
@@ -1295,7 +1410,7 @@ pub fn second_pass(
                 if should_gen_sheath {
                     let sheath_lines = tower::generate_sheath_gcode(
                         ctx.ir_data.tower.layer_count,
-                        ctx.curr_max_tower_height,
+                        ctx.layer_z(),
                         ctx.suggested_lh,
                         ctx.ir_data.machine.first_layer_height,
                         ctx.ir_data.wiping.wiper_x,
@@ -1328,7 +1443,7 @@ pub fn second_pass(
                     };
                     let rib_lines = tower::generate_rib_gcode(
                         ctx.ir_data.tower.layer_count,
-                        ctx.curr_max_tower_height,
+                        ctx.layer_z(),
                         ctx.suggested_lh,
                         ctx.ir_data.machine.first_layer_height,
                         final_tower_height,
@@ -1356,8 +1471,7 @@ pub fn second_pass(
                 }
                 ctx.ir_data.tower.layer_count += 1;
             }
-            let safe_z = ctx.current_layer_height.max(ctx.curr_max_tower_height)
-                + ctx.ir_data.tower.safe_z_offset;
+            let safe_z = ctx.layer_z() + ctx.ir_data.tower.safe_z_offset;
             let leaving = process_gcode_offset(
                 &format!(
                     "G1 X{} Y{}",
@@ -1394,7 +1508,7 @@ pub fn second_pass(
                 }
             }
 
-            let layer_height = ctx.curr_max_tower_height - ctx.last_tower_z;
+            let layer_height = ctx.layer_z() - ctx.last_tower_z;
             let max_lh =
                 (TOWER_SUGGESTED_LAYER_COEFF * ctx.ir_data.machine.nozzle_diameter * 1000.0)
                     .round()
@@ -1403,13 +1517,13 @@ pub fn second_pass(
             if layer_height > max_lh + 1e-9 {
                 pass2_stats.tower_layer_height_warnings.push(
                     crate::postproc::pass1::TowerLayerHeightWarning {
-                        z: ctx.curr_max_tower_height,
+                        z: ctx.layer_z(),
                         layer_height,
                         max_lh,
                     },
                 );
             }
-            ctx.last_tower_z = ctx.curr_max_tower_height;
+            ctx.last_tower_z = ctx.layer_z();
         }
 
         if trimmed.starts_with("; layer num/total_layer_count") {
@@ -1566,7 +1680,7 @@ pub fn second_pass(
         if h_lower_pentip {
             ctx.write_line(&format!(
                 "G1 Z{}",
-                format_z(ctx.curr_max_tower_height + ctx.ir_data.toolhead.z_offset)
+                format_z(ctx.nominal_tower_height + ctx.ir_data.toolhead.z_offset)
             ));
         }
 
@@ -1583,7 +1697,7 @@ pub fn second_pass(
                 0.0,
                 crate::gcode::OffsetMode::Normal,
             )?;
-            ctx.write_line(&format!("G1 Z{}", format_z(ctx.last_max_tower_height)));
+            ctx.write_line(&format!("G1 Z{}", format_z(ctx.nominal_tower_height)));
             let variable_wipe_code = format!("G1 X15 Y2{}", crate::gcode::get_pseudo_random());
             if ctx.ir_data.filament.filament_type == "PLA" {
                 ctx.write_line_offset(
@@ -1669,7 +1783,7 @@ pub fn second_pass(
         }
 
         if let Some(lift_z) = lift_z_first {
-            let comp = math_round(ctx.curr_max_tower_height + TOWER_HEIGHT_COMP_OFFSET, 3);
+            let comp = math_round(ctx.nominal_tower_height + TOWER_HEIGHT_COMP_OFFSET, 3);
             if comp > lift_z {
                 ctx.write_line(&format!("G1 Z{};Compensation", format_z(comp)));
             }
@@ -1683,7 +1797,7 @@ pub fn second_pass(
             ctx.write_line(&format!(
                 "G1 Z{}",
                 format_z(math_round(
-                    ctx.curr_max_tower_height + TOWER_HEIGHT_COMP_OFFSET,
+                    ctx.nominal_tower_height + TOWER_HEIGHT_COMP_OFFSET,
                     3,
                 ))
             ));
@@ -1696,7 +1810,7 @@ pub fn second_pass(
         tracing::info!(count = support_extrusion_count, "支撑挤出调整");
     }
 
-    let tower_height = ctx.curr_max_tower_height;
+    let tower_height = ctx.last_tower_z;
     Ok(Pass2Output {
         lines: ctx.sink.lines,
         tower_height,

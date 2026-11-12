@@ -1,0 +1,70 @@
+/*
+ * 设置页深色星河的两层（见 `GalaxyBackdrop.tsx` 头注）。
+ *
+ * 铺在 `.page` 之内、z-index −1：与它原来那张 `::before` 图同一层，
+ * 内容（页头 / 目录 / 卡片）照旧盖在上面。
+ *
+ * ★ 两层都是**上半部分一条，往下长长地淡掉**：高度取 `--galaxy-h`，再用一条
+ *   从 42% 拉到 100% 的 mask 收尾 —— 不是 470px 一刀切，也不是铺满整页。
+ *   星星那层用的是同一条曲线（`GalaxyBackdrop.tsx` 的 `FADE_FROM`），两层才对得上。
+ */
+.root {
+  --galaxy-pad: 16px;
+  --galaxy-h: 560px;
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/*
+ * 云雾层：`galaxy_cloud_dark.svg` 是原图剥掉星点之后剩下的三团光晕 + 一条光带，
+ * 中间那团「云雾」逐字复刻。整层只做极慢的呼吸与几像素位移（合成层上跑）。
+ */
+.cloud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: min(var(--galaxy-h), 100%);
+  background: url('../assets/hero/galaxy_cloud_dark.svg') center top / 100% 100% no-repeat;
+  -webkit-mask-image: linear-gradient(to bottom, #000 42%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 42%, transparent 100%);
+  will-change: transform;
+  animation: galaxy-breathe 68s ease-in-out infinite;
+}
+
+/*
+ * 星层：左右各外扩 `--galaxy-pad`（星星自己铺满那个宽度），
+ * 再让整层做几十秒一轮的横移，边缘不会露出「画布到这儿就没了」的直边。
+ *
+ * ★ 宽高必须写死比例：`canvas` 是替换元素，只给 `inset` 它会退回
+ *   `width="300" height="150"` 那个固有尺寸（右/下两条边被忽略）。
+ */
+.stars {
+  position: absolute;
+  top: 0;
+  left: calc(-1 * var(--galaxy-pad));
+  width: calc(100% + var(--galaxy-pad) * 2);
+  height: min(var(--galaxy-h), 100%);
+  display: block;
+}
+
+@keyframes galaxy-breathe {
+  0%,
+  100% {
+    transform: translate3d(-4px, 1px, 0) scale(1.012);
+    opacity: 0.9;
+  }
+  50% {
+    transform: translate3d(5px, -2px, 0) scale(1.028);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cloud {
+    animation: none;
+  }
+}

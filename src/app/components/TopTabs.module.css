@@ -407,3 +407,12 @@ body[data-window-dragging='true'] .logo[data-clickable='true']:active {
 [data-theme='dark'] .bar {
   box-shadow: none;
 }
+
+/* 浅色：只让设置页的标题栏透出窗底那层背景，其余页标题栏保持自己的底色 */
+[data-theme='light'] .bar {
+  background: var(--bg-1);
+}
+
+[data-theme='light'] [data-tab='settings'] .bar {
+  background: transparent;
+}

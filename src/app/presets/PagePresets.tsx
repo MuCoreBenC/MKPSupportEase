@@ -86,8 +86,8 @@
  * # 两种类型的「生效」是两件不同的事
  *
  * ```
- * MKP     生效 = 设为当前配置       applyPreset()    已应用 / 未应用   操作 [应用]
- * 切片器   生效 = 复制到切片器目录   copyToSlicer()   已复制 / 未复制   操作 [复制]
+ * MKP     生效 = 设为当前配置       applyPreset()    在用 / 未使用     操作 [使用]
+ * 切片器   生效 = 放进切片器目录     copyToSlicer()   已放入 / 未放入   操作 [放入]
  * ```
  *
  * 切片器 profile 光下到本机没用 —— 它得躺在切片器自己的 profile 目录里才生效。
@@ -102,7 +102,7 @@
  *   我自己的文件             `api.getLocalPresetFiles()`                  真（**本地文件**：扫 `presets-local/`，盘当底账）
  *   本地那份的正文           `api.readLocalPresetText()`                  真（只读；抽屉里看，读不出来照实说）
  *   已应用                   唯一底账 run/active-preset.json  真（**全局唯一**，落 Internal 根，刷新还在）
- *   已复制到切片器           `api.getSlicerCopied()`                     **演示集合**（起始 1 个）
+ *   已放入切片器             `api.getSlicerCopied()`                     真（扫每个账号目录，起始 1 个）
  *   喷嘴 / 层高              `PresetFileInfo.{nozzle,layerHeight}`       真（**只有切片器有，所以只有切片器那张表里有这两列**）
  *   时间 / 大小              `PresetFileInfo.{modifiedText,sizeText}`    **假后端按 path 稳定推的演示值**，前端一行不编
  *                            （交付行的大小是**真值**：catalog 登记的那个字节数）
@@ -149,7 +149,7 @@
  * 带一个 × 手动关。不做自动消失 —— 「契约里还没有这个方法」这种话消失了就等于没说过。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 /* 内联自定义属性（`--scrollbar-pad`）要一个 `as CSSProperties` —— 见 `.editBody` 那一处 */
 import type { CSSProperties } from 'react'
 import { api, errorText } from '../../api'
@@ -190,8 +190,10 @@ import { useCopiesFollowCloud } from '../state/deliveryState'
 /* 「正文草稿被别处作废」那一嗓子（参数页保存时发）：编辑器还开着就按新内容重开 */
 import { lastTextDraftDroppedPath, useTextDraftDrop } from '../state/draftState'
 import { FieldLayer } from '../../components/field'
+import { Switch } from '../../components/switch'
 import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
+import type { IconName } from '../../components/Icon'
 import type { Density } from '../../hooks/useDensity'
 import {
   comboOf,
@@ -199,6 +201,11 @@ import {
   REVEAL_LABEL_KEY,
 } from '../../hooks/usePlatform'
 import Icon from '../shell/icons'
+/* 工具栏那颗刷新走**全站字形表**（`components/Icon` 的 `refresh`）——
+   外壳那套 `shell/icons` 只有导航与窗口那几枚，没有它 */
+import Glyph from '../../components/Icon'
+/* 「按下沉、松开回位」—— 全站一套手感（见那个文件的头注） */
+import { pressDown, pressUp } from '../shared/press'
 /* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
 import { tickText } from '../shared/download'
 /* 「复制后处理脚本」全站那一份（与标题栏 MKP 字标、首页那颗同一个出口）—— 见那个文件的文件头 */
@@ -210,6 +217,7 @@ import { dismiss, notify } from '../notify/notify'
 /* 「右键某一份预设 → 打开它的参数」那一屏（2026-10-09）。它里面就是参数页本身 */
 import PresetParamsModal from '../params/PresetParamsModal'
 import CompareModal from './CompareModal'
+import PlacementsModal from './PlacementsModal'
 import TextDiffModal from './TextDiffModal'
 import PresetScopeBar from './PresetScopeBar'
 import PresetStatusPill, { PresetSlicerPill } from './PresetStatusPill'
@@ -236,12 +244,10 @@ import {
   localUnreadableWhy,
   localCountOfAxis,
   treeCountOfAxis,
-  PRESET_SUSPECT_WHY,
   STATUS_TEXT,
   UNSUPPORTED_TEXT,
   /* 「下载」那个词只有一处（`UPDATE_ACTION_TEXT`）—— 右键菜单与操作列那颗按钮不许各写一个 */
   UPDATE_ACTION_TEXT,
-  isSuspectPreset,
   sizeTextOf,
   /* 重命名框：主名与后缀拆开（后缀灰色贴在行尾、不可改） */
   splitFileName,
@@ -262,6 +268,107 @@ import { splitHeader, tomlTokens } from './tomlPaint'
 import { locateIntoView } from '../../components/scroll/locate'
 import s from './PagePresets.module.css'
 
+
+/**
+ * 「云端」那颗刷新在走时**转起来的那一圈**（作者 2026-11-11：「加一下旋转的动画呀」）。
+ *
+ * ★ 动效走 **WAAPI**（`element.animate()`），不走 CSS animation —— WKWebView 上
+ *   CSS 动画不播，全站都这么绕（同 `PresetTable` 的 `BusySpin`、`postprocess/HANDOVER.md` §4）。
+ * ★ 先 `cancel()` 上一轮：同一个元素上叠两轮，停下时可能停在半路。
+ * ★ `prefers-reduced-motion` 时干脆不转 —— 不转的双箭头照样读得出"这是刷新"。
+ * ★ **只转里面那一层**（图标自己），按钮的圆在这一圈之外，不跟着甩。
+ */
+function RefreshSpin({ busy }: { busy: boolean }) {
+  const ref = useRef<HTMLSpanElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (el === null || !busy) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    el.getAnimations().forEach((a) => a.cancel())
+    const anim = el.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], {
+      duration: 900,
+      iterations: Infinity,
+      easing: 'linear',
+    })
+    return () => anim.cancel()
+  }, [busy])
+
+  return (
+    <span ref={ref} className={s.tbRefreshSpin} aria-hidden>
+      <Glyph name="refresh" size={14} />
+    </span>
+  )
+}
+
+/**
+ * 刷新那一颗的四种回执（**长在按钮自己身上**，见 `refreshCloud`）。
+ *
+ *   `busy`   正在问云端 —— 图标转着，胶囊上写「检查中…」
+ *   `same`   同一代 —— 「已是最新」
+ *   `synced` 目录换过了 —— 「已更新」
+ *   `failed` 网络 / 数据源那边失败了 —— 「刷新失败」，原因在页脚那条
+ */
+type RefreshPhase = 'idle' | 'busy' | 'same' | 'synced' | 'failed'
+
+/** 每档在胶囊上写哪一句：都是短句 —— 它紧挨着「本地 │ 云端」，不抢第二排的位 */
+const REFRESH_LABEL_KEY: Record<Exclude<RefreshPhase, 'idle'>, StringKey> = {
+  busy: 'presets.page.refresh.running',
+  same: 'presets.page.refresh.same',
+  synced: 'presets.page.refresh.synced',
+  failed: 'presets.page.refresh.failedShort',
+}
+
+/**
+ * 胶囊上那**四条候选文案**。
+ *
+ * 四条都画、只有当前那条可见（其余 `opacity: 0` 叠在同一格里，见 CSS 的
+ * `.tbRefreshLabel`）—— 格子取最长那句，于是「检查中…」换成「已是最新」时
+ * **一个像素都不跳**（作者 2026-11-11：「3 个字和 4 个字就差一点点的宽度，
+ * 它还要变，我不喜欢这种」）。同一套做法见 `PresetScopeBar` 的 `.optText`。
+ *
+ * 换档时两条**交叉淡化**（旧的淡出、新的淡入，120ms）—— 不是"啪"地替换掉。
+ */
+const REFRESH_LABEL_KEYS: readonly StringKey[] = Object.values(REFRESH_LABEL_KEY)
+
+/** 文案 → 它在胶囊里的第几格（交叉淡化按它找那两个孩子） */
+const REFRESH_LABEL_INDEX = new Map<StringKey, number>(
+  REFRESH_LABEL_KEYS.map((key, i) => [key, i]),
+)
+
+/**
+ * 回执在胶囊上留多久，然后收回图标。
+ *
+ * 作者 2026-11-11：「缩回去的好快呀，我很难去再次点击」→ 1.8s 太急；
+ * 又「有时候很快、有时候要等很久」→ 去掉"指针停着就不收"那套（它的时长取决于
+ * 鼠标在不在上面，看着就是随机）。现在**从回执出现算起固定 4 秒**，
+ * 这段时间内点空白 / 点别处也会立刻收回（见那条 document 监听）。
+ */
+const REFRESH_HOLD_MS = 4000
+
+/** 展开 / 收回的时长（**单调缓动，不带过冲** —— 果冻那套已经撤掉） */
+const REFRESH_WIDTH_MS = 260
+
+/** 宽度变化小于这个像素就不值得播动画（字体渲染的亚像素抖动） */
+const MIN_WIDTH_DELTA = 0.5
+
+/**
+ * 去重窗口：**10 秒内再点只重演回执，不再问云端**。
+ *
+ * 作者 2026-11-11：「有的人就是喜欢点一下这个刷新动画看一看」—— 看动画可以，
+ * 不能每点一下都真发一趟网络。只有成功的结局（已是最新 / 已更新）进这个窗口；
+ * 失败不缓存，再点就是真重试。
+ */
+const REFRESH_DEDUPE_MS = 10_000
+
+/**
+ * 「检查中…」至少留这么久，才许换成结果。
+ *
+ * 本地那一趟 `checkRemoteUpdate` 常常几十毫秒就回来了 —— 弹簧还没弹完就换字，
+ * 看着就是"字在抖 / 卡一下"（作者 2026-11-11 报的手感就是它）。留够一段，
+ * 让"弹开 → 落定 → 换字"三拍分得开；本地真快也只是多等这一会儿，不碍事。
+ */
+const REFRESH_MIN_BUSY_MS = 420
 
 interface Props {
   density: Density
@@ -629,6 +736,152 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const copiesFollowCloud = useCopiesFollowCloud()
   const [note, setNote] = useState<Note | null>(null)
   /*
+   * 「云端」那一颗刷新现在**自己说话**（作者 2026-11-11）：图标 →（变宽）检查中… →
+   * 已是最新 / 已更新 → 收回图标。回执不再借页脚横幅 —— 那一格太不显眼。
+   */
+  const [refreshPhase, setRefreshPhase] = useState<RefreshPhase>('idle')
+  const refreshBtnRef = useRef<HTMLButtonElement | null>(null)
+  /** 上一帧按钮的宽度（px）：变宽 / 收窄都从它出发（FLIP，见下面的 layout effect） */
+  const refreshWidthRef = useRef<number | null>(null)
+  /** 回执留多久再收回图标（回到 `idle` 只走这个定时器） */
+  const refreshHoldRef = useRef(0)
+  /** 这一下点下去的时刻（算"检查中…"已经过了多久，见 `REFRESH_MIN_BUSY_MS`） */
+  const refreshStartRef = useRef(0)
+  /** 「按下沉」那一层缩放演在槽上（按钮的 `transform` 归宽度动画，见 refreshNode 的注释） */
+  const refreshSlotRef = useRef<HTMLSpanElement | null>(null)
+  /** 胶囊上那行字（展开那几百毫秒里它是**淡进来**的，不跟着宽度抖，见 layout effect） */
+  const refreshLabelRef = useRef<HTMLSpanElement | null>(null)
+  /** 上一档那句文案：换档时拿它找"淡出的是哪一句"（交叉淡化，见 layout effect） */
+  const refreshLabelPrevRef = useRef<StringKey | null>(null)
+  /** 上一次真跑成功的那一趟（时刻 + 结局）：10 秒内的重复点击直接复用它，不再联网 */
+  const refreshLastRef = useRef<{ at: number; outcome: 'same' | 'synced' } | null>(null)
+  /** 点了几次：只认**最新那一次**的结局（「检查中」再点一下会重新问，旧那趟作废） */
+  const refreshGenRef = useRef(0)
+  /** 正在播的那段宽度动画 —— 下一次开工前先把它收掉 */
+  const refreshAnimRef = useRef<Animation | null>(null)
+
+  /*
+   * 按钮是**切到「云端」才画出来**的：它一出现就把静止宽记下来。
+   *
+   * ★ 不这么做的话，第一次展开时 `refreshWidthRef` 还是 `null`（那个 layout effect
+   *   只在档位变的时候跑，按钮出现那一刻它不会跑）⇒ 没有起点，弹簧直接变成"啪"地
+   *   一下变宽 —— 作者 2026-11-11 报的「第一次根本没有动画」就是这一条。
+   */
+  const setRefreshBtn = useCallback((el: HTMLButtonElement | null) => {
+    refreshBtnRef.current = el
+    if (el === null) {
+      /* 按钮收起来了（切走 / 换档）：交叉淡化的"上一句"也一起忘掉 ——
+         否则下次出现时它会拿旧键去找一个刚挂载、还没亮过的孩子，闪一下 */
+      refreshLabelPrevRef.current = null
+      return
+    }
+    refreshWidthRef.current = el.getBoundingClientRect().width
+  }, [])
+
+  /*
+   * 展开 / 收回：先让 React 把新那一版摆进布局，量出**这一帧的自然宽**，再从上一帧
+   * 的宽度**平滑**动画过去（260ms，单调缓动，**没有过冲、没有挤压** ——
+   * 作者 2026-11-11 把弹簧果冻那套撤掉了：「它和我再次点击有点冲突」）。
+   *
+   * ★ 走 WAAPI：WKWebView 上 CSS transition 不播（同全站那几处）。
+   * ★ 系统开了「减弱动态效果」就不动 —— 宽度直接到位。
+   * ★ 它住在这段（组件顶部的 hook 段）：这一页有早退分支，摆到下面就是条件调用。
+   */
+  useLayoutEffect(() => {
+    const btn = refreshBtnRef.current
+    if (btn === null) return
+    /* 上一轮还在跑：拿屏上**此刻**的宽度当起点，别跳回记忆里的旧值 */
+    const live = refreshAnimRef.current === null ? null : btn.getBoundingClientRect().width
+    refreshAnimRef.current?.cancel()
+    refreshAnimRef.current = null
+    const to = btn.getBoundingClientRect().width
+    const from = live ?? refreshWidthRef.current
+    refreshWidthRef.current = to
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    /*
+     * **换档 → 文案交叉淡化**（作者 2026-11-11：「检查中变已是最新，是瞬间替换，
+     * 很不明显看到文字消失又出现」）：旧那句 1→0、新那句 0→1，两条同时走 120ms。
+     *
+     * 只有展开 / 收窄的档位变化不够 —— 换文案时宽度根本不变，所以这一段放在
+     * "宽度要不要演"的判断**之前**。
+     */
+    const label = refreshLabelRef.current
+    const nextKey = refreshPhase === 'idle' ? null : REFRESH_LABEL_KEY[refreshPhase]
+    const prevKey = refreshLabelPrevRef.current
+    if (!reduce && label !== null && nextKey !== null && prevKey !== null && prevKey !== nextKey) {
+      const kids = label.children
+      const out = kids[REFRESH_LABEL_INDEX.get(prevKey) ?? -1]
+      const into = kids[REFRESH_LABEL_INDEX.get(nextKey) ?? -1]
+      out?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 100, easing: 'ease-out' })
+      into?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 100, easing: 'ease-out' })
+    }
+    refreshLabelPrevRef.current = nextKey
+
+    if (from === null || Math.abs(to - from) < MIN_WIDTH_DELTA) return
+    if (reduce) return
+    const anim = btn.animate(
+      [{ width: `${from}px` }, { width: `${to}px` }],
+      { duration: REFRESH_WIDTH_MS, easing: 'cubic-bezier(.22,.68,.2,1)' },
+    )
+    refreshAnimRef.current = anim
+    /*
+     * 收窄时**保住白底细边**（`data-closing`）：`data-open` 一摘，胶囊立刻变透明，
+     * 那条收窄动画就成了"看不见的动画"（作者 2026-11-11：「缩回的时候动画丢失了」）。
+     */
+    if (to < from) btn.dataset.closing = 'on'
+    /*
+     * ★ **字不跟着宽度抖**：内容钉在右线（右线不动，见 refreshNode 里「[字][图标]」），
+     * 展开时字先不显示，等宽度基本定下来再淡进来 —— 它从头到尾不横移。
+     */
+    if (to > from && label !== null) {
+      label.animate([{ opacity: 0 }, { opacity: 1 }], {
+        duration: 120,
+        /* 等宽度基本走完再淡进来：早了会被左缘"擦着"露出来，看着像字在动 */
+        delay: 200,
+        fill: 'backwards',
+      })
+    }
+    /* 动画不带 fill：结束就回到 CSS 的宽度（同一个值）；收个尾只管清引用与 `data-closing` */
+    void anim.finished.then(
+      () => {
+        if (refreshAnimRef.current !== anim) return
+        refreshAnimRef.current = null
+        delete btn.dataset.closing
+      },
+      () => {
+        /* 被下一段顶掉了：`data-closing` 由它管，这里不动 */
+      },
+    )
+  }, [refreshPhase])
+
+  /*
+   * **点空白 / 点别处就收起来**（作者 2026-11-11）。
+   *
+   * 只监听回执那几档：检查中不打断（那一下本来就不许点）。capture 阶段接，
+   * 免得别的控件在冒泡里 `stopPropagation` 把这一下吃掉。
+   */
+  useEffect(() => {
+    if (refreshPhase === 'idle' || refreshPhase === 'busy') return
+    const onDown = (e: PointerEvent): void => {
+      const slot = refreshSlotRef.current
+      if (slot !== null && e.target instanceof Node && slot.contains(e.target)) return
+      setRefreshPhase('idle')
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
+  }, [refreshPhase])
+
+  /* 卸载时把定时器与那段动画带走 */
+  useEffect(
+    () => () => {
+      window.clearTimeout(refreshHoldRef.current)
+      refreshAnimRef.current?.cancel()
+    },
+    [],
+  )
+
+  /*
    * **参数对比台**（2026-10-08）：一个**独立常驻工具** —— 不挂在"云端版本"或"更新"上，
    * 也不因为有没有新版而变化。它只比**用户自己的本地预设**（`presets-local/`）。
    *
@@ -695,6 +948,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     target: { path: string; fileName: string; machineId: string; versionId: string }
     syncFirst: boolean
   } | null>(null)
+  /**
+   * 「查看放入情况」那个框（2026-11-10）：记的是**哪一份**，每个账号目录的实况由框自己
+   * 现读（`getSlicerPlacements`）—— 盘是底账，框开着的时候用户也可能去访达删掉一份。
+   */
+  const [placements, setPlacements] = useState<{ fileName: string } | null>(null)
   /*
    * 正在做动作的那几行（rowKey 集合）—— 只用来把**那一颗**按钮禁掉 / 换成「下载中」。
    *
@@ -878,6 +1136,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *   问句与代价照旧；批量时同一个框说"这 N 份"、并按来源把代价分开数。
    */
   const [removeAsk, setRemoveAsk] = useState<PresetTableRow[] | null>(null)
+  /**
+   * 删除确认框里那个勾：**同时把切片器目录里那份也删掉**（2026-11-10 作者：
+   * 「删除的时候弹窗可以勾选同步删云端的吗」）。
+   *
+   * 云端删不了 —— 发布目录只读、BBS 账号里的云端预设也不归本程序删；能删的是**本机
+   * 切片器目录里那份**，而它正是"删了还在"的来源。默认不勾（删别人的目录要用户自己点）。
+   * 只对**单份、切片器配置、而且确实已放入**的那种行出现（见 `slicerCopyOf`）。
+   */
+  const [alsoSlicerOn, setAlsoSlicer] = useState(false)
 
   /*
    * **多选（批量删除）**（2026-10-29 作者：「我想批量删除」）。
@@ -2486,10 +2753,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 二次确认是**居中的模态框**（`removeAsk`，2026-10-20 从右键菜单里搬出来）；
    * 正在使用 / 有草稿不再拦 —— 后端把属于这一份的状态一并清掉（确认框讲清了）。
    */
-  const runRemove = (row: PresetTableRow) => {
+  const runRemove = (row: PresetTableRow, alsoSlicer?: boolean) => {
     setNote({ text: msg('presets.page.remove.running', { name: row.fileName }), bad: false })
     const done =
-      row.origin === 'preset' ? data.removePreset(row.fileName) : data.remove(row.path)
+      row.origin === 'preset'
+        ? data.removePreset(row.fileName, alsoSlicer)
+        : data.remove(row.path)
     done.then(
       () =>
         setNote({
@@ -2512,6 +2781,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const askRemove = (row: PresetTableRow) => {
     menu.close()
+    setAlsoSlicer(false)
     setRemoveAsk([row])
   }
 
@@ -2519,8 +2789,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const confirmRemove = () => {
     const rows = removeAsk
     if (rows === null || rows.length === 0) return
+    const alsoSlicer = alsoSlicerOn
     setRemoveAsk(null)
-    if (rows.length === 1) runRemove(rows[0])
+    if (rows.length === 1) runRemove(rows[0], alsoSlicer)
     else void runRemoveMany(rows)
   }
 
@@ -2670,6 +2941,22 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     )
   }
 
+  /*
+   * 「查看放入情况」那个框（2026-11-10）。**不打开系统文件夹**：把这份预设散落的每个
+   * 账号目录都列出来，各带一枚「已放入 / 未放入」徽章 —— 用户在外部删掉其中一份也看得见，
+   * 未放入的那一行当场就能补。
+   */
+  const openPlacements = (row: { fileName: string }) => {
+    menu.close()
+    setPlacements({ fileName: row.fileName })
+  }
+
+  /* 框自己会拿它现读（`load` 的身份要稳，否则那个 effect 每次渲染都重跑） */
+  const loadPlacements = useCallback(
+    (fileName: string) => api.getSlicerPlacements(fileName),
+    [],
+  )
+
   /**
    * 置顶是纯前端的排序，真的能用 —— 落 localStorage，刷新还在。
    *
@@ -2730,58 +3017,20 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
 
   /**
-   * 操作列上那两个**真的能用**的动作。
+   * 操列上那颗**切片器**的动作（`onLive`）。
    *
-   * 一个路子：写底账 → 重读底账（`usePresetData` 的 `apply` / `copy` 里做的）。
-   * **MKP 应用成功不再发提示条**（作者：「这一行可以去掉了，因为上面有了」）——
-   * 已应用状态条就在同一屏上面，应用哪一份写在它身上，同一句话说两遍；
-   * 状态条的 `title` 里说清它是本机底账（刷新还在）。
-   * 切片器的复制成功照旧发：它没有状态条，行上的「已复制」只说状态、不说去了哪。
+   * # 它现在只做一件事：把框打开（2026-11-10 作者）
    *
-   * 失败照抛出来说：假后端的两条校验（仓库里没这个 asset、类型对不上）就是从这里冒上来的，
-   * 真后端还会多一种（切片器路径没配 = 没装那个应用 / 没打开过）；**同名不再拦**——
-   * 那儿原来那份直接换成我们这份（2026-10-13 作者改判）。不吞、不假装成功。
+   * 「放入按钮的话，它能出现模态框……让我选择 BBS 还是哪些，让我自己看着去放入」——
+   * 落点可以有**好几个切片器 × 好几个账号目录**，一次点下去就直接全写不再是对的：
+   * 用户要先看到"哪儿有、哪儿没有"，再决定放哪些。真正落盘的动作在框里那几行
+   * （`PlacementsModal` → `data.copy`），这一侧不再自己写盘。
+   *
+   * 于是行上那颗按钮的三种状态照旧：已放入 = 灰字、未放入 = 可点、不可点 = 带原因的灰
+   * （`PresetTable` 那一侧判的），只是"可点"现在开的是框。
    */
   const runLive = (row: PresetLocalRow) => {
-    /*
-     * 切片器：复制进切片器自己的用户配置目录（真机落盘）。**键是文件名** ——
-     * 下载 / 应用 / 读正文同一个取用口径。成功要发提示条（行上的「已复制」只说状态、
-     * 不说去了哪）；失败照抛出来说（不是切片器配置 / 本机没那份字节）。
-     *
-     * ★ 2026-10-14：这里原来还裹着一层 `if (page.kind !== 'mkp') { … }`，后面跟着
-     * "MKP 档本地行也能使用"那半段（`row.origin === 'local'` 的应用路径）与一条
-     * "正常到不了"的兜底 —— **整段删了**：`onLive` 只喂给非 MKP 档的本地行
-     * （`PresetTable` 里 MKP 本地行走的是 `onUse`），那个 `if` 恒真，后半段一行都执行不到
-     * （兜底那句注释自己都写着"正常到不了"）。
-     */
-    /* 连点两下会往切片器目录写两遍 —— 第二下丢掉（见 `inflightRef`） */
-    const key = `live:${row.rowKey}`
-    if (!enter(key)) return
-    markBusy(row.rowKey)
-    data.copy(row.fileName).then(
-      (outcome) => {
-        leave(key)
-        clearBusy(row.rowKey)
-        /*
-         * **同名换掉**这件事要说清（2026-10-13 作者改判：「有相同的就覆盖吧」）——
-         * 「替换掉了你别的东西」与「新放了一份」对用户是两件事，
-         * 不合并成一句"已复制"。
-         */
-        /* 落点路径不印在提示条上（技术细节，2026-10-13 作者口径）——
-           文件在哪，行上右键有「显示切片器里的那份」 */
-        setNote({
-          text: outcome.replaced
-            ? msg('presets.page.live.copiedReplaced', { name: row.fileName })
-            : msg('presets.page.live.copied', { name: row.fileName }),
-          bad: false,
-        })
-      },
-      (e: unknown) => {
-        leave(key)
-        clearBusy(row.rowKey)
-        setNote({ text: msg('presets.page.live.failed', { detail: errorText(e) }), bad: true })
-      },
-    )
+    openPlacements(row)
   }
 
   /**
@@ -2846,9 +3095,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
 
   /*
-   * **「查看工艺预设」**：跳去 BBS 预设查看器看这一份。
+   * **「去工艺页面查看」**：跳去 BBS 预设查看器看这一份。
    *
-   * # 灰着的就不出现（2026-10-16 作者：「mkp 的是灰色的就不显示」）
+   * # 灰着的就不出现
    *
    * 全站那条铁律是「禁用一定带原因」（见 `components/menu/types.ts`）—— 但那条针对的是
    * **用户本来就该能做、这会儿被挡住**的动作（改名 / 复制 / 删除），灰着并说清为什么
@@ -2856,16 +3105,20 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 而 MKP 档整档都是 MKP 配方（toml）—— `bbsWhyNot` **恒**有话说 ⇒ 那一档上它永远灰着。
    * 一个在任何行上都点不动、只为解释自己为什么点不动而存在的项，是纯噪声 ⇒ 干脆不列。
    *
-   * # 词（2026-10-16 作者：「在 BBS 中查看这个文案改成查看工艺预设」）
+   * # 图标由调用方给
    *
-   * 沿革：「在 BBS 预设查看器中打开」→「在 BBS 中查看」→ **「查看工艺预设」**。
-   * 中间那版说的是"去哪儿看"，作者要的是"看的是什么东西"（工艺预设）。
-   * 不挂图标：它只在工艺预设上才出现，是这几张菜单里最冷的一档。
+   * 切片器那张表里这一项挂 `presets`（书签 = 一份工艺预设），MKP 那两张表不传 ——
+   * 那两张表里它永远不出现（见上），形状上也就不动它们。
    */
-  const bbsEntries = (row: PresetTableRow): ContextMenuEntry[] => {
+  const bbsEntries = (row: PresetTableRow, icon?: IconName): ContextMenuEntry[] => {
     if (bbsWhyNot(row) !== undefined) return []
     return [
-      { id: 'bbs', label: tr('presets.page.bbs.open'), onSelect: () => onOpenBbs?.(row.fileName) },
+      {
+        id: 'bbs',
+        icon,
+        label: tr('presets.page.bbs.open'),
+        onSelect: () => onOpenBbs?.(row.fileName),
+      },
     ]
   }
 
@@ -2910,6 +3163,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *   （云端表的菜单本来就不含这一项，不经过这里）。
    */
   /* 措辞在模块级 `removeWhyNotOf`（那里才谈得上"依赖稳定"）：effect 里也能老实声明依赖 */
+
+  /**
+   * 这一行**在切片器目录里真有那一份**吗 —— 决定删除确认框里要不要给那个勾。
+   *
+   * 只认切片器那一档的交付行：MKP 预设根本不进切片器（走「使用」），别的来源也没有那一步。
+   * `live` 对切片器 = 「每个账号目录里都有」，也就是确实有东西可删。
+   */
+  const slicerCopyOf = (row: PresetTableRow): boolean =>
+    row.origin === 'preset' && row.kind !== 'mkp_preset' && 'live' in row && row.live
 
   /** 删除确认框的第二行：**代价跟着行的来源走** —— 能重下的说能重下，真删的说真删 */
   const removeConfirmDetail = (row: PresetTableRow): string => {
@@ -3379,13 +3641,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      */
     const canEdit =
       row.origin === 'local' && row.kind === 'mkp_preset' && row.localState !== 'unreadable'
-    /*
-     * 内容存疑的那两档（旧版本 / 内容异常）：**不许复制** ——
-     * 与"不许应用、不许改"同一条边界（第三圈第 6 层）：盘上那份的字节我们不认，
-     * 不能让它换个名字继续活着。禁用一定带原因 —— 灰一个项不说为什么，用户只会以为坏了。
-     */
-    const suspect = isSuspectPreset(row.presetState)
 
+    /*
+     * # 这一档不再列「复制」「重命名」
+     *
+     * 那两项是"复制出一份 / 改个名字"的本地文件动作，而这张表里 `row.origin !== 'local'`
+     * 恒成立（列的是目录登记的交付文件）⇒ 两项**永远灰着**。灰一个用户本来就做不了的项
+     * 只会把菜单撑长，所以整项不列（2026-11-10 作者：「没有的就不要显示出来了」）。
+     * 它与「显示切片器里的那份」不同：那一项是**真的能做**、只是这一行还没放入。
+     */
     return [
       /* 两态两枚图标（`pinOff` / `pin`）—— 与上面 MKP 档那一项同一条，理由见那里 */
       {
@@ -3394,6 +3658,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         label: row.pinned ? tr('presets.page.menu.unpin') : tr('presets.page.menu.pin'),
         onSelect: () => togglePin(row),
       },
+      /*
+       * **「查看放入情况…」**（2026-11-10 作者）：不打开系统文件夹，花一个框把这份预设
+       * **每个账号目录**里有没有都列出来 —— 用户在外部删掉其中一份也看得见。
+       * 图标 `files`（几个文件夹）：这一项问的正是"散在几处"。
+       */
+      {
+        id: 'placements',
+        icon: 'files',
+        label: tr('presets.page.menu.placements'),
+        onSelect: () => openPlacements(row),
+      },
       /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry` ——
          切片器档这一侧只有「本地文件」里读得出来的 MKP 预设才有这一项 */
       ...(canCompare(row) ? [compareEntry(row)] : []),
@@ -3401,47 +3676,34 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       ...(canEdit
         ? ([{ id: 'edit', label: tr(EDIT_TEXT.cell), onSelect: () => openEdit(row) }] satisfies ContextMenuEntry[])
         : []),
-      {
-        id: 'copy',
-        /* ★ 不挂图标（2026-10-16 作者：「复制文件的不需要图标」）—— 与 MKP 档那一项同一条 */
-        label: tr(LOCAL_COPY.cell),
-        /* 本地文件 → 本地文件（第十一层，按字节复制、来源记录原样带过去）；
-           其余行按 `copyWhyNot` 说明为什么不行（内容存疑那一句优先） */
-        disabled: suspect ? tr(PRESET_SUSPECT_WHY) : copyWhyNot(row),
-        onSelect: () => runDuplicate(row),
-      },
-      {
-        id: 'rename',
-        label: tr('presets.page.menu.rename'),
-        /* 第十层：只有「本地文件」能改名（只动名字、字节一个不动） */
-        disabled: renameWhyNot(row),
-        onSelect: () => openRename(row),
-      },
       /*
-       * 「打开所在文件夹」在这张表里是**两条**（2026-10-13 作者）：切片器配置在磁盘上
+       * 「打开所在文件夹」在这张表里是**两条**：切片器配置在磁盘上
        * 有两个落点，用户要能分别打开 —— 在我们这儿的原件（下载区）与切片器里那份
-       * （复制过去的，他在 BBS 里改的就是那一份）。两处都不是"程序自己管得摸不着"的
-       * 地方（旧版把这一栏整条禁了，理由是"住在程序自己管理的区域"）。
+       * （放过去的，他在 BBS 里改的就是那一份）。
        *
        * 这张表里列的都是**盘上真有**的那些（未下载的不进本地表）⇒ 第一条恒可点；
-       * 第二条看「已复制」那一格（`live`）。
+       * 第二条看「已放入」那一格（`live`）。
        *
-       * 两条也**都不挂图标**：它们是同一件事的两个落点，空着正好把彼此认成一伙。
+       * 两条都挂图标，但**不是同一枚**：`folder` 是我们那份，`external`（↗）是
+       * 切片器那边 —— 并排两行同一枚字形读不出区别，而 `external` 本来就表"在别处"。
        */
       {
         id: 'revealOurs',
+        icon: 'folder',
         label: tr('presets.page.menu.revealOurs'),
         onSelect: () => runRevealOurs(row),
       },
       {
         id: 'revealSlicer',
+        icon: 'external',
         label: tr('presets.page.menu.revealSlicer'),
         disabled: row.live ? undefined : tr('presets.page.menu.revealSlicerDisabled'),
         onSelect: () => runRevealSlicer(row),
       },
-      ...bbsEntries(row),
+      ...bbsEntries(row, 'presets'),
       { separator: true },
-      /* 「批量删除…」—— 与 MKP 档那一项同一个入口、同一段话（见那一处的注释） */
+      /* 「批量删除…」—— 与 MKP 档那一项同一个入口、同一段话（见那一处的注释）。
+         不挂图标：与下面「删除」同族，两枚垃圾桶并排反而分不出粒度。 */
       {
         id: 'bulkRemove',
         label: tr('presets.page.menu.bulkRemove'),
@@ -3452,8 +3714,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         icon: 'trash',
         label: tr('presets.page.menu.remove'),
         danger: true,
-        /* 本地文件真删；切片器交付行删了可重下；正在使用的那份删掉时后端会一并撤下使用
-           —— 代价在确认框里说清（框在页面层：`askRemove` → `removeAsk`） */
+        /* 切片器交付行删了可重下 —— 代价在确认框里说清（框在页面层：`askRemove`） */
         disabled: removeWhyNotOf(tr, row),
         onSelect: () => askRemove(row),
       },
@@ -3520,7 +3781,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     }, 120)
   }
   const searchNode = (
-    /* 位置那一轴两种类型都有（2026-10-09 起），它自带 segPush 顶到右簇 —— 搜索紧挨在它右边 */
+    /* 位置那一轴两种类型都有（2026-10-09 起），右簇（刷新区 + 分段）自带 auto 边距 —— 搜索紧挨在它右边 */
     <div className={s.search}>
 
       <input
@@ -3562,7 +3823,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             commitQuery('')
           }}
         >
-          ×
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
         </button>
       )}
     </div>
@@ -3601,6 +3862,157 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const assetCloudCount = data.delivery.presets.filter(
     (p) => p.kind === 'mkp_preset',
   ).length
+
+  /** 撤掉"到期收回"那颗定时器（指针进胶囊、或要重新问一遍时调） */
+  const stopRefreshHold = (): void => window.clearTimeout(refreshHoldRef.current)
+
+  /** 到期把胶囊收回图标；**只有指针不在胶囊上时**才该调它 */
+  const holdRefresh = (ms: number = REFRESH_HOLD_MS): void => {
+    stopRefreshHold()
+    refreshHoldRef.current = window.setTimeout(() => setRefreshPhase('idle'), ms)
+  }
+
+  /*
+   * 「云端」表那一颗**手动刷新**（2026-11-11）。
+   *
+   * 自动检查一整个运行期只走一次（进入预设页那一刻），用户在工作台发了新版之后
+   * 不重启就看不到 —— 这一颗把那趟再走一遍。**只换目录，不下载任何预设文件**。
+   * 只在「云端」那一页出现：本地表与云端账无关，摆一颗在那儿会让人以为点了也会变。
+   *
+   * ★ 回执**长在按钮自己身上**（作者 2026-11-11：页脚那条太不显眼，「按钮变宽显示最新」）：
+   *   点下去圆钮变宽成胶囊、说「检查中…」，回来换成「已是最新 / 已更新」，留一会儿再收回
+   *   图标。失败**照旧进页脚**：那一格才是放原因的地方，胶囊上只写「刷新失败」四个字。
+   *   「远端读不懂」不归这颗按钮 —— 它由页脚那条「需升级」说。
+   */
+  const refreshCloud = (): void => {
+    /*
+     * ★ **检查中不许再点**（作者 2026-11-11：「刷新中的时候不应该我点击」）：
+     * 点了没反应，也没有按压动画。
+     *
+     * 回执那一档（已是最新 / 已更新 / 刷新失败）**可以点** —— 再问一遍，
+     * `refreshGenRef` 记代次，旧那趟回来对不上就作废，不会把新结果盖回去。
+     */
+    if (refreshPhase === 'busy') return
+    stopRefreshHold()
+    const now = performance.now()
+    refreshStartRef.current = now
+    /*
+     * 结果**等展开动画走完再换字**（见 `REFRESH_MIN_BUSY_MS`）—— 本地那趟常常几十毫秒
+     * 就回来了，抢在动画中间换字就是作者说的"卡一下"。
+     */
+    const afterExpand = (run: () => void): void => {
+      const elapsed = performance.now() - refreshStartRef.current
+      window.clearTimeout(refreshHoldRef.current)
+      refreshHoldRef.current = window.setTimeout(run, Math.max(0, REFRESH_MIN_BUSY_MS - elapsed))
+    }
+
+    /* 去重窗口内：把上一次的回执再演一遍，**不联网**（见 `REFRESH_DEDUPE_MS`） */
+    const cached = refreshLastRef.current
+    if (cached !== null && now - cached.at < REFRESH_DEDUPE_MS) {
+      setRefreshPhase('busy')
+      afterExpand(() => {
+        setRefreshPhase(cached.outcome)
+        holdRefresh()
+      })
+      return
+    }
+
+    const gen = ++refreshGenRef.current
+    setRefreshPhase('busy')
+    void data.refreshCatalog().then(
+      (outcome) => {
+        if (gen !== refreshGenRef.current) return
+        if (outcome === 'unreadable') {
+          refreshLastRef.current = null
+          afterExpand(() => setRefreshPhase('idle'))
+          return
+        }
+        /* 成功那一趟记下时刻：10 秒内再点直接复用，动画照演、网络不再发 */
+        refreshLastRef.current = { at: performance.now(), outcome }
+        afterExpand(() => {
+          setRefreshPhase(outcome)
+          /* 固定从回执出现算起 4 秒（点空白会提前收，见那条 document 监听） */
+          holdRefresh()
+        })
+      },
+      (e: unknown) => {
+        if (gen !== refreshGenRef.current) return
+        /* 失败不进去重窗口：再点就是要真重试 */
+        refreshLastRef.current = null
+        /* 原因（后端原话）只有页脚说得下 —— 胶囊只答"这一下成了没有" */
+        setNote({ text: msg('presets.page.refresh.failed', { detail: errorText(e) }), bad: true })
+        afterExpand(() => {
+          setRefreshPhase('failed')
+          holdRefresh(REFRESH_HOLD_MS + 800)
+        })
+      },
+    )
+  }
+
+  const refreshNode =
+    page.scope === 'cloud' ? (
+      /*
+       * **悬浮**（作者 2026-11-11）：槽只有 26×26，按钮绝对定位贴槽右线往左长 ——
+       * 展开成胶囊时**一个邻居都不动**（原来它撑宽了第一排，搜索框被挤到第二行）。
+       *
+       * 「按下沉」的缩放演在**槽**上，不演在按钮上：按钮那一层归宽度动画管，
+       * 两段动画挤在同一个元素上会互相顶掉；槽和按钮是两层，各演各的（见 `shared/press.ts`）。
+       */
+      <span className={s.tbRefreshSlot} ref={refreshSlotRef}>
+        <button
+          ref={setRefreshBtn}
+          type="button"
+          className={s.tbRefresh}
+          /* 打开那几档才变宽（CSS 那边 width:auto + 胶囊内衬） */
+          data-open={refreshPhase === 'idle' ? undefined : true}
+          onClick={refreshCloud}
+          /*
+           * **不用 `disabled` 属性**（作者 2026-11-11）：一 disabled 连 hover / pointerleave
+           * 都收不到，胶囊收回的时机就全乱了。检查中只挂 `aria-disabled` + 点击直接 return，
+           * 指针事件照常走（但**没有**按压动画 —— 那一下点不动）。
+           */
+          aria-disabled={refreshPhase === 'busy'}
+          onPointerDown={(e) => {
+            if (e.button === 0 && refreshPhase !== 'busy') pressDown(refreshSlotRef.current)
+          }}
+          onPointerUp={(e) => {
+            if (e.button === 0 && refreshPhase !== 'busy') pressUp(refreshSlotRef.current)
+          }}
+          onPointerLeave={() => pressUp(refreshSlotRef.current)}
+          onPointerCancel={() => pressUp(refreshSlotRef.current)}
+          /* 平时只有图标（作者 2026-11-11）：话留给悬停与读屏 —— `tip` 说清它做什么，
+             `action` 给读屏一个短名字（那句长话当按钮名会被念一长串） */
+          title={tr('presets.page.refresh.tip')}
+          aria-label={tr('presets.page.refresh.action')}
+          aria-busy={refreshPhase === 'busy'}
+        >
+          {/*
+           * ★ **字在左、图标在右**（2026-11-11）：胶囊钉在右线上往左长，右线是不动的 ——
+           *   只有让内容也钉在右线，展开那几百毫秒里字才**一个像素都不横移**
+           *   （作者：「检查中的字好像会左右跳动」）。图标因此落在字的右边，
+           *   它恰好停在 idle 时那个位置上（26 的圆里居中 = 右内衬 6px，与展开态同值）。
+           */}
+          {refreshPhase !== 'idle' && (
+            /*
+             * 四条候选全画、只有当前那条可见 —— 格子取最长那句，换文案时宽度不动
+             * （见 `REFRESH_LABEL_KEYS` 与 CSS 的 `.tbRefreshLabel`）。
+             */
+            <span ref={refreshLabelRef} className={s.tbRefreshLabel} aria-live="polite">
+              {REFRESH_LABEL_KEYS.map((key) => {
+                const on = key === REFRESH_LABEL_KEY[refreshPhase]
+                return (
+                  <span key={key} data-on={on || undefined} aria-hidden={on ? undefined : true}>
+                    {tr(key)}
+                  </span>
+                )
+              })}
+            </span>
+          )}
+          <RefreshSpin busy={refreshPhase === 'busy'} />
+        </button>
+      </span>
+    ) : null
+
   const metaNode = (
     <span className={s.meta}>
       <span
@@ -3748,7 +4160,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             scope={page.scope}
             onKind={setKind}
             onScope={setScope}
-          />
+          >
+            {/* 「云端」那一页才有它：向云端再要一次目录（见 `refreshCloud`）—— 排在切换器左边 */}
+            {refreshNode}
+          </PresetScopeBar>
 
           {page.kind === 'mkp' ? (
             <>
@@ -4090,6 +4505,21 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           />
 
           {/*
+           * **放入情况**（2026-11-10）：这份预设散在哪几个账号目录里、哪几处还没有。
+           * 框自己现读（读的是盘），放入 / 打开文件夹都走本页那两个已经存在的动作。
+           */}
+          <PlacementsModal
+            open={placements !== null}
+            fileName={placements?.fileName ?? ''}
+            host={pageEl}
+            onClose={() => setPlacements(null)}
+            onPlaced={() => void data.refreshSlicerCopied()}
+            load={loadPlacements}
+            put={data.copy}
+            reveal={data.revealSlicer}
+          />
+
+          {/*
            * **编辑器**（「编辑文件」那条链）。初稿 = **盘上那份文件的字节**，
            * 编辑期间只动正文草稿 —— 所以这里没有"保存到云端"这种动作：
            * 只有「放弃并退出」与「保存（写回我这份）」。参数页那份未保存的改动**不进来**
@@ -4160,7 +4590,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             }
             footer={
               <>
-                <button type="button" className={s.editGhost} onClick={() => setRemoveAsk(null)}>
+                <button
+                  type="button"
+                  className={s.editGhost}
+                  onClick={() => {
+                    setRemoveAsk(null)
+                    setAlsoSlicer(false)
+                  }}
+                >
                   {tr('presets.page.removeAsk.cancel')}
                 </button>
                 <button type="button" className={s.editDanger} onClick={confirmRemove}>
@@ -4170,12 +4607,37 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 </button>
               </>
             }
-            onClose={() => setRemoveAsk(null)}
+            onClose={() => {
+              setRemoveAsk(null)
+              setAlsoSlicer(false)
+            }}
           >
             {/* 一份 = 原来那一条代价；多份 = 按来源分开数（见 `removeManyDetail`） */}
             {removeAsk !== null &&
               (removeAsk.length === 1 ? (
-                <p className={s.editNote}>{removeConfirmDetail(removeAsk[0])}</p>
+                <>
+                  <p className={s.editNote}>{removeConfirmDetail(removeAsk[0])}</p>
+                  {/*
+                   * **「同时删掉切片器目录里那份」**（2026-11-10 作者要的那个勾）。
+                   * 云端删不了（发布目录只读、BBS 账号里的云端也不归本程序删），
+                   * 所以这里能勾的就是本机盘上那一份 —— 那句话在下面的小字里写明。
+                   */}
+                  {slicerCopyOf(removeAsk[0]) && (
+                    <div className={s.removeOpt}>
+                      <Switch
+                        checked={alsoSlicerOn}
+                        onChange={setAlsoSlicer}
+                        ariaLabel={tr('presets.page.removeAsk.alsoSlicer')}
+                      />
+                      <span className={s.removeOptText}>
+                        <span>{tr('presets.page.removeAsk.alsoSlicer')}</span>
+                        <span className={s.removeOptNote}>
+                          {tr('presets.page.removeAsk.alsoSlicerNote')}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className={s.editNoteLines}>
                   {removeManyDetail(removeAsk).map((line) => (

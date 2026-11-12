@@ -269,6 +269,14 @@ pub struct ParamDef {
     pub merge_group: Option<String>,
     #[serde(default)]
     pub pinned: bool,
+    /// **该机型/变体没写值就整行不落盘**（2026-11-10）。
+    ///
+    /// 只对「某些机型用不到」的字段有意义：A 系列的落笔/收笔骨架只动 X，
+    /// 等待位 Y 对它不适用。不标这个的话，出厂默认 `0` 会落进 TOML，界面上
+    /// 就多出一格永远不该被改的 Y —— 而那是绝对坐标，改错就是把工具头甩到零点。
+    /// 标了之后只有机型基底/版本**真的写了值**才落盘。
+    #[serde(default)]
+    pub omit_when_unset: bool,
     #[serde(default)]
     pub serialization: Option<Serialization>,
     /// **哪几册译文跟着这份中文一起过期了**（2026-11-02）。
@@ -689,14 +697,86 @@ impl RegistryFile {
     /// 与 [`Registry::load_from`] 共用 `toml_edit::de` 这一条路 —— 两边读法不一致的
     /// 话，"数据一样"这个结论就只对我们自己的读法成立。
     pub(crate) fn parse_str(text: &str) -> Result<Self, AppError> {
-        toml_edit::de::from_str(text).map_err(|e| {
+        let mut file: Self = toml_edit::de::from_str(text).map_err(|e| {
             AppError::corrupted(messages::text(
                 "ui.presetdata.registry.292",
                 &[("v1", "<内存>")],
             ))
             .with_detail(e.to_string())
-        })
+        })?;
+        file.normalize_typed_values();
+        Ok(file)
     }
+
+    /// **值的写法跟着 `valueType` 走**：`int` 参数里「整值浮点」归一成整数。
+    ///
+    /// 源数据里有 `defaultValue = 1.0`（TOML 浮点）而 `valueType = "int"` 的历史写法。
+    /// 不归一的话 `Layers::effective_recipe()` 会把这个 `1.0` 原样交给写值层，
+    /// 而 [`to_toml_value`] 对 `int` 只认 `as_i64()` —— 复制配方因为一个值被判
+    /// "类型对不上"就整批拒绝，一项都写不进去。
+    ///
+    /// **只收整值**：`1.5` 原样保留，那是真的写错了，写值层会如实报错 ——
+    /// 这一层不是兜底。`Float` / `Bool` / `Text` 与 `showWhen.value` 都不动
+    /// （后者有自己的比较归一，见 `domain::visibility`）。
+    ///
+    /// 两条解析入口（[`Self::parse_str`] 与 [`ParamRegistry::load_from`]）都必须调它：
+    /// 只归一一边的话，同一份文件在两个入口里会长出两种数字。
+    pub(crate) fn normalize_typed_values(&mut self) {
+        for p in &mut self.params {
+            if p.value_type != ValueType::Int {
+                continue;
+            }
+            coerce_integral_number(&mut p.default_value);
+            for v in p.machine_variants.values_mut() {
+                coerce_integral_number(v);
+            }
+            for c in &mut p.choices {
+                coerce_integral_number(&mut c.value);
+            }
+        }
+    }
+}
+
+/// JSON number 的 `1.0` 收成 `1`（只对**整值**）。非数、非整值、本来就整数：原样不动。
+///
+/// `serde_json::Value` 把 `1` 与 `1.0` 当成两个不相等的值，而注册表里它们是同一个数。
+/// 归一放在**读入**这一层，`effective_recipe` / 产物 / 指纹 / 复制配方就都看同一份模型。
+fn coerce_integral_number(v: &mut Value) {
+    if v.is_i64() || v.is_u64() {
+        return;
+    }
+    let Some(f) = v.as_f64() else {
+        return;
+    };
+    if !f.is_finite() || f.fract() != 0.0 {
+        return;
+    }
+    *v = Value::from(f as i64);
+}
+
+/// 原文里一处「`int` 参数却写成了小数」。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawIntLiteral {
+    pub key: String,
+    /// `""` = `defaultValue`；其它 = `machineVariants` 的 owner（`A1` / `A1:FAST`）
+    pub owner: String,
+    /// 原文写法（`1.0`）
+    pub literal: String,
+    /// 整值浮点（`1.0`）：`presets normalize` 能写正；`false` 是真小数，得先改数值
+    pub integral: bool,
+}
+
+fn push_if_float(out: &mut Vec<RawIntLiteral>, key: &str, owner: &str, v: &toml_edit::Value) {
+    let Some(f) = v.as_float() else {
+        return;
+    };
+    out.push(RawIntLiteral {
+        key: key.to_owned(),
+        owner: owner.to_owned(),
+        /* `Display` 会把前缀的空格一起印出来（` 1.0`），消息里要的是原文 */
+        literal: v.to_string().trim().to_owned(),
+        integral: f.is_finite() && f.fract() == 0.0,
+    });
 }
 
 /* ---------- 参数摆放 ---------- */
@@ -791,13 +871,16 @@ impl ParamRegistry {
         let file = root.join("registry").join("param_registry.toml");
         let text = super::read(&file)?;
         let doc = super::parse_text(&text, &file)?;
-        let parsed: RegistryFile = toml_edit::de::from_str(&text).map_err(|e| {
+        let mut parsed: RegistryFile = toml_edit::de::from_str(&text).map_err(|e| {
             AppError::corrupted(messages::text(
                 "ui.presetdata.registry.292",
                 &[("v1", &file.display().to_string())],
             ))
             .with_detail(e.to_string())
         })?;
+        /* 与 `RegistryFile::parse_str` 同一条归一 —— 两个入口各读一份文件，
+        只归一一边的话同一份数字会有两种写法 */
+        parsed.normalize_typed_values();
 
         let layout_file = root.join("layout_schema.toml");
         let layout_text = super::read(&layout_file)?;
@@ -1284,6 +1367,54 @@ impl ParamRegistry {
             .clone()
     }
 
+    /// **原文里 `int` 参数却写成了小数**的那些值（`defaultValue`、`machineVariants`、`choices`）。
+    ///
+    /// 模型在读入时已经归一（见 [`RegistryFile::normalize_typed_values`]），所以
+    /// **只有原文 token 还留着旧写法**。发布闸要看的是「源文件写对了没有」，
+    /// 不是「读得对不对」—— 所以这一条从 `doc` 上扫，而不是从 `params` 上扫。
+    ///
+    /// 只认标准表（`[[params]]` / `[params.machineVariants]`）：那是
+    /// `presets normalize` 写出来的形状，也是仓库里唯一在用的形状。
+    pub fn raw_int_literals(&self) -> Vec<RawIntLiteral> {
+        let Some(params) = self.doc.get("params").and_then(|i| i.as_array_of_tables()) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for t in params.iter() {
+            if t.get("valueType").and_then(|v| v.as_str()) != Some("int") {
+                continue;
+            }
+            let Some(key) = t.get("key").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            if let Some(v) = t.get("defaultValue").and_then(|i| i.as_value()) {
+                push_if_float(&mut out, key, "", v);
+            }
+            if let Some(mv) = t.get("machineVariants") {
+                if let Some(tbl) = mv.as_table() {
+                    for (owner, item) in tbl.iter() {
+                        if let Some(v) = item.as_value() {
+                            push_if_float(&mut out, key, owner, v);
+                        }
+                    }
+                } else if let Some(it) = mv.as_inline_table() {
+                    for (owner, v) in it.iter() {
+                        push_if_float(&mut out, key, owner, v);
+                    }
+                }
+            }
+            if let Some(choices) = t.get("choices").and_then(|i| i.as_array_of_tables()) {
+                for (i, c) in choices.iter().enumerate() {
+                    if let Some(v) = c.get("value").and_then(|x| x.as_value()) {
+                        push_if_float(&mut out, key, &format!("choices[{i}]"), v);
+                    }
+                }
+            }
+        }
+        out.sort_by(|a, b| (&a.key, &a.owner).cmp(&(&b.key, &b.owner)));
+        out
+    }
+
     /* ---------- 写回 ---------- */
 
     /// 写一个机型 / 版本的值覆盖，落在 `[params.machineVariants]` 里。
@@ -1463,6 +1594,137 @@ impl ParamRegistry {
         Ok(())
     }
 
+    /// 删掉某个 owner（`机型:版本`）在**四张表**里的全部记录，返回动过的字段 key。
+    ///
+    /// 只有「删版本」会调它：版本没了，这些键就指向一个不存在的对象，而
+    /// [`super::Presets::check_cross_consistency`] 下一次加载会把整份数据判成
+    /// `Corrupted`（整个工作台起不来）。四张表必须一起清 —— 漏一张就等于没删干净：
+    ///
+    /// | 表 | 装什么 |
+    /// |---|---|
+    /// | `machineVariants` | 这一版钉过的值 |
+    /// | `machineMinVariants` / `machineMaxVariants` | 范围的机型特化 |
+    /// | `follows` | 这一版跟不跟基底 |
+    ///
+    /// 删空的表连表头一起删，与 [`Self::clear_variant`] / [`Self::set_following`]
+    /// 同一口径（留一个空表读起来像"这里有记录"）。
+    pub fn drop_owner(&mut self, owner: &str) -> Result<Vec<String>, AppError> {
+        let mut touched = Vec::new();
+        for at in 0..self.params.len() {
+            let p = &self.params[at];
+            let had = p.machine_variants.contains_key(owner)
+                || p.machine_min_variants.contains_key(owner)
+                || p.machine_max_variants.contains_key(owner)
+                || p.follows.contains_key(owner);
+            if !had {
+                continue;
+            }
+            let key = p.key.clone();
+
+            let t = self.param_table_mut(at, &key)?;
+            for field in [
+                "machineVariants",
+                "machineMinVariants",
+                "machineMaxVariants",
+                "follows",
+            ] {
+                /* **两种形状都要认**：`machineVariants` / `follows` 是真表
+                （`[params.machineVariants]`），min/max 在源文件里是**内联表**
+                （`machineMinVariants = { "A1:FAST" = 10.0 }`）。只处理前者的话，
+                删完 `A1:FAST` 在 min 里还留着，下一次加载照样判 Corrupted。 */
+                let empty = match t.get_mut(field) {
+                    Some(item) => {
+                        if let Some(tbl) = item.as_table_mut() {
+                            tbl.remove(owner);
+                            tbl.is_empty()
+                        } else if let Some(inline) = item.as_inline_table_mut() {
+                            inline.remove(owner);
+                            inline.is_empty()
+                        } else {
+                            false
+                        }
+                    }
+                    None => false,
+                };
+                if empty {
+                    t.remove(field);
+                }
+            }
+
+            let p = &mut self.params[at];
+            p.machine_variants.remove(owner);
+            p.machine_min_variants.remove(owner);
+            p.machine_max_variants.remove(owner);
+            p.follows.remove(owner);
+            touched.push(key);
+        }
+        Ok(touched)
+    }
+
+    /// 把一个 owner（`机型:版本`）在**四张表**里的键改名，返回动过的字段 key。
+    ///
+    /// 给「改版本 id」用：`A1:FAST` 要跟着搬成 `A1:NEW1`，否则那几项值会指向
+    /// 一个不存在的版本 —— 下一次加载 [`super::Presets::check_cross_consistency`]
+    /// 当场判 `Corrupted`，与 [`Self::drop_owner`] 那条注释是同一类事故。
+    ///
+    /// 表与内联表两种形状都要认（min / max 在源文件里是 `machineMinVariants = { ... }`）。
+    /// 新键追加在该表的末尾：`toml_edit` 的 `Table` 保序但换不了键位，一次改名把那一行
+    /// 挪到同字段的末尾可以接受（改主键本来就是大动）。
+    pub fn rename_owner(
+        &mut self,
+        old_owner: &str,
+        new_owner: &str,
+    ) -> Result<Vec<String>, AppError> {
+        let mut touched = Vec::new();
+        for at in 0..self.params.len() {
+            let p = &self.params[at];
+            let had = p.machine_variants.contains_key(old_owner)
+                || p.machine_min_variants.contains_key(old_owner)
+                || p.machine_max_variants.contains_key(old_owner)
+                || p.follows.contains_key(old_owner);
+            if !had {
+                continue;
+            }
+            let key = p.key.clone();
+
+            let t = self.param_table_mut(at, &key)?;
+            for field in [
+                "machineVariants",
+                "machineMinVariants",
+                "machineMaxVariants",
+                "follows",
+            ] {
+                if let Some(item) = t.get_mut(field) {
+                    if let Some(tbl) = item.as_table_mut() {
+                        if let Some(v) = tbl.remove(old_owner) {
+                            tbl[new_owner] = v;
+                        }
+                    } else if let Some(inline) = item.as_inline_table_mut() {
+                        if let Some(v) = inline.remove(old_owner) {
+                            inline.insert(new_owner, v);
+                        }
+                    }
+                }
+            }
+
+            let p = &mut self.params[at];
+            if let Some(v) = p.machine_variants.remove(old_owner) {
+                p.machine_variants.insert(new_owner.to_owned(), v);
+            }
+            if let Some(v) = p.machine_min_variants.remove(old_owner) {
+                p.machine_min_variants.insert(new_owner.to_owned(), v);
+            }
+            if let Some(v) = p.machine_max_variants.remove(old_owner) {
+                p.machine_max_variants.insert(new_owner.to_owned(), v);
+            }
+            if let Some(v) = p.follows.remove(old_owner) {
+                p.follows.insert(new_owner.to_owned(), v);
+            }
+            touched.push(key);
+        }
+        Ok(touched)
+    }
+
     /* ---------- 定义编辑（2026-10-03，作者：「弃用是谁决定的？我没办法改」） ---------- */
 
     /// 改一条参数的**定义**（名称 / 说明 / 单位 / 值类型 / 控件 / 范围 / 步进 /
@@ -1541,20 +1803,21 @@ impl ParamRegistry {
             (Value::Bool(_), ValueType::Bool) => {}
             (Value::String(_), ValueType::Text) => {}
             (v, t) => {
+                /* 值类型要求的三个短语本身也是文案（它们会拼进上面那句的括号里） */
+                let want = match t {
+                    ValueType::Float | ValueType::Int => {
+                        messages::text("ui.presetdata.registry.want_number", &[])
+                    }
+                    ValueType::Bool => messages::text("ui.presetdata.registry.want_bool", &[]),
+                    ValueType::Text => messages::text("ui.presetdata.registry.want_text", &[]),
+                };
                 return Err(AppError::invalid_argument(messages::text(
                     "ui.presetdata.registry.308",
                     &[
                         ("key", key),
                         ("v", &v.to_string()),
                         ("v1", value_type_str(t)),
-                        (
-                            "v2",
-                            match t {
-                                ValueType::Float | ValueType::Int => "要数字",
-                                ValueType::Bool => "要 true/false",
-                                ValueType::Text => "要字符串",
-                            },
-                        ),
+                        ("v2", want.as_str()),
                     ],
                 )));
             }
@@ -3362,6 +3625,220 @@ mod tests {
     use super::*;
     use crate::presetdata::one_edit_only;
 
+    /* ---------- 值的写法跟着 valueType 走（2026-11-12） ---------- */
+
+    /// 最小注册表：三个参数，分别覆盖「int 写成浮点」「int 真的写了小数」「float 写成整数」。
+    ///
+    /// 只走 [`RegistryFile::parse_str`] —— 不需要布局文件，这一条只盯"读进来是什么类型"。
+    const MIXED_TYPES: &str = "\
+[[params]]
+key = 'w.int'
+configKey = 'A'
+tomlKey = 'a'
+jsonKey = 'a'
+label = 'A'
+desc = ''
+tomlComment = ''
+valueType = 'int'
+uiComponent = 'number'
+defaultValue = 1.0
+scope = 'universal'
+section = 'motion'
+
+[[params.choices]]
+label = 'Two'
+value = 2.0
+
+[params.machineVariants]
+'A1' = 30.0
+
+[params.layout]
+sectionId = 'motion'
+order = 0.0
+
+[[params]]
+key = 'w.int.bad'
+configKey = 'B'
+tomlKey = 'b'
+jsonKey = 'b'
+label = 'B'
+desc = ''
+tomlComment = ''
+valueType = 'int'
+uiComponent = 'number'
+defaultValue = 1.5
+scope = 'universal'
+section = 'motion'
+
+[params.layout]
+sectionId = 'motion'
+order = 1.0
+
+[[params]]
+key = 'w.float'
+configKey = 'C'
+tomlKey = 'c'
+jsonKey = 'c'
+label = 'C'
+desc = ''
+tomlComment = ''
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 0
+scope = 'universal'
+section = 'motion'
+
+[params.layout]
+sectionId = 'motion'
+order = 2.0
+";
+
+    /// **`int` 参数读进来必须是整数**：默认值、机型变体、选项值三处都归一；
+    /// 非整值原样留着让写值层报错；`float` 参数一点都不碰。
+    ///
+    /// 这条咬的是真事故（2026-11-12）：`wiping.glue_pass_count = 1.0` 被原样交给
+    /// `to_toml_value`，`int` 只认 `as_i64()` ⇒ 复制配方整批拒绝、一项都没写进去。
+    #[test]
+    fn int_values_written_as_integral_floats_are_read_back_as_integers() {
+        let f = RegistryFile::parse_str(MIXED_TYPES).expect("夹具读得通");
+        let p = f.params.iter().find(|p| p.key == "w.int").expect("在");
+
+        assert_eq!(
+            p.default_value,
+            Value::from(1),
+            "int 默认值 1.0 该读成整数 1，实测 {:?}",
+            p.default_value
+        );
+        assert!(
+            p.default_value.is_i64(),
+            "必须是整数 JSON number，不是浮点：{:?}",
+            p.default_value
+        );
+        assert_eq!(p.machine_variants.get("A1"), Some(&Value::from(30)));
+        assert_eq!(p.choices[0].value, Value::from(2));
+
+        let bad = f.params.iter().find(|p| p.key == "w.int.bad").expect("在");
+        assert_eq!(
+            bad.default_value,
+            serde_json::json!(1.5),
+            "非整值不是写法问题，是真写错了 —— 不许悄悄截断"
+        );
+
+        let fl = f.params.iter().find(|p| p.key == "w.float").expect("在");
+        assert_eq!(
+            fl.default_value,
+            Value::from(0),
+            "float 参数不在这条归一里，整数写法原样保留"
+        );
+    }
+
+    /// 夹具 → `ParamRegistry`（**不走文件**）：原文 token 的闸只看 `doc`，
+    /// 不需要布局那份文件，也就不必为这一条再造一棵临时树。
+    fn registry_with_doc(text: &str) -> ParamRegistry {
+        let file = RegistryFile::parse_str(text).expect("夹具读得通");
+        let doc: toml_edit::DocumentMut = text.parse().expect("夹具是合法 TOML");
+        let index = file
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.key.clone(), i))
+            .collect();
+        ParamRegistry {
+            params: file.params,
+            tabs: Vec::new(),
+            layout: Vec::new(),
+            updated: String::new(),
+            index,
+            doc,
+            file: std::path::PathBuf::new(),
+            layout_doc: toml_edit::DocumentMut::default(),
+            layout_file: std::path::PathBuf::new(),
+            schema_fingerprint_cache: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// **闸看原文**：模型已归一，只有 `doc` 还留着 `1.0` 这种写法。
+    ///
+    /// 三处都要报：默认值、机型变体、选项值；`1.5` 也要报（且 `integral = false`，
+    /// 说明它得先改数值，normalize 写不正）。
+    #[test]
+    fn raw_int_literals_reports_decimal_spellings_for_int_params() {
+        let reg = registry_with_doc(MIXED_TYPES);
+        let bad = reg.raw_int_literals();
+        assert_eq!(
+            bad.len(),
+            4,
+            "应报 1.0 / 30.0 / 2.0 / 1.5 四处，实测 {bad:?}"
+        );
+        assert!(
+            bad.iter().any(|b| b.key == "w.int"
+                && b.owner.is_empty()
+                && b.literal == "1.0"
+                && b.integral),
+            "默认值那一处没报到：{bad:?}"
+        );
+        assert!(
+            bad.iter().any(|b| b.owner == "A1" && b.literal == "30.0"),
+            "机型变体那一处没报到：{bad:?}"
+        );
+        assert!(
+            bad.iter()
+                .any(|b| b.owner == "choices[0]" && b.literal == "2.0"),
+            "选项值那一处没报到：{bad:?}"
+        );
+        let non_integral = bad
+            .iter()
+            .find(|b| b.key == "w.int.bad")
+            .expect("1.5 也是 int 写成小数，要报");
+        assert!(!non_integral.integral, "1.5 不是整值，不能标成可自动修");
+    }
+
+    /// 全写成整数 ⇒ 一处都不报（闸不该误伤）。
+    #[test]
+    fn raw_int_literals_is_empty_when_int_values_are_integers() {
+        let text = MIXED_TYPES
+            .replace("defaultValue = 1.0", "defaultValue = 1")
+            .replace("'A1' = 30.0", "'A1' = 30")
+            .replace("value = 2.0", "value = 2")
+            /* `1.5` 不是写法问题，真改成整数再验"干净" */
+            .replace("defaultValue = 1.5", "defaultValue = 2");
+        let reg = registry_with_doc(&text);
+        let bad = reg.raw_int_literals();
+        assert!(bad.is_empty(), "干净源不该报，实测 {bad:?}");
+    }
+
+    /// **真仓库一个都不能有** —— 这条就是「以后别再写回去」的闸。
+    #[test]
+    fn the_real_registry_has_no_decimal_spellings_for_int_params() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+        let reg = ParamRegistry::load_from(&root).expect("真仓库的注册表要读得通");
+        let bad = reg.raw_int_literals();
+        assert!(bad.is_empty(), "源里还有 int 参数写成小数：{bad:?}");
+    }
+
+    /// **真仓库里那四个 `int` 参数的默认值必须是整数**（源数据回归）。
+    ///
+    /// 它们曾经写成 `1.0 / 30.0 / 50.0 / 0.0`。归一能让运行时不再出错，但源文件
+    /// 该是整数 —— 这条钉住"别再写回去"。
+    #[test]
+    fn the_real_registry_keeps_int_defaults_as_integers() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+        let reg = ParamRegistry::load_from(&root).expect("真仓库的注册表要读得通");
+        for key in [
+            "wiping.glue_pass_count",
+            "wiping.prime_trigger_layers",
+            "wiping.sheath_converge_layers",
+            "wiping.user_dry_time",
+        ] {
+            let p = reg.param(key).unwrap_or_else(|| panic!("{key} 在"));
+            assert!(
+                p.default_value.is_i64(),
+                "{key} 的 defaultValue 写成了浮点：{:?}",
+                p.default_value
+            );
+        }
+    }
+
     /* ---------- 改回去不许留下字节差（2026-11-02） ---------- */
 
     /// **70 → 75 → 70 之后，文件必须一字不差地回到原样。**
@@ -3941,7 +4418,7 @@ mod tests {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
-        assert_eq!(r.params().len(), 83, "字段条数");
+        assert_eq!(r.params().len(), 92, "字段条数");
         assert!(!r.tabs().is_empty());
         assert!(!r.updated().is_empty(), "updated 没读到");
 
@@ -4096,6 +4573,8 @@ mod tests {
             "follows",
             "mergeGroup",
             "pinned",
+            // 「该机型没写值就整行不落盘」（2026-11-10）；读进 `ParamDef::omit_when_unset`
+            "omitWhenUnset",
             "serialization",
             // 刻意不读的两个：实测 74/74 全 true，零区分度
             "mergeable",
@@ -4528,59 +5007,42 @@ mod tests {
     /// 没有任何判据能描述它。所以批量入口要么全成，要么一个字节都不写。
     #[test]
     fn a_batch_of_values_lands_in_one_write() {
-        let Some(root) = crate::presetdata::repo_presets_root() else {
-            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
-            return;
-        };
-        let tmp = tempfile::tempdir().unwrap();
-        copy_tree(&root, tmp.path());
-        let mut p = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
+        let tree = crate::presetdata::testdata::minimal_presets_tree();
+        let mut p = crate::presetdata::Presets::load_from(tree.path()).unwrap();
+        let machine = tree.machine.clone();
+        let versioned = tree.versioned_param_key(&tree.version_with_assets);
 
-        // 一批：两个机型基底 + 一个版本覆盖 + 一次清空
+        // 一批：机型基底 + 版本覆盖
         p.apply_values(&[
             (
-                "toolhead.MKP_retract".to_owned(),
-                "A1".to_owned(),
+                tree.param.clone(),
+                machine.clone(),
                 Some(serde_json::json!(-3.5)),
             ),
             (
-                "toolhead.MKP_retract".to_owned(),
-                "P1S".to_owned(),
-                Some(serde_json::json!(-4.0)),
-            ),
-            (
-                "toolhead.MKP_retract".to_owned(),
-                "A1:FAST".to_owned(),
+                tree.param.clone(),
+                versioned.clone(),
                 Some(serde_json::json!(-5.0)),
             ),
         ])
         .expect("一批写得进去");
 
-        let again = crate::presetdata::Presets::load_from(tmp.path()).expect("改完读得通");
-        let t = &again
-            .registry
-            .param("toolhead.MKP_retract")
-            .unwrap()
-            .machine_variants;
-        assert_eq!(t["A1"], serde_json::json!(-3.5));
-        assert_eq!(t["P1S"], serde_json::json!(-4.0));
-        assert_eq!(t["A1:FAST"], serde_json::json!(-5.0));
+        let again = crate::presetdata::Presets::load_from(tree.path()).expect("改完读得通");
+        let t = &again.registry.param(&tree.param).unwrap().machine_variants;
+        assert_eq!(t[machine.as_str()], serde_json::json!(-3.5));
+        assert_eq!(t[versioned.as_str()], serde_json::json!(-5.0));
 
         // 清空也走同一条路
-        p.apply_values(&[(
-            "toolhead.MKP_retract".to_owned(),
-            "A1:FAST".to_owned(),
-            None,
-        )])
-        .expect("清得掉");
-        let again = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
-        let t = &again
-            .registry
-            .param("toolhead.MKP_retract")
-            .unwrap()
-            .machine_variants;
-        assert!(!t.contains_key("A1:FAST"), "清空没生效");
-        assert_eq!(t["A1"], serde_json::json!(-3.5), "顺带把别的键改了");
+        p.apply_values(&[(tree.param.clone(), versioned.clone(), None)])
+            .expect("清得掉");
+        let again = crate::presetdata::Presets::load_from(tree.path()).unwrap();
+        let t = &again.registry.param(&tree.param).unwrap().machine_variants;
+        assert!(!t.contains_key(&versioned), "清空没生效");
+        assert_eq!(
+            t[machine.as_str()],
+            serde_json::json!(-3.5),
+            "顺带把别的键改了"
+        );
     }
 
     /// **值与「跟不跟基底」同一次落盘**（2026-11-03 的验收点）。
@@ -4594,65 +5056,62 @@ mod tests {
     /// 3. 改回跟随 = 表里删掉那个键（文件回到默认形状，不留 `= true`）。
     #[test]
     fn value_and_follow_state_go_out_in_the_same_write() {
-        let Some(root) = crate::presetdata::repo_presets_root() else {
-            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
-            return;
-        };
-        let tmp = tempfile::tempdir().unwrap();
-        copy_tree(&root, tmp.path());
-        let mut p = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
+        let tree = crate::presetdata::testdata::minimal_presets_tree();
+        let mut p = crate::presetdata::Presets::load_from(tree.path()).unwrap();
+        let scope = tree.versioned_param_key(&tree.version_with_assets);
+        let key = tree.param.as_str();
 
         /* ① 写值：一笔里同时带 `不跟随` */
         p.apply_values(&[crate::presetdata::ValueEdit::write(
-            "toolhead.MKP_retract",
-            "A1:FAST",
+            key,
+            scope.as_str(),
             serde_json::json!(-5.0),
         )])
         .unwrap();
-        let again = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
-        let q = again.registry.param("toolhead.MKP_retract").unwrap();
-        assert_eq!(q.machine_variants["A1:FAST"], serde_json::json!(-5.0));
+        let again = crate::presetdata::Presets::load_from(tree.path()).unwrap();
+        let q = again.registry.param(key).unwrap();
+        assert_eq!(q.machine_variants[scope.as_str()], serde_json::json!(-5.0));
         assert!(
-            !crate::presetdata::follows::is_following(q, "A1:FAST"),
+            !crate::presetdata::follows::is_following(q, scope.as_str()),
             "写值与状态必须同一笔落地"
         );
 
         /* ② 连带写（改基底时跟着变的那些）：显式 `跟随` ⇒ 还是跟随 */
         p.apply_values(&[crate::presetdata::ValueEdit::write(
-            "toolhead.MKP_retract",
-            "A1:FAST",
+            key,
+            scope.as_str(),
             serde_json::json!(-6.0),
         )
         .with_follows(true)])
             .unwrap();
-        let again = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
-        let q = again.registry.param("toolhead.MKP_retract").unwrap();
-        assert_eq!(q.machine_variants["A1:FAST"], serde_json::json!(-6.0));
+        let again = crate::presetdata::Presets::load_from(tree.path()).unwrap();
+        let q = again.registry.param(key).unwrap();
+        assert_eq!(q.machine_variants[scope.as_str()], serde_json::json!(-6.0));
         assert!(
-            crate::presetdata::follows::is_following(q, "A1:FAST"),
+            crate::presetdata::follows::is_following(q, scope.as_str()),
             "连带写不许把跟随项翻成独立值"
         );
 
         /* ③ 改回跟随 = 删键（不留 `= true` 这种同义写法） */
         p.apply_values(&[crate::presetdata::ValueEdit::keep(
-            "toolhead.MKP_retract",
-            "A1:FAST",
+            key,
+            scope.as_str(),
             true,
         )])
         .unwrap();
-        let again = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
-        let q = again.registry.param("toolhead.MKP_retract").unwrap();
+        let again = crate::presetdata::Presets::load_from(tree.path()).unwrap();
+        let q = again.registry.param(key).unwrap();
         assert!(
             q.follows.is_empty(),
             "跟随 = 表里没有这个键，实际：{:?}",
             q.follows
         );
         assert!(
-            crate::presetdata::follows::is_following(q, "A1:FAST"),
+            crate::presetdata::follows::is_following(q, scope.as_str()),
             "跟随"
         );
         assert_eq!(
-            q.machine_variants["A1:FAST"],
+            q.machine_variants[scope.as_str()],
             serde_json::json!(-6.0),
             "只改状态不许碰值"
         );

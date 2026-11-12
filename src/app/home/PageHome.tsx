@@ -28,6 +28,13 @@ import { api, errorText, uiErrorOf } from '../../api'
 import type { CalibModel, PostProcessCommand, UiError } from '../../api'
 import { msg, useLocale, useText, useT, type StringKey, type Text } from '../../i18n'
 import { bi } from '../shared/dataLabel'
+import ModelVersionRow from '../shared/ModelVersionRow'
+import {
+  DEFAULT_VERSION_ID,
+  XY_VERSIONS,
+  Z_VERSIONS,
+  type CalibVersion,
+} from '../shared/calibVersions'
 import { activeForSelection, localActiveForSelection, selectionFromActive } from './activeSelection'
 import { notify } from '../notify/notify'
 import {
@@ -167,7 +174,13 @@ export default function PageHome({ density }: PageHomeProps) {
   const [sel, setSel] = useState<Selection>(EMPTY)
 
   /** `name` 存键（`msg`）：这个弹窗会一直开着，换语言时框里那几句话得跟着翻 */
-  const [openModel, setOpenModel] = useState<{ id: string; name: Text } | null>(null)
+  /* 版本清单随状态走：三档（二合一 / 改版 / 原版）在两页是同一份
+     （`shared/calibVersions`），首页原来没有这一格 ⇒ 永远只开原版。 */
+  const [openModel, setOpenModel] = useState<{
+    id: string
+    name: Text
+    versions: readonly CalibVersion[]
+  } | null>(null)
   /* 「打开测试模型」弹窗的**真实状态**（2026-10-09）：本机有没有缓存由盘说了算 */
   const [modelInfo, setModelInfo] = useState<CalibModel | null>(null)
   const [modelBusy, setModelBusy] = useState(false)
@@ -1379,7 +1392,12 @@ export default function PageHome({ density }: PageHomeProps) {
             topAction={{
               label: tr('home.calib.openModel'),
               accent: true,
-              onClick: () => setOpenModel({ id: 'z', name: msg('home.calib.zPlate') }),
+              onClick: () =>
+                setOpenModel({
+                  id: DEFAULT_VERSION_ID,
+                  name: msg('home.calib.zPlate'),
+                  versions: Z_VERSIONS,
+                }),
             }}
             corner={
               /* 预设 pill 挂右上角（作者 10-03：内容列里那一行别占地方）——点开左抽屉；
@@ -1390,7 +1408,10 @@ export default function PageHome({ density }: PageHomeProps) {
                 onClick={() => setPickerOpen(true)}
                 data-tip={tr('home.calib.pickPresetTitle')}
               >
-                <span className={p.presetFileName}>
+                <span
+                  className={p.presetFileName}
+                  data-tip={calibFileName ?? tr('home.calib.pickPreset')}
+                >
                   {calibFileName ?? tr('home.calib.pickPreset')}
                 </span>
                 <span className={p.presetSwitch}>{tr('home.calib.switch')}</span>
@@ -1471,7 +1492,12 @@ export default function PageHome({ density }: PageHomeProps) {
             topAction={{
               label: tr('home.calib.openModel'),
               accent: true,
-              onClick: () => setOpenModel({ id: 'xy', name: msg('home.calib.xyPlate') }),
+              onClick: () =>
+                setOpenModel({
+                  id: DEFAULT_VERSION_ID,
+                  name: msg('home.calib.xyPlate'),
+                  versions: XY_VERSIONS,
+                }),
             }}
             corner={
               /* 同 Z 步：预设 pill 挂右上角，点开左抽屉 */
@@ -1481,7 +1507,10 @@ export default function PageHome({ density }: PageHomeProps) {
                 onClick={() => setPickerOpen(true)}
                 data-tip={tr('home.calib.pickPresetTitle')}
               >
-                <span className={p.presetFileName}>
+                <span
+                  className={p.presetFileName}
+                  data-tip={calibFileName ?? tr('home.calib.pickPreset')}
+                >
                   {calibFileName ?? tr('home.calib.pickPreset')}
                 </span>
                 <span className={p.presetSwitch}>{tr('home.calib.switch')}</span>
@@ -1549,6 +1578,20 @@ export default function PageHome({ density }: PageHomeProps) {
           <CardFrame
             eyebrow={tr('home.calib.modelEyebrow')}
             peekSafe
+            /* 打开测试模型挂**右上角**（与 Z / XY 那两张卡的「打开模型」同一个位）——
+               作者 2026-11-12：它原来在底缘那排按钮里，三张卡的打开按钮不在一条线上。 */
+            topAction={{
+              label: tr('home.calib.openTest'),
+              accent: true,
+              onClick: () =>
+                /* 测试模型只有一份 —— `versions` 传空（`ModelVersionRow` 据此不出那一行）。
+                   漏了它就会 `undefined.length`：2026-11-12 作者点这颗按钮的崩溃。 */
+                setOpenModel({
+                  id: TEST_MODEL_ID,
+                  name: msg('home.calib.testModel'),
+                  versions: [],
+                }),
+            }}
             navs={[
               {
                 label: tr('home.calib.back'),
@@ -1558,12 +1601,6 @@ export default function PageHome({ density }: PageHomeProps) {
               scriptAction,
             ]}
             actions={[
-              {
-                label: tr('home.calib.openTest'),
-                primary: true,
-                onClick: () =>
-                  setOpenModel({ id: TEST_MODEL_ID, name: msg('home.calib.testModel') }),
-              },
               { label: tr('home.nav.home'), onClick: () => deckRef.current?.jumpTo(0) },
             ]}
           >
@@ -1733,6 +1770,12 @@ export default function PageHome({ density }: PageHomeProps) {
             </>
           }
         >
+          {/* 模型版本：换要打开的那份 3mf（与校准页同一个共用件，两页清单同源） */}
+          <ModelVersionRow
+            versions={openModel.versions}
+            value={openModel.id}
+            onChange={(next) => setOpenModel({ ...openModel, id: next })}
+          />
           {/* 用哪个打开（默认在设置页「切片」那格；勾「仅这一次」就不写回） */}
           <SlicerPickView
             value={slicerPick.value}

@@ -576,9 +576,9 @@ for (const size of SIZES) {
    * ★ 2026-10-16 按现状重写：原来那两档（「手动指定」/「使用内置云端源」+「恢复内置默认」）
    *   已经改成「两个固定内置单选（构建期注入）+ 收起的自定义地址」——
    *   假后端没有内置源（`getPresetSource()` 给 null），所以这里只有：
-   *     当前「还没配置」→ 选「自定义地址（开发 / 排查）」→ 填地址 → 应用 →
-   *     当前变「你指定：…」（尾斜杠砍掉，与真机 `normalize_base_url` 同一套）→
-   *     非法地址如实拒（主句说"取不到、没有改"，技术详情收在折叠里）。
+   *     当前「还没配置」→ 选「自定义地址」→ 填地址 → 应用 →
+   *     当前变「https://…」（尾斜杠砍掉，与真机 `normalize_base_url` 同一套）→
+   *     非法地址如实拒（主句一句"取不到预设数据，未更改"；技术原因在悬停气泡里）。
    */
   await page.getByRole('button', { name: '设置', exact: true }).first().click()
   const setReady = await until(async () => (await mainText(page)).includes('预设数据源'), 8000)
@@ -602,21 +602,16 @@ for (const size of SIZES) {
    */
   check(
     tag,
-    '设置页「备份与恢复」那一块在（打一份 / 从备份恢复两颗按钮都在）',
+    '设置页「备份与恢复」那一块在（行标题 + 一颗「打开…」）',
     setText.includes('备份与恢复') &&
-      (await page.getByRole('button', { name: '打一份备份…' }).count()) === 1 &&
-      (await page.getByRole('button', { name: '从备份恢复…' }).count()) === 1,
+      (await page.getByRole('button', { name: '打开…', exact: true }).count()) === 1,
     setText.includes('备份与恢复') ? '' : `没看到那一块：${setText.slice(0, 120)}`,
   )
 
-  /* 自定义地址：选上才展开输入框（防错第一道：普通用户没有输错地址的机会）。
-     原生 radio 被自绘墨点盖着（`.mark` 拦 pointer）—— 直接 dispatch 点击，别用 `.check()` */
-  await page.evaluate(() => {
-    const input = [...document.querySelectorAll('input[name="preset-source"]')].find((x) =>
-      (x.closest('label')?.textContent ?? '').includes('自定义地址'),
-    )
-    input?.click()
-  })
+  /* 自定义地址：在下拉里选上才展开输入框（防错第一道：普通用户没有输错地址的机会）。
+     触发器是共用件 `SelectField`（`aria-label` = 这一项的名字），选项是 `role="option"` */
+  await page.getByRole('button', { name: '预设数据源', exact: true }).click()
+  await page.getByRole('option', { name: /自定义地址/ }).click()
   await page.waitForTimeout(300)
   await page.getByLabel('数据源地址').fill('https://example.com/mkp/')
   await page.getByRole('button', { name: '应用', exact: true }).click()
@@ -625,14 +620,14 @@ for (const size of SIZES) {
   check(
     tag,
     '自定义地址能应用（尾斜杠砍掉 —— 与真机 normalize 同一套）',
-    applied && setText2.includes('你指定：https://example.com/mkp'),
+    applied && setText2.includes('当前：https://example.com/mkp'),
     setText2.slice(0, 120),
   )
 
-  /* 非法地址如实拒：主句说清"取不到、没有改"（校验消息在折叠的技术详情里） */
+  /* 非法地址如实拒：主句一句"取不到预设数据，未更改"（技术原因在悬停气泡里，不占版面） */
   await page.getByLabel('数据源地址').fill('file:///tmp/presets')
   await page.getByRole('button', { name: '应用', exact: true }).click()
-  const rejected = await until(async () => (await mainText(page)).includes('这个地址取不到预设数据'), 5000)
+  const rejected = await until(async () => (await mainText(page)).includes('取不到预设数据'), 5000)
   check(tag, '非法地址如实拒（主句说"取不到、没有改"）', rejected, '')
   await page.screenshot({ path: `${shotDir}/wire-settings-${tag}.png` })
 

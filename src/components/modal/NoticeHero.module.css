@@ -1,0 +1,143 @@
+/*
+ * 提示卡（`NoticeHero.tsx`）的骨架与两档配色。
+ *
+ * ★ 几何是**布局契约**，别按页面改：整块 `height: 104px`（与全站这一档 hero 同一口）、
+ *   内衬 10/18、圆角 `--r-md`、图标圈 40×40 —— 换一页时模态框一个像素都不许动
+ *   （`scripts/probes/pp-modal-height.mjs` 量这件事）。
+ *
+ * 深色那一档**不在这里另写**：`--warn-* / --ask-*` 两套 token 本来就是深浅各一份
+ * （`tokens.css`），配色跟着主题走。
+ */
+
+.hero {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+
+  /*
+   * ★★ 定死高度之后内衬不算在 104 里（`border-box` 才不算；flex 子项默认按内容高度撑）——
+   *    让 `.scroll` 的 `max-height: 100%` 真正等于"内容盒的高度"，
+   *    不然它按 104（含内衬 28）去算，一有滚动条就把最后一行切掉半截。
+   */
+  box-sizing: border-box;
+  height: 104px;
+  padding: 10px 18px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+/*
+ * 两档只有颜色不同。橙 = 拦一下（结果可能不对）；绿 = 这一盘怎么跑的选择（**不是出错**，
+ * 拿警告色去说它会让用户以为出了故障）。
+ */
+.warn {
+  background: var(--warn-surface);
+  border: 1px solid var(--warn-line);
+  color: var(--warn-ink);
+}
+
+.ask {
+  background: var(--ask-surface);
+  border: 1px solid var(--ask-line);
+  color: var(--ask-ink);
+}
+
+.glyph {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 空心圈：40px、2px currentColor 描边、24px 粗体文字「!」（颜色跟随整块的墨色） */
+.badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--warn-soft);
+  border: 2px solid currentcolor;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* 圈里换成 SVG 记号时同一边长（19px 与结果 hero 那枚一样大） */
+.badge svg {
+  display: block;
+  width: 19px;
+  height: 19px;
+}
+
+/* 绿那档的圈底跟着块走（`--warn-soft` 在绿块里是一枚橙色底，读起来像警告） */
+.ask .badge {
+  background: var(--ask-line);
+}
+
+.copy {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+/*
+ * 可滚的那一叠（题目 + 正文 + 兜底句）。
+ *
+ * `margin-block: auto` = 内容短就居中、超高**就从第一行开始滚**（溢出时 auto 边距
+ * 自己归零，不会像 `justify-content: center` 那样把顶上一截裁掉看不见）。
+ */
+.scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-self: stretch;
+  max-height: 100%;
+  margin-block: auto;
+  /* 右侧只留 8px：滚动条本身要占宽，别再让它挤掉正文的显示面积 */
+  padding-right: 8px;
+  overflow-y: auto;
+  /*
+   * ★ 这里**不许挂 `mask-image` 做"上下褪色"**（作者 2026-10-17：「这些字的上边缘下边缘
+   *   有点模糊」）：那一层渐变是**无条件**的，内容没有超高时也照样把第一行的上半截和
+   *   最后一行的下半截调成半透明 —— 看起来就是题目与末行那两句"发虚"。
+   *   要滚动提示就等真的溢出再说，别拿字迹的清晰度换。
+   */
+}
+
+.title {
+  flex-shrink: 0;
+  margin-bottom: 3px;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+}
+
+.line {
+  font-size: var(--fs-label);
+  line-height: 1.65;
+  letter-spacing: 0.2px;
+  opacity: 0.85;
+  /* 长句（G-code 里那种一句三行的警告）在卡宽里折行，一个字符都不许被裁 */
+  word-break: break-word;
+}
+
+/* 最弱一档（倒计时 / "不答会怎样"）：比正文再轻一点，分隔靠间距不靠线 */
+.hint {
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  letter-spacing: 0.2px;
+  opacity: 0.72;
+}
+
+.hint + .hint {
+  margin-top: 1px;
+}

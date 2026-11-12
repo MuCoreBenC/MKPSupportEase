@@ -160,6 +160,13 @@ impl History {
         presets: &mut crate::workbench::presets::Presets,
         committed: &Committed,
     ) -> Result<(), AppError> {
+        /* 清单以**当前编辑态**为准。
+         *
+         * `committed` 是"打开工作台那一刻"的清单：新建版本、改版本 id 之后，
+         * 新 uid 只存在于 `presets` 里。拿旧清单校验会把整批重放拒掉
+         * （`版本 A1/FAST_NEW 不存在`）—— 界面上看就是"改了 id，参数全没了"。
+         * 新建版本后补参数同理。唯一实现在 `patch::live_committed`。 */
+        let live = patch::live_committed(presets, committed);
         for e in self.undo.iter() {
             /* 结构编辑写的是影子文件（`reload` 会读回来），只有值编辑需要重放 */
             let fwd = match &e.action {
@@ -167,13 +174,8 @@ impl History {
                 Action::Struct(_) => continue,
             };
             let mut d = Self::baseline_draft();
-            patch::apply(
-                &mut d,
-                committed,
-                &presets.registry,
-                std::slice::from_ref(fwd),
-            )?;
-            let staged = crate::workbench::app::storage::stage_value_edits(presets, committed, &d);
+            patch::apply(&mut d, &live, &presets.registry, std::slice::from_ref(fwd))?;
+            let staged = crate::workbench::app::storage::stage_value_edits(presets, &live, &d);
             crate::workbench::app::storage::stage_into(presets, &staged)?;
         }
         Ok(())
@@ -220,6 +222,60 @@ impl History {
     /// 栈里所有条目（从旧到新）。给「改了什么」与日志用，**不许拿它当真相**
     pub fn entries(&self) -> impl Iterator<Item = &Entry> {
         self.undo.iter()
+    }
+
+    /// 把两套栈里指向旧版本的记录重指到新 uid（改版本 id 时用）。
+    ///
+    /// 两种写法都要认，`c` = `machineVariants` 的写法、`v` = uid 的写法：
+    ///
+    /// | 在哪 | 形状 | 漏了会怎样 |
+    /// |---|---|---|
+    /// | 字段账 `owner` | `A1:FAST` | 「改了什么」指着一个不存在的版本 |
+    /// | `Action::Value` 的 patch / inverse | `A1/FAST` | `reload_presets` 重放时写回旧 uid |
+    ///
+    /// 第二行是真坑：改完 id 后任何一次结构编辑都会 `reload_presets`，
+    /// 那条重放按旧 owner 写值 —— 界面上看就是"改过的参数又跑回旧版本了"。
+    ///
+    /// 文件字节（`Action::Struct` 里的 `before` / `after`）**不在这里改**：它们是
+    /// "那一刻的文件长什么样"，撤销是后进先出 —— 改 id 这一条会先被撤掉，
+    /// id 退回旧值之后那些字节才是对的。
+    pub fn retarget_version(&mut self, old_c: &str, new_c: &str, old_v: &str, new_v: &str) {
+        fn retarget_patch(p: &mut Patch, old: &str, new: &str) {
+            if let Patch::SetValue { owner, .. } = p {
+                if owner == old {
+                    *owner = new.to_owned();
+                }
+            }
+        }
+        let old_prefix = format!("v:{old_v}:");
+        let new_prefix = format!("v:{new_v}:");
+        for e in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            for f in &mut e.fields {
+                if f.owner == old_c {
+                    f.owner = new_c.to_owned();
+                }
+            }
+            if let Action::Value { patch, inverse } = &mut e.action {
+                retarget_patch(patch, old_v, new_v);
+                for p in inverse.iter_mut() {
+                    retarget_patch(p, old_v, new_v);
+                }
+            }
+            if let Some(k) = &mut e.merge_key {
+                if k.starts_with(&old_prefix) {
+                    *k = k.replacen(&old_prefix, &new_prefix, 1);
+                }
+            }
+        }
+    }
+
+    /// **撤销栈顶那一条**：标签 + 它改了几处字段。
+    ///
+    /// 「未保存改动」框里那颗「撤销这一笔（N 处）」用它 —— 那一笔是**一次手势**
+    /// （批量设值就是一条），逐行各给一颗按钮会让人以为只撤那一格。
+    pub fn top_op(&self) -> Option<(String, usize)> {
+        let e = self.undo.back()?;
+        Some((e.label.clone(), e.fields.len()))
     }
 
     /// **记一条命令**（不碰草稿、不碰文档 —— 调用方已经应用过了）。
@@ -338,40 +394,61 @@ impl History {
         Draft::default()
     }
 
+    /// 栈顶那一条（**不弹**）。撤销要"先算再出栈"：算不出来时栈一格都不能动。
+    pub fn peek_undo(&self) -> Option<&Entry> {
+        self.undo.back()
+    }
+
+    /// 重做栈顶那一条（**不弹**）。同 [`Self::peek_undo`]。
+    pub fn peek_redo(&self) -> Option<&Entry> {
+        self.redo.last()
+    }
+
     /// **撤销栈顶那条**要写的行（在真的撤销之前算 —— `changes` 要的是"改前"的值）。
     ///
     /// 走的是与正向**同一条管线**：把那条的反向应用到一个空草稿上，
     /// 再 `stage_value_edits`。于是撤销不会长出第二套"归并连带 / 跟随状态"的规则。
+    ///
+    /// # 为什么是 `Result<Option<_>>` 而不是 `Option<_>`
+    ///
+    /// 早先算不出来就 `.ok()?` 返回 `None`，调用方照样 `undo()` 出栈 ——
+    /// 界面上就是「点了撤销，什么都没发生，但那一笔已经没了」（作者 2026-11-12）。
+    /// 现在算不出来是**错误**：调用方先算、算出错就原样报错，栈一格不动。
+    /// `Ok(None)` 只表示"这一条是结构编辑，不走值管线"。
     pub fn inverse_staged(
         &self,
         presets: &crate::workbench::presets::Presets,
         committed: &Committed,
-    ) -> Option<crate::workbench::app::storage::StagedEdits> {
-        let e = self.undo.back()?;
+    ) -> Result<Option<crate::workbench::app::storage::StagedEdits>, AppError> {
+        let Some(e) = self.undo.back() else {
+            return Ok(None);
+        };
         let inverse = match &e.action {
             Action::Value { inverse, .. } => inverse,
             /* 结构编辑的撤销是"把 before 字节写回文件"，不走值管线 */
-            Action::Struct(_) => return None,
+            Action::Struct(_) => return Ok(None),
         };
         let mut d = Self::baseline_draft();
         if !inverse.is_empty() {
-            patch::apply(&mut d, committed, &presets.registry, inverse).ok()?;
+            patch::apply(&mut d, committed, &presets.registry, inverse)?;
         }
-        Some(crate::workbench::app::storage::stage_value_edits(
+        Ok(Some(crate::workbench::app::storage::stage_value_edits(
             presets, committed, &d,
-        ))
+        )))
     }
 
-    /// **重做栈顶那条**要写的行（正向）
+    /// **重做栈顶那条**要写的行（正向）。返回值的道理同 [`Self::inverse_staged`]。
     pub fn redo_staged(
         &self,
         presets: &crate::workbench::presets::Presets,
         committed: &Committed,
-    ) -> Option<crate::workbench::app::storage::StagedEdits> {
-        let e = self.redo.last()?;
+    ) -> Result<Option<crate::workbench::app::storage::StagedEdits>, AppError> {
+        let Some(e) = self.redo.last() else {
+            return Ok(None);
+        };
         let fwd = match &e.action {
             Action::Value { patch, .. } => patch,
-            Action::Struct(_) => return None,
+            Action::Struct(_) => return Ok(None),
         };
         let mut d = Self::baseline_draft();
         patch::apply(
@@ -379,11 +456,10 @@ impl History {
             committed,
             &presets.registry,
             std::slice::from_ref(fwd),
-        )
-        .ok()?;
-        Some(crate::workbench::app::storage::stage_value_edits(
+        )?;
+        Ok(Some(crate::workbench::app::storage::stage_value_edits(
             presets, committed, &d,
-        ))
+        )))
     }
 }
 
@@ -406,16 +482,30 @@ fn merge_fields(into: &mut Vec<super::txn::FieldEntry>, more: Vec<super::txn::Fi
 }
 
 /// 一条历史条目**改了几处**（去处重后还剩几个字段）。就是页头那个 N 的原料。
+///
+/// **没有字段账的条目各算一处**：新建 / 删除 / 复制 / 移动这类一次性动作在
+/// 「一格字段」这把尺子上量不出东西，可它们确实改了文件。漏掉这一段，
+/// 界面上就是「灯亮着、未保存 0」（作者 2026-11-11 报的那一幕）。
 pub fn dirty_fields(entries: &[Entry]) -> usize {
-    let mut out: Vec<&super::txn::FieldEntry> = Vec::new();
+    let one_shots = entries.iter().filter(|e| e.fields.is_empty()).count();
+    dirty_field_entries(entries).len() + one_shots
+}
+
+/// 跨条目合并后的字段账 —— 「改了什么」逐条列的就是这一份。
+///
+/// 去重键 = `(层, 归属, 键)`：同一格连点十下只算一处，**`before` 保最初、
+/// `after` 换最新**。少了"换最新"这一步，一次改过去又改回来
+/// （批量设 1.2 → 跟随基线回 1.0）会各算一处，页头写着「未保存 9」
+/// 而影子树与盘上一模一样（作者 2026-11-09 报的就是这一条）。
+///
+/// **唯一口径** —— [`dirty_fields`]（数个数）与检查框里的字段清单都从这里来，
+/// 各写一遍就会出现"页头 14 处、清单 0 处"那种两个数打架。
+pub fn dirty_field_entries(entries: &[Entry]) -> Vec<super::txn::FieldEntry> {
+    let mut out: Vec<super::txn::FieldEntry> = Vec::new();
     for e in entries {
-        for f in e.fields.iter().filter(|f| f.changed()) {
-            if !out.iter().any(|x| x.same_cell(f)) {
-                out.push(f);
-            }
-        }
+        merge_fields(&mut out, e.fields.clone());
     }
-    out.len()
+    out
 }
 
 /// 值编辑的合并判据：**哪一格**（`v:A1/STANDARD:toolhead.offset.z` 这样的字符串键）。
@@ -884,5 +974,49 @@ mod tests {
             Some(&Some(serde_json::json!(12.0))),
             "重做之后回到改完的那个值"
         );
+    }
+
+    /// **一趟改过去又改回来 = 0 处**（作者 2026-11-09 报的「未保存 9，点进来空的」）。
+    ///
+    /// 两笔各自都"变了"，但同一格合并之后 `before` 与最新 `after` 是同一个状态
+    /// （都是「跟随（1.0）」）⇒ 净零。以前只留第一条、不换 `after`，于是
+    /// 批量设 1.2 再跟随基线回 1.0 会留下 9 个虚假的改动，而影子树与盘上一模一样。
+    #[test]
+    fn a_round_trip_that_ends_where_it_started_is_not_dirty() {
+        let cell = |before: &str, after: &str| super::super::txn::FieldEntry {
+            level: Some(format!("{:?}", Level::Version)),
+            owner: "A1:STANDARD".to_owned(),
+            key: "wiping.child".to_owned(),
+            label: "塔位置 X".to_owned(),
+            before: Some(before.to_owned()),
+            after: Some(after.to_owned()),
+            why: "user",
+        };
+        let entry = |fields| Entry {
+            label: "批量".to_owned(),
+            action: Action::Value {
+                patch: set(
+                    Level::Version,
+                    "A1/STANDARD",
+                    "wiping.child",
+                    Some(serde_json::json!(1.2)),
+                ),
+                inverse: Vec::new(),
+            },
+            merge_key: None,
+            at: Instant::now(),
+            fields,
+        };
+
+        let entries = vec![
+            entry(vec![cell("跟随（1.0）", "1.2")]),
+            entry(vec![cell("1.2", "跟随（1.0）")]),
+        ];
+        assert_eq!(dirty_fields(&entries), 0, "一进一出必须净零");
+        assert!(dirty_field_entries(&entries).is_empty());
+
+        /* 只走一半：跟随 1.0 → 钉住 1.2，是实打实的 1 处 */
+        let half = vec![entry(vec![cell("跟随（1.0）", "1.2")])];
+        assert_eq!(dirty_fields(&half), 1);
     }
 }

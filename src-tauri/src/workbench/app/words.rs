@@ -22,6 +22,7 @@ use serde::Serialize;
 
 use crate::error::AppError;
 use crate::ipc::traced;
+use crate::workbench::domain::issues::Severity;
 use crate::workbench::domain::layer::{Level, Origin};
 use crate::workbench::domain::patch::Visibility;
 use crate::workbench::domain::preview::BulkKind;
@@ -82,6 +83,9 @@ pub struct Words {
     pub snapshot: Table,
     /// 参数台一行上的状态四档（C14）：dirty 压过 origin —— 改了还没保存是最要紧的事实
     pub param_status: Table,
+    /// 检查三档的中文标签（阻断 / 待办 / 提示）。**唯一出口** ——
+    /// 检查卡与导航徽标都读它，前端不再写 `block → '阻断'` 那套映射
+    pub severity: Table,
     /// 「已弃用」参数级那一枚（C14 §五）。判据来自上游注册表的 `deprecated`
     pub param_deprecated: Word,
     /// 「已弃用」选项级那一枚。判据是推出来的（见 `registry::deprecated_choice_values`）
@@ -283,6 +287,12 @@ fn words() -> Words {
         .into_iter()
         .map(|(k, l, e)| (k, Word::new(l, e)))
         .collect(),
+
+        /* 三档的中文标签就写在 `Severity::label()` 那一处，这里只做投影 */
+        severity: [Severity::Block, Severity::Todo, Severity::Hint]
+            .into_iter()
+            .map(|s| (s.key(), Word::new(s.label(), s.explain())))
+            .collect(),
     }
 }
 
@@ -413,13 +423,13 @@ mod tests {
         assert_eq!(v["build"]["stale"]["label"], "待更新");
         assert!(v["build"]["stale"]["explain"].is_string());
         assert_eq!(v["origin"]["machine"]["label"], "机型");
-        assert_eq!(v["level"]["machine"]["label"], "机型基底");
+        assert_eq!(v["level"]["machine"]["label"], "机型基线");
         assert_eq!(v["placeholder"]["blank"], "空");
         // `save` 这一档没有解释句 —— 为 null 而不是空串，前端才好判
         assert!(v["save"]["saved"]["explain"].is_null());
         // 参数台只有两档：跟不跟随（2026-11-02 作者定稿）。
         // 「出厂默认 / 机型默认 / 本版修改」那三分已退役 —— 它们答的是"值从哪来"
-        assert_eq!(v["paramStatus"]["follow"]["label"], "跟随基底");
+        assert_eq!(v["paramStatus"]["follow"]["label"], "跟随基线");
         assert_eq!(v["paramStatus"]["own"]["label"], "不跟随");
         assert!(
             v["paramStatus"]["dirty"].is_null(),

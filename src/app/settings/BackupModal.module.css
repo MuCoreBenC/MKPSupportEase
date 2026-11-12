@@ -1,0 +1,273 @@
+/*
+ * 「备份与恢复」那一框里的东西（2026-11-09）。
+ *
+ * **框本身不是这一份** —— 外壳用全站那唯一一套居中模态框（`components/modal`：
+ * 标题栏 / × / 遮罩 / Esc / 焦点锁都在那儿）。这里只管框身里那几样：
+ * 一行选项（开关 / 范围下拉）、一条路径胶囊、一块**有才出现**的进度。
+ *
+ * ★ 2026-11-09 第二刀：**不留空行**；第三刀：模式切换挪到页脚左下角
+ *   （共用件 `PageToggle`），框身从"选项行"开始 —— 两页因此同构、同高。
+ */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/*
+ * 页脚左边那一簇：那颗翻页胶囊（`PageToggle`）。`margin-right: auto` 把它顶到
+ * 页脚另一头（模态框页脚是右对齐的一行按钮）—— 与导出框 `.footLeft` 同一份数值，
+ * 它**不改变页脚高度**（高度由那几颗按钮撑着）。
+ */
+.footLeft {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* ---- 路径胶囊（与导出框那颗同一个读法：头收省略号、尾两段钉住） ---- */
+
+/*
+ * 整条是**显示**不是按钮：只有右边那颗改位置 / 开位置能点 ——
+ * 路径正文因此还能拖选，误点一下也不会弹系统框。
+ */
+.pill {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* 高度写死：与虚线那条 `pickRow` 必须一模一样（见那边注释） */
+  height: 50px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  box-sizing: border-box;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  text-align: left;
+}
+
+.pillIcon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.pillText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+  white-space: nowrap;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.pillHead {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pillTail {
+  flex-shrink: 0;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+/*
+ * 胶囊右边那一颗：整条里**唯一可点的地方**（字体从等宽换回正文那一族）。
+ * 备份打完之前是「更改位置」，打完之后**就地翻成「打开位置」**（同一格、同一尺寸）；
+ * 恢复那一页一直是「更换文件」。
+ */
+.pillAct {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-solid);
+  font-family: var(--font-label);
+  color: var(--text-1);
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.pillAct:hover {
+  border-color: var(--text-3);
+}
+
+/* 成了之后这一颗翻成强调色（hover 那条写在前面，所以它在这儿压得住） */
+.pillAct[data-open='true'] {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  text-shadow: var(--state-bold);
+}
+
+.pillAct:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- 恢复那一页"还没挑文件"时的整条入口 ---- */
+
+/*
+ * 虚线胶囊：它是一件**要做的事**（去挑一份），不是一个位置 ——
+ * 挑好之后这一格变成上面那条实的路径胶囊。
+ */
+.pickRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /*
+   * 与上面那条实线胶囊**同高同衬**（作者 2026-11-09：「它是虚线，但是它的高度一样，
+   * 尺寸一样」）—— 挑完文件那一格换成胶囊时，框一个像素都不动。
+   *
+   * 为什么不靠内衬对齐：胶囊右边多一颗按钮（约 27px），虚线行没有，只调 padding
+   * 永远差一截。写死同一个高度、内容居中，才是"同一副尺寸"。
+   */
+  height: 50px;
+  padding: 0 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  box-sizing: border-box;
+  color: var(--text-2);
+  font-size: var(--fs-label);
+  text-align: left;
+}
+
+.pickRow:hover {
+  border-color: var(--text-3);
+  color: var(--text-1);
+}
+
+.pickRow:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pickText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 备份那一页的「连同预设一起备份」 ----
+ * 形制照导出框的 `.zipRow`（跨模块不能直接引用，数值照抄）：
+ * 左边两行（题 + 一句小字），右边一颗开关；它摆在路径胶囊**上面**。
+ */
+
+.switchRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.switchText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.switchTitle {
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  color: var(--text-1);
+}
+
+.switchHint {
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+/*
+ * 恢复范围那颗下拉：外面这层只管**定宽**（共用件的 `.wrap` 是 inline-flex，
+ * 不给宽会被撑成整行），与设置页 `.sourcePick` 同一个做法。
+ */
+.scopePick {
+  display: grid;
+  flex: 0 0 auto;
+  width: 140px;
+}
+
+/*
+ * 恢复页那一行的小字是**红的**（「只动选中的那一部分，覆盖后无法撤销」）——
+ * 原来它是文件行下面独立一条，为了两页等高并进了这一行的说明位（见 JSX 注释）。
+ */
+.hintDanger {
+  color: var(--danger);
+}
+
+/* ---- 进度：有才出现（跑着 / 成了） ---- */
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stage {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 成了：这一行换成强调色 */
+.stage[data-done='true'] {
+  color: var(--accent-deep);
+}
+
+/*
+ * 那根条。`width` 由 `onTick` 的 `done / total` 算出来（**不是**估的），
+ * 于是它每一跳都对应盘上真写出去的量。
+ *
+ * 过渡只给 0.16s：一跳最快 120ms 一条，看得见在走、又不会拖成"慢半拍"。
+ * （WKWebView 不播 CSS **关键帧**动画，`transition` 不在那条禁令里。）
+ */
+.bar {
+  height: 6px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.16s ease;
+}
+
+/* 细那一行：正在处理哪一份（等宽、可拖选 —— 排查时有人会想抄它） */
+.detail {
+  margin: -2px 0 0;
+  overflow: hidden;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+  -webkit-user-select: text;
+}

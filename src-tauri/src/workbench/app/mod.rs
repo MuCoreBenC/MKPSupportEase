@@ -311,8 +311,8 @@ use crate::workbench::domain::derive::{Book, BookView, ColRef, Desk, Matrix};
 use crate::workbench::domain::history as edit_history;
 
 use crate::workbench::domain::layer::Layers;
-use crate::workbench::domain::patch::{apply as apply_patches, Draft, Patch};
-use crate::workbench::domain::preview::BulkPreview;
+use crate::workbench::domain::patch::{apply as apply_patches, live_committed, Draft, Patch};
+use crate::workbench::domain::preview::{AttachPreview, BulkPreview};
 use crate::workbench::domain::shadow_diff;
 use crate::workbench::domain::txn::{self, Op, Txn};
 use crate::workbench::domain::variants;
@@ -644,6 +644,65 @@ impl Ctx {
         Ok(ctx)
     }
 
+    /// 把**内存里的值编辑**一次写进影子树。
+    ///
+    /// 值编辑只改 `ctx.presets`（内存），影子树一个字节都不动；而
+    /// `txn::commit` 与 `shadow_diff` 比的都是「真源 ↔ 影子」两棵**磁盘**树。
+    /// 所以凡是靠影子树回答「保存会改什么」的时刻（保存本身、打开未保存改动框），
+    /// 都得先调这里把这批命令落成字节。
+    ///
+    /// 幂等：没有值编辑时什么都不做。保存与「看改动」共用这一处 —— 两处各写一份的话，
+    /// 迟早一处写了另一处忘，界面上就是「未保存 N」与「一模一样」同时成立。
+    fn flush_values_into_shadow(&mut self) -> Result<(), AppError> {
+        if self.history.is_empty() {
+            return Ok(());
+        }
+        self.presets.write_back()?;
+        tracing::info!(
+            commands = self.history.undo_depth(),
+            "值编辑：内存里的命令一次写进影子树"
+        );
+        Ok(())
+    }
+
+    /// 「未保存改了几处」—— **唯一实现**：值编辑历史 + 草稿层 + 结构编辑。
+    ///
+    /// 页头那个 N 与生成闸（`require_clean`）都读它。两处各算一遍的话会出现
+    /// "生成拦不拦取决于你看没看过未保存改动框"—— 那个框一打开就会把值编辑
+    /// 写成影子字节，而只看影子与草稿的旧判据读不到内存里的命令。
+    fn dirty_count(&self) -> usize {
+        self.struct_dirty_count() + self.draft.dirty_count() + self.txn.dirty_count()
+    }
+
+    /// 结构编辑那本账改了几处（机型 / 版本 / 套餐 / 资产的定义编辑）。
+    ///
+    /// 单独拎出来是因为 [`view_of`] 也要加它 —— 那个函数拿的是**传进来的**
+    /// committed / draft（可能是一份"假如"的），但这本账只有 `ctx` 上有。
+    fn struct_dirty_count(&self) -> usize {
+        edit_history::dirty_fields(&self.history.entries().cloned().collect::<Vec<_>>())
+    }
+
+    /// 改版本 id 之后，把**还没保存的那些记录**一起重指到新 uid。
+    ///
+    /// 两处必须跟着换（第三处是 `edit_key`：主键变了，同一格连点不能再并到旧格子上）：
+    ///
+    /// - 值草稿的键（`v:A1/FAST:key`）—— 不换的话保存时按旧 uid 写进
+    ///   `machineVariants`，那个版本已经没了；
+    /// - 字段账的归属（`A1:FAST`）—— 撤销栈与「改了什么」都读它。
+    ///
+    /// **不动** `committed` / `base`：那是"已落盘 / 打开时"的两份，改 id 还没保存，
+    /// 它们该停在旧值上 —— 撤销这一笔时要能退回去。
+    fn retarget_version_uid(&mut self, machine_id: &str, old_vid: &str, new_vid: &str) {
+        let old_v = format!("{machine_id}/{old_vid}");
+        let new_v = format!("{machine_id}/{new_vid}");
+        let old_c = format!("{machine_id}:{old_vid}");
+        let new_c = format!("{machine_id}:{new_vid}");
+        self.draft.retarget_version_uid(&old_v, &new_v);
+        self.history
+            .retarget_version(&old_c, &new_c, &old_v, &new_v);
+        self.edit_key = None;
+    }
+
     /// 重算「几份文件有改动」并写回缓存。**唯一实现** ——
     /// 页头那颗「未保存（N）」、状态栏、`TxnState`、以及「代码对比」里的「N 份文件」
     /// 都从这里来，不许各自再算一套（两套口径迟早不一致，作者 2026-11-02 报的
@@ -685,6 +744,18 @@ impl Ctx {
     ///
     /// 作者 2026-11-03 报的「改了很多还是只有 1」就是第一格曾经写成第三个：
     /// 一次 `setValue` 连带改四行，按文件数永远只算 1。
+    /// 撤销该弹哪一套栈：两套并存时退**最近的那一笔**。
+    ///
+    /// `undo_in` 与 `txn_state.top_op` 共用这一条判据 —— 两处各写一遍，
+    /// 界面上就会"按钮写着撤这一笔、按下去退的是另一套"。
+    fn undo_uses_history(&self) -> bool {
+        match (self.history.undo_last_at(), self.txn.undo_last_at()) {
+            (Some(h), Some(t)) => h >= t,
+            (Some(_), None) => true,
+            _ => false,
+        }
+    }
+
     pub(super) fn txn_state(&self) -> TxnState {
         TxnState {
             /* 「脏」不再问影子树（值编辑根本不写它）：历史里有字段 / 草稿里有挂着的 /
@@ -697,13 +768,17 @@ impl Ctx {
             /* 「改了几处」= 历史里还剩几个字段 + 草稿里挂着的格 + 结构编辑的字段。
             **必须是同一个量纲（一格字段）**：历史那边按 `(层, 归属, 键)` 去重，
             与 `txn::FieldEntry` 同一把尺子。 */
-            dirty_count: edit_history::dirty_fields(
-                &self.history.entries().cloned().collect::<Vec<_>>(),
-            ) + self.draft.dirty_count()
-                + self.txn.dirty_count(),
+            dirty_count: self.dirty_count(),
             can_undo: self.history.undo_depth() > 0 || self.txn.undo_depth() > 0,
             can_redo: self.history.redo_depth() > 0 || self.txn.redo_depth() > 0,
             ops: self.txn.ops(),
+            /* 「这一笔」= 下面那颗撤销真会弹掉的那一条（两套栈按时间取最近） */
+            top_op: if self.undo_uses_history() {
+                self.history.top_op()
+            } else {
+                self.txn.undo_top()
+            }
+            .map(|(label, fields)| TopOp { label, fields }),
             /* 回执与事务状态同一趟取走：前端本来就在轮询这一个（800ms），
             不必为它另开一条通道 */
             receipt: take_receipt(),
@@ -837,6 +912,7 @@ const COMMAND_LABELS: &[(&str, &str)] = &[
     ("wb_set_brand_field", "改品牌信息"),
     ("wb_add_machine", "新增机型"),
     ("wb_add_version", "新增版本"),
+    ("wb_set_version_id", "改版本 id"),
     ("wb_copy_version", "复制版本"),
     ("wb_copy_recipe", "复制版本参数"),
     ("wb_remove_version", "删除版本"),
@@ -856,6 +932,7 @@ const COMMAND_LABELS: &[(&str, &str)] = &[
     ("wb_set_group", "改资产分组"),
     ("wb_remove_group", "删除资产分组"),
     ("wb_set_param_meta", "改参数定义"),
+    ("wb_clear_stale_translations", "清译文标记"),
     ("wb_set_section_meta", "改分组名与位置"),
     ("wb_remove_section", "删除分组"),
     ("wb_anno_write", "保存标注"),
@@ -1042,7 +1119,48 @@ pub(super) fn run_struct<T>(
             .iter()
             .map(|p| (p.clone(), std::fs::read(root.join(p)).ok()))
             .collect();
-        let out = f(ctx)?;
+        /*
+         * ★ 失败必须把影子文件退回去。
+         *
+         * 命令可能**改了文件才失败**：最典型的是"先写机型文件、再从盘上重读"，
+         * 删版本把 `A1/FAST` 写掉了，重读时才被资产台账判成 Corrupted。
+         * 那一份字节留在影子里，而这一条没进任何一本账 ⇒ 页头数不到、撤销退不回、
+         * 「放弃改动」又因为三本账都干净直接放行，影子从此带着一笔没人认领的改动。
+         *
+         * 内存文档也要重读：`machine_mut().remove_version()` 改的是 `ctx.presets`，
+         * 文件退回去了、内存还停在删完的样子，界面与影子就各说各话。
+         */
+        let out = match f(ctx) {
+            Ok(v) => v,
+            Err(e) => {
+                ctx.pending_fields.clear();
+                for (path, bytes) in &before {
+                    let target = root.join(path);
+                    let restored = match bytes {
+                        Some(b) => crate::fsx::atomic::atomic_write(&target, b),
+                        None => match std::fs::remove_file(&target) {
+                            Ok(()) => Ok(()),
+                            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                            Err(err) => {
+                                Err(AppError::io(format!("回滚出错文件：{}", target.display()))
+                                    .with_detail(err.to_string()))
+                            }
+                        },
+                    };
+                    if let Err(err) = restored {
+                        tracing::error!(
+                            path = %path,
+                            error = %err.message,
+                            "结构编辑失败，回滚影子文件也失败"
+                        );
+                    }
+                }
+                if let Err(err) = ctx.reload_presets() {
+                    tracing::error!(error = %err.message, "结构编辑失败，重读内存也失败");
+                }
+                return Err(e);
+            }
+        };
         let swaps = before
             .into_iter()
             .map(|(path, b)| edit_history::FileSwap {
@@ -1295,8 +1413,9 @@ fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>
 
     现在数**行**（`Txn::dirty_count` → `changed_lines`）。它与 diff 框里
     红绿行的条数同源，也和"`ops.len()` = 撤销栈几格"分得开。
-    唯一真值仍然是 `Txn::dirty_count()` —— 页头那个数由前端回填这一个。 */
-    v.dirty_count = ctx.txn.dirty_count() + draft.dirty_count();
+    **三项缺一不可**：结构编辑（`ctx.history`）/ 值草稿 / 值事务。
+    少加第一项就是作者 2026-11-11 报的那一幕 —— 改了标签，页头还是「未保存 0」。 */
+    v.dirty_count = ctx.struct_dirty_count() + ctx.txn.dirty_count() + draft.dirty_count();
     v
 }
 
@@ -1309,6 +1428,15 @@ fn shadow_differs(real: &Path, shadow: &Path) -> Result<bool, AppError> {
     Ok(!txn::equal(&a, &b))
 }
 
+/// 撤销栈顶那一条 —— 「撤销这一笔（N 处）」要的两个数。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopOp {
+    pub label: String,
+    /// 这一笔改了几处字段（同一格合并之后的条数）
+    pub fields: usize,
+}
+
 /// 统一事务的状态（页头三按钮 + 状态栏读它）
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1318,6 +1446,11 @@ pub struct TxnState {
     pub can_undo: bool,
     pub can_redo: bool,
     pub ops: Vec<Op>,
+    /// **撤销栈顶那一条**（值编辑 / 结构编辑按时间取最近的那套）。
+    ///
+    /// 「未保存改动」框把它渲染成一颗「撤销这一笔（N 处）」—— 一次手势改的所有格子
+    /// 是一条，逐行各给一颗按钮会让人以为只撤那一格。
+    pub top_op: Option<TopOp>,
     /// **刚跑完那一笔的请求号**（2026-11-02）。`null` = 这一轮没跑过命令。
     ///
     /// 状态栏把号显示出来，作者就能拿它去日志里 `grep` 出这一次点击的全部行。
@@ -1890,12 +2023,18 @@ pub fn wb_clear_stale_translations(
     keys: Vec<String>,
 ) -> Result<RegistryView, AppError> {
     traced("wb_clear_stale_translations", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.registry.clear_stale_translations(&key, &keys)?;
-            ctx.presets.registry.write_back()?;
-            ctx.reload_presets()?;
-            Ok(registry_view(&ctx.presets.registry))
-        })
+        /* 走**结构编辑**那条统一入口：它也是草稿（保存才落真仓库），
+         * 不进 `ctx.history` 的话页头「未保存 N」读不到这一笔 —— 清了几格标记、
+         * 页头还是 0，下一趟保存才发现自己也把它写进去了 */
+        with_struct_ctx(
+            "stale",
+            |_| vec!["registry/param_registry.toml".to_owned()],
+            |ctx| {
+                ctx.presets.registry.clear_stale_translations(&key, &keys)?;
+                ctx.presets.registry.write_back()?;
+                Ok(registry_view(&ctx.presets.registry))
+            },
+        )
     })
 }
 
@@ -2121,6 +2260,20 @@ pub fn wb_preview_bulk(
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
             Ok(Book::new(&ctx.presets, &c, &d).preview_bulk(&key, &value, &cols))
+        })
+    })
+}
+
+/// **挂回跟随**的预览：点下去之前先看清哪几列真的会变、哪几列本来就跟着基底。
+///
+/// 与 [`wb_preview_bulk`] 是同一个问题的另一半 —— 那个问"设成这个值"，这个问"让它
+/// 重新跟着基底"。写下去的是 `null`（删掉那一层自己写的键），与「跟随」按钮同一个语义。
+#[tauri::command(async)]
+pub fn wb_preview_attach(key: String, cols: Vec<ColRef>) -> Result<AttachPreview, AppError> {
+    traced("wb_preview_attach", |_| {
+        with_ctx(|ctx| {
+            let (c, d, _) = state(ctx)?;
+            Ok(Book::new(&ctx.presets, &c, &d).preview_attach(&key, &cols))
         })
     })
 }
@@ -2451,26 +2604,29 @@ fn value_target(ctx: &Ctx, level: Level, owner: &str) -> String {
     }
 }
 
-/// **「改了什么」的数据源**（2026-11-03 定稿：事务是唯一数据源）。
+/// **「改了什么」的数据源**：事务账 + 值编辑历史，两处并起来。
 ///
-/// # 为什么不再读 `ctx.draft`
+/// # 为什么是两份
 ///
-/// 以前它遍历 `draft.values` / `draft.visibility` / `draft.bundles`。可
-/// `wb_apply_draft` 把值写进影子树之后**立刻** `ctx.draft = Draft::default()`
-/// —— 于是打开框时草稿层永远是空的，「改了什么」永远显示「这一份里没有格子级的
-/// 改动」。真正改动只活在 `ctx.txn` 里，而这个函数以前没读它。
+/// 结构编辑进事务（`ctx.txn`），**值编辑只落内存**（`ctx.history`，保存才写影子树）。
+/// 只读事务那份的话，改一格参数这里永远是 0 处 —— 页头写着「未保存 14」、
+/// 清单写「还没进事务」，两句话指的是同一批改动。
 ///
-/// # 为什么从事务读而不是比影子树
+/// # 为什么不用"影子树 vs 磁盘"现比
 ///
-/// 影子树里可能有**不是本次事务**造成的差异（上次会话的残留、外部改过），
-/// 拿"影子树 vs 磁盘"去数会把它们一起算进来。事务里那份是"这一笔到底改了
-/// 哪些字段"的确切记录 —— 作者 2026-11-03 的第 8 条硬约束。
+/// 影子树里可能有**不是这次编辑**造成的差异（上次会话的残留、外部改过），
+/// 拿它去数会把它们一起算进来。两份账各自记的是"这一笔到底改了哪些字段"。
 ///
-/// 现在「未保存 N」也是数它（[`txn::Txn::dirty_count`]），两个数物理同源。
+/// 去重口径与「未保存 N」同一处（[`history::dirty_field_entries`] 的 `same_cell`）。
 fn diff_draft(ctx: &Ctx) -> Vec<DiffLine> {
-    ctx.txn
-        .field_changes()
-        .into_iter()
+    let entries: Vec<edit_history::Entry> = ctx.history.entries().cloned().collect();
+    let mut rows = ctx.txn.field_changes();
+    for f in edit_history::dirty_field_entries(&entries) {
+        if !rows.iter().any(|x| x.same_cell(&f)) {
+            rows.push(f);
+        }
+    }
+    rows.into_iter()
         .map(|e| {
             /* `owner` 的写法在两条路上不同：
             值改动是 `A1` / `A1:STANDARD`（`machineVariants` 的叫法），
@@ -2529,8 +2685,8 @@ fn kind_of(why: &str) -> &'static str {
         "structural" => "改定义",
         /* 2026-11-03：`promoted`（为了保住值而多写的版本键）不再单独成一类 ——
         界面只问"这一格变没变"，不问"我们写了几个键"。它现在与不加键的继承
-        是同一种表现，统一叫「随基底生效」。 */
-        "follows" | "promoted" | "inherited" => "改值（随基底）",
+        是同一种表现，统一叫「随基线生效」。 */
+        "follows" | "promoted" | "inherited" => "改值（随基线）",
         "copy" => "改值（复制）",
         _ => "改值",
     }
@@ -2643,12 +2799,10 @@ pub fn wb_apply_draft(
                 }] => format!("{} · {}", value_target(ctx, *level, owner), what_of(key)),
                 _ => label,
             };
-            let out = apply_patches(
-                &mut ctx.draft,
-                &ctx.committed,
-                &ctx.presets.registry,
-                &patches,
-            )?;
+            /* 校验看**编辑态**清单：本会话里新建 / 改过 id 的版本也要写得进去
+            （`ctx.committed` 还停在开会话那一刻，见 `live_committed` 的注） */
+            let live = live_committed(&ctx.presets, &ctx.committed);
+            let out = apply_patches(&mut ctx.draft, &live, &ctx.presets.registry, &patches)?;
             /*
              * ★★ **2026-11-03：值编辑只落内存，一个字节都不写文件**。
              *
@@ -2668,7 +2822,7 @@ pub fn wb_apply_draft(
              * ②必须夹在①③之间：撤销要知道"这一笔改了什么"，而③之后就问不到了
              * （值已经是新的）。合并时反向沿用最早那条（见 `history::History::record`）。
              */
-            let staged = storage::stage_value_edits(&ctx.presets, &ctx.committed, &ctx.draft);
+            let staged = storage::stage_value_edits(&ctx.presets, &live, &ctx.draft);
             let fields = value_field_entries(ctx, &staged.changes);
             /*
              * 一次调用 = **一条命令**：单 patch 用它自己的 `EditKey`（允许按时间合并）；
@@ -2839,7 +2993,7 @@ pub fn wb_copy_recipe(
         /* ★ 改**会话里那一份**（影子树），不是 `load_presets()`（真仓库）。
          * 这两条路以前各走各的：命令登记在 `EDIT_COMMANDS` 里、事务拍的是影子，
          * 而写盘却落在真仓库 —— 和 22:17 那桩案子同一种病（2026-11-01）。 */
-        with_struct_ctx(
+        let done = with_struct_ctx(
             "",
             |_| {
                 vec![
@@ -2864,7 +3018,31 @@ pub fn wb_copy_recipe(
                 );
                 Ok(keys)
             },
-        )
+        );
+        /* **失败要能被界面讲清**（2026-11-12）：底下的错是字段级的
+        （`wiping.glue_pass_count 的值 1.0 …`），它答不出"这是哪一次复制"。
+        这里补上操作身份与该带的上下文，并盖一个稳定码给弹框显示。 */
+        done.map_err(|e| {
+            tracing::warn!(
+                machine = %machine_id,
+                template = %template_version_id,
+                version = %new_version_id,
+                error = %e.message,
+                "参数正文复制失败"
+            );
+            let context = format!(
+                "复制参数：{machine_id}/{new_version_id} ← 模板 {machine_id}/{template_version_id}"
+            );
+            let detail = match e.detail {
+                Some(d) if !d.is_empty() => format!("{context}；{d}"),
+                _ => context,
+            };
+            AppError {
+                detail: Some(detail),
+                ..e
+            }
+            .with_message_code("E_WB_COPY_RECIPE_001")
+        })
     })
 }
 
@@ -2916,22 +3094,9 @@ pub(super) fn save_in(ctx: &mut Ctx) -> Result<SaveResult, AppError> {
     }
     // 保存前先有一份对得上的快照：万一 save 中途挂了，草稿还在
     ctx.flush();
-    /*
-     * ★★ **2026-11-03：先把历史里那些命令一次写进影子树**。
-     *
-     * 编辑态改了（值只落内存），所以影子树可能一个字节都没变过 —— 而
-     * `txn::commit` 比的是真源 ↔ 影子。不先写这一笔，保存就会写空。
-     *
-     * 这里的字节来源是 `ctx.presets`（已经含着全部命令），所以**一次 `write_back`**，
-     * 不是 N 次。仍然只有「保存」这一个时刻会碰文件。
-     */
-    if !ctx.history.is_empty() {
-        ctx.presets.write_back()?;
-        tracing::info!(
-            commands = ctx.history.undo_depth(),
-            "保存：历史里的命令一次写进影子树"
-        );
-    }
+    /* 值编辑只在内存里，影子树可能一个字节都没变过 —— 而 `txn::commit` 比的是
+    真源 ↔ 影子。不先写这一笔，保存就会写空。 */
+    ctx.flush_values_into_shadow()?;
     let mut remap = BTreeMap::new();
     if values_dirty {
         let out = storage::save(&ctx.store, &mut ctx.presets, &ctx.committed, &ctx.draft)?;
@@ -2999,13 +3164,46 @@ pub fn wb_discard() -> Result<BookView, AppError> {
 
 /// [`wb_discard`] 的本体（**抽出来是为了可测**）：影子整个拉回磁盘原状、内存重读。
 pub(super) fn discard_in(ctx: &mut Ctx) -> Result<BookView, AppError> {
-    if ctx.draft.is_clean() && !ctx.txn.is_dirty() && ctx.history.is_empty() {
+    let base_root = txn::base_root(&ctx.store.root);
+    /* 空目录与"没有基准"是一回事 —— `txn::walk` 对不存在的目录给的是空快照 `Ok`，
+    拿它去判"影子脏不脏"必然说脏，而 `mirror(空 → 影子)` 会把整棵影子清掉 */
+    let base_snap = txn::snapshot(&base_root).ok().filter(|b| !b.is_empty());
+    /*
+     * "有没有可放弃的东西"必须**看影子**，不能只数三本账（草稿 / 事务 / 历史）。
+     *
+     * 结构命令可能改了文件才失败（先写、再从盘上重读校验）—— 那一笔不在任何一本账里，
+     * 影子却真的与基准不同。只数账会直接放行：用户点多少次「放弃改动」都清不掉它，
+     * 而「查看改动」照样能看见那几行。两条口径从此对不上。
+     *
+     * 只看源文件（`delivery/` 是生成产物，不算编辑）。基准读不出来时退回"只认三本账"：
+     * 没有可回退的那一份，判断也无从谈起。
+     */
+    let shadow_differs = match (&base_snap, txn::snapshot(&ctx.shadow_root)) {
+        (Some(base), Ok(shadow)) => {
+            let base = base.clone().without_products();
+            !txn::equal(&shadow.without_products(), &base)
+        }
+        _ => false,
+    };
+    if ctx.draft.is_clean() && !ctx.txn.is_dirty() && ctx.history.is_empty() && !shadow_differs {
         /* **没有可放弃的东西 = 已经是你要的样子**（2026-11-02）。
         作者点第二次「放弃改动」时，这条 `Err` 变成一条永远消不掉的横幅
         （`fatal` 只设不清、z 60、不能点穿），只能重开软件。
         幂等：什么都不做，把现在的状态交回去。 */
         let notices = ctx.notices_now();
         return Ok(view_of(ctx, &ctx.committed, &ctx.draft, notices));
+    }
+    /* 没有基准就**不能**往下走：`mirror(空 → 影子)` 会把整棵影子清掉，
+    而用户以为只是作废自己的编辑。缺就报错，不许兜底（AGENTS §8.1） */
+    if base_snap.is_none() {
+        return Err(
+            AppError::internal("基准快照不在，放弃改动没有可回退的那一份".to_owned()).with_detail(
+                format!(
+                    "期望 {} 里有一份完整的预设副本；它缺失时回铺会清空影子树",
+                    base_root.display()
+                ),
+            ),
+        );
     }
     let dropped = ctx.draft.dirty_count() + ctx.txn.dirty_count() + ctx.history.undo_depth();
     ctx.draft = Draft::default();
@@ -3037,7 +3235,6 @@ pub(super) fn discard_in(ctx: &mut Ctx) -> Result<BookView, AppError> {
      *
      * 基准（`base_root`）**不动**：它就是"我来的时候"那一份。
      * 增删改名排序全都不用逐种回退 —— 整份覆盖天然覆盖它们。 */
-    let base_root = txn::base_root(&ctx.store.root);
     txn::mirror(&base_root, &ctx.shadow_root)?;
     ctx.base = Presets::load_from(&base_root)?;
     ctx.txn.clear();
@@ -3067,12 +3264,19 @@ pub fn wb_txn_state() -> Result<TxnState, AppError> {
 /// 作者 2026-11-02：「其实我觉得代码的 diff 就很直观了」。两个框看的是同一件事的两面：
 /// 对象视角回答"我动了哪些格子"，这个回答"文件因此变成什么样"。
 ///
-/// **只读**：快照 + 读字节，一个字节都不写（`read_commands_are_async` 的白名单里有它）。
+/// **「保存会改什么」的唯一真值**：值编辑只在内存里，所以入口先把这批命令
+/// 写成影子字节（[`Ctx::flush_values_into_shadow`]），再摊两棵树。
+/// 不先写这一笔，框里就会说"影子与盘上一模一样"，而页头还挂着「未保存 N」。
+/// diff 本身只读两棵树；写只发生在"内存里确实有值编辑"时，写的就是保存要写的那批字节。
 #[tauri::command(async)]
 pub fn wb_shadow_diff() -> Result<shadow_diff::ShadowDiff, AppError> {
-    traced("wb_shadow_diff", |_| {
-        with_ctx(|ctx| shadow_diff::shadow_diff(&ctx.real_root, &ctx.shadow_root))
-    })
+    traced("wb_shadow_diff", |_| with_ctx_mut(shadow_diff_in))
+}
+
+/// [`wb_shadow_diff`] 的本体（**抽出来是为了可测**）。
+pub(super) fn shadow_diff_in(ctx: &mut Ctx) -> Result<shadow_diff::ShadowDiff, AppError> {
+    ctx.flush_values_into_shadow()?;
+    shadow_diff::shadow_diff(&ctx.real_root, &ctx.shadow_root)
 }
 
 /// 把一条结构命令的文件字节**换回去**（`undo=true` 换 `before`，`false` 换 `after`）。
@@ -3115,17 +3319,29 @@ pub(super) fn undo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
          * 迁移期：值编辑在 `ctx.history`（内存命令），结构编辑还在 `ctx.txn`
          * （文件事务）。谁后发生退谁 —— 按栈名轮流退会让撤销顺序与真实顺序相反：
          * 改了个参数、又改了机型信息之后按 Cmd+Z，必须退机型信息那一笔。
-         * 两个 `Instant` 来自同一个进程，可比。
+         * 判据的唯一实现是 `Ctx::undo_uses_history`（`txn_state.top_op` 也读它）。
          */
-        let use_history = match (ctx.history.undo_last_at(), ctx.txn.undo_last_at()) {
-            (Some(h), Some(t)) => h >= t,
-            (Some(_), None) => true,
-            _ => false,
-        };
+        let use_history = ctx.undo_uses_history();
         if use_history {
             /* 反向是「一条命令」：先算它要写哪些行（**在撤销之前算**，
-            因为 `changes` 要的是"改前"），再应用 */
-            let staged = ctx.history.inverse_staged(&ctx.presets, &ctx.committed);
+            因为 `changes` 要的是"改前"），再应用。
+            ★ 算不出来就**报错、不出栈**：早先 `.ok()?` 吞掉之后照样 `undo()`，
+            界面上就是"点了撤销什么都没发生，那一笔却没了"（2026-11-12）。 */
+            let live = live_committed(&ctx.presets, &ctx.committed);
+            let staged = ctx.history.inverse_staged(&ctx.presets, &live)?;
+            let Some(top_is_value) = ctx
+                .history
+                .peek_undo()
+                .map(|e| matches!(&e.action, edit_history::Action::Value { .. }))
+            else {
+                return Ok(ctx.txn_state());
+            };
+            /* 值编辑必须有一份算好的行；到这里还是 None 说明算的与弹的不是同一条 */
+            if top_is_value && staged.is_none() {
+                return Err(AppError::internal(
+                    "值编辑的反向算不出来 —— 撤销没有写出任何一行".to_owned(),
+                ));
+            }
             let Some(entry) = ctx.history.undo() else {
                 return Ok(ctx.txn_state());
             };
@@ -3182,7 +3398,21 @@ pub(super) fn redo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
             _ => false,
         };
         if use_history {
-            let staged = ctx.history.redo_staged(&ctx.presets, &ctx.committed);
+            /* 同 `undo`：先算再出栈，算不出来报错、栈不动 */
+            let live = live_committed(&ctx.presets, &ctx.committed);
+            let staged = ctx.history.redo_staged(&ctx.presets, &live)?;
+            let Some(top_is_value) = ctx
+                .history
+                .peek_redo()
+                .map(|e| matches!(&e.action, edit_history::Action::Value { .. }))
+            else {
+                return Ok(ctx.txn_state());
+            };
+            if top_is_value && staged.is_none() {
+                return Err(AppError::internal(
+                    "值编辑的重做算不出来 —— 重做没有写出任何一行".to_owned(),
+                ));
+            }
             let Some(entry) = ctx.history.redo() else {
                 return Ok(ctx.txn_state());
             };
@@ -3875,6 +4105,295 @@ mod tests {
         );
     }
 
+    /// **「未保存改动」框必须看得见值编辑**（2026-11-08）。
+    ///
+    /// 值编辑只落内存，影子树一个字节都不动。框里若直接摊两棵树，就会如实报告
+    /// "影子与盘上一模一样"，而页头挂着「未保存 N」—— 同一屏两个相反结论。
+    /// 所以入口要先 `flush_values_into_shadow`，本测试钉住这条接线。
+    #[test]
+    fn unsaved_value_edits_reach_the_shadow_diff() {
+        let (_fx, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real).unwrap();
+
+        assert!(
+            super::shadow_diff_in(&mut ctx).unwrap().files.is_empty(),
+            "刚打开、没有改动 ⇒ 框里是空的"
+        );
+        assert!(
+            super::build::require_clean(&ctx).is_ok(),
+            "刚打开 ⇒ 生成闸放行"
+        );
+
+        /* 值编辑的真实形状：内存文档改了 + 历史里记了一条，影子树没动 */
+        run_ctx(&mut ctx, Some("改值"), |c| {
+            c.presets
+                .set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+        })
+        .unwrap();
+        let patch = crate::workbench::domain::patch::Patch::SetValue {
+            level: Level::Machine,
+            owner: "A1".to_owned(),
+            key: "wiping.mode".to_owned(),
+            value: Some(serde_json::json!("disk")),
+        };
+        /* 字段账要一起记 —— 「未保存 N」与生成闸数的都是它，不是命令条数 */
+        let field = txn::FieldEntry {
+            level: Some("machine".to_owned()),
+            owner: "A1".to_owned(),
+            key: "wiping.mode".to_owned(),
+            label: "擦拭模式".to_owned(),
+            before: Some("wipe_tower".to_owned()),
+            after: Some("disk".to_owned()),
+            why: "user",
+        };
+        ctx.history.record(
+            "改值".to_owned(),
+            None,
+            patch.clone(),
+            vec![patch],
+            vec![field],
+        );
+        assert!(
+            !ctx.history.is_empty(),
+            "这一笔进了历史（保存才落盘的那批）"
+        );
+        assert!(
+            super::build::require_clean(&ctx).is_err(),
+            "值编辑也算未保存 —— 否则生成拦不拦取决于看没看过改动框"
+        );
+
+        let d = super::shadow_diff_in(&mut ctx).unwrap();
+        assert!(
+            !d.files.is_empty(),
+            "值编辑必须落成影子字节，否则框里会说「一模一样」：{d:?}"
+        );
+        /* 改的是注册表里的值 —— 落点也钉住，免得将来写错了文件还以为对 */
+        assert!(
+            d.files
+                .iter()
+                .any(|f| f.rel.ends_with("param_registry.toml")),
+            "改值落在注册表那份文件上：{:?}",
+            d.files.iter().map(|f| f.rel.clone()).collect::<Vec<_>>()
+        );
+
+        /* 幂等：再问一次不该多出文件（开框可能被连点） */
+        let again = super::shadow_diff_in(&mut ctx).unwrap();
+        assert_eq!(again.files.len(), d.files.len(), "刷第二次不该多出文件");
+
+        save_in(&mut ctx).unwrap();
+        assert!(
+            super::shadow_diff_in(&mut ctx).unwrap().files.is_empty(),
+            "保存之后影子与真源一致，框里回空"
+        );
+    }
+
+    /// **一趟「设值 → 跟随基线」= 0 处未保存**（作者 2026-11-09 报的那一幕）。
+    ///
+    /// 9 列批量设 1.2、再整批跟随基线回到 1.0：影子树与盘上一个字节都不差，
+    /// 页头就必须是 0。以前每一笔各自算「变了」，写着「未保存 9」，
+    /// 点进「查看改动」却什么都没有 —— 计数与 diff 同屏两个相反结论。
+    #[test]
+    fn a_follow_round_trip_cancels_the_unsaved_count() {
+        let ((_d, _f), _fx, mut ctx) = ctx();
+        /* patch 的 `owner` 是版本 uid（斜杠）；`machineVariants` 的叫法是冒号 */
+        let uid = "A1/STANDARD";
+        let at = "A1:STANDARD";
+        let key = "wiping.child";
+        let base = {
+            let inherited = ctx
+                .presets
+                .registry
+                .inherited_value_for(key, at)
+                .expect("这一项有继承值");
+            let p = ctx.presets.registry.param(key).expect("wiping.child");
+            crate::workbench::domain::wording::value_text(p, &inherited)
+        };
+
+        let mut entries: Vec<edit_history::Entry> = Vec::new();
+        for (round, value) in [Some(serde_json::json!(1.2)), None].into_iter().enumerate() {
+            let one = Patch::SetValue {
+                level: Level::Version,
+                owner: uid.to_owned(),
+                key: key.to_owned(),
+                value,
+            };
+            let mut d = Draft::default();
+            crate::workbench::domain::patch::apply(
+                &mut d,
+                &ctx.committed,
+                &ctx.presets.registry,
+                std::slice::from_ref(&one),
+            )
+            .unwrap();
+            let staged = storage::stage_value_edits(&ctx.presets, &ctx.committed, &d);
+            entries.push(edit_history::Entry {
+                label: "批量".to_owned(),
+                action: edit_history::Action::Value {
+                    patch: one,
+                    inverse: Vec::new(),
+                },
+                merge_key: None,
+                at: std::time::Instant::now(),
+                fields: value_field_entries(&ctx, &staged.changes),
+            });
+            storage::stage_into(&mut ctx.presets, &staged).unwrap();
+            if round == 0 {
+                assert_eq!(
+                    edit_history::dirty_fields(&entries),
+                    1,
+                    "只走一半 ⇒ 实打实 1 处：{entries:?}"
+                );
+            }
+        }
+        assert_eq!(
+            edit_history::dirty_fields(&entries),
+            0,
+            "设成 1.2 再跟回 {base} 必须净零：{entries:?}"
+        );
+        assert!(
+            super::shadow_diff_in(&mut ctx).unwrap().files.is_empty(),
+            "净零时影子树与盘上逐字节相同"
+        );
+    }
+
+    /// **一批里连基线一起改 ⇒ 版本写「跟随」，结果同值**（作者 2026-11-09）。
+    ///
+    /// 前端在 `followsBase` 时给版本发 `value: null`（跟随），基线发新值。
+    /// 两条同一个手势：基线成了 1.2，跟随它的版本也必须是 1.2，
+    /// 而且状态仍是"跟随"（不是各钉一份）。
+    #[test]
+    fn a_batch_that_writes_the_base_leaves_versions_following() {
+        let ((_d, _f), _fx, mut ctx) = ctx();
+        let key = "wiping.child";
+        let mut d = Draft::default();
+        crate::workbench::domain::patch::apply(
+            &mut d,
+            &ctx.committed,
+            &ctx.presets.registry,
+            &[
+                Patch::SetValue {
+                    level: Level::Machine,
+                    owner: "A1".to_owned(),
+                    key: key.to_owned(),
+                    value: Some(serde_json::json!(1.2)),
+                },
+                Patch::SetValue {
+                    level: Level::Version,
+                    owner: "A1/STANDARD".to_owned(),
+                    key: key.to_owned(),
+                    value: None,
+                },
+            ],
+        )
+        .unwrap();
+        let staged = storage::stage_value_edits(&ctx.presets, &ctx.committed, &d);
+        storage::stage_into(&mut ctx.presets, &staged).unwrap();
+
+        let p = ctx.presets.registry.param(key).expect("wiping.child");
+        assert_eq!(
+            p.machine_variants.get("A1"),
+            Some(&serde_json::json!(1.2)),
+            "基线写进去了"
+        );
+        assert!(
+            crate::presetdata::follows::is_following(p, "A1:STANDARD"),
+            "版本仍是跟随，不是自己钉一份"
+        );
+        let effective = p
+            .machine_variants
+            .get("A1:STANDARD")
+            .cloned()
+            .unwrap_or_else(|| p.machine_variants["A1"].clone());
+        assert_eq!(effective, serde_json::json!(1.2), "跟随后的值 = 基线的新值");
+    }
+
+    /// **「撤销这一笔（N 处）」报的必须是撤销真会弹掉的那一条**（作者 2026-11-09）。
+    ///
+    /// 批量一次改多格 = 历史里一条；`top_op` 的 `fields` 就是它改了几处。
+    #[test]
+    fn top_op_reports_the_entry_undo_would_pop() {
+        let ((_d, _f), _fx, mut ctx) = ctx();
+        let cell = |owner: &str| txn::FieldEntry {
+            level: Some("Version".to_owned()),
+            owner: owner.to_owned(),
+            key: "wiping.child".to_owned(),
+            label: "塔位置 X".to_owned(),
+            before: Some("1.0".to_owned()),
+            after: Some("1.2".to_owned()),
+            why: "user",
+        };
+        ctx.history.record(
+            "擦料塔首层流量 批量设为 1.2（2 列）".to_owned(),
+            None,
+            Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(1.2)),
+            },
+            /* 逆命令非空才占栈（`record` 的第一道闸） */
+            vec![Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(1.0)),
+            }],
+            vec![cell("A1:STANDARD"), cell("A1:FAST")],
+        );
+
+        let top = ctx.txn_state().top_op.expect("有一笔可撤销");
+        assert_eq!(top.fields, 2, "这一笔改了两处");
+        assert!(
+            top.label.contains("批量设为"),
+            "标签要带得走：{}",
+            top.label
+        );
+    }
+
+    /// 看了一眼改动，不等于签了字：flush 写进影子的那些字节，**放弃必须整条退回去**。
+    #[test]
+    fn flushing_value_edits_stays_discardable() {
+        let (_fx, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real).unwrap();
+
+        run_ctx(&mut ctx, Some("改值"), |c| {
+            c.presets
+                .set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+        })
+        .unwrap();
+        let patch = crate::workbench::domain::patch::Patch::SetValue {
+            level: Level::Machine,
+            owner: "A1".to_owned(),
+            key: "wiping.mode".to_owned(),
+            value: Some(serde_json::json!("disk")),
+        };
+        ctx.history.record(
+            "改值".to_owned(),
+            None,
+            patch.clone(),
+            vec![patch],
+            Vec::new(),
+        );
+
+        assert!(
+            !super::shadow_diff_in(&mut ctx).unwrap().files.is_empty(),
+            "先有差异（看改动这一步会把它写成字节）"
+        );
+
+        discard_in(&mut ctx).unwrap();
+        assert!(ctx.history.is_empty(), "放弃清掉值编辑历史");
+        assert!(
+            super::shadow_diff_in(&mut ctx).unwrap().files.is_empty(),
+            "放弃之后影子回到真源，框里不该还剩东西"
+        );
+    }
+
     ///   ② 编辑之后真仓库一个字节不动，事务 +1；
     ///   ③ 放弃 → 影子回到磁盘原状、事务清零；
     ///   ④ 再改一次并保存 → 这时真仓库才变。
@@ -4221,6 +4740,73 @@ mod tests {
         drop(fx_dir);
     }
 
+    /// **结构编辑一定要进「未保存 N」**（作者 2026-11-11 报的：改了版本标签，
+    /// 页头一直写「未保存 0」，可导航那盏灯亮着、撤销也点得动）。
+    ///
+    /// 两种各验一次：记了字段账的（改一格）与一次性动作（新建 / 删除，没有格可记）。
+    /// `Ctx::dirty_count()`（状态栏那条）与 `view_of().dirty_count`（页头那份）同源。
+    #[test]
+    fn a_struct_edit_always_shows_up_in_the_unsaved_count() {
+        use crate::presetdata::VersionField;
+
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+        assert_eq!(ctx.dirty_count(), 0, "开场是干净的");
+
+        /* ① 改一格：命令把改前 / 改后写进 `pending_fields` —— 标签也必须算得出来 */
+        run_struct(
+            &mut ctx,
+            "改版本信息",
+            "tag",
+            |_| vec!["machines/A1.toml".to_owned()],
+            |ctx| {
+                ctx.presets.catalog.machine_mut("A1")?.set_version_field(
+                    "FAST",
+                    VersionField::Tag,
+                    Some("旧版"),
+                )?;
+                ctx.presets.catalog.write_machine("A1")?;
+                ctx.pending_fields = vec![one_field(
+                    "A1:FAST".to_owned(),
+                    "tag",
+                    "快拆版6月以前".to_owned(),
+                    Some("推荐".to_owned()),
+                    Some("旧版".to_owned()),
+                )];
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(ctx.dirty_count(), 1, "改了一格就是一处");
+        let (c, d, n) = state(&ctx).unwrap();
+        assert_eq!(
+            view_of(&ctx, &c, &d, n).dirty_count,
+            1,
+            "页头那份读数也要是 1（它曾经漏掉结构编辑那一项）"
+        );
+
+        /* ② 一次性动作：没有"格"，但它照样改了文件 —— 也算一处 */
+        run_struct(
+            &mut ctx,
+            "新增机型",
+            "",
+            |_| vec!["machines/NEW.toml".to_owned()],
+            |ctx| {
+                ctx.presets
+                    .catalog
+                    .add_machine("NEW", "BAMBU_LAB", "新机器")?;
+                ctx.presets.catalog.write_machine("NEW")
+            },
+        )
+        .unwrap();
+        assert_eq!(ctx.dirty_count(), 2, "1 格 + 1 个一次性动作");
+
+        drop(fx_dir);
+    }
+
     /// **新建机型撤销 ⇒ 那个文件被删掉**（`before` 为 `None` = 这一笔新建了它）
     #[test]
     fn undoing_a_new_machine_removes_its_file() {
@@ -4252,6 +4838,484 @@ mod tests {
         );
 
         drop(fx_dir);
+    }
+
+    /// **新建版本后，整本里立刻有它**（2026-11-12）。
+    ///
+    /// 详情卡由 `book.machines[].versions` 驱动（前端 `nodeOf` 按 `versionId` 找节点）。
+    /// 清单以前读 `committed.catalog`（已落盘那一份），新建的版本只在 `presets` 里 ——
+    /// 于是点完「新增版本」：列表里有、详情打不开、改不了，得先保存才看得见
+    /// （作者报的「新增的这些展开不了详情」）。
+    #[test]
+    fn a_new_version_shows_up_in_the_book_before_saving() {
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        run_struct(
+            &mut ctx,
+            "新增版本",
+            "",
+            |_| vec!["machines/A1.toml".to_owned()],
+            |ctx| {
+                ctx.presets
+                    .catalog
+                    .machine_mut("A1")?
+                    .add_version("NEW1", "新版本")?;
+                ctx.presets.catalog.write_machine("A1")
+            },
+        )
+        .unwrap();
+
+        let view = view_of(&ctx, &ctx.committed, &ctx.draft, Vec::new());
+        let a1 = view.machines.iter().find(|m| m.id == "A1").expect("A1 在");
+        let node = a1
+            .versions
+            .iter()
+            .find(|v| v.version_id == "NEW1")
+            .expect("新建的版本必须在整本里 —— 否则详情卡取不到节点");
+        assert_eq!(node.name, "新版本", "名字来自编辑态，不是回落的 id");
+        assert!(
+            view.dirty_count >= 1,
+            "新建一个版本算一处未保存，实测 {}",
+            view.dirty_count
+        );
+
+        drop(fx_dir);
+    }
+
+    /// **本会话里新建的版本，参数台要写得进去**（2026-11-12）。
+    ///
+    /// `ctx.committed` 是"打开工作台那一刻"的清单：新 uid 只存在于 `presets` 里。
+    /// 校验拿旧清单就报「版本 A1/NEW1 不存在」—— 参数台一格都改不动，撤销也一样
+    /// （反向被 `.ok()?` 吞掉，点了没反应）。这里同时钉住"旧清单会拒"与"编辑态清单能写"。
+    #[test]
+    fn a_version_created_in_this_session_accepts_value_edits() {
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        run_struct(
+            &mut ctx,
+            "新增版本",
+            "",
+            |_| vec!["machines/A1.toml".to_owned()],
+            |ctx| {
+                ctx.presets
+                    .catalog
+                    .machine_mut("A1")?
+                    .add_version("NEW1", "新版本")?;
+                ctx.presets.catalog.write_machine("A1")
+            },
+        )
+        .unwrap();
+
+        let patch = Patch::SetValue {
+            level: Level::Version,
+            owner: "A1/NEW1".to_owned(),
+            key: "toolhead.offset.x".to_owned(),
+            value: Some(serde_json::json!(-0.7)),
+        };
+
+        /* 前提：旧清单确实会拒 —— 修之前作者看到的就是这一句 */
+        let stale = apply_patches(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.presets.registry,
+            std::slice::from_ref(&patch),
+        );
+        assert!(stale.is_err(), "前提：开会话那一刻的清单里没有 NEW1");
+
+        /* 编辑态清单：与 `wb_apply_draft` 同一条路 */
+        let live = live_committed(&ctx.presets, &ctx.committed);
+        let out = apply_patches(
+            &mut ctx.draft,
+            &live,
+            &ctx.presets.registry,
+            std::slice::from_ref(&patch),
+        )
+        .unwrap();
+        let staged = storage::stage_value_edits(&ctx.presets, &live, &ctx.draft);
+        assert!(!staged.is_empty(), "新版本上写值必须算出真实改动");
+        ctx.history.record(
+            "A1 · 新版本 · X 轴偏移".to_owned(),
+            edit_history::merge_key_of(&patch),
+            patch.clone(),
+            out.inverse,
+            Vec::new(),
+        );
+        storage::stage_into(&mut ctx.presets, &staged).unwrap();
+        ctx.draft = Draft::default();
+
+        assert_eq!(
+            ctx.presets
+                .registry
+                .param("toolhead.offset.x")
+                .unwrap()
+                .machine_variants
+                .get("A1:NEW1")
+                .cloned(),
+            Some(serde_json::json!(-0.7)),
+            "值要落在新版本自己的键上"
+        );
+
+        /* 撤销：反向同样要认得新 uid（旧清单会把反向拒掉、再被 `.ok()?` 吞掉）。
+        跟随状态的语义是"值同步回基底、状态置跟随"，所以这一格回到 0.0 而不是消失 */
+        let depth_before = ctx.history.undo_depth();
+        undo_in(&mut ctx).unwrap();
+        assert_eq!(
+            ctx.presets
+                .registry
+                .param("toolhead.offset.x")
+                .unwrap()
+                .machine_variants
+                .get("A1:NEW1")
+                .cloned(),
+            Some(serde_json::json!(0.0)),
+            "撤销把这一格同步回基底（跟随）"
+        );
+        assert!(
+            crate::presetdata::follows::is_following(
+                ctx.presets.registry.param("toolhead.offset.x").unwrap(),
+                "A1:NEW1"
+            ),
+            "撤销之后这一格要回到跟随"
+        );
+        assert_eq!(
+            ctx.history.undo_depth(),
+            depth_before - 1,
+            "那一笔真的退掉了，不是静默吞掉"
+        );
+
+        drop(fx_dir);
+    }
+
+    /// **改过 id 的版本，参数台同样写得进去**（2026-11-12）。
+    ///
+    /// 与上一条同源：改名之后新 uid 也只在 `presets` 里。
+    #[test]
+    fn a_renamed_version_accepts_value_edits() {
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        run_struct(
+            &mut ctx,
+            "改版本 id",
+            "",
+            |_| {
+                vec![
+                    "machines/A1.toml".to_owned(),
+                    "registry/param_registry.toml".to_owned(),
+                    "assets.toml".to_owned(),
+                ]
+            },
+            |ctx| {
+                ctx.presets.rename_version_uid("A1", "FAST", "FAST_NEW")?;
+                ctx.presets.registry.write_back()?;
+                ctx.presets.assets.write()?;
+                ctx.presets.catalog.write_machine("A1")?;
+                ctx.retarget_version_uid("A1", "FAST", "FAST_NEW");
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        let patch = Patch::SetValue {
+            level: Level::Version,
+            owner: "A1/FAST_NEW".to_owned(),
+            key: "toolhead.offset.x".to_owned(),
+            value: Some(serde_json::json!(6.5)),
+        };
+        let live = live_committed(&ctx.presets, &ctx.committed);
+        let out = apply_patches(
+            &mut ctx.draft,
+            &live,
+            &ctx.presets.registry,
+            std::slice::from_ref(&patch),
+        )
+        .expect("改过 id 的版本要写得进去 —— 新 uid 在编辑态清单里");
+        let staged = storage::stage_value_edits(&ctx.presets, &live, &ctx.draft);
+        storage::stage_into(&mut ctx.presets, &staged).unwrap();
+        ctx.history.record(
+            "A1 · 高速版 · X 轴偏移".to_owned(),
+            edit_history::merge_key_of(&patch),
+            patch.clone(),
+            out.inverse,
+            Vec::new(),
+        );
+        ctx.draft = Draft::default();
+
+        assert_eq!(
+            ctx.presets
+                .registry
+                .param("toolhead.offset.x")
+                .unwrap()
+                .machine_variants
+                .get("A1:FAST_NEW")
+                .cloned(),
+            Some(serde_json::json!(6.5))
+        );
+
+        /* 整本里必须能找到新 uid —— 机型页的详情卡按 `book.machines[].versions[].versionId`
+        找节点，找不到就整块不渲染（作者 2026-11-12：「改了 id 就展开不了详情」） */
+        let view = view_of(&ctx, &ctx.committed, &ctx.draft, Vec::new());
+        let node = view
+            .machines
+            .iter()
+            .find(|m| m.id == "A1")
+            .expect("A1 在")
+            .versions
+            .iter()
+            .find(|v| v.version_id == "FAST_NEW");
+        assert!(
+            node.is_some(),
+            "改名之后整本里必须有新 uid，实测：{:?}",
+            view.machines.iter().find(|m| m.id == "A1").map(|m| m
+                .versions
+                .iter()
+                .map(|v| v.version_id.clone())
+                .collect::<Vec<_>>())
+        );
+
+        drop(fx_dir);
+    }
+
+    /// **先改了参数再改版本 id：草稿要跟着搬到新 uid**（2026-11-12）。
+    ///
+    /// 主键换了而草稿还挂着 `v:A1/FAST:key` 的话，保存那一刻那几格会被写进一个
+    /// 不存在的版本（`machineVariants` 里留下 `A1:FAST`，下一次加载判 Corrupted）。
+    /// 早先的写法是"有值编辑就拒绝改 id" —— 作者要的是搬过去，不是拦下来。
+    #[test]
+    fn renaming_a_version_carries_unsaved_value_edits() {
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        /* ① 值编辑：草稿 + 历史各一份（真实路径 `wb_apply_draft` 落的也是这两笔） */
+        let patch = Patch::SetValue {
+            level: Level::Version,
+            owner: "A1/FAST".to_owned(),
+            key: "toolhead.offset.x".to_owned(),
+            value: Some(serde_json::json!(6.5)),
+        };
+        apply_patches(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.presets.registry,
+            std::slice::from_ref(&patch),
+        )
+        .unwrap();
+        ctx.history.record(
+            "A1 · 高速版 · X 轴偏移".to_owned(),
+            Some("v:A1/FAST:toolhead.offset.x".to_owned()),
+            patch,
+            vec![Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/FAST".to_owned(),
+                key: "toolhead.offset.x".to_owned(),
+                value: Some(serde_json::json!(-0.7)),
+            }],
+            Vec::new(),
+        );
+        assert!(
+            ctx.draft.values.keys().any(|k| k.starts_with("v:A1/FAST:")),
+            "前提：草稿里那一格挂在旧 uid 上"
+        );
+
+        /* ② 改 id：与命令体同一套动作 */
+        run_struct(
+            &mut ctx,
+            "改版本 id",
+            "",
+            |_| {
+                vec![
+                    "machines/A1.toml".to_owned(),
+                    "registry/param_registry.toml".to_owned(),
+                    "assets.toml".to_owned(),
+                ]
+            },
+            |ctx| {
+                ctx.presets.rename_version_uid("A1", "FAST", "FAST_NEW")?;
+                ctx.presets.registry.write_back()?;
+                ctx.presets.assets.write()?;
+                ctx.presets.catalog.write_machine("A1")?;
+                ctx.retarget_version_uid("A1", "FAST", "FAST_NEW");
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        /* ③ 草稿键跟着搬，旧键一个不剩 */
+        assert!(
+            !ctx.draft.values.keys().any(|k| k.contains("A1/FAST:")),
+            "旧 uid 的草稿键一条都不该剩：{:?}",
+            ctx.draft.values.keys().collect::<Vec<_>>()
+        );
+        assert!(
+            ctx.draft
+                .values
+                .keys()
+                .any(|k| k.starts_with("v:A1/FAST_NEW:")),
+            "那一格要落在新 uid 上"
+        );
+
+        /* ④ 历史里那条值编辑也要重指：结构编辑会 `reload_presets`，它拿 patch 重放 */
+        ctx.reload_presets().unwrap();
+        let def = ctx
+            .presets
+            .registry
+            .param("toolhead.offset.x")
+            .expect("字段在");
+        assert_eq!(
+            def.machine_variants.get("A1:FAST_NEW"),
+            Some(&serde_json::json!(6.5)),
+            "重放之后值要落在新 uid 上，实测：{:?}",
+            def.machine_variants
+        );
+        assert!(
+            !def.machine_variants.contains_key("A1:FAST"),
+            "旧 uid 一条都不该剩"
+        );
+
+        drop(fx_dir);
+    }
+
+    /// **把版本指到套餐 = 一条可撤销的草稿编辑**（2026-11-12）。
+    ///
+    /// 它改的是**机型文件**里的 `recommendedBundle`，套餐内容一个字都不动。
+    /// `files_of` 曾经写成 `["bundles.toml"]` —— `run_struct` 拍不到被改的机型文件，
+    /// 撤销撤不回去、未保存数也不涨（这正是"还有哪些没用草稿"那一问里挖出来的）。
+    #[test]
+    fn assigning_versions_to_a_bundle_is_an_undoable_draft_edit() {
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        let rel = "machines/P1S.toml";
+        let before = std::fs::read(ctx.shadow_root.join(rel)).unwrap();
+        let uids = vec!["P1S/LITE".to_owned()];
+
+        run_struct(
+            &mut ctx,
+            "指派版本到套餐",
+            "members",
+            |_| super::bundles::assign_files_of(&uids),
+            |ctx| {
+                ctx.presets.assign_versions("A1_default", &uids)?;
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(
+            ctx.dirty_count() >= 1,
+            "指派也是一处未保存改动（它改了机型文件）"
+        );
+        assert_ne!(
+            std::fs::read(ctx.shadow_root.join(rel)).unwrap(),
+            before,
+            "机型文件真的被改了"
+        );
+
+        undo_in(&mut ctx).unwrap();
+        assert_eq!(
+            std::fs::read(ctx.shadow_root.join(rel)).unwrap(),
+            before,
+            "撤销要退回机型文件 —— files_of 漏了它就退不回来"
+        );
+
+        drop(fx_dir);
+    }
+
+    /// **结构命令失败 ⇒ 影子文件退回 before，任何一本账都不留**（2026-11-11）。
+    ///
+    /// 现场：删版本先把 `A1/FAST` 从机型文件里写掉，再从盘上重读时才被资产台账
+    /// 判成 Corrupted。那半笔改动不在草稿 / 事务 / 历史任何一本账里 ——
+    /// 页头数不到、撤销退不回、「放弃改动」又因为三本账都干净直接放行。
+    #[test]
+    fn a_failed_struct_command_leaves_no_trace_in_the_shadow() {
+        let (_fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        let rel = "machines/A1.toml";
+        let before = std::fs::read(ctx.shadow_root.join(rel)).unwrap();
+
+        let err = run_struct(
+            &mut ctx,
+            "删除版本",
+            "",
+            |_| vec![rel.to_owned()],
+            |ctx| -> Result<(), AppError> {
+                /* 写盘成功、校验失败 —— 这一步的顺序就是真机上出事的顺序 */
+                ctx.presets
+                    .catalog
+                    .machine_mut("A1")?
+                    .remove_version("FAST")?;
+                ctx.presets.catalog.write_machine("A1")?;
+                Err(AppError::corrupted("模拟重读失败".to_owned()))
+            },
+        );
+        assert!(err.is_err());
+
+        assert_eq!(
+            std::fs::read(ctx.shadow_root.join(rel)).unwrap(),
+            before,
+            "失败之后影子必须退回命令之前那一份"
+        );
+        assert!(!ctx.txn.is_dirty(), "失败的一笔不进事务");
+        assert_eq!(ctx.history.undo_depth(), 0, "失败的一笔不进历史");
+        assert!(
+            ctx.presets
+                .catalog
+                .machine("A1")
+                .unwrap()
+                .versions
+                .iter()
+                .any(|v| v.id == "FAST"),
+            "内存文档也要退回删除之前"
+        );
+    }
+
+    /// **三本账都干净、影子却真的脏 ⇒ 「放弃改动」必须照清**（2026-11-11）。
+    ///
+    /// 作者遇到的那一屏：页头「未保存 (0)」，「查看改动」有 -16 行，
+    /// 点「放弃改动」什么都不做。只数账的判据认不出这种残迹。
+    #[test]
+    fn discard_cleans_a_shadow_that_no_book_accounts_for() {
+        let (_fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        let rel = "machines/A1.toml";
+        let pristine = std::fs::read(ctx.shadow_root.join(rel)).unwrap();
+        let mut dirty = String::from_utf8(pristine.clone()).unwrap();
+        dirty.push_str("\n# 没人认领的一笔\n");
+        crate::fsx::atomic::atomic_write(&ctx.shadow_root.join(rel), dirty.as_bytes()).unwrap();
+        assert!(ctx.draft.is_clean() && !ctx.txn.is_dirty() && ctx.history.is_empty());
+
+        discard_in(&mut ctx).unwrap();
+
+        assert_eq!(
+            std::fs::read(ctx.shadow_root.join(rel)).unwrap(),
+            pristine,
+            "放弃之后影子要回到打开那一刻"
+        );
     }
 
     /// **机器页的结构编辑不许冲掉内存里的值编辑**（2026-11-03 换代回归）。
@@ -4863,6 +5927,72 @@ mod tests {
         );
     }
 
+    /// **模板里有一个「int 写成 1.0」的参数，复制照样成功**（2026-11-12 真事故）。
+    ///
+    /// 复制走的是完整有效配方（含出厂默认）。`1.0` 交给 `to_toml_value` 时按
+    /// `int` 判类型不符，**整批**被拒、一项都写不进去 —— 作者看到的就是
+    /// 「勾了同时复制配方，卡片仍是参数源待补」。读入归一（1.0 → 1）之后这条才通。
+    #[test]
+    fn copying_a_recipe_survives_an_int_default_written_as_a_float() {
+        let (dir, _old) = Fixture::load().into_parts();
+        let root = dir.path().join("presets");
+
+        /* 往夹具里加一个 int 参数，默认值照真数据那样写成 `1.0` */
+        let reg = root.join("registry/param_registry.toml");
+        let mut text = std::fs::read_to_string(&reg).unwrap();
+        text.push_str(
+            "\n[[params]]\n\
+             key = 'copy.probe'\n\
+             label = '复制探针'\n\
+             desc = ''\n\
+             configKey = 'CopyProbe'\n\
+             tomlKey = 'copy_probe'\n\
+             jsonKey = 'copy_probe'\n\
+             tomlComment = ''\n\
+             valueType = 'int'\n\
+             uiComponent = 'number'\n\
+             defaultValue = 1.0\n\
+             section = 'wiping'\n\
+             scope = 'universal'\n\
+             \n\
+             [params.layout]\n\
+             sectionId = 'wipe'\n\
+             order = 99.0\n",
+        );
+        crate::fsx::atomic::atomic_write(&reg, text.as_bytes()).unwrap();
+        /* 布局里收下它 —— 否则一致性校验会拦「有参数没有被任何 section 收下」 */
+        let lay = root.join("layout_schema.toml");
+        let mut ltext = std::fs::read_to_string(&lay).unwrap();
+        ltext.push_str(
+            "\n[[tabs.sections.items]]\n\
+             id = 'copy.probe'\n\
+             key = 'copy.probe'\n\
+             paramKey = 'copy.probe'\n",
+        );
+        crate::fsx::atomic::atomic_write(&lay, ltext.as_bytes()).unwrap();
+
+        let mut p = crate::presetdata::Presets::load_from(&root).expect("加了参数也读得通");
+        p.catalog
+            .machine_mut("A1")
+            .unwrap()
+            .add_version("SNAPSHOT", "快照版")
+            .unwrap();
+
+        let keys = copy_recipe(&mut p, "A1", "FAST", "SNAPSHOT")
+            .expect("int 参数写成 1.0 也要能复制 —— 否则整批被拒");
+        assert!(keys > 0);
+
+        let copied = p
+            .registry
+            .param("copy.probe")
+            .unwrap()
+            .machine_variants
+            .get("A1:SNAPSHOT")
+            .cloned()
+            .expect("探针参数要落进新版本");
+        assert!(copied.is_i64(), "写进文件的是整数，不是 1.0：{copied:?}");
+    }
+
     fn cols(list: &[(&str, Option<&str>)]) -> Vec<ColRef> {
         list.iter()
             .map(|(m, v)| ColRef {
@@ -5248,15 +6378,54 @@ mod tests {
 
         let lines = diff_draft(&ctx);
         assert_eq!(lines.len(), 2, "两处改动两行：{lines:#?}");
-        assert_eq!(lines[0].target, "A1 · 机型基底");
+        assert_eq!(lines[0].target, "A1 · 机型基线");
         assert_eq!(lines[1].target, "A1 · 标准版", "版本归属要翻成人话");
         assert_eq!(lines[1].why, "promoted", "连带项的来源要带到界面上");
-        /* 2026-11-03：`promoted` 与继承统一成「随基底生效」—— 界面不再区分
+        /* 2026-11-03：`promoted` 与继承统一成「随基线生效」—— 界面不再区分
         "我们写没写版本键"，那是存储细节 */
-        assert_eq!(lines[1].kind, "改值（随基底）");
+        assert_eq!(lines[1].kind, "改值（随基线）");
         assert_eq!(lines[1].before, "-1");
         assert_eq!(lines[1].after, "7");
         assert!(lines.iter().all(|l| l.file == VALUE_FILE));
+    }
+
+    /// **值编辑只落内存、不进事务 —— 「改了什么」也必须看得见它**（2026-11-08 作者报的）。
+    ///
+    /// 页头「未保存 N」数的是两份账（事务 + 值编辑历史）；这个清单以前只读事务那份，
+    /// 于是同一批改动在页头是 14、在清单里是 0 处。
+    #[test]
+    fn the_diff_lists_pending_value_edits_that_never_touch_the_transaction() {
+        let (_d, _f, mut ctx) = ctx();
+        assert!(diff_draft(&ctx).is_empty(), "没有改动时框里是空的");
+
+        let patch = Patch::SetValue {
+            level: crate::workbench::domain::Level::Version,
+            owner: "A1/STANDARD".to_owned(),
+            key: "wiping.tower_first_layer_flow".to_owned(),
+            value: Some(serde_json::json!(1.2)),
+        };
+        ctx.history.record(
+            "改值".to_owned(),
+            None,
+            patch.clone(),
+            vec![patch],
+            vec![txn::FieldEntry {
+                level: Some("Version".to_owned()),
+                owner: "A1:STANDARD".to_owned(),
+                key: "wiping.tower_first_layer_flow".to_owned(),
+                label: "填料塔首层流量".to_owned(),
+                before: Some("1".to_owned()),
+                after: Some("1.2".to_owned()),
+                why: "user",
+            }],
+        );
+
+        let lines = diff_draft(&ctx);
+        assert_eq!(lines.len(), 1, "值编辑不进事务，也要列出来：{lines:#?}");
+        assert_eq!(lines[0].owner, "A1:STANDARD");
+        assert_eq!(lines[0].target, "A1 · 标准版", "归属要翻成人话");
+        assert_eq!(lines[0].after, "1.2");
+        assert!(ctx.txn.field_changes().is_empty(), "这一笔确实没进事务");
     }
 
     /// 草稿里指向已消失版本的条目在**加载时**清掉，并且报出来。
@@ -5557,9 +6726,65 @@ mod tests {
     /// 真机事故：`wb_publish` 当时是同步命令，读 Keychain（系统弹密码框，凭据后来
     /// 改住凭据文件）、推 git、建 PR 全发生在主线程上，窗口一动不动；作者原话
     /// 「卡住了，我什么都没办法点」。那条命令现在已经 `(async)`，这里把它钉住，别再退回去。
+    /// **每一个编辑命令都要进未保存账**（作者 2026-11-12：「可能还有很多地方改了，
+    /// 它都显示这个未保存 0」）。
+    ///
+    /// 判据：登记在 [`COMMAND_LABELS`] 里的命令 = 编辑，正文必须走
+    /// [`with_struct_ctx`]（它在 `run_struct` 里记 `ctx.history`，页头那个 N 才数得到）。
+    /// 既没进 history 也没进 txn 的写命令，界面就是「文件改了、页头 0」，
+    /// 2026-11-11 改版本标签那一幕就是这么来的（`version_field_text` 漏胳膊）。
+    ///
+    /// 用登记表当输入而不是"猜哪些命令会写盘"：写盘可能藏在
+    /// `Presets::set_asset_delivery` 这类封装里，源码里看不到 `write()`，
+    /// 按写调用扫会漏掉一半命令。
+    #[test]
+    fn every_editing_command_goes_through_the_edit_ledger() {
+        // 走 `txn` 那一套栈（`TXN_EDIT_COMMANDS` 的唯一一条），不是 `ctx.history`
+        const EXEMPT: &[&str] = &["wb_anno_write"];
+
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workbench/app");
+        let mut all = String::new();
+        for entry in std::fs::read_dir(&dir).expect("app 目录").flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("rs") {
+                continue;
+            }
+            all.push_str(&std::fs::read_to_string(&path).expect("读源码"));
+            all.push('\n');
+        }
+
+        let mut checked = 0usize;
+        for (cmd, label) in COMMAND_LABELS {
+            if EXEMPT.contains(cmd) {
+                continue;
+            }
+            let Some(start) = all.find(&format!("pub fn {cmd}")) else {
+                panic!("{cmd}（{label}）登记在 COMMAND_LABELS 里，源码里却找不到这个函数");
+            };
+            /* 一条命令的正文到下一个命令注解为止；文件末尾那一条会吞掉测试模块，
+            再按 `#[cfg(test)]` 截一次（里面全是"造现场"的写盘调用，扫进来就是假阳性） */
+            let body = all[start..]
+                .split("#[tauri::command")
+                .next()
+                .unwrap_or_default();
+            let body = body.split("#[cfg(test)]").next().unwrap_or(body);
+            checked += 1;
+            assert!(
+                body.contains("with_struct_ctx("),
+                "{cmd}（{label}）是编辑却没过 with_struct_ctx —— \
+                 页头「未保存 N」会漏掉它"
+            );
+        }
+        assert!(checked > 20, "只验了 {checked} 条编辑命令，判据大概没生效");
+    }
+
     #[test]
     fn read_commands_are_async_so_they_never_freeze_the_window() {
         /// 这一批是**只读**（只算不写盘）的 —— 全部必须是 `(async)`。
+        ///
+        /// 唯一的例外是 `wb_shadow_diff`：它入口会把内存里的值编辑写成影子字节
+        /// （与保存写的是同一批），之后才摊两棵树。它留在这张单子里是因为**必须 async**
+        /// —— 摊两棵树 + 偶尔一次整份写回，占住主线程就是冻窗口。
         const READ: &[&str] = &[
             "wb_boot",
             "wb_words",
@@ -5573,7 +6798,7 @@ mod tests {
             "wb_ui",
             "wb_preview_bulk",
             "wb_diff_draft",
-            // 未保存改动的逐行 diff：只做快照 + 读字节，不写盘
+            // 未保存改动的逐行 diff：读两棵树（入口会先把内存值编辑落成影子字节）
             "wb_shadow_diff",
             "wb_preflight",
             "wb_generate_preview",

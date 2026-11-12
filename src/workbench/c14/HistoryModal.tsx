@@ -35,7 +35,14 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { WHY_LABEL, wb, type DiffLine, type ShadowDiff, type ShadowFileDiff } from '../api'
+import {
+  WHY_LABEL,
+  wb,
+  type DiffLine,
+  type ShadowDiff,
+  type ShadowFileDiff,
+  type TopOp,
+} from '../api'
 import { settleAll } from '../editQueue'
 import { isAppError } from '../api'
 import ModalC14 from './ModalC14'
@@ -67,6 +74,14 @@ interface Props {
   /** 正在保存或放弃 */
   busy?: boolean
   /**
+   * 页头那个「未保存 N」（与状态栏同一个数，来自后端 `Txn::dirty_count`）。
+   *
+   * 用它守住一条：**文件层面没有差异 ≠ 没有未保存改动**。值编辑会被入口写成影子字节，
+   * 但菜单 / 套餐 / 可见性写在 `workbench/` 自己的 json 里，永远进不了这份文件对比 ——
+   * 那几笔仍要在框里说出来，不许把「影子与盘上一模一样」当结论。
+   */
+  dirtyCount?: number
+  /**
    * 撤销 / 重做（2026-11-02 作者：「这个也加上功能」）。
    *
    * **不在这里自己发命令**：撤销栈是外壳那一份（`wb_txn_state` 里的 `canUndo/canRedo`），
@@ -79,6 +94,14 @@ interface Props {
   onRedo?: () => Promise<boolean>
   canUndo?: boolean
   canRedo?: boolean
+  /**
+   * 撤销栈顶那一条（标签 + 改了几处）。
+   *
+   * 字段表原来**每一行**挂一颗「撤销」，但撤的都是栈顶那一笔 —— 批量 14 行点
+   * 哪颗都一样，看着却像"只撤这一格"。现在整页只有一颗「撤销这一笔（N 处）」
+   * （作者 2026-11-09）。
+   */
+  topOp?: TopOp | null
 }
 
 type View = 'code' | 'fields'
@@ -97,10 +120,12 @@ export default function HistoryModal({
   canSave = false,
   canDiscard = false,
   busy = false,
+  dirtyCount = 0,
   onUndo,
   onRedo,
   canUndo = false,
   canRedo = false,
+  topOp = null,
 }: Props) {
   /* ---------- 改了什么（对象视角） ---------- */
   const [lines, setLines] = useState<DiffLine[] | null>(null)
@@ -259,16 +284,33 @@ export default function HistoryModal({
     return lines.filter((l) => focusKeys.has(`${l.owner}:${l.key ?? ''}`))
   }, [lines, focusKeys])
 
+  /* 文件对比是空的、页头却还挂着「未保存 N」—— 那几笔在内存里（菜单 / 套餐 / 可见性） */
+  const emptyButDirty = diff !== null && files.length === 0 && dirtyCount > 0
+
+  /*
+   * 文件层面没有差异、但字段账里确实有改动。
+   *
+   * 值编辑会落成影子字节，可有些改动（菜单 / 套餐 / 可见性）写在 `workbench/`
+   * 自己的 json 里，永远进不了「盘上 presets/ ↔ 影子树」这份对比。那时只给
+   * 一句「还有 N 处」等于让人对着空框猜 —— 每一条都得列出来（作者 2026-11-09：
+   * 「上面写我有 9 个未保存结果，点进来一看，居然是空的」）。
+   */
+  const fieldsOnly = diff !== null && files.length === 0 && lines !== null && lines.length > 0
+
   const subtitle =
-    view === 'code'
+    view === 'code' && !fieldsOnly
       ? diff === null
         ? '正在比对盘上的 presets/ 与影子树…'
         : files.length === 0
-          ? '影子与盘上一模一样 —— 没有未保存的改动'
+          ? emptyButDirty
+            ? `文件层面没有差异 —— 还有 ${dirtyCount} 处改动只活在内存里，保存会一并写入`
+            : '影子与盘上一模一样 —— 没有未保存的改动'
           : `${files.length} 份文件有改动 · +${changeCount} 行 —— 比的是盘上的 presets/ 与影子树，保存就是把右边写成左边`
-      : files.length === 0
-        ? '保存 = 写进仓库文件（保存本身也能撤销），放弃 = 整条一起丢'
-        : `这一份改了几格 —— 右边每一格都能就地撤销`
+      : fieldsOnly
+        ? `文件层面没有差异 · 还有 ${lines?.length ?? 0} 处改动只在内存里（菜单 / 套餐 / 可见性写在 workbench 自己的文件里）`
+        : files.length === 0
+          ? '保存 = 写进仓库文件（保存本身也能撤销），放弃 = 整条一起丢'
+          : `这一份改了几格 —— 右边每一格都能就地撤销`
 
   /* 文件清单两项共用（代码 / 改了什么 都画同一批文件） */
   const fileItem = (f: ShadowFileDiff) => (
@@ -311,17 +353,22 @@ export default function HistoryModal({
         <div className={d.viewToggle} role="group" aria-label="怎么看这些改动">
           <button
             type="button"
-            className={view === 'code' ? `${d.viewBtn} ${d.viewBtnOn}` : d.viewBtn}
-            aria-pressed={view === 'code'}
-            data-tip="盘上的 presets/ 与影子树逐行对比 —— 保存会改掉的字节"
+            className={view === 'code' && !fieldsOnly ? `${d.viewBtn} ${d.viewBtnOn}` : d.viewBtn}
+            aria-pressed={view === 'code' && !fieldsOnly}
+            disabled={fieldsOnly}
+            data-tip={
+              fieldsOnly
+                ? '这几处写在 workbench 自己的文件里 —— 盘上的 presets/ 与影子树没有字节差异'
+                : '盘上的 presets/ 与影子树逐行对比 —— 保存会改掉的字节'
+            }
             onClick={() => setView('code')}
           >
             代码对比
           </button>
           <button
             type="button"
-            className={view === 'fields' ? `${d.viewBtn} ${d.viewBtnOn}` : d.viewBtn}
-            aria-pressed={view === 'fields'}
+            className={view === 'fields' || fieldsOnly ? `${d.viewBtn} ${d.viewBtnOn}` : d.viewBtn}
+            aria-pressed={view === 'fields' || fieldsOnly}
             data-tip="哪一格从什么值改成什么值，可就地撤销 / 重做"
             onClick={() => setView('fields')}
           >
@@ -376,24 +423,40 @@ export default function HistoryModal({
         </p>
       ) : diff === null ? (
         <p className={d.empty}>正在比对…</p>
-      ) : noFiles ? (
-        /* 空态：不分栏。左边一栏空清单 + 右边一句"没有改动"没有意义 */
-        <p className={d.empty}>影子与盘上一模一样 —— 没有未保存的改动。</p>
+      ) : noFiles && !fieldsOnly ? (
+        /* 空态：不分栏。左边一栏空清单 + 右边一句"没有改动"没有意义。
+        但**空 diff 不等于干净** —— 还有 N 处就得说还有 N 处，不许报"一模一样"。 */
+        emptyButDirty ? (
+          <p className={d.empty}>
+            {`文件层面没有差异 —— 还有 ${dirtyCount} 处改动只活在内存里（菜单 / 套餐 / 可见性写在 workbench 自己的文件里），保存会一并写入。`}
+          </p>
+        ) : (
+          <p className={d.empty}>影子与盘上一模一样 —— 没有未保存的改动。</p>
+        )
       ) : (
         <div className={d.panes}>
-          {/* 左：有改动的文件清单（两种视图共用；点进去 = 右边只谈这一份） */}
-          <nav className={d.list} aria-label="有未保存改动的文件">
-            {files.map(fileItem)}
-          </nav>
+          {/* 左：有改动的文件清单（两种视图共用；点进去 = 右边只谈这一份）。
+              字段账有、文件 diff 没有时不画空栏 —— 那几笔压根不落在 presets/ 里 */}
+          {!noFiles && (
+            <nav className={d.list} aria-label="有未保存改动的文件">
+              {files.map(fileItem)}
+            </nav>
+          )}
 
           {/* 右：按视图换内容 —— 代码 = 行级 diff，改了什么 = 那几格 + 就地撤销 */}
           <div className={d.detail}>
             <header className={d.detailHead}>
               <span className={d.detailName}>
-                {current === null ? '—' : view === 'code' ? current.rel : (current.rel ?? '')}
+                {fieldsOnly
+                  ? '只在内存里的改动'
+                  : current === null
+                    ? '—'
+                    : view === 'code'
+                      ? current.rel
+                      : (current.rel ?? '')}
               </span>
               <span className={d.detailMeta}>
-                {view === 'code' && current !== null ? (
+                {view === 'code' && !fieldsOnly && current !== null ? (
                   <>
                     <span className={d[`state_${current.state}`]}>
                       {STATE_TEXT[current.state]}
@@ -412,7 +475,7 @@ export default function HistoryModal({
               </span>
             </header>
 
-            {view === 'code' ? (
+            {view === 'code' && !fieldsOnly ? (
               <div className={d.detailScroll}>
                 {current === null ? (
                   <p className={d.empty}>左边点一份看它的差异</p>
@@ -443,15 +506,46 @@ export default function HistoryModal({
             ) : lines === null ? (
               <p className={d.empty}>正在读改动…</p>
             ) : shownLines.length === 0 ? (
-              /* 2026-11-03 起这一页**不会再"无缘无故空"**：数据来自事务里的字段账，
-              真改了东西就一定有条目。剩下的空格只有两种情况，分开说清楚 —— */
+              /* 这一页的数据来自**两份账**（事务 + 值编辑历史），真改了值或定义就一定有
+              条目。剩下的空格只有两种情况，分开说清楚 —— */
               <p className={d.empty}>
                 {focusKeys === null
-                  ? '这一笔改动还没进事务 —— 改一格参数、或改一次说明，这里就会列出来。'
+                  ? '这一屏没有字段级改动 —— 值改动与定义改动都会列在这里；只动了注释 / 空行那类，看「代码对比」。'
                   : '这一份文件这一次没有字段级改动（只动了注释 / 空行那类），看「代码对比」的逐行差异。'}
               </p>
             ) : (
               <div className={d.fields}>
+                {/*
+                 * **一次手势 = 一笔**（作者 2026-11-09）。
+                 *
+                 * 原来每一行挂一颗「撤销」，但撤的都是栈顶那一笔 —— 批量 14 行点哪颗
+                 * 都一样，看着却像"只撤这一格"。现在整页一颗，数就是这一笔改了几处
+                 * （`topOp.fields`，与 `onUndo` 真会弹掉的是同一条）。
+                 */}
+                {onUndo !== undefined && (
+                  <div className={d.fieldTools}>
+                    <button
+                      type="button"
+                      className={s.btn}
+                      disabled={!canUndo || pendingKey !== null}
+                      data-tip={
+                        canUndo
+                          ? `撤销「${topOp?.label ?? '最近一笔'}」（这一笔的所有格子一起退回）`
+                          : '没有可撤销的改动'
+                      }
+                      onClick={() => void run('undo', '__undo')}
+                    >
+                      {pendingKey === '__undo'
+                        ? '撤销中…'
+                        : topOp !== null
+                          ? `撤销这一笔（${topOp.fields} 处）`
+                          : '撤销这一笔'}
+                    </button>
+                    <span className={d.fieldHint}>
+                      一次手势改的所有格子在一条里 —— 点一次整笔退回，不是只撤这一行。
+                    </span>
+                  </div>
+                )}
                 {/*
                  * **三列表格**（2026-11-03 作者定稿：平铺 + 标签）。
                  *
@@ -468,13 +562,9 @@ export default function HistoryModal({
                 {shownLines.map((l, i) => {
                   const mark = `${l.owner}:${l.key ?? ''}`
                   const whyLabel = WHY_LABEL[l.why] ?? l.why
-                  /* 撤销按钮挂在**这一格**上，撤的是栈顶那一条编辑。
-                     2026-11-02 起同一格 5 秒内的连点并成一条（`txn::MERGE_MS`），
-                     所以按一下回到的是"我开始动手之前"，不是退一小步 —— 那正是
-                     作者要的粒度。重做按钮放在底部：重做按栈的顺序来，不该逐行给。 */
                   return (
                     <div key={`${mark}-${i}`} className={d.field}>
-                      {/* ① 归属：等宽的 `A1:STANDARD` 才好扫；基底与版本分色 */}
+                      {/* ① 归属：等宽的 `A1:STANDARD` 才好扫；基线层与版本分色 */}
                       <span
                         className={`${d.fieldOwner} ${l.owner.includes(':') ? d.fieldOwnerVer : ''}`}
                         data-tip={l.target}
@@ -503,21 +593,6 @@ export default function HistoryModal({
                         >
                           {whyLabel}
                         </span>
-                        {onUndo !== undefined && (
-                          <button
-                            type="button"
-                            className={d.fieldUndo}
-                            disabled={!canUndo || pendingKey !== null}
-                            data-tip={
-                              canUndo
-                                ? '撤掉这一格所在的编辑（同一格 5 秒内的连点算一条，撤一次回到最初）'
-                                : '没有可撤销的改动'
-                            }
-                            onClick={() => void run('undo', mark)}
-                          >
-                            {pendingKey === mark ? '撤销中…' : '撤销'}
-                          </button>
-                        )}
                       </span>
                     </div>
                   )
@@ -525,8 +600,7 @@ export default function HistoryModal({
                 {onRedo !== undefined && (
                   <div className={d.fieldFoot}>
                     <span className={d.fieldHint}>
-                      撤销走的是外壳那条栈（与状态栏的「撤销」同一个）。同一格 5 秒内的连点并成一条 ——
-                      撤一次回到那一格最初的值。重做按栈的顺序来，不按这一行的位置。
+                      撤销走的是外壳那条栈（与状态栏的「撤销」同一个）。重做按栈的顺序来，不按这一行的位置。
                     </span>
                     <button
                       type="button"

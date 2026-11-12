@@ -91,10 +91,12 @@ import { api, errorText, uiErrorOf } from '../../api'
 import type { ReportExportFile, ReportExportKind, ReportExportPlan } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import Icon from '../../components/Icon'
-import { HeadNote, Modal, useModalHeadNoteSlot } from '../../components/modal'
+import { HeadNote, Modal, PageToggle, useModalHeadNoteSlot } from '../../components/modal'
 import { Switch } from '../../components/switch'
 import { useStickyState } from '../../hooks/useStickyState'
 import { useT, type StringKey } from '../../i18n'
+import PathPill from '../shared/PathPill'
+import { joinExportPath } from '../shared/pathPillText'
 import { Btn } from '../ui/Controls'
 import s from './ExportModal.module.css'
 
@@ -196,13 +198,6 @@ const CHECK_SHAPE = (
 )
 
 /**
- * 页脚那颗「信息」上的记号：圈里一个 i。
- *
- * 画成 SVG 而不是写 `ⓘ`：字体里那个符号自带基线偏移，`align-items: center` 居中的是
- * 行盒不是字形，看上去会偏低（与后处理那一颗同一条理由、同一个字形，见
- * `PostProcessModal.tsx` 的 `InfoGlyph`）。
- */
-/**
  * 文件名拆成"头 + 尾"两段 —— 为的是**中间省略**（2026-11-04 作者：「文件名字太长中间应该省略」，
  * 「反正不要换行高度不要变化」）。
  *
@@ -230,57 +225,6 @@ function HeadBadge({ label }: { label: string }) {
   const slot = useModalHeadNoteSlot()
   if (slot === null) return null
   return createPortal(<span className={s.badge}>{label}</span>, slot)
-}
-
-function InfoGlyph() {
-  return (
-    <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
-      <circle cx="6" cy="6" r="4.6" stroke="currentColor" strokeWidth="1.1" />
-      <path d="M6 5.4v3" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
-      <circle cx="6" cy="3.7" r="0.62" fill="currentColor" />
-    </svg>
-  )
-}
-
-/**
- * 路径胶囊里的那串字：`<父目录><分隔符><基名><分隔符>` 拆两段 ——
- * 前段自己收省略号、**尾两段钉住不缩**（"往哪个盘哪个文件夹里导"永远看得见）。
- *
- * 分隔符按父目录里用的那个认（Windows 收到的是 `\`，macOS 是 `/`）；
- * 段数少到没有"尾两段"可言时整条当前段，不分。
- *
- * `zipped` = 压缩导出：落点是一个 `<基名>.zip` **文件**，尾巴上不再带分隔符 ——
- * 胶囊里显示的就是"会落在哪个包"，读起来与散着导出那一档同一种语法。
- */
-function pathPill(
-  dir: string,
-  base: string,
-  zipped: boolean,
-): { folder: string; full: string; head: string; tail: string } {
-  const sep = dir.includes('\\') ? '\\' : '/'
-  const name = zipped ? `${base}.zip` : base
-  const folder = `${dir.replace(/[\\/]+$/, '')}${sep}${name}`
-  const full = zipped ? folder : `${folder}${sep}`
-  const lead = full.startsWith(sep) ? sep : ''
-  const parts = full.split(/[\\/]/).filter((x) => x !== '')
-  if (parts.length <= 2) return { folder, full, head: '', tail: full }
-  return {
-    folder,
-    full,
-    head: lead + parts.slice(0, -2).join(sep) + sep,
-    tail: parts.slice(-2).join(sep) + (zipped ? '' : sep),
-  }
-}
-
-/**
- * 归档路径拆成「目录 + 文件名」两段（信息页那一行用）。
- *
- * 与保存位置胶囊同一条理由：**尾那个文件名钉住不缩**，长的部分由前面的目录自己收省略号。
- * 只收成一条"从左边截断的路径"会把文件名截没 —— 那一行要回答的正是"这是哪个文件"。
- */
-function splitPath(full: string): { dir: string; base: string } {
-  const at = Math.max(full.lastIndexOf('/'), full.lastIndexOf('\\'))
-  return at < 0 ? { dir: '', base: full } : { dir: full.slice(0, at + 1), base: full.slice(at + 1) }
 }
 
 export interface ExportModalProps {
@@ -427,7 +371,10 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
 
   const dir = picked === '' ? (plan?.defaultDir ?? '') : picked
   /* 压缩开着时落点是一个 `<基名>.zip`（胶囊里就得这么写，别写成"某个文件夹"） */
-  const path = plan === null || dir === '' ? null : pathPill(dir, plan.base, zip)
+  const path =
+    plan === null || dir === ''
+      ? null
+      : joinExportPath(dir, zip ? `${plan.base}.zip` : plan.base, !zip)
 
   /**
    * 「这一次导出去的是哪一档」—— 成功之后要记住，不能跟着开关飘（作者 2026-11-04）：
@@ -490,7 +437,7 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
     setBusy(true)
     setFail(null)
     /* 这一趟的落点先扣下来：成功之后开关再怎么拨，胶囊与页脚那句都照这一份说 */
-    const at = path.full
+    const at = path
     /* 真会进包 / 真会复制出去的份数（缺的那一份不算） */
     const packed = plan.files.filter((f) => f.exists).length
     api.exportReportArchive(id, dir, zip, overwrite).then(
@@ -582,12 +529,9 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
   const exported = done !== null
 
   /** 成功之后胶囊上写哪个落点：这一趟真导出去的那个（开关后来的改动不回溯） */
-  const shownPath = exported && last !== null ? last.path : (path?.full ?? '')
-  /** 胶囊里那两段字：成功态按"真落点"拆，其余按"待导出的落点"拆 */
-  const shown: { dir: string; tail: string } =
-    exported && last !== null
-      ? { dir: splitPath(last.path).dir, tail: splitPath(last.path).base }
-      : { dir: path?.head ?? '', tail: path?.tail ?? '' }
+  const shownPath = exported && last !== null ? last.path : (path ?? '')
+  /** 那颗胶囊当前说的是文件夹还是文件（散导出 = 文件夹，zip = 文件） */
+  const shownFolder = exported && last !== null ? !last.zip : !zip
 
   /**
    * **一行文件** —— 两页共用这一个（作者 2026-11-04 第三件事：信息页要和文件页一样，
@@ -631,14 +575,14 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
         </span>
         <span className={s.fileMeta}>
           {/* 名字只占一行：宽了两段拼回原名，挤了中间省略（`middleName`） */}
-          <span className={s.fileName} title={f.name}>
+          <span className={s.fileName} data-tip={f.name}>
             <span className={s.nameHead}>{cut.head}</span>
             <span className={s.nameTail}>{cut.tail}</span>
           </span>
           <span className={s.fileSub}>
             <span className={s.fileKind}>{tr(KIND_LABEL[f.kind])}</span>
             {where && (
-              <span className={s.fileWhere} title={f.path}>
+              <span className={s.fileWhere} data-tip={f.path}>
                 {f.path}
               </span>
             )}
@@ -699,39 +643,15 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
         {path !== null && (
           /*
            * 整条是**显示**不是按钮：只有右边那颗改位置 / 开位置（作者 2026-10-11）。
-           * 路径正文因此还能拖选、误点一下也不会弹系统框。
+           * 形状与日志导出那扇框共用同一件（`app/shared/PathPill`）。
            */
-          <div className={s.pathPill} data-tip={shownPath}>
-            <svg
-              className={s.pathIcon}
-              width={15}
-              height={15}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.7}
-              aria-hidden="true"
-            >
-              <path d="M3.5 6.5A2 2 0 0 1 5.5 4.5h4l2 2.5h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
-            </svg>
-            <span className={s.pathText}>
-              <span className={s.pathHead}>{shown.dir}</span>
-              <span className={s.pathTail}>{shown.tail}</span>
-            </span>
-            {/*
-             * ★ 成了之后这一颗**就地翻成「打开位置」**（作者：都导出成功了，
-             *   位置已经定了，那一刻要的是"去那儿看看"）—— 同一格、同一尺寸，
-             *   框的宽窄一动不动。
-             */}
-            <button
-              type="button"
-              className={s.pathEdit}
-              data-open={exported}
-              onClick={exported ? openFolder : changeDir}
-            >
-              {exported ? tr('report.export.open') : tr('report.export.change')}
-            </button>
-          </div>
+          <PathPill
+            path={shownPath}
+            folder={shownFolder}
+            opened={exported}
+            action={exported ? tr('report.export.open') : tr('report.export.change')}
+            onAction={exported ? openFolder : changeDir}
+          />
         )}
       </div>
     )
@@ -749,15 +669,13 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
            * 成了之后「已导出 N 个文件」跟在它右边 —— 两态页脚高度不变（按钮撑着）。
            */}
           <span className={s.footLeft}>
-            <button
-              type="button"
-              className={s.tabToggle}
-              aria-pressed={tab === 'info'}
+            {/* 翻页小钮走共用件（`PageToggle`）：钮上写"点它会去哪一页"，
+                形状 / 那颗圆 i 与后处理那一屏是同一份实现 */}
+            <PageToggle
+              label={tab === 'files' ? tr('report.export.info') : tr('report.export.files')}
+              pressed={tab === 'info'}
               onClick={() => chooseTab(tab === 'files' ? 'info' : 'files')}
-            >
-              <InfoGlyph />
-              {tab === 'files' ? tr('report.export.info') : tr('report.export.files')}
-            </button>
+            />
             {exported && (
               <span className={s.footNote}>
                 {/*
@@ -884,12 +802,7 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
               </span>
               <span className={s.zipKnob} />
             </div>
-            <div className={s.pathPill}>
-              <span className={s.pathText}>
-                <span className={s.pathTail}>{NBSP}</span>
-              </span>
-              <span className={s.pathEdit}>{NBSP}</span>
-            </div>
+            <PathPill gauge />
           </div>
         </div>
 
