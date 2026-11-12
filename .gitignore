@@ -54,6 +54,11 @@ workbench/receipts/
 # 入库只会把"哪一份才是真的"搅浑。
 workbench/.sandbox/
 
+# 工作台的**回收站**（2026-11-12）：生成时被清掉的旧产物挪到这儿（`prune_orphan_presets`），
+# 是**本机**状态、按时间戳分桶，不是源数据。跟着入库等于每清一次就往仓库塞一份副本
+# （第一次就是这么混进来的：`2026-11-12T07-07-40Z` 那四份旧预设）。
+workbench/.trash/
+
 # 系统
 .DS_Store
 Thumbs.db
