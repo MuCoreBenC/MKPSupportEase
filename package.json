@@ -44,7 +44,8 @@
     "preview:deliver": "cargo run -q --bin preview --features workbench -- deliver",
     "preview:recover": "cargo run -q --bin preview --features workbench -- recover",
     "clean:target": "./scripts/clean-target.sh",
-    "pr": "node scripts/pr.mjs"
+    "pr": "node scripts/pr.mjs",
+    "ship": "node scripts/ship.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",
