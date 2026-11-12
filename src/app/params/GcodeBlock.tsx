@@ -247,7 +247,7 @@ export default function GcodeBlock({
         <div className={s.syncBar}>
           <span className={s.syncText}>
             {tr('params.gcode.cloudDiff', {
-              n: (cloudValue as string).split('\n').length,
+              n: diffRows.filter((row) => row.kind !== 'same').length,
             })}
           </span>
           <button
@@ -274,7 +274,8 @@ export default function GcodeBlock({
          * 对比 = 代码视图的另一种摆法：左右两栏逐行对齐，点哪一栏就用哪一份。
          *
          * 两栏都是 `<button>`：选中态靠边框 + 右上角勾表达，不靠“点完左边变样”。
-         * 行高锁死，`removed` 只在左边、`added` 只在右边，删行与加行各自占一格。
+         * 行高锁死，一行一格：真删 / 真加整行铺底，改过的行两栏并排、**只有变了的
+         * 那几个字铺底**（作者：「其实只是部分不同」）。
          */
         <div className={s.diff}>
           <button
@@ -300,7 +301,13 @@ export default function GcodeBlock({
                     row.left === null ? s.diffBlank : ''
                   }`}
                 >
-                  {row.left ?? ''}
+                  {row.leftSegs === undefined
+                    ? (row.left ?? '')
+                    : row.leftSegs.map((seg, k) => (
+                        <span key={k} className={seg.hit ? s.diffHitGone : undefined}>
+                          {seg.text}
+                        </span>
+                      ))}
                 </span>
               ))}
             </span>
@@ -326,7 +333,13 @@ export default function GcodeBlock({
                     row.right === null ? s.diffBlank : ''
                   }`}
                 >
-                  {row.right ?? ''}
+                  {row.rightSegs === undefined
+                    ? (row.right ?? '')
+                    : row.rightSegs.map((seg, k) => (
+                        <span key={k} className={seg.hit ? s.diffHitNew : undefined}>
+                          {seg.text}
+                        </span>
+                      ))}
                 </span>
               ))}
             </span>
