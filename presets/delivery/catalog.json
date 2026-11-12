@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "f540bd66db654ffd",
+  "revision": "a991834998ef8555",
   "publishedAt": "2026-11-11T02:14:35Z",
   "brands": [
     {
@@ -672,7 +672,7 @@
     {
       "id": "calibration-combined",
       "type": "model",
-      "name": "校准模型（整体版 · Z + XY）",
+      "name": "校准模型（二合一 · Z + XY）",
       "path": "models/Calibration_Combined.3mf",
       "delivery": "download",
       "calibration": "Combined"

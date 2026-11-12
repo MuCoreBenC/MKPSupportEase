@@ -1,8 +1,8 @@
-//! Task 9.5 判据：校准参考输入/输出对逐字节比对（tests/reference/calibration/）。
+//! 判据：校准参考输入/输出对逐字节比对（tests/reference/calibration/）。
 //!
-//! 输入 JSON 自包含（IR 为 FillDefaults 后快照 + BBox + 质心 + dwell），由
-//! Task 4.3 从旧仓库导出。证据等级：对照当前 Go 实现的输出（见
-//! tests/reference/README.md），Go 若有 bug 此处逐字节复制。
+//! 输入 JSON 自包含（IR 为 FillDefaults 后快照 + BBox + 质心 + dwell）。
+//! 期望值是**本项目人工确认过的输出**，不是外部实现的投影：它回答「校准块的字节有没有变」，
+//! 不回答「校准块对不对」—— 后者靠真机验收。证据等级见 `tests/reference/README.md`。
 
 use postprocess::ir::Ir;
 use postprocess::postproc::disk::{BBox, CentroidResult, generate_calibration_gcode_with_centroid};

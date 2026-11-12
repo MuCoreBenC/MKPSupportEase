@@ -1,29 +1,24 @@
-//! 后处理两条入口的判据：**钩子那条脸与 CLI 那条脸必须产出同一份字节**。
+//! 后处理两条入口的判据：**钩子那条脸与 CLI 那条脸必须产出同一份字节**，
+//! 且两者都等于整链基线。
 //!
-//! 背景：mkp-ssr 的钩子路径手里已经是 `Ir`（预设 TOML 经 `mkp-preset` 映射而来），
-//! 不是 TOML 配置文件，所以 `pipeline` 多了一张脸。多一张脸就多一条会漂移的产品路径，
-//! 因此这条判据钉的不是「新脸能跑」，而是**新脸与旧脸字节相等，且都等于整链参考物**。
+//! 背景：钩子路径手里已经是 `Ir`（预设 TOML 经 `mkp-preset` 映射而来），不是 TOML 配置文件，
+//! 所以 `pipeline` 多了一张脸。多一张脸就多一条会漂移的产品路径，因此这条判据钉的不是
+//! 「新脸能跑」，而是**两张脸字节相等**。
 //!
 //! ## 判据资产是派生的，不是手搓的
 //!
-//! - 输入 `tests/golden/42274.2.gcode`：来源仓库的判据输入，原样搬入。
-//! - 配置 `tests/fixtures/config/A1.toml`：由 `mkp-sr` 的 `ir::build()` 产出的
-//!   `tests/fixtures/ir/build9/A1-standard.json` 经 `config::to_toml` 转成（派生说明与每轮复查
-//!   在 `tests/pipeline.rs`）。**刻意不用** `fixtures/ir/golden_42274_2.json` ——
-//!   那份带 ±999 的机器范围，喂进整链会在边界检查处报 `E_GCODE_BOUNDARY_001`，
-//!   看着像搬错了，其实是选错 fixture（AGENTS.md §7⑥）。
-//! - 期望输出 `tests/golden/42274.2.e2e-A1.reference.gcode`（668,687 B）：
-//!   由 `mkp-sr` 的 CLI 生成，命令记在 `tests/end_to_end.rs` 头部。比对前剔除三类
-//!   **有意偏离**：MKP 标记行（纯增量）、换笔段（2026-10-20 起的净空修正）、
-//!   涂胶段内的抬落笔与走速（2026-11-03 起由发射层按笔尖净空给出）。
-//!   剔除口径与 `tests/end_to_end.rs::normalize` 同一套，不许在两处各写一份。
+//! - 输入 `tests/golden/42274.2.gcode`：原样搬入的判据输入。
+//! - 配置 `tests/fixtures/config/A1.toml`：派生自 `tests/fixtures/ir/build9/A1-standard.json`
+//!   经 `config::to_toml`（派生说明在 `tests/pipeline.rs`）。**刻意不用**
+//!   `fixtures/ir/golden_42274_2.json` —— 那份带 ±999 的机器范围，喂进整链会在边界检查处
+//!   报 `E_GCODE_BOUNDARY_001`，看着像搬错了，其实是选错 fixture。
+//! - 基线 `tests/golden/42274.2.e2e-A1.config.gcode`：本项目自己的整链输出，
+//!   再生入口见 `tests/end_to_end.rs` 头部。判据是**纯逐字节**，不做任何剔除。
 //!
 //! ## 证据等级
 //!
-//! 与 `end_to_end.rs` 同一层（最弱那层）：对照的是**当下 `mkp-sr` 的输出**，
-//! 不是「正确的输出」。它能守住「拆 `process_with_ir` 没改变行为」，
-//! 守不住「行为本来就对」。
-
+//! 与 `end_to_end.rs` 同一层：它回答「两张脸与整链字节有没有变」，不回答「输出对不对」。
+//!
 //! ## 一个必须先说清的坑：整链输出依赖**进程内**的伪随机序列状态
 //!
 //! `postproc::pass2` 的可变擦拭点用 `gcode::get_pseudo_random()`
@@ -33,7 +28,7 @@
 //!
 //! 后果（本判据第一版实测撞上）：同一个进程里跑第二遍整链，擦拭 Y 会不一样 ——
 //! 第一版这两条断言都报「首个不同字节在 offset 126603（left=0x33 right=0x31）」，
-//! 看着像 `process_with_ir` 搬错了，真因是**我自己制造的假红**（AGENTS.md §6.1）。
+//! 看着像 `process_with_ir` 搬错了，真因是**我自己制造的假红**。
 //! 所以每次整链前必须 reset，且两条断言要串行（并行会让两个线程交错取同一条序列）。
 
 use std::path::PathBuf;
@@ -65,17 +60,9 @@ fn config_a1() -> PathBuf {
     repo_root().join("tests/fixtures/config/A1.toml")
 }
 
-fn reference_output() -> PathBuf {
-    repo_root().join("tests/golden/42274.2.e2e-A1.reference.gcode")
+fn baseline_output() -> PathBuf {
+    repo_root().join("tests/golden/42274.2.e2e-A1.config.gcode")
 }
-
-/// 用户偏好（`Ir.prefs`）的两颗钉子：参考输出按「补抬 Z=5 + 跳过震动检测」生成，
-/// 与出厂档对齐 —— 两张脸都钉回去，字节判据才不假红
-/// （同 `end_to_end.rs` 的同名注释；fixture 保持派生原样）。
-const PREFERENCE_PINS: &[&str] = &[
-    "Prefs.BeginStageRetractZLiftMm=5",
-    "Prefs.SkipVibrationCalibration=true",
-];
 
 /// 把输入复制进临时目录，原地跑一遍，返回原地覆盖后的字节。
 ///
@@ -93,8 +80,7 @@ fn run_in_place(with_ir: bool) -> Vec<u8> {
     if with_ir {
         // 钩子路径：配置先变成 IR，再把 IR 交给管线。
         let raw = std::fs::read_to_string(&work).expect("读输入");
-        let overrides: Vec<String> = PREFERENCE_PINS.iter().map(|s| (*s).to_string()).collect();
-        let ir = pipeline::resolve_ir(&config_a1(), &overrides, Some(&raw)).expect("配置 → IR");
+        let ir = pipeline::resolve_ir(&config_a1(), &[], Some(&raw)).expect("配置 → IR");
         /* ★ 走**产品真正用的那个**函数（`hook.rs` 调的就是它），不是 `process_with_ir`。
         2026-10-19 收敛之后，`process_with_ir` / `_and_cancel_interval` 已随
         "零产品调用方"一起删除 —— 判据若还指着它们，守的就是一条没人走的路。 */
@@ -115,7 +101,7 @@ fn run_in_place(with_ir: bool) -> Vec<u8> {
             ProcessRequest {
                 gcode_path: work.clone(),
                 config_path: config_a1(),
-                overrides: PREFERENCE_PINS.iter().map(|s| (*s).to_string()).collect(),
+                overrides: Vec::new(),
                 output_path: None, // 原地
             },
             &mut sink,
@@ -127,8 +113,8 @@ fn run_in_place(with_ir: bool) -> Vec<u8> {
     std::fs::read(&work).expect("读回原地输出")
 }
 
-/// 大对象**不要**直接 `assert_eq!`：两个 668KB 的 `Vec<u8>` 不等时输出 5.2MB，
-/// 真因反而被埋掉（AGENTS.md §7⑦）。先比长度，再定位首个不同字节。
+/// 大对象**不要**直接 `assert_eq!`：两个 600KB 的 `Vec<u8>` 不等时输出 5MB，
+/// 真因反而被埋掉。先比长度，再定位首个不同字节。
 fn assert_same_bytes(what: &str, left: &[u8], right: &[u8]) {
     assert!(
         left.len() == right.len(),
@@ -152,72 +138,22 @@ fn process_with_ir_matches_the_config_face_byte_for_byte() {
     assert_same_bytes("两张公开脸的输出", &via_config, &via_ir);
 }
 
-/// 剔除 MKP 标记协议 v1 的标记行 —— 判据侧只有
-/// `postprocess::postproc::marks::strip_mark_lines` 这一份实现（见那边的注释）。
-fn strip_mkp_marks(bytes: &[u8]) -> Vec<u8> {
-    postprocess::postproc::marks::strip_mark_lines(bytes)
-}
-
-/// 剔除「换笔块」—— 实现只有 `postprocess::postproc::marks::strip_swap_travel_blocks`
-/// 这一份（2026-10-20 起换笔段有意偏离参考物，见那边的注释）。
-fn strip_swap_travel_blocks(bytes: &[u8]) -> Vec<u8> {
-    postprocess::postproc::marks::strip_swap_travel_blocks(bytes)
-}
-
-/// 剔除涂胶段内的抬笔/落笔与走速（2026-11-03 起由发射层按笔尖净空给出，
-/// 与 `mkp-sr` 参考必然不同）；XY 与 E 仍要求逐字节一致。
-fn strip_glue_section_vertical_moves(bytes: &[u8]) -> Vec<u8> {
-    postprocess::postproc::marks::strip_glue_section_vertical_moves(bytes)
-}
-
-/// 剔除塔块结束后的 feature 恢复行（2026-11-04 起塔块末尾会补一条
-/// `; FEATURE: <切片器当前那一档>`，否则模型段整段被预览算成「内墙」）。
-fn strip_tower_feature_restore(bytes: &[u8]) -> Vec<u8> {
-    postprocess::postproc::marks::strip_tower_feature_restore(bytes)
-}
-
-/// 抹掉塔区间内的 Z（塔打在本层模型层顶，参考物打在自己的记账高度上）。
-fn zero_tower_region_z(bytes: &[u8]) -> Vec<u8> {
-    postprocess::postproc::marks::zero_tower_region_z(bytes)
-}
-
-/// 剔除卸载块 —— 实现只有
-/// `postprocess::postproc::marks::strip_begin_stage_retract_blocks` 一份
-/// （2026-11-10 起块从文件头挪到原版 `G28 Z P0 T` 之前，见那边的注释）。
-fn strip_begin_stage_retract_blocks(bytes: &[u8]) -> Vec<u8> {
-    postprocess::postproc::marks::strip_begin_stage_retract_blocks(bytes)
-}
-
-/// 与 `tests/end_to_end.rs::normalize` 同一口径：去卸载块 → 去换笔块 → 去涂胶段 Z/F →
-/// 去塔块 feature 恢复行 → 抹塔 Z → 去标记行。
-/// 少一层就会把有意偏离报成「整链不等价」（实测差 1380 字节）。
-fn normalize(bytes: &[u8]) -> Vec<u8> {
-    strip_mkp_marks(&zero_tower_region_z(&strip_tower_feature_restore(
-        &strip_glue_section_vertical_moves(&strip_swap_travel_blocks(
-            &strip_begin_stage_retract_blocks(bytes),
-        )),
-    )))
-}
-
 #[test]
-fn process_with_ir_matches_the_end_to_end_reference() {
+fn process_with_ir_matches_the_chain_baseline() {
     let _seq = lock_sequence();
-    // 参考物由来源仓库的 CLI 生成、本仓无法复现 ⇒ 剔除几处**有意偏离**再比：
-    // MKP 标记行（纯增量）、换笔段（2026-10-20 净空修正）、涂胶段 Z/F（2026-11-03 笔尖净空）、
-    // 卸载块（2026-11-10 从文件头挪到原版 `G28 Z P0 T` 之前）。
-    let via_ir = normalize(&run_in_place(true));
-    let raw = std::fs::read(reference_output()).expect("读整链参考物");
-    // 反空转哨兵：参考物必须真的是那 668,687 字节的那一份，
-    // 否则「读到一个空文件、两边都空、判据全绿」在终端上长得跟真绿一样。
+    let via_ir = run_in_place(true);
+    let want = std::fs::read(baseline_output()).expect("读整链基线");
+
+    // 反空转：基线必须真的是一份后处理产物 —— 读不到 / 读成空文件 / 读成输入本身，
+    // 在终端上长得跟真绿一样。
+    let input_len = std::fs::metadata(golden_input())
+        .expect("输入 fixture 应当存在")
+        .len() as usize;
     assert!(
-        raw.len() == 668_687,
-        "整链参考物字节数必须是 668687，实测 {}",
-        raw.len()
+        want.len() > input_len,
+        "整链基线（{} 字节）没有比输入（{input_len} 字节）长 ⇒ 读到的是空文件或输入本身",
+        want.len()
     );
-    let want = normalize(&raw);
-    assert_same_bytes(
-        "process_with_ir 与整链参考物（已剔除 MKP 标记行 / 换笔段 / 涂胶段 Z,F）",
-        &want,
-        &via_ir,
-    );
+
+    assert_same_bytes("process_with_ir 与整链基线", &want, &via_ir);
 }

@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "ef289a2e6ee64a15",
+  "revision": "72437464090f2bba",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -671,7 +671,7 @@
     {
       "id": "calibration-combined",
       "type": "model",
-      "name": "校准模型（整体版 · Z + XY）",
+      "name": "校准模型（二合一 · Z + XY）",
       "path": "models/Calibration_Combined.3mf",
       "delivery": "download",
       "calibration": "Combined"
