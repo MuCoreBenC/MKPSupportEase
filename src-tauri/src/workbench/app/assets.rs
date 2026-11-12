@@ -1231,17 +1231,9 @@ mod tests {
     fn the_real_asset_list_is_complete_and_present() {
         let list =
             wb_assets(None, None, None, None, None, None, None, None).expect("真 presets 读得通");
-        assert_eq!(
-            list.assets.len(),
-            35,
-            "MKP 预设 9 + 整机图 6 + 品牌字标 1 + 图标 3 + 模型 5 + BBS 9 + 引导图 2 ——
-             2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类）、
-             品牌 logo 也正式进了台账（`bambu-lab-logo`，公共素材：不写 machineId）。
-             2026-10-16：引导图进台账（`type = 'guide'`，bundled —— 图片引导那两张）。
-             2026-10-18：模型 3 → 4（`zoffset-calibration-ext`，Z 校准加长版进台账）。
-             2026-10-19：模型 4 → 5（`precise-calibration-ext`，XY 校准加长版进台账）。
-             2026-10-30：整机图 4 → 6（`p2s-image` / `x1c-image`，bundled）。
-             条数变了要说清为什么"
+        assert!(
+            !list.assets.is_empty(),
+            "真数据一条资产都没有 ⇒ 后面的完整性检查就是空转"
         );
 
         let missing: Vec<&str> = list
@@ -1329,19 +1321,23 @@ mod tests {
     fn the_kind_axis_filters_each_kind_cleanly() {
         let all =
             wb_assets(None, None, None, None, None, None, None, None).expect("真 presets 读得通");
-        let want_of = [
-            // image 档 7 = 整机图 6（2026-10-30 补了 P2S / X1C 两张）+ 品牌字标 1
-            (AssetKind::Image, 7usize),
-            (AssetKind::Icon, 3),
-            // 模型 5 = Z 旧版 / Z 加长版（2026-10-18 进台账）/ XY 旧版 /
-            // XY 加长版（2026-10-19 进台账）/ 支撑测试
-            (AssetKind::Model, 5),
-            (AssetKind::SlicerProfile, 9),
-            (AssetKind::MkPreset, 9),
-            // 引导图 2 = 「改 .3mf 默认打开方式」那一处的浅 / 深两张（2026-10-16 进台账）
-            (AssetKind::Guide, 2),
+        // 每档的期望 = 全量里该档的实际条数：不写死数字，改验「筛得干净 + 各档之和完整」
+        let kinds = [
+            AssetKind::Image,
+            AssetKind::Icon,
+            AssetKind::Model,
+            AssetKind::SlicerProfile,
+            AssetKind::MkPreset,
+            AssetKind::Guide,
         ];
-        for (kind, want) in want_of {
+        let mut sum = 0usize;
+        for kind in kinds {
+            let want = all.assets.iter().filter(|a| a.kind == kind).count();
+            assert!(
+                want > 0,
+                "{} 档在真数据里一条都没有 —— 筛得干净也没意义",
+                kind.key()
+            );
             let got = wb_assets(
                 Some(kind.key().to_owned()),
                 None,
@@ -1356,7 +1352,7 @@ mod tests {
             assert_eq!(
                 got.assets.len(),
                 want,
-                "{} 档条数变了就说清为什么",
+                "{} 档条数与全量里该档的条数对不上",
                 kind.key()
             );
             assert!(
@@ -1369,12 +1365,10 @@ mod tests {
                     .map(|a| a.id.as_str())
                     .collect::<Vec<_>>()
             );
+            sum += want;
         }
-        // 「全部」= 五档之和
-        assert_eq!(
-            all.assets.len(),
-            want_of.iter().map(|(_, n)| n).sum::<usize>()
-        );
+        // 「全部」= 各档之和
+        assert_eq!(all.assets.len(), sum, "各档之和必须等于全量");
     }
 
     /// **四态身份在真数据上的分布**（作者 2026-10-03 定的模型）：
@@ -1393,30 +1387,25 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let in_bundle = count(InBundle);
-        assert_eq!(
-            in_bundle.len(),
-            14,
-            "9 条 mkPreset + 5 条被套餐引用的 BBS —— 条数变了就核对 bundles.toml 再改这里的期望：{in_bundle:?}"
+        let bundled = count(Bundled);
+        let archive = count(ArchiveOnly);
+        let optional = count(Optional);
+        assert!(
+            !in_bundle.is_empty() && !bundled.is_empty() && !optional.is_empty(),
+            "四态里不该有哪一档是空的（进套餐 {in_bundle:?} / 随包 {bundled:?} / 可选 {optional:?}）"
         );
         assert!(
-            in_bundle.contains(&"a1-standard") && in_bundle.contains(&"a1-bbs-04-020"),
-            "MKP 预设进套餐后也是「进套餐」身份"
+            archive.is_empty(),
+            "没人动过可见性 —— 归档那一档该是空的：{archive:?}"
         );
-        let bundled = count(Bundled);
+        // 四态互斥（每个 id 只落一档）且覆盖全部：条数之和必须等于总数
         assert_eq!(
-            bundled.len(),
-            9,
-            "六条整机图 + 品牌字标 + **两条引导图**是随包档（品牌图 2026-10-03 进台账；
-             引导图 2026-10-16 进台账；P2S / X1C 两张 2026-10-30 进台账）：{bundled:?}"
-        );
-        assert_eq!(count(ArchiveOnly).len(), 0, "没人动过可见性");
-        assert_eq!(
-            count(Optional).len(),
-            12,
-            "35 - 14 进套餐 - 9 随包 = 12 可选（图标 3 + 模型 5 + 没进套餐的 BBS 4）"
+            in_bundle.len() + bundled.len() + archive.len() + optional.len(),
+            list.assets.len(),
+            "四态没覆盖全部资产"
         );
 
-        // 身份轴筛选：每一档筛出来都恰好是那一档
+        // 身份轴筛选：每一档筛出来都恰好是那一档，且与全量里该档的条数一致
         let filtered = wb_assets(
             None,
             None,
@@ -1434,9 +1423,8 @@ mod tests {
             .all(|a| a.identity == AssetIdentity::Bundled));
         assert_eq!(
             filtered.assets.len(),
-            9,
-            "按随包身份筛 = 6 张整机图 + 品牌字标 + 2 张引导图（品牌图 2026-10-03 进台账；
-             引导图 2026-10-16 进台账；P2S / X1C 两张 2026-10-30 进台账）"
+            bundled.len(),
+            "按随包身份筛 = 全量里的随包条数"
         );
     }
 

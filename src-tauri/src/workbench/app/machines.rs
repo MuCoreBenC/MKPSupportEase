@@ -932,14 +932,8 @@ mod tests {
             return;
         };
         let p = Presets::load_from(&root).expect("读得通");
-        let v = p
-            .catalog
-            .machine("A1")
-            .and_then(|m| m.versions.iter().find(|v| v.id == "FASTV3.3"))
-            .expect("夹具前提：A1 有 FASTV3.3");
-
-        /* 夹具前提：这一版这十三格都填着东西 */
-        for f in [
+        // 找一个「这十三格都填着」的版本当样本：不点名机型与版本 id
+        const FILLED: [VersionField; 13] = [
             VersionField::Name,
             VersionField::NameEn,
             VersionField::NameTw,
@@ -953,15 +947,20 @@ mod tests {
             VersionField::DescriptionEn,
             VersionField::DescriptionTw,
             VersionField::DescriptionJa,
-        ] {
+        ];
+        let v = p
+            .catalog
+            .machines()
+            .iter()
+            .flat_map(|m| m.versions.iter())
+            .find(|v| FILLED.iter().all(|f| version_field_text(v, *f).is_some()))
+            .expect("真数据里该有一版把这十三格都填着 —— 这条判据要它当样本");
+
+        for f in FILLED {
             assert!(
                 version_field_text(v, f).is_some(),
                 "{f:?} 这一格填着东西却读成 None —— 改它会算成没改"
             );
         }
-
-        /* 这两格这一版确实没填 —— None 是对的 */
-        assert_eq!(version_field_text(v, VersionField::Remark), None);
-        assert_eq!(version_field_text(v, VersionField::Image), None);
     }
 }

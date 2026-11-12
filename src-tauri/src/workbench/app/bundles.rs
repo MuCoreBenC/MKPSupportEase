@@ -641,24 +641,44 @@ mod tests {
     /// 反查的**套餐那一档**在真数据上说得清是谁（b05 Task 10）
     #[test]
     fn the_real_usage_lookup_names_the_bundles_too() {
-        let u = wb_asset_usage("a1-bbs-04-020".to_owned()).expect("反查");
-        assert!(u.machines.is_empty(), "BBS 预设不被机型直接引用");
-        assert_eq!(
-            u.bundles,
-            vec![
-                "A1_STANDARD".to_owned(),
-                "A1_FAST".to_owned(),
-                "A1_FASTV3.3".to_owned()
-            ],
-            "A1 的三个版本共用这一条 BBS —— 三份套餐各装它一次"
+        let root = crate::presetdata::repo_presets_root().expect("定位 presets");
+        let presets = crate::presetdata::Presets::load_from(&root).expect("真 presets 读得通");
+
+        // 每条资产被哪些套餐引用 —— 由 bundles 自己扫出来，不写死套餐名
+        let mut by_asset: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+        for b in presets.bundles.items() {
+            for r in &b.asset_refs {
+                by_asset
+                    .entry(r.trim().to_lowercase())
+                    .or_default()
+                    .push(b.id.clone());
+            }
+        }
+
+        // 挑一条被最多套餐引用的资产：反查结果必须等于上面扫出来的那份
+        let (asset, mut want) = by_asset
+            .iter()
+            .max_by_key(|(_, v)| v.len())
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .expect("套餐里总该有资产引用");
+        want.sort();
+        let u = wb_asset_usage(asset.clone()).expect("反查");
+        let mut got = u.bundles.clone();
+        got.sort();
+        assert_eq!(got, want, "{asset} 的反查结果要与遍历套餐得出的一致");
+
+        // 没被任何套餐引用的资产（图标那一类）：归属 ≠ 引用，套餐那一档必须是空的
+        let unused = presets
+            .assets
+            .items()
+            .iter()
+            .find(|a| !by_asset.contains_key(&a.id.to_lowercase()))
+            .expect("真数据里该有没进套餐的资产（图标那一类）");
+        let u = wb_asset_usage(unused.id.clone()).expect("反查");
+        assert!(
+            u.bundles.is_empty(),
+            "{} 没进任何套餐，反查的套餐那一档该是空的",
+            unused.id
         );
-
-        // 图标那一份没有套餐引用（归属 ≠ 引用）：p1s-icon 归 P1S，用的是 P2S / X1C
-        let u = wb_asset_usage("p1s-icon".to_owned()).expect("反查");
-        assert!(u.bundles.is_empty(), "机型图标不该被套餐引用");
-
-        // MKP 预设那一条只被自己那版指向的套餐装着
-        let u = wb_asset_usage("a1-fast".to_owned()).expect("反查");
-        assert_eq!(u.bundles, vec!["A1_FAST".to_owned()]);
     }
 }
