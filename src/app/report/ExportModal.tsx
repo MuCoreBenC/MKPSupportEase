@@ -437,7 +437,7 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
     setBusy(true)
     setFail(null)
     /* 这一趟的落点先扣下来：成功之后开关再怎么拨，胶囊与页脚那句都照这一份说 */
-    const at = path.full
+    const at = path
     /* 真会进包 / 真会复制出去的份数（缺的那一份不算） */
     const packed = plan.files.filter((f) => f.exists).length
     api.exportReportArchive(id, dir, zip, overwrite).then(
