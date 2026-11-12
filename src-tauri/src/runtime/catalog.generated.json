@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "72437464090f2bba",
+  "revision": "00d6366fd849a082",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -1941,7 +1941,10 @@
         "machineFilter": [],
         "deprecated": false,
         "machineVariants": {
-          "A1": 60.0
+          "A1": 70.0,
+          "A1:FAST260326": 70.0,
+          "A1:FAST261111": 60.0,
+          "A1:STANDARD": 70.0
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -4660,7 +4663,11 @@
         "machineFilter": [],
         "deprecated": false,
         "machineVariants": {
-          "A1": 0.8
+          "A1": 0.8,
+          "A1_MINI": 0.7,
+          "A1_MINI:FAST260326": 0.7,
+          "A1_MINI:FAST261111": 0.7,
+          "A1_MINI:STANDARD": 0.7
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -4818,20 +4825,20 @@
         "machineFilter": [],
         "deprecated": false,
         "machineVariants": {
-          "A1": 1.2,
-          "A1:FAST260326": 1.2,
-          "A1:FAST261111": 1.2,
-          "A1:STANDARD": 1.2,
-          "A1_MINI": 1.2,
-          "A1_MINI:FAST260326": 1.2,
-          "A1_MINI:FAST261111": 1.2,
-          "A1_MINI:STANDARD": 1.2,
-          "P1S": 1.2,
-          "P1S:LITE": 1.2,
-          "P2S": 1.2,
-          "P2S:STANDARD": 1.2,
-          "X1C": 1.2,
-          "X1C:LITE": 1.2
+          "A1": 1.0,
+          "A1:FAST260326": 1.0,
+          "A1:FAST261111": 1.0,
+          "A1:STANDARD": 1.0,
+          "A1_MINI": 1.0,
+          "A1_MINI:FAST260326": 1.0,
+          "A1_MINI:FAST261111": 1.0,
+          "A1_MINI:STANDARD": 1.0,
+          "P1S": 1.0,
+          "P1S:LITE": 1.0,
+          "P2S": 1.0,
+          "P2S:STANDARD": 1.0,
+          "X1C": 1.0,
+          "X1C:LITE": 1.0
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -4877,7 +4884,22 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1": 1.2,
+          "A1:FAST260326": 1.2,
+          "A1:FAST261111": 1.2,
+          "A1:STANDARD": 1.2,
+          "A1_MINI": 1.2,
+          "A1_MINI:FAST260326": 1.2,
+          "A1_MINI:FAST261111": 1.2,
+          "A1_MINI:STANDARD": 1.2,
+          "P1S": 1.2,
+          "P1S:LITE": 1.2,
+          "P2S": 1.2,
+          "P2S:STANDARD": 1.2,
+          "X1C": 1.2,
+          "X1C:LITE": 1.2
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
