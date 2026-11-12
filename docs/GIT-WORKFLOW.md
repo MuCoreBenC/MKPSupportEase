@@ -109,14 +109,103 @@
 git switch -c feat/<something>
 # 改、提交（闸①⑥⑦ 在守着）
 git push -u origin HEAD
-gh pr create
-# 等 CI（web + rust）绿
-gh pr merge --squash --delete-branch
+npm run pr              # 建 PR —— 标题取自最新提交
+npm run pr -- --merge   # 等 CI 全绿后 squash 合并
 ```
+
+**`gh pr create` 不许直接用。** 走 `npm run pr`（见 §4.2）。
 
 **squash 会重写提交。** 合进 main 的那一个提交与分支上的任何提交都不是同一个 SHA ——
 所以 tag 必须在 `git switch main && git pull` 之后、在 main 的 tip 上打，
 在分支上打的 tag 指向的是一个不在 main 历史里的提交（闸⑤的"tag 必须在 main 上"就是拦这个）。
+
+### 4.1 一次交付的最短路径（SOP）
+
+判据只有一条：**push 次数决定总时长**。一次 push 一轮 CI，改一回就重跑一整轮
+（`rust-windows` 实测 20 分钟）。所以先在本地把所有能红的跑完，再推。
+
+```bash
+# ① 本地把闸跑完（这一步省下的是整轮 CI，不是几分钟）
+cargo test --workspace                              # 默认 feature
+cargo test -p mkp-support-ease --features workbench # ★ 少了这条，CI 的 rust job 会红
+cargo clippy --workspace --all-targets
+cargo fmt --all --check
+npm run lint
+npm run presets -- check && npm run presets -- diff
+
+# ② 提交（工作区必须干净，见 §4.3 的三道闸）
+git add -A <路径>
+git commit -m "..."
+
+# ③ 要发数据就现在发 —— 它会自己 commit + push（见 §4.4）
+npm run presets -- publish --dry-run     # 先给人看
+npm run presets -- publish --confirm
+
+# ④ 版本号 + 预览包
+npm run version:ensure
+git add version.toml package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json Cargo.lock
+git commit -m "chore(version): 进待交付的预览号 x.y.z-preview.N"
+npm run tauri -- build
+node scripts/local-release.mjs
+
+# ⑤ 一次 push，然后建 PR / 合并
+git push -u origin HEAD
+npm run pr -- --merge
+```
+
+### 4.2 建 PR 的三条判据（`scripts/pr.mjs`）
+
+直接 `gh pr create` 会踩三个坑，脚本把它们钉住了：
+
+| 判据 | 规则 | 为什么 |
+| --- | --- | --- |
+| 分支 | `main` 不许；`chore/next-preview-*`、`chore/version-*`、`chore/next-dev-version` 不许 | 进号是本地动作，合并它等于把 main 的号往回拨 |
+| 标题 | **必须等于最新提交的主题** | 只允许 squash ⇒ main 上那一条的标题就是 PR 标题 |
+| 已有 PR | 标题对得上才复用；对不上就停 | 复用旧 PR 会让合并记录写着上一轮的内容 |
+
+```bash
+npm run pr                  # 建 / 校验
+npm run pr -- --replace     # 标题对不上：关掉旧的开新的
+npm run pr -- --merge       # 建 + 等 CI + squash 合并
+npm run pr -- --list        # 看还有哪些 PR 开着（收旧 PR 用）
+```
+
+PR 正文由 `origin/main..HEAD` 的提交列表自动生成 —— 手写正文正是"标题与内容对不上"的来源。
+判据本身有自检：`node scripts/check-pr.mjs`（在 `npm run lint` 里）。
+
+### 4.3 三道会把时间翻倍的闸
+
+| 闸 | 症状 | 处理 |
+| --- | --- | --- |
+| `tauri build` 拒脏工作区 | `✗ 不开工：工作区不干净（1 处） M version.toml` | 只放行 4 个派生文件，**`version.toml` 不在内** —— 先提交它 |
+| `preview:build` 的第二次 | 号从 `preview.1` 自己变成 `preview.2` | 它读本地清单算"下一个待交付号"。**同一个号只编一次**；重编用 `npm run tauri -- build` + `node scripts/local-release.mjs` |
+| `presets publish` 自己推送 | 分支上凭空多一个提交、CI 多跑一轮 | 见 §4.4，把它排在最后一次 push 之前 |
+
+### 4.4 会自动提交 / 推送的三处
+
+| 命令 | 提交 | 推送 | 建 PR |
+| --- | --- | --- | --- |
+| `presets publish --confirm` | 是 | **是** | 否（没配发布账户） |
+| `preview:build` 的 `version:ensure` | 否 | 否 | 否 |
+| `release` | 是 | 是 | 是 |
+
+所以 `presets publish` **不能**当"攒批中的一步"：它推的那一下会把当前分支上
+所有未推的提交一起带上去。要省轮次就把排在它后面的改动先做完，或者接受多一轮。
+
+### 4.5 时间账（2026-11-12 实测）
+
+| 环节 | 耗时 | 备注 |
+| --- | --- | --- |
+| `web` | 1m50s | 含 `lint` / `tsc` / `check:artifacts` |
+| `rust` | 9m21s | 含 `--features workbench` 那一档 |
+| `rust-windows` | 20m01s | **最长的那个，决定整轮** |
+| `windows-build`（NSIS） | 6m11s | 只在 `feat/**` 与 tag 上触发 |
+| 本地全量（增量） | 1–2m | 含 feature 那一档 |
+| `tauri build`（增量） | 2–3m | |
+
+`ci.yml` 对同分支连续 push 开了 `cancel-in-progress` —— 旧的会取消，但**新的一轮从头跑**。
+另有变更分类：只动 `presets/delivery/` 或文档时跳过编译与测试（job 仍 success），
+所以纯数据发布很便宜。
 
 ## 4b. 版本号什么时候才用
 
