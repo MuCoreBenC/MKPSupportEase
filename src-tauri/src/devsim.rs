@@ -550,6 +550,8 @@ fn finish(
                 layer_height_max: Some(0.2),
                 /* 演出档不演调试（那一档走真钩子的调试弹框，不在这里） */
                 debug: None,
+                /* 演出档不演热床预涂胶：那一屏在浏览器里用 `?pp=glue` 试（`src/api/mock.ts`） */
+                bed_glue: false,
             }),
             /* 校准件那几档演出：结论里也带上"选了哪种跑法" */
             calib_choice: calib_choice.map(std::string::ToString::to_string),

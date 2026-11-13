@@ -879,16 +879,15 @@ pub async fn commit_text_draft(app: AppHandle) -> Result<CommittedDraftDto, AppE
         if !lost.is_empty() {
             return Err(AppError::invalid_argument(messages::text("ui.ipc.local.092", &[("v1", &lost.len().to_string())]))
             .with_detail(format!(
-                "缺的是：{} —— 它们被注释掉了或整行不见了（切片时会静默退回默认值）。补回来再存，或按底栏「恢复默认值」退回最初那份。",
+                "缺的是：{} —— 它们被注释掉了或整行不见了（切片时会静默退回默认值）。补回来再存，或按底栏「恢复默认值」退回上次同步那一版。",
                 lost.iter()
                     .map(|m| m.label.clone())
                     .collect::<Vec<_>>()
                     .join("、")
             )));
         }
-        /* ★ 原文镜像：编辑器保存**写盘之前**存 —— 此刻盘上还是原文
-        （保存之后就再也见不到它了）。新文件那一路在落盘时就存过，这里是幂等的空转 */
-        let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &draft.path);
+        /* ★ 手改保存**不碰**原文镜像：手改出来的不是默认值（见 `runtime::baseline`）。
+        镜像只在云端内容落盘之后刷新。 */
         runtime::local::write_text(&user_root, &draft.path, &draft.text)?;
         runtime::app_state::clear_text_draft(&root)?;
         /* 另一侧作废：盘上字节换了，参数页手上那份就成了孤儿 */
@@ -920,8 +919,7 @@ pub async fn discard_text_draft(app: AppHandle) -> Result<(), AppError> {
 /// 恢复默认值……可能需要你去做一种备份」）。
 ///
 /// 来源 = `baseline-local/` 的路径镜像（见 [`runtime::baseline`] 的模块头）：
-/// 下载 / 导入 / 复制 / 另存的那几份在**落盘时**存过；老文件在**第一次被我们改写**
-/// （编辑器保存 / 参数写回 / 校准 / 归属机型）之前补上。
+/// 下载 / 导入 / 复制 / 另存落盘时写入；更新合并只在逐字节等于云端原文时刷新。
 ///
 /// 都没有 ⇒ `None` —— 界面把那颗按钮禁用（不猜、不编）。路径闸与读正文同一道
 /// （[`runtime::baseline::read_origin_copy`] → `check_local_prefix` + 防穿越）。
@@ -934,6 +932,100 @@ pub async fn read_local_origin_text(
         let root = internal_root(&app)?;
         runtime::baseline::read_origin_copy(&root, &path)
     })
+}
+
+/// 「恢复默认值」要回到的那一版里的一格参数。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BaselineValueDto {
+    pub key: String,
+    pub value: String,
+}
+
+/// 「恢复默认值」要回到的那一版：**最近一次与云端某一版逐字节一致落盘的原样**。
+///
+/// `origin` 只说这一份是怎么来的（界面据此解释"回到哪一版"）：
+/// - `cloudSync` —— 最近一次云端落盘（下载 / 全采用更新 / 导入 / 另存）；
+/// - `migrated`  —— 升级前的老档，按文件尾部末条 sha 从 `content/` 取回了那一版；
+/// - `initial`   —— 只有最初那份，没有可迁移的云端原文。
+///
+/// **绝不回落到注册表的出厂值** —— 那些值是工作台的共用口径（含占位零），
+/// 客户端不消费（见 `AGENTS.md`）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BaselineSnapshotDto {
+    pub values: Vec<BaselineValueDto>,
+    /// 这一版的发布时刻（目录 `publishedAt`）—— 来自文件尾部来源记录
+    pub at: Option<String>,
+    pub catalog_id: Option<String>,
+    pub serial: Option<u64>,
+    pub origin: String,
+}
+
+/// 参数页与「编辑文件」共用的那一份默认值（两处读同一份字节）。
+///
+/// 缺镜像且没有可迁移的云端原文 ⇒ `None`：按钮禁用，界面不编一个"默认"出来。
+#[tauri::command]
+pub async fn read_preset_baseline_values(
+    app: AppHandle,
+    path: String,
+) -> Result<Option<BaselineSnapshotDto>, AppError> {
+    traced("readPresetBaselineValues", |_| {
+        let root = internal_root(&app)?;
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        baseline_snapshot_at(&root, &user_root, &path)
+    })
+}
+
+/// 选哪一份正文当默认：镜像与这份文件现在认的那版一致就用镜像；老档按尾部末条
+/// `sha256` 去 `content/` 取那一版；都没有才退回镜像（`initial`）。
+fn baseline_snapshot_at(
+    root: &std::path::Path,
+    user_root: &std::path::Path,
+    path: &str,
+) -> Result<Option<BaselineSnapshotDto>, AppError> {
+    runtime::local::check_local_prefix(path)?;
+    let Ok(local_text) = runtime::local::read_preset_text(user_root, path) else {
+        return Ok(None);
+    };
+    let line = runtime::provenance::parse(&local_text).and_then(|p| p.latest_version().cloned());
+    let want = line.as_ref().and_then(|v| v.sha256.clone());
+
+    let mirror = runtime::baseline::read_origin_copy(root, path)?;
+    let mirror_sha = mirror
+        .as_deref()
+        .and_then(runtime::provenance::parse)
+        .and_then(|p| p.latest_version().and_then(|v| v.sha256.clone()));
+
+    /* 老档迁移要读一次云端原文；有没有由 `pick` 的第三格告诉它 */
+    let content_text = match &want {
+        Some(sha) => runtime::content::read(root, sha)?,
+        None => None,
+    };
+    let (text, origin) = match runtime::baseline::pick(
+        mirror_sha.as_deref(),
+        want.as_deref(),
+        content_text.is_some(),
+    ) {
+        runtime::baseline::Pick::Mirror => (mirror.clone().unwrap_or_default(), "cloudSync"),
+        runtime::baseline::Pick::Content => (content_text.unwrap_or_default(), "migrated"),
+        runtime::baseline::Pick::MirrorOnly => (mirror.clone().unwrap_or_default(), "initial"),
+        runtime::baseline::Pick::Nothing => return Ok(None),
+    };
+
+    let catalog = runtime::load_released_catalog(root)?;
+    let values = crate::presetdata::params::read_param_values(&text, &catalog.registry.params)?
+        .into_iter()
+        .map(|(key, value)| BaselineValueDto { key, value })
+        .collect();
+
+    Ok(Some(BaselineSnapshotDto {
+        values,
+        at: line.as_ref().and_then(|v| v.at.clone()),
+        catalog_id: line.as_ref().and_then(|v| v.catalog.clone()),
+        serial: line.as_ref().and_then(|v| v.serial),
+        origin: origin.to_owned(),
+    }))
 }
 
 /// **参数草稿的摘要**（预设列表行上的「未保存」标记、"要不要重开"两处用）。
@@ -1184,9 +1276,9 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
                     &based_on,
                     &draft.text,
                 )?;
-                /* 原文镜像：新文件**落盘之后**存（刚写进去的就是原文）。
+                /* 原文镜像：新文件**落盘之后**覆盖（刚写进去的就是云端那一版的原样）。
                 记不上不影响保存本身 —— 与出处账同一条口径 */
-                let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &done.path);
+                let _ = runtime::baseline::refresh_origin_copy(&root, &user_root, &done.path);
                 /*
                  * **源身份账**（2026-10-27）：这一份是"在哪个源生效时建出来的"。
                  * 没有它，换源之后 SHA 不同就只剩"内容变了"这一种说法 ——
@@ -1230,9 +1322,7 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
                     .path
                     .clone()
                     .ok_or_else(|| AppError::corrupted(messages::text("ui.ipc.local.095", &[])))?;
-                /* ★ 原文镜像：写回**之前**存 —— 那一刻盘上还是原文（保存改了就补不回来了）。
-                新文件那一路在落盘时就存过，这里是幂等的空转 */
-                let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &rel);
+                /* ★ 写回**不碰**原文镜像：手改出来的不是默认值。 */
                 runtime::local::save_back(&user_root, &rel, &draft.text)?
             }
         };
@@ -1432,8 +1522,8 @@ pub async fn copy_local_preset(
             let with_mother = runtime::provenance::duplicate_from_local(&text, &path);
             crate::fsx::atomic::atomic_write(&copied, with_mother.as_bytes())?;
 
-            /* 原文镜像：副本**落盘之后**存一份（副本的"最初那样"= 它诞生那一刻的字节） */
-            runtime::baseline::ensure_origin_copy(&internal, &user_root, &done.path)?;
+            /* 原文镜像：副本**落盘之后**覆盖一份（副本没有云端来源，能追溯的就是它诞生那一刻） */
+            runtime::baseline::refresh_origin_copy(&internal, &user_root, &done.path)?;
             /*
              * 来路账（程序自己的运行索引）：仍记一笔，供排查与"我怎么来的"那一格；
              * 详情页的来源版本 / 发布线只读文件尾部记录，不读这本账。
@@ -1592,8 +1682,7 @@ pub async fn save_preset_calibration(
                 &crate::presetdata::patch::FieldEdit::new(key, value.to_string()),
             )?;
         }
-        /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
-        let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &path);
+        /* ★ 校准也是手改：**不碰**原文镜像（手改出来的不是默认值） */
         runtime::local::write_text(&user_root, &path, &text)
     })
 }
@@ -1764,8 +1853,7 @@ pub async fn set_local_preset_machine_version(
                 &[("machine_id", machine_id)],
             )));
         }
-        /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
-        let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &path);
+        /* ★ 改归属是手改：**不碰**原文镜像（手改出来的不是默认值） */
         runtime::local::set_machine_variant(&user_root, &path, machine_id, version_id)
     })
 }

@@ -769,9 +769,6 @@ pub struct RecipeParamDto {
     /// **一律字符串** —— 单位换算与小数位数不该由界面再做一遍
     pub value: String,
     pub origin: &'static str,
-    /// 只有 `origin === "variant"` 时有：基础配方里的那个值
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_value: Option<String>,
     /// **字段级弃用**（`ParamDef.deprecated`）：这一整项在真上游里标了废弃。
     ///
     /// 与 [`ParamMetaDto::deprecated`] **同一个值、同一处出处**（`ParamDef.deprecated`）——
@@ -880,8 +877,6 @@ fn machine_params_dto(
             step: p.step,
             value: to_text(eff.value),
             origin: if is_variant { "variant" } else { "base" },
-            // 被版本盖过才带「还原成」的那个值：先看机型层有没有钉着，没有才是出厂默认
-            base_value: is_variant.then(|| to_text(base.get(key).unwrap_or(&p.default_value))),
             // 字段级弃用：与 [`ParamMetaDto::deprecated`] 同源同值（`ParamDef.deprecated`）
             deprecated: p.deprecated,
         });
@@ -1775,8 +1770,6 @@ mod tests {
             .expect("偏移 X 在配方里");
         assert_eq!(vx.origin, "variant", "{vm}/{vv} 这一版在版本层覆盖了它");
         assert!(!vx.value.is_empty(), "值来自那一层");
-        // 机型层没写 → 「还原成」给的是出厂默认 0
-        assert_eq!(vx.base_value.as_deref(), Some("0"));
 
         // 机型不存在的报错要说出是谁
         let err = machine_params_dto(&catalog, "NOPE", None).unwrap_err();

@@ -17,11 +17,13 @@
  * 手抄表和真注册表的总数都是 67，但最后两类的切分完全不同（手抄：涂胶 31 / 更多 4，
  * 真注册表：涂胶 18 / 更多 17）。总数对得上所以一直没人发现 —— 这里以真注册表为准。
  *
- * # 三层值
+ * # 两层值
  *
- *   出厂     `RecipeParam.baseValue`（被版本盖过的那几条有）否则加载时 `origin === 'base'` 的值
- *     ↓ 已保存  保存动作把草稿并进来。**按「机型:版本」分开记**，切回去还看得见
- *       ↓ 草稿  未保存的改动
+ *   已保存  保存动作把草稿并进来。**按「机型:版本」分开记**，切回去还看得见
+ *     ↓ 草稿  未保存的改动
+ *
+ * 注册表里的出厂值**不在这条链上** —— 它只是工作台的共用口径（含占位零），
+ * 客户端不消费（「恢复默认值」读的是 `baseline-local/`，见 AGENTS.md）。
  *
  * 显示读 `draft ?? saved`。中间那一层不能省：行上那个「↩」chip 要退回的是**已保存值**，
  * 而「恢复默认值」退回的是**出厂值** —— 保存过一次之后这两个就不是一回事了。
@@ -63,6 +65,8 @@ import {
 import type {
   ActiveOrigin,
   CatalogParamDef,
+  BaselineSnapshot,
+  BaselineValue,
   Machine,
   MachineVersion,
   ParamDecision,
@@ -355,8 +359,6 @@ interface ComboData {
   placeByKey: Map<string, Place>
   /** api 给的当前值 = 「文件里现在写着什么」的基准 */
   baseByKey: Map<string, string>
-  /** 出厂值 */
-  factoryByKey: Map<string, string>
   /** 这个 combo 的 MKP 文件名（`A1.toml`）。包里这个版本没有 MKP 文件时是 null */
   fileLabel: string | null
 }
@@ -642,14 +644,10 @@ export interface Params {
   savedValueOf: (key: string) => string
   /** 这一项上一次保存之前的值（2026-10-21；没记录过 = null） */
   prevSavedOf: (key: string) => string | null
-  /** 出厂值。「恢复默认值」与行详情要它 */
-  factoryOf: (key: string) => string
   dirtyOf: (key: string) => boolean
   dirtyCount: number
   /** 哪些分类里有未保存的改动 —— 分类胶囊上那颗红点 */
   dirtyTabs: Set<string>
-  /** 与出厂不同的条数，按当前机型实算 */
-  changedCount: number
 
   isVisible: (key: string) => boolean
   /** 现在是哪个父字段的条件没满足。可见时返回 null */
@@ -700,10 +698,18 @@ export interface Params {
   /** 行上那个 chip：退回**已保存值**（= 撤掉草稿） */
   revertToSaved: (key: string) => void
   /**
-   * 底栏的「恢复默认值」：全部退回**出厂值**（目录里那份 `baseValue`），
-   * 算一次动作、可整体撤销（2026-10-08 资源库改判：不再问任何历史快照）。
+   * 底栏的「恢复默认值」：退回**最近一次与云端某一版逐字节一致落盘的原样**
+   * （`baseline-local/`），算一次动作、可整体撤销。
+   *
+   * `values` 由 [`loadRestoreSnapshot`] 先取好（确认框要按它列「旧 → 新」）；
+   * **不读注册表的出厂值** —— 那是工作台内部口径，含占位零。
    */
-  restoreDefaults: () => void
+  restoreDefaults: (values: BaselineValue[]) => void
+  /**
+   * 取「恢复默认值」要回到的那一版。`null` = 没有可恢复的（按钮禁用）。
+   * 与「编辑文件」那颗读同一份字节。
+   */
+  loadRestoreSnapshot: () => Promise<BaselineSnapshot | null>
   /**
    * 全部未保存的改动**一次退回已保存值**（原「取消」；2026-10-16 起 =
    * 「放弃并退出」做的事——作者：「退出编辑模式就是作废，那些改的都作废，
@@ -1046,17 +1052,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const presetPrefsRevision = usePresetPrefsRevision()
   /** 上一次那次读认的是哪一份文件 —— 换文件才丢云端表态，改偏好不该丢 */
   const syncPathRef = useRef<string | null>(null)
-
-  /**
-   * **「恢复默认值」的基准** —— **已退场**（2026-10-08 资源库改判）。
-   *
-   * 那一版是"退回这份预设当初那版云端的默认值"（藏在内部 baseline 里）。
-   * 现在整个功能不要了：**有问题就让用户删掉、重新取一份** —— 参数表上的「恢复默认值」
-   * 退回**出厂值**（目录里那份 `baseValue`），不再去问任何历史快照。
-   *
-   * 于是这一条读（`getPresetDefaults`）与状态一起下线：少一次请求、少一个"我该退到哪一版"
-   * 的隐性概念。
-   */
 
   /**
    * **保存**：把草稿提交成"本地预设"（云端线另存 / 用户线写回）。
@@ -1410,7 +1405,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         const defs: ParamDef[] = []
         const defByKey = new Map<string, ParamDef>()
         const baseByKey = new Map<string, string>()
-        const factoryByKey = new Map<string, string>()
 
         /* 把某个 key 登记进分类 / 分组索引 */
         const place = (key: string, sectionId: string): void => {
@@ -1527,11 +1521,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           /* 值本体只对活字段有（弃用字段配方通道不下发 → 不填，展示走兜底） */
           if (p !== undefined) {
             baseByKey.set(key, normalizeRaw(p.value, meta?.valueType))
-            /* 出厂值：被版本盖过的那几条带 baseValue，没盖过的 value 本身就是出厂值 */
-            factoryByKey.set(
-              key,
-              normalizeRaw(p.origin === 'variant' ? p.baseValue : p.value, meta?.valueType),
-            )
           }
           place(key, sectionId)
         }
@@ -1552,7 +1541,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           defByKey,
           placeByKey,
           baseByKey,
-          factoryByKey,
           fileLabel,
         })
       })
@@ -1643,8 +1631,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     (key: string) => draft[key] ?? savedValueOf(key),
     [draft, savedValueOf],
   )
-
-  const factoryOf = useCallback((key: string) => combo?.factoryByKey.get(key) ?? '', [combo])
 
   /* 判据只有一处（`isDirtyValue`）：草稿里的值真的与已保存值不同才算脏 */
   const dirtyOf = useCallback(
@@ -1885,22 +1871,33 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   )
 
   /**
+   * 取「恢复默认值」要回到的那一版 —— `baseline-local/` 那份原文。
+   * 参数页与「编辑文件」读同一份字节；没有就 `null`（按钮禁用）。
+   */
+  const loadRestoreSnapshot = useCallback(async (): Promise<BaselineSnapshot | null> => {
+    if (localPath === null) return null
+    return api.readPresetBaselineValues(localPath)
+  }, [localPath])
+
+  /**
    * 整份恢复默认值：一次动作，撤销一下就全回来。
    *
-   * **退回目录里那份出厂值**（2026-10-08 资源库改判）：那套"退回这份预设当初那版交付预设的
-   * 默认值"整个退场了 —— 有问题就让用户删掉、重新取一份，参数页不再养一份历史快照，
-   * 也就没有"基准里缺哪一项"那一串回落。
+   * **退的是「最近一次与云端某一版逐字节一致落盘的原样」**，不是注册表里的出厂值 ——
+   * 那些值只是工作台的共用口径（含占位零），客户端不消费（见 AGENTS.md）。
+   * 云端更新里那几项"采用"的待落决定一并作废：否则保存时又把云端值写回去，恢复白做。
    */
-  const restoreDefaults = useCallback(() => {
-    if (combo === null) return
-    apply(
-      tr('params.act.restoreDefaults'),
-      combo.defs.map((d) => ({
-        key: d.key,
-        value: combo.factoryByKey.get(d.key) ?? '',
-      })),
-    )
-  }, [apply, combo, tr])
+  const restoreDefaults = useCallback(
+    (values: BaselineValue[]) => {
+      if (values.length === 0) return
+      apply(
+        tr('params.act.restoreDefaults'),
+        values.map((v) => ({ key: v.key, value: v.value })),
+      )
+      /* 放在 `apply` **之后**：它会按"这一步之后的表态表"覆盖一次（同 `discardAll`） */
+      setSyncDecisions({})
+    },
+    [apply, tr],
+  )
 
   /* 撤销 / 重做在**回调体里**读栈算完再 set —— StrictMode 会把 updater 跑两次 */
   const undo = useCallback(() => {
@@ -2354,12 +2351,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     () => (combo?.tabs ?? []).map((t) => localizeTab(t, locale)),
     [combo, locale],
   )
-
-  /** 与出厂不同的条数 —— 按当前机型实算，不是写死的 67 */
-  const changedCount = useMemo(() => {
-    if (combo === null) return 0
-    return combo.defs.filter((d) => valueOf(d.key) !== (combo.factoryByKey.get(d.key) ?? '')).length
-  }, [combo, valueOf])
 
   const sectionsOf = useCallback(
     (tabId: string) => localizedTabs.find((t) => t.id === tabId)?.sections ?? [],
@@ -2868,11 +2859,9 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     total: combo?.defs.length ?? 0,
     valueOf,
     savedValueOf,
-    factoryOf,
     dirtyOf,
     dirtyCount: dirtyKeys.length,
     dirtyTabs,
-    changedCount,
     isVisible,
     blockedBy: findBlocked,
     condOn,
@@ -2888,6 +2877,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     dismissReslice: useCallback(() => setResliceAsk(false), []),
     revertToSaved,
     restoreDefaults,
+    loadRestoreSnapshot,
     discardAll,
     save,
     savedNote,

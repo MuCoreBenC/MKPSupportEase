@@ -102,6 +102,7 @@ import type {
   VersionFiles,
 } from '../../api'
 import type { StringKey, Tr } from '../../i18n'
+import type { RelativePart } from '../store/package'
 
 /**
  * 用户自己的一份文件（本地文件，`presets-local/`）。
@@ -620,13 +621,6 @@ export interface CloudRowState {
   warn: boolean
   /** 动作按钮的悬停说明 */
   hint: StringKey | null
-  /**
-   * ★ **只有这一档为真，详情才画「云端新版发布」那一行**。
-   *
-   * 作者的口径：本地文件能用的状态下不显示云端时间 —— 那会让人以为"云端有新的"，
-   * 却没有任何可更新的版本。时间只在真有新版、且真给更新按钮时出现。
-   */
-  showCloudRelease: boolean
 }
 
 /** `github#owner/repo@main` → `main`；没有 ref（自建源）⇒ `null` */
@@ -652,6 +646,26 @@ export function identityDisplayOf(tr: Tr, key: string | null | undefined): strin
   return ref === null ? platform : `${platform} · ${ref}`
 }
 
+/**
+ * 相对时间那一格怎么念。**文案住 i18n 表**（四语同改），这里只做「分档 → 键」的映射。
+ *
+ * 只给「云端当前」用；`relativePart(...)` 返回 `null` 时调用方退回 `instantText`。
+ */
+export function relativeLabel(tr: Tr, part: RelativePart): string {
+  switch (part.kind) {
+    case 'now':
+      return tr('time.relative.now')
+    case 'minute':
+      return tr('time.relative.minute', { n: String(part.value) })
+    case 'hour':
+      return tr('time.relative.hour', { n: String(part.value) })
+    case 'day':
+      return tr('time.relative.day', { n: String(part.value) })
+    case 'month':
+      return tr('time.relative.month', { n: String(part.value) })
+  }
+}
+
 /** 说不清的原因 → 人话（后端给稳定词，界面只翻词） */
 export const UNVERIFIED_WHY: Record<UnverifiedReason, StringKey> = {
   no_source_record: 'presets.tree.unverified.noSourceRecord',
@@ -669,7 +683,7 @@ export const UNVERIFIED_WHY: Record<UnverifiedReason, StringKey> = {
  * 是否显示云端时间）在这里产生一次，组件只负责画。
  *
  * 它**不看时间**：谁新谁旧由 `basedOn`（Rust 侧 `catalogId + serial + SHA + ref`）回答。
- * 时间只做追溯：`showCloudRelease` 为真时，界面才把「云端新版发布」那一行画出来。
+ * 「云端当前」那一行**永久显示**（不跟有没有新版走）；这里只回答动作给不给。
  */
 export function updateStatusOf(row: {
   basedOn?: BasedOn
@@ -683,7 +697,6 @@ export function updateStatusOf(row: {
     action: 'none',
     warn: false,
     hint: null,
-    showCloudRelease: false,
   } as const
   if (row.localState === undefined) return { ...none }
 
@@ -710,7 +723,6 @@ export function updateStatusOf(row: {
         ...none,
         text: 'presets.tree.cloudLocal.stale',
         action: 'update',
-        showCloudRelease: true,
       }
     /*
      * **发布前进了，但这一份没变**：不说「有新版」，也不给动作 ——
@@ -729,7 +741,6 @@ export function updateStatusOf(row: {
         ...none,
         text: 'presets.tree.cloudLocal.unchanged',
         action: 'update',
-        showCloudRelease: true,
       }
     /*
      * **说不清版本关系**：不声称有新版，也不给「更新」——
@@ -775,7 +786,6 @@ export function updateStatusOf(row: {
         ...none,
         text: CLOUD_LOCAL_TEXT[row.localState],
         action: row.localState === 'stale' ? 'update' : 'none',
-        showCloudRelease: row.localState === 'stale',
       }
   }
 }
@@ -3085,6 +3095,7 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
           sourceRelease: claim?.facts.sourceRelease ?? null,
           sourceVersionAt: claim?.facts.sourceVersionAt ?? null,
           sourceSha256: claim?.facts.sourceSha256 ?? null,
+          downloadSha256: claim?.facts.downloadSha256 ?? null,
           cloudSource: sourceIdentity,
           cloudPublishedAt: releaseAt,
           /* 目录登记值就摆在这儿 —— 不再因为"前端没搬"而写未知 */

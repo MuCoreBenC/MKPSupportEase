@@ -245,11 +245,11 @@ export const bridgeApi: MkpApi = {
    * 两条都要挂一条 Channel（Rust 侧是必填参数，见 `withTick` 头注）—— 备份几百 MB
    * 时界面要的正是那条水位：`scan` → 一跳一跳的 `pack`。
    */
-  createBackup: (destDir, includePresets, onTick) =>
+  createBackup: (destDir, includePresets, includeHistory, onTick) =>
     call(
       'createBackup',
       'create_backup',
-      withTick({ destDir, includePresets }, onTick),
+      withTick({ destDir, includePresets, includeHistory }, onTick),
     ),
   restoreBackup: (zipPath, scope, onTick) =>
     call('restoreBackup', 'restore_backup', withTick({ zipPath, scope }, onTick)),
@@ -265,6 +265,9 @@ export const bridgeApi: MkpApi = {
   /* 「恢复默认值」（编辑文件那颗）读的原文镜像 —— `baseline-local/`，见 Rust `runtime::baseline` */
   readLocalOriginText: (path) =>
     call('readLocalOriginText', 'read_local_origin_text', { path }),
+  /* 「恢复默认值」要回到的那一版（参数页底栏；与上一行同一份字节） */
+  readPresetBaselineValues: (path) =>
+    call('readPresetBaselineValues', 'read_preset_baseline_values', { path }),
   putTextDraft: (text) => call('putTextDraft', 'put_text_draft', { text }),
   commitTextDraft: () => call('commitTextDraft', 'commit_text_draft'),
   /* 编辑框实时自检：语法 + 相对最初那份缺了哪些参数（红条跟着字走） */

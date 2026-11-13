@@ -62,8 +62,6 @@ interface Props {
    * `null` = 没记录过（从没保存过它的改动 / 清过历史）—— 那就什么也不画。
    */
   prevSavedValue?: string | null
-  /** 默认值（点「恢复默认值」回到的那个数）—— 只在展开的行详情里显示 */
-  factoryValue: string
   dirty: boolean
   /**
    * 这一项上的**云端更新账**（我 / 云端旧值 / 云端新值）。
@@ -163,7 +161,6 @@ export default function ParamRow({
   value,
   savedValue,
   prevSavedValue = null,
-  factoryValue,
   dirty,
   sync,
   syncDraft = null,
@@ -189,7 +186,6 @@ export default function ParamRow({
   /* 改不动：条件关着，或已弃用 —— 两者控件都是 disabled，但文案与长相分开 */
   const locked = blocked || dep
   const savedText = valueText(def, savedValue, tr)
-  const factoryText = valueText(def, factoryValue, tr)
 
   /*
    * **打字不合法也要有「还原」出口**（2026-10-20，作者：「这个时候就可以显示
@@ -408,7 +404,7 @@ export default function ParamRow({
               打字不合法（未提交）时也摆 —— 那是失焦闸困住之后的可见出口（见上面 badTyping 注） */}
           {(dirty || badTyping) && !locked && !readonly && (
             <RestoreChip
-              title={tr('params.row.revertTitle', { saved: savedText, factory: factoryText })}
+              title={tr('params.row.revertTitle', { saved: savedText })}
               onClick={() => {
                 onRevertToSaved(def.key)
                 setResetNonce((n) => n + 1)
@@ -536,17 +532,6 @@ export default function ParamRow({
               </dd>
             </>
           )}
-          {/*
-            这一格 = **点「恢复默认值」会回到的那个数**（`factoryByKey`）。
-            来源是**当前云端目录**里这个机型·版本的基准：被版本盖过的项取机型基底，
-            其余取版本有效值。它既不是安装包里的字节，也不是你那份文件里的数 ——
-            所以不能叫「包里的值」（作者 2026-10-31 指出：包里根本没有这份预设）。
-            标签定成「默认值」：与底栏那颗「恢复默认值」是同一个词，用户自己就能对上。
-          */}
-          <dt className={s.dt}>{tr('params.row.dt.package')}</dt>
-          <dd className={s.dd}>
-            <Highlight text={factoryText} query={query} />
-          </dd>
           <dt className={s.dt}>{tr('params.row.dt.scope')}</dt>
           <dd className={s.dd}>
             <Highlight

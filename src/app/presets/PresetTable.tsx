@@ -133,7 +133,7 @@ import Chevron from '../shell/icons'
 /* 多选那一列的两颗框（表头全选 / 行勾选）走共用件 —— 全站勾与框的唯一出口 */
 import Check from '../../components/check/Check'
 import ui from '../ui/ui.module.css'
-import { useT, type Tr } from '../../i18n'
+import { useT } from '../../i18n'
 /* 「在文件夹中打开」那颗的文案键（mac 说访达、Windows 说文件夹）与右键菜单同一条 */
 import { REVEAL_LABEL_KEY } from '../../hooks/usePlatform'
 import type { Machine } from '../../api'
@@ -143,7 +143,7 @@ import type { Machine } from '../../api'
  * （CSS 里没有 `[data-machine]` 选择器、探针也没读它），整条链（导入 + 变量 + 属性 +
  * `ui/machineTone.ts` 整个模块）一起删了。
  */
-import { longStatText, shortStatText } from '../store/package'
+import { instantText, longStatText, relativePart, shortStatText } from '../store/package'
 /* 详情卡双列的中线自适应（量出来的，见那个文件的头注释） */
 import { fitSplitWhenResized } from './splitFit'
 /* a03：所有 WHY（悬停用）导入已随「去悬停提示」移除 */
@@ -152,7 +152,6 @@ import {
   archiveOpenText,
   ASSET_STATE_TEXT,
   ASSET_USE_TEXT,
-  BASED_ON_TEXT,
   cloudClaimBadge,
   CLOUD_STATE_TEXT,
   DASH_,
@@ -169,6 +168,7 @@ import {
   USAGE_KEY,
   usageCellText,
   identityDisplayOf,
+  relativeLabel,
   isDetachedCopy,
   originCellOf,
   updateStateOf,
@@ -194,22 +194,9 @@ import s from './PresetTable.module.css'
  * 完整 64 位永远在 `title` 里（2026-10-29 作者：页面可以继续显示短摘要，
  * 完整值放悬浮提示）。**不在这里算出"未知"** —— 那是文案，归 i18n。
  */
-function shortSha(sha: string | null): string | null {
-  if (sha === null || sha === '') return null
+function shortSha(sha: string | null | undefined): string | null {
+  if (sha === null || sha === undefined || sha === '') return null
   return sha.length > 12 ? `${sha.slice(0, 12)}…` : sha
-}
-
-/**
- * 发布线怎么写：`support-ease · 第 1 号` / `support-ease · No. 1`。
- *
- * 两格**同生同死**：老副本缺 `catalog` 或缺 `serial`，这条线就不成立 ——
- * 返回 `null`，由调用方决定写「未知」（那是文案，归 i18n）。
- * 改版前这段格式是写死在 JSX 里的中文（英文界面照样念「第 1 号」），
- * 2026-10-29 第十五轮一并收进字典。
- */
-function lineTextOf(tr: Tr, catalog: string | null, serial: number | null): string | null {
-  if (catalog === null || serial === null) return null
-  return tr('presets.table.detail.lineValue', { catalog, serial })
 }
 
 /**
@@ -877,7 +864,7 @@ export default function PresetTable({
                 row.presetState !== undefined ? updateStateOf(row.presetState) : undefined
               /*
                * ★ **更新状态唯一出口**（2026-10-29 第二代）：详情、徽章、操作列都读它。
-               *   `showCloudRelease` 为真时，详情才画「云端新版发布」那一行。
+               *   「云端当前」那一行不归它管 —— 没有新版也照常显示。
                */
               const mkpCloudStatus = row.scope === 'cloud' && row.localState !== undefined
               /*
@@ -908,7 +895,6 @@ export default function PresetTable({
                       action: 'none' as const,
                       warn: false,
                       hint: null,
-                      showCloudRelease: false,
                     }
               const statusText = status.text === null ? null : tr(status.text, status.params)
               /*
@@ -925,22 +911,13 @@ export default function PresetTable({
                * 这时「本地发布线 / 本地 SHA-256 / 判定」不是"记不清"—— 是**还没有**。
                * 原来三格都写「未知（当时没有记录）」，删掉一份预设再看它就会读成人品问题。
                */
-              const noLocalCopy = row.origin !== 'local' && row.localState === 'none'
               const obtainedUnix = row.origin === 'local' ? row.obtainedUnix : null
               /*
-               * **版本判定那一组画不画**（2026-10-29 第十五轮）。
-               *
-               * 五格全空（老文件没有来源记录、也没有目录登记值）时**整组不画** ——
-               * 一列「未知（当时没有记录）」只是噪声；"说不清"这件事由基本信息里的
-               * **更新状态**那一格说（它的文案里带着原因），不需要再说五遍。
+               * 版本判定**不再单独画一格**：结论与右列「更新状态」是同一件事，
+               * 而且老文件常常只说得清"无法确认"，那一格只会让人以为坏了。
+               * 事实（发布线 / SHA）全在折叠区，主区只留时间对照。
                */
               const verdictFacts = row.basedOnFacts
-              const verdictShown =
-                verdictFacts !== undefined &&
-                (verdictFacts.sourceCatalog !== null ||
-                  verdictFacts.cloudCatalog !== null ||
-                  verdictFacts.sourceSha256 !== null ||
-                  verdictFacts.cloudSha256 !== null)
               /*
                * 来源记录记录里记着几项 —— 就是「共 N 项」那个 N。
                * 数的是**六个格子里非空的那些**（`[mkp_source]` 记录 + 建副本时的源身份），
@@ -1525,15 +1502,6 @@ export default function PresetTable({
                             </span>
                             <i className={s.dDot} aria-hidden>·</i>
                             <span>{row.sizeText ?? tr(UNKNOWN)}</span>
-                            <i className={s.dDot} aria-hidden>·</i>
-                            <span>
-                              {row.origin === 'preset'
-                                ? row.scope === 'cloud'
-                                  ? tr('presets.table.when.cloud')
-                                  : row.arrivalBy === 'replaced' ? tr('presets.table.when.replaced') : tr('presets.table.when.downloaded')
-                                : tr('presets.table.when.modified')}
-                              {longStatText(row.modifiedText) ?? tr(UNKNOWN)}
-                            </span>
                           </span>
                           {/*
                             收起：与点这一行（再点一次）同一件事 —— 安静的小按钮，不抢摘要。
@@ -1646,41 +1614,7 @@ export default function PresetTable({
                                 </div>
                               )}
 
-                              {/*
-                                **版本判定**（第十六轮从「版本判定」整组收成这一格：发布线
-                                与 SHA 退到「更多详情」，主区只留结论）。
-                                判据仍是后端那一格 `row.basedOn`，前端不重算；无本地副本时不
-                                拿 `outdated` 冒充 —— 那时没有"新旧"可比。
-                                ★ 第十七轮（作者圈图）：**图标与原始枚举都省了** —— 那颗小圆圈
-                                  挤在值前面换行后孤零零挂在行首，括注一长串机器值把行撑成两行；
-                                  "为什么"由右列「更新状态」说，这里只留结论本身。
-                              */}
-                              {verdictFacts !== undefined && verdictShown && (
-                                <div className={s.dRow}>
-                                  <span className={s.dKey}>
-                                    {tr('presets.table.detail.more.verdict')}
-                                  </span>
-                                  <span className={s.dVal}>
-                                    {/*
-                                      ★ 2026-10-30（作者看截图：「看这个文字，我也觉得他
-                                      没做到视觉对齐呀」）：这一格**不能**用 `.dWhyInline` ——
-                                      那是"跟在主词后面的小注"（8px 左缩进 + 小一号灰字），
-                                      放在这里就是整格的值，于是它比上面「版本 / 来源」的值
-                                      往右缩了一截、字还小一档。值就是值：与其它格同一个起点、
-                                      同一档字色。
-                                    */}
-                                    {noLocalCopy ? (
-                                      tr('presets.table.detail.verdict.none')
-                                    ) : row.basedOn === undefined ? (
-                                      tr('presets.table.detail.more.none')
-                                    ) : (
-                                      <span className={s.dVerdictText}>
-                                        {tr(BASED_ON_TEXT[row.basedOn])}
-                                      </span>
-                                    )}
-                                  </span>
-                                </div>
-                              )}
+
 
                               {/*
                                 后处理跑成过几次（2026-10-17 作者：「加一个显示的字段，
@@ -1811,14 +1745,18 @@ export default function PresetTable({
                               {row.origin === 'local' && (
                                 <div className={s.dRow}>
                                   <span className={s.dKey}>
-                                    {tr('presets.table.detail.key.cloudPublishedAt')}
+                                    {tr('presets.table.detail.key.basedOn')}
                                   </span>
-                                  <span
-                                    className={s.dVal}
-                                    data-tip={tr('presets.table.detail.cloudPublishedAt.why')}
-                                  >
-                                    {longStatText(row.versionPublishedAt ?? undefined) ??
+                                  <span className={s.dVal}>
+                                    {instantText(row.versionPublishedAt ?? undefined) ??
                                       tr('presets.table.detail.versionUnknown')}
+                                    {verdictFacts?.sourceSerial != null && (
+                                      <span className={s.dWhyInline}>
+                                        {tr('presets.table.detail.serialShort', {
+                                          n: String(verdictFacts.sourceSerial),
+                                        })}
+                                      </span>
+                                    )}
                                   </span>
                                 </div>
                               )}
@@ -1829,21 +1767,26 @@ export default function PresetTable({
                                 却没有任何可更新的版本（作者 2026-10-29 的口径）。
                                 这一行同时说"新版从哪来"（`Gitee · main`）。
                               */}
-                              {status.showCloudRelease && row.basedOnFacts !== undefined && (
+                              {/*
+                                「云端当前」**永久显示**（不跟「有没有新版」走）：
+                                没有新版也要看得见云端停在哪一版。时间用相对值，悬停给到分钟的绝对时间；
+                                分支与序号进折叠区（一行里塞不下，也不该塞）。
+                              */}
+                              {row.basedOnFacts?.cloudPublishedAt != null && (
                                 <div className={s.dRow}>
                                   <span className={s.dKey}>
-                                    {tr('presets.table.detail.key.cloudRelease')}
+                                    {tr('presets.table.detail.key.cloudCurrent')}
                                   </span>
                                   <span className={s.dVal}>
-                                    {longStatText(
-                                      row.basedOnFacts.cloudPublishedAt ?? undefined,
-                                    ) ?? tr('presets.table.detail.versionUnknown')}
-                                    {identityDisplayOf(tr, row.basedOnFacts.cloudSource) !==
-                                      null && (
-                                      <span className={s.dSourceTag}>
-                                        {identityDisplayOf(tr, row.basedOnFacts.cloudSource)}
-                                      </span>
-                                    )}
+                                    {(() => {
+                                      const raw = row.basedOnFacts?.cloudPublishedAt ?? null
+                                      if (raw === null) return null
+                                      const abs = instantText(raw) ?? raw
+                                      const rel = relativePart(raw, Date.now())
+                                      return rel === null ? abs : (
+                                        <span title={abs}>{relativeLabel(tr, rel)}</span>
+                                      )
+                                    })()}
                                   </span>
                                 </div>
                               )}
@@ -1930,36 +1873,18 @@ export default function PresetTable({
                                       </span>
                                     </div>
                                   )}
-                                  <div className={s.dRow}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.sourceVersionAt')}
-                                    </span>
-                                    <span className={s.dVal}>
-                                      {verdictFacts.sourceVersionAt ??
-                                        tr('presets.table.detail.more.none')}
-                                    </span>
-                                  </div>
-                                  <div className={s.dRow}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.more.sourceSha')}
-                                    </span>
-                                    <span className={`${s.dVal} ${s.dMono}`}>
-                                      {verdictFacts.sourceSha256 ??
-                                        tr('presets.table.detail.more.none')}
-                                    </span>
-                                  </div>
-                                  <div className={s.dRow}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.more.releaseIdentity')}
-                                    </span>
-                                    <span className={`${s.dVal} ${s.dMono}`}>
-                                      {verdictFacts.sourceCatalog ??
-                                        tr('presets.table.detail.more.none')}
-                                      {verdictFacts.sourceSerial !== null
-                                        ? ` #${verdictFacts.sourceSerial}`
-                                        : ''}
-                                    </span>
-                                  </div>
+                                    <div className={s.dRow}>
+                                      <span className={s.dKey}>
+                                        {tr('presets.table.detail.more.releaseIdentity')}
+                                      </span>
+                                      <span className={`${s.dVal} ${s.dMono}`}>
+                                        {verdictFacts.sourceCatalog ??
+                                          tr('presets.table.detail.more.none')}
+                                        {verdictFacts.sourceSerial !== null
+                                          ? ` #${verdictFacts.sourceSerial}`
+                                          : ''}
+                                      </span>
+                                    </div>
                                 </div>
                               </details>
                             )}
@@ -1988,61 +1913,54 @@ export default function PresetTable({
                                 {row.origin === 'local' && (
                                   <div className={`${s.dRow} ${s.dMoreFull}`}>
                                     <span className={s.dKey}>
-                                      {tr('presets.table.detail.more.baseline')}
+                                      {tr('presets.table.detail.more.kept')}
                                     </span>
                                     <span className={`${s.dVal} ${s.dMono}`}>
                                       {`baseline-local/${row.path}`}
                                     </span>
                                   </div>
                                 )}
-                                {verdictFacts !== undefined &&
-                                  lineTextOf(
-                                    tr,
-                                    verdictFacts.cloudCatalog,
-                                    verdictFacts.cloudSerial,
-                                  ) !== null && (
-                                    <div className={s.dRow}>
-                                      <span className={s.dKey}>
-                                        {tr('presets.table.detail.more.cloudLine')}
-                                      </span>
-                                      <span className={s.dVal}>
-                                        {lineTextOf(
-                                          tr,
-                                          verdictFacts.cloudCatalog,
-                                          verdictFacts.cloudSerial,
-                                        )}
-                                      </span>
-                                    </div>
-                                  )}
-
-                                {verdictFacts?.cloudSha256 !== null &&
-                                  verdictFacts?.cloudSha256 !== undefined && (
-                                    <div
-                                      className={s.dRow}
-                                      data-tip={verdictFacts.cloudSha256 ?? undefined}
-                                    >
-                                      <span className={s.dKey}>
-                                        {tr('presets.table.detail.more.cloudSha')}
-                                      </span>
-                                      <span className={`${s.dVal} ${s.dMono}`}>
-                                        {shortSha(verdictFacts.cloudSha256)}
-                                      </span>
-                                    </div>
-                                  )}
-                                {verdictFacts !== undefined && !noLocalCopy && (
-                                  <div
-                                    className={s.dRow}
-                                    data-tip={verdictFacts.sourceSha256 ?? undefined}
-                                  >
+                                {/*
+                                  分支与序号只在这里说一次（「云端当前」那一行只说时间）——
+                                  同一个号在界面上出现两遍，读的人一定会问哪个是哪个。
+                                */}
+                                {verdictFacts?.cloudSource != null && (
+                                  <div className={s.dRow}>
                                     <span className={s.dKey}>
-                                      {tr('presets.table.detail.more.localSha')}
+                                      {tr('presets.table.detail.more.cloudRef')}
+                                    </span>
+                                    <span className={s.dVal}>
+                                      {identityDisplayOf(tr, verdictFacts.cloudSource)}
+                                    </span>
+                                  </div>
+                                )}
+                                  <div className={s.dRow} data-tip={verdictFacts.sourceSha256 ?? undefined}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.more.shaBased')}
                                     </span>
                                     <span className={`${s.dVal} ${s.dMono}`}>
                                       {shortSha(verdictFacts.sourceSha256) ??
                                         tr('presets.table.detail.more.none')}
                                     </span>
                                   </div>
-                                )}
+                                  <div className={s.dRow} data-tip={verdictFacts.cloudSha256 ?? undefined}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.more.shaCloud')}
+                                    </span>
+                                    <span className={`${s.dVal} ${s.dMono}`}>
+                                      {shortSha(verdictFacts.cloudSha256) ??
+                                        tr('presets.table.detail.more.none')}
+                                    </span>
+                                  </div>
+                                  <div className={s.dRow} data-tip={verdictFacts.downloadSha256 ?? undefined}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.more.shaDownload')}
+                                    </span>
+                                    <span className={`${s.dVal} ${s.dMono}`}>
+                                      {shortSha(verdictFacts.downloadSha256) ??
+                                        tr('presets.table.detail.more.none')}
+                                    </span>
+                                  </div>
                               </div>
                             </details>
                           )}

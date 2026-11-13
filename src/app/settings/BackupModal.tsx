@@ -7,6 +7,10 @@
  *   3. 「备份和还原合并成同一个按钮，可选手动带上预设；去掉多余空行，文字极简」——
  *      一扇框、两个分页（`.seg`），备份那一页多一颗「连同预设一起备份」。
  *
+ * ★ 2026-11-13 第四刀：备份那一页再加一颗「连同执行记录一起备份」——
+ *   执行归档（`user/gcode_history`）是包里最大的一块，带上它就会明显变慢。
+ *   两颗开关都**缺省开**（＝原来那份备份的内容，不改变老行为）。
+ *
  * # 外壳与语义照报告页的导出框（`app/report/ExportModal.tsx`）
  *
  * 同一个底座 `components/modal/Modal`，同一批约定：
@@ -96,6 +100,8 @@ export default function BackupModal({ open, host = null, onClose }: BackupModalP
   const [dir, setDir] = useState<string | null>(null)
   /** 「连同预设一起备份」 */
   const [includePresets, setIncludePresets] = useState(true)
+  /** 「连同执行记录一起备份」 */
+  const [includeHistory, setIncludeHistory] = useState(true)
   /** 恢复的那份 zip。`null` = 还没挑 */
   const [zip, setZip] = useState<string | null>(null)
   /** 恢复范围（`all` / `presets` / `settings`）—— 只动选中的那一块 */
@@ -113,6 +119,7 @@ export default function BackupModal({ open, host = null, onClose }: BackupModalP
     setMode('backup')
     setDir(null)
     setIncludePresets(true)
+    setIncludeHistory(true)
     setZip(null)
     setScope('all')
     setBusy(false)
@@ -195,7 +202,7 @@ export default function BackupModal({ open, host = null, onClose }: BackupModalP
     setFail(null)
     setDone(null)
     setTick(null)
-    api.createBackup(dir, includePresets, (t) => setTick(t)).then(
+    api.createBackup(dir, includePresets, includeHistory, (t) => setTick(t)).then(
       (sum) => {
         setBusy(false)
         setDone(sum)
@@ -405,35 +412,54 @@ export default function BackupModal({ open, host = null, onClose }: BackupModalP
         {fail !== null && <HeadNote text={fail} tone="error" />}
 
         {/*
-         * 「连同预设一起备份」—— 位置与形制照报告页导出框的那条（`zipRow`）：
-         * **带标题的选项在上、路径在下**（作者 2026-11-09：「这种开关呀，有标题什么的
-         * 应该放在上面，像那个导出一样。这个路径是在下面的」）。
-         * 左边两行（题 + 一句小字），右边一颗共用件开关。
+         * 备份那一页的两颗开关（预设 / 执行记录）—— 位置与形制照报告页导出框的那条
+         * （`zipRow`）：**带标题的选项在上、路径在下**（作者 2026-11-09：「这种开关呀，
+         * 有标题什么的应该放在上面，像那个导出一样。这个路径是在下面的」）。
+         * 每行左边两行（题 + 一句小字），右边一颗共用件开关。
+         *
+         * ★ 两颗都摆在路径胶囊上面、挨着排：它们是同一件事的两个口子（包里带什么），
+         *   上下拆开会让第二颗看着像"另一个设置"。
          */}
         {backup && (
-          <div className={s.switchRow}>
-            <span className={s.switchText}>
-              <span className={s.switchTitle}>{tr('settings.backupModal.includePresets')}</span>
-              <span className={s.switchHint}>
-                {tr('settings.backupModal.includePresetsHint')}
+          <>
+            <div className={s.switchRow}>
+              <span className={s.switchText}>
+                <span className={s.switchTitle}>{tr('settings.backupModal.includePresets')}</span>
+                <span className={s.switchHint}>
+                  {tr('settings.backupModal.includePresetsHint')}
+                </span>
               </span>
-            </span>
-            <Switch
-              checked={includePresets}
-              onChange={setIncludePresets}
-              disabled={busy || done !== null}
-              ariaLabel={tr('settings.backupModal.includePresets')}
-            />
-          </div>
+              <Switch
+                checked={includePresets}
+                onChange={setIncludePresets}
+                disabled={busy || done !== null}
+                ariaLabel={tr('settings.backupModal.includePresets')}
+              />
+            </div>
+            <div className={s.switchRow}>
+              <span className={s.switchText}>
+                <span className={s.switchTitle}>{tr('settings.backupModal.includeHistory')}</span>
+                <span className={s.switchHint}>
+                  {tr('settings.backupModal.includeHistoryHint')}
+                </span>
+              </span>
+              <Switch
+                checked={includeHistory}
+                onChange={setIncludeHistory}
+                disabled={busy || done !== null}
+                ariaLabel={tr('settings.backupModal.includeHistory')}
+              />
+            </div>
+          </>
         )}
 
         {/*
          * 恢复页那一行：与备份页的开关行**同一副骨架**（左两行字、右控件），
-         * 控件是共用下拉（三档）。两页因此**等高**（行高由文字块撑着，下拉 34px 更矮）。
+         * 控件是共用下拉（三档）。
          *
          * ★ 第二行就是那句红字（「只动选中的那一部分，覆盖后无法撤销」）——
-         *   原来是摆在文件行下面独立一条，但那样恢复页会比备份页高出一行；
-         *   作者这轮的硬要求就是"两页等高"，所以把它并进这一行的说明位（内容一字没少）。
+         *   原来是摆在文件行下面独立一条，为了少一行并进了这一行的说明位（内容一字没少）。
+         *   （备份页 2026-11-13 多了一颗开关，比这一页高一行 —— 那是"多一个选择"的直接后果。）
          */}
         {!backup && (
           <div className={s.switchRow}>

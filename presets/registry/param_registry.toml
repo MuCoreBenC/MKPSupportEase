@@ -293,6 +293,22 @@ machineMinVariants = {  }
 machineMaxVariants = {  }
 pinned = false
 
+[params.machineVariants]
+A1_MINI = -6.0
+"A1_MINI:STANDARD" = -6.0
+"A1_MINI:FAST260326" = -6.0
+"A1_MINI:FAST261111" = -6.0
+A1 = -6.0
+"A1:STANDARD" = -6.0
+"A1:FAST260326" = -6.0
+"A1:FAST261111" = -6.0
+P1S = -6.0
+"P1S:LITE" = -6.0
+P2S = -6.0
+"P2S:STANDARD" = -6.0
+X1C = -6.0
+"X1C:LITE" = -6.0
+
 [[params]]
 key = "toolhead.MKP_extrude"
 configKey = "MKPExtrude"
@@ -1092,20 +1108,20 @@ mergeGroup = "offset"
 pinned = true
 
 [params.machineVariants]
-"A1" = 3.9
-"A1_MINI" = 3.9
-"A1_MINI:STANDARD" = 3.9
+"A1" = 4.0
+"A1_MINI" = 4.0
+"A1_MINI:STANDARD" = 4.0
 "P1S" = 1.1
 "P1S:LITE" = 1.1
 "P2S" = 1.1
 "P2S:STANDARD" = 1.1
 "X1C" = 1.1
 "X1C:LITE" = 1.1
-"A1:STANDARD" = 3.9
-"A1:FAST261111" = 3.9
-"A1:FAST260326" = 3.9
-"A1_MINI:FAST260326" = 3.9
-"A1_MINI:FAST261111" = 3.9
+"A1:STANDARD" = 4.0
+"A1:FAST261111" = 4.0
+"A1:FAST260326" = 4.0
+"A1_MINI:FAST260326" = 4.0
+"A1_MINI:FAST261111" = 4.0
 
 [params.follows]
 "P1S:LITE" = false
@@ -2255,15 +2271,22 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
-"A1" = "auto"
+"A1" = 'auto'
 "A1:STANDARD" = "auto"
 "A1:FAST261111" = "auto"
 "A1_MINI:FAST261111" = "auto"
+A1_MINI = 'auto'
+"A1_MINI:STANDARD" = 'auto'
+"A1_MINI:FAST260326" = 'auto'
+"A1:FAST260326" = 'auto'
+P1S = 'auto'
+"P1S:LITE" = 'off'
+"P2S:STANDARD" = 'auto'
+P2S = 'auto'
+"X1C:LITE" = 'off'
 
 [params.follows]
-"A1:STANDARD" = false
-"A1:FAST261111" = false
-"A1_MINI:FAST261111" = false
+"P1S:LITE" = false
 
 [[params]]
 key = "wiping.ironing_suppress_expand"
@@ -2828,11 +2851,14 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
-"A1" = 0.8
-A1_MINI = 0.7
-"A1_MINI:STANDARD" = 0.7
-"A1_MINI:FAST260326" = 0.7
-"A1_MINI:FAST261111" = 0.7
+"A1" = 0.75
+A1_MINI = 0.75
+"A1_MINI:STANDARD" = 0.75
+"A1_MINI:FAST260326" = 0.75
+"A1_MINI:FAST261111" = 0.75
+"A1:STANDARD" = 0.75
+"A1:FAST260326" = 0.75
+"A1:FAST261111" = 0.75
 
 [[params]]
 key = "wiping.swap_hop_height"

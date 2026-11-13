@@ -521,6 +521,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::local::get_preset_draft_summary,
         // 「恢复默认值」（编辑文件那颗）读的原文镜像
         ipc::local::read_local_origin_text,
+        // 「恢复默认值」要回到的那一版（参数页与编辑文件读同一份字节）
+        ipc::local::read_preset_baseline_values,
         // 身份账本（预设页判「我这边有没有一份跟云端对得上」的唯一依据）
         ipc::local::get_local_preset_index,
         // 第十层：用户文件管理（改名 / 删除 —— 只动名字或删掉，字节一个不动）
@@ -728,6 +730,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::local::get_preset_draft_summary,
         // 「恢复默认值」（编辑文件那颗）读的原文镜像
         ipc::local::read_local_origin_text,
+        // 「恢复默认值」要回到的那一版（参数页与编辑文件读同一份字节）
+        ipc::local::read_preset_baseline_values,
         // 身份账本（预设页判「我这边有没有一份跟云端对得上」的唯一依据）
         ipc::local::get_local_preset_index,
         // 第十层：用户文件管理（与上面那份清单一字不差）

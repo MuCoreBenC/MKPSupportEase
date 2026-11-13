@@ -65,3 +65,48 @@ export function longStatText(raw: string | undefined): string | undefined {
   const date = t.y === null ? `${t.mo}-${t.d}` : `${t.y}-${t.mo}-${t.d}`
   return t.hh === null ? date : `${date} ${t.hh}:${t.mi}`
 }
+
+/**
+ * **全站绝对时间的唯一写法**：`YYYY-MM-DD HH:mm`（本地时区）。
+ *
+ * 详情卡、折叠区、两个确认框都走它 —— 界面上不该再出现 `T` / `Z` 与秒。
+ * 与 `longStatText` 同一个解析：认不出的原样返回，不编一个时间出来。
+ */
+export function instantText(raw: string | undefined): string | undefined {
+  return raw === undefined ? undefined : longStatText(raw)
+}
+
+/** 相对时间的上限：超过一年退回绝对时间（「13 个月前」没有信息量） */
+const RELATIVE_LIMIT_MS = 365 * 24 * 60 * 60 * 1000
+
+/**
+ * 相对时间的一档。**只给「云端当前」那一格用**，其余时间一律 `instantText`。
+ *
+ * 返回结构而不是字符串：文案住 i18n 表（四语同改），这里不拼中文。
+ * `null` = 这一格该显示绝对时间（未来时刻、超过一年、认不出的老值）。
+ */
+export type RelativePart =
+  | { kind: 'now' }
+  | { kind: 'minute' | 'hour' | 'day' | 'month'; value: number }
+
+/**
+ * 把 ISO 时刻折成相对的一档。`now` 由调用方注入 —— 判据能固定时钟，渲染期也不起定时器。
+ *
+ * 只认带时刻的 ISO：纯日期与 `9/30 16:12` 这种老值没有时区信息，拿来算相对会差一天。
+ */
+export function relativePart(raw: string | undefined, now: number): RelativePart | null {
+  if (raw === undefined || !/^\d{4}-\d{2}-\d{2}T/.test(raw)) return null
+  const ms = new Date(raw).getTime()
+  if (Number.isNaN(ms)) return null
+  const diff = now - ms
+  /* 未来的时刻（对方机器时钟快了）不算"多久之前"，照实摆绝对时间 */
+  if (diff < 0 || diff > RELATIVE_LIMIT_MS) return null
+  const minutes = Math.floor(diff / 60000)
+  if (minutes < 1) return { kind: 'now' }
+  if (minutes < 60) return { kind: 'minute', value: minutes }
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return { kind: 'hour', value: hours }
+  const days = Math.floor(hours / 24)
+  if (days < 30) return { kind: 'day', value: days }
+  return { kind: 'month', value: Math.floor(days / 30) }
+}

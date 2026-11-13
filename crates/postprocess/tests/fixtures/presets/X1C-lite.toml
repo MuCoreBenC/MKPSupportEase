@@ -1,6 +1,6 @@
 # machine: X1C
 # variant: lite
-# generated_at: 2026-11-13T01:23:56+08:00
+# generated_at: 2026-11-13T11:49:04+08:00
 
 [toolhead]
 # 落笔 G-code
@@ -30,7 +30,7 @@ M106 P1 S[AUTO] ; 风扇
 first_pen_revitalization_flag = false # 首笔活化标志
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
 MKP_extrude = 0 # 挤出长度(mm)
-MKP_retract = -5 # 回抽长度(mm)
+MKP_retract = -6 # 回抽长度(mm)
 offset_x = -25.9 # 笔尖偏移
 offset_y = 14 # 笔尖偏移
 offset_z = 1.1 # 笔尖偏移

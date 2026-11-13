@@ -639,6 +639,9 @@ fn result_facts(done: &postprocess::pipeline::ProcessResult) -> crate::hook_ipc:
             .then_some(done.stats.pass1.layer_height_max),
         /* 调试那一趟的坐标概要：结果页要摆，正常那一趟是 `None`（那一行不出现） */
         debug: done.debug.clone(),
+        /* 热床预涂胶：结果屏要拿它提醒"盯住首层"。校准件那一趟内核不插涂胶块
+        （`bed_glue::apply_bed_glue` 直接返回），所以这里也不报 —— 报了就是假警报 */
+        bed_glue: ir.prefs.bed_glue_enabled && !ir.safety.is_calibration_mode,
     }
 }
 
@@ -3329,6 +3332,13 @@ mod tests {
         assert!(
             out.result.print_time_seconds.is_some(),
             "这一条没延后（headless），打印时间该在车上：{:?}",
+            out.result
+        );
+        /* 热床预涂胶出厂是关的 ⇒ 这趟**不许**报"开了"（报了就是假警报，
+        界面会拿它让用户盯着首层）。开了那一趟由 `result_facts` 的判据另一支管。 */
+        assert!(
+            !out.result.bed_glue,
+            "出厂档没开热床预涂胶：{:?}",
             out.result
         );
         let after = std::fs::read(&gcode).expect("读产物");

@@ -635,8 +635,6 @@ export interface RecipeParam {
   /** 当前值。**一律字符串** —— 单位换算与小数位数不该由界面再做一遍 */
   value: string
   origin: ParamOrigin
-  /** 只有 origin === 'variant' 时有：基础配方里的那个值，用来显示「还原成」与对照 */
-  baseValue?: string
   /**
    * 字段级弃用（2026-10-02）：该字段已退出正常编辑 / 产物生成，但**仍属于已知参数**，
    * 所以参数页继续展示它的历史状态。
@@ -1120,6 +1118,8 @@ export interface BasedOnFacts {
   sourceVersionAt: string | null
   /** 来源那一版云端原文 SHA-256（不是本地文件此刻的字节） */
   sourceSha256: string | null
+  /** **下载那一刻**云端原文的摘要（记录里的 `origin.sha256`）；没更新过时与 `sourceSha256` 相同 */
+  downloadSha256: string | null
   /** 当前生效的源身份 */
   cloudSource: string | null
   /**
@@ -1374,6 +1374,37 @@ export interface HistoryRecordItem {
   tab: string
   section: string
   unit: string | null
+}
+
+/**
+ * 「恢复默认值」要回到的那一版里的一格参数。
+ *
+ * 只含那一版真的写着的键：新增参数在老版里没有，恢复时保持现值不动。
+ */
+export interface BaselineValue {
+  key: string
+  value: string
+}
+
+/**
+ * 「恢复默认值」要回到的那一版：**最近一次与云端某一版逐字节一致落盘的原样**。
+ *
+ * 参数页底栏与「编辑文件」那颗读同一份字节 —— 不是两套。
+ * `origin` 只说这一版怎么来的：
+ * - `cloudSync` 最近一次云端落盘（下载 / 全采用更新 / 导入 / 另存）；
+ * - `migrated`  升级前的老档，按文件尾部末条 sha 从云端原文里取回；
+ * - `initial`   只有最初那份，没有可迁移的云端原文。
+ *
+ * 缺镜像且没有可迁移的云端原文 ⇒ `null`，界面把按钮禁用，
+ * **绝不回落到注册表的出厂值**（那是工作台内部口径）。
+ */
+export interface BaselineSnapshot {
+  values: BaselineValue[]
+  /** 这一版的发布时刻（目录 `publishedAt`） */
+  at: string | null
+  catalogId: string | null
+  serial: number | null
+  origin: 'cloudSync' | 'migrated' | 'initial'
 }
 
 /*
@@ -2785,6 +2816,13 @@ export interface PostProcessResult {
   /** 切片软件（`"BambuStudio 02.08.02.60"` —— pass1 从输入头行刮到的完整串） */
   slicer?: string
   /**
+   * **这一趟开着热床预涂胶**：产物里插了涂胶块，打印时那支笔会真的在板面上走一圈。
+   *
+   * 结果屏拿它先摆一句"盯住首层"——涂胶那一段没人看着就可能划伤打印板。
+   * 缺 = 不知道（回放 / 老钩子）⇒ 不提示；`true` 才提示。
+   */
+  bedGlue?: boolean
+  /**
    * 层厚的**最小 / 最大**（mm）—— 两个一样 = 固定层高。
    *
    * 缺 = 层数太少量不出来（或老钩子没这两格）⇒ 界面退回开场事实里那个标称
@@ -3371,12 +3409,17 @@ export interface MkpApi {
    * 原文备份 / 回收站）**不进包**（界面上那颗「连同预设一起备份」）—— 包里只剩设置与执行归档。
    * 这份包恢复时也不动它们 —— 判断依据记在说明书里，不靠调用方再传一次。
    *
+   * `includeHistory = false`：执行归档（`user/gcode_history`）**不进包**（界面上那颗
+   * 「连同执行记录一起备份」）—— 那是包里最大的一块，不带它能快很多。恢复时同样不动
+   * 现在那一棵，判据也在说明书里。
+   *
    * `onTick` 可选：给了就看过程（`scan` → 一跳一跳的 `pack`），不给就是"点了等结果"。
    * 命令本身跑在线程池里（几百 MB 的归档不会把窗口冻住），**进度只有这一条路**。
    */
   createBackup(
     destDir: string,
     includePresets: boolean,
+    includeHistory: boolean,
     onTick?: (tick: BackupTick) => void,
   ): Promise<BackupSummary>
 
@@ -3449,15 +3492,21 @@ export interface MkpApi {
   beginTextEdit(fileName: string, path: string): Promise<PresetTextDraft>
 
   /**
-   * **这份用户文件的原文**（它最初落到盘上时的那一份）——「编辑文件」模态框那颗
-   * **「恢复默认值」**读的就是它（2026-10-16 作者：「编辑文件这个也可以有个按钮……
-   * 恢复默认值……对于用户导进来的，可能需要你去做一种备份」）。
+   * **这份用户文件的默认原样** ——「编辑文件」模态框那颗「恢复默认值」读它。
    *
-   * 来源 = `baseline-local/` 的路径镜像：下载 / 导入 / 复制 / 另存的那几份在**落盘时**
-   * 存过；老文件在**第一次被我们改写**（编辑器保存 / 参数写回 / 校准 / 归属机型）之前补上。
+   * 来源 = `baseline-local/` 的路径镜像（与 [`readPresetBaselineValues`] 同一份字节）：
+   * 下载 / 导入 / 复制 / 另存落盘时写入；更新合并只在逐字节等于云端原文时刷新。
    * 都没有 ⇒ `null` —— 界面把那颗按钮禁用（不猜、不编一个"默认"出来）。
    */
   readLocalOriginText(path: string): Promise<string | null>
+
+  /**
+   * **「恢复默认值」要回到的那一版**（参数页底栏用；与 [`readLocalOriginText`] 同一份字节）。
+   *
+   * 返回那一版的参数值 + 发布时刻 + 序号；老档会按尾部末条 sha 从云端原文迁移。
+   * 没有可恢复的版本 ⇒ `null`，按钮禁用。**不回落到注册表的出厂值**。
+   */
+  readPresetBaselineValues(path: string): Promise<BaselineSnapshot | null>
 
   /**
    * 把改动写进临时文件（编辑框边改边存）。**只动正文**，[`beginTextEdit`] 那一刻的其它不变。

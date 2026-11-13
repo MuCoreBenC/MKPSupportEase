@@ -1,6 +1,6 @@
 # machine: A1
 # variant: fast260326
-# generated_at: 2026-11-13T01:23:56+08:00
+# generated_at: 2026-11-13T11:49:04+08:00
 
 [toolhead]
 # 落笔 G-code
@@ -27,10 +27,10 @@ G1 F30000
 first_pen_revitalization_flag = false # 首笔活化标志
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
 MKP_extrude = 0 # 挤出长度(mm)
-MKP_retract = -5 # 回抽长度(mm)
+MKP_retract = -6 # 回抽长度(mm)
 offset_x = -0.7 # 笔尖偏移
 offset_y = 26.3 # 笔尖偏移
-offset_z = 3.9 # 笔尖偏移
+offset_z = 4 # 笔尖偏移
 pen_mount_speed = 10000 # 落笔速度
 pen_mount_wait_x = 256 # 落笔等待位 X
 pen_mount_x = 267 # 落笔位 X
@@ -87,7 +87,7 @@ rib_extra_length = 0 # 斜肋额外长度(mm) 范围:0~300
 rib_fillet_wall = true # 外墙倒圆角
 rib_width = 8 # 斜肋宽度(mm) 范围:0~300
 small_feature_factor = 1 # 小特征因子 范围:0~2
-support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+support_extrusion_multiplier = 0.75 # 支撑体挤出倍率
 swap_hop_height = 1 # 换笔脱层高度(mm) 范围:0.2~3
 tower_custom_layer_height = "auto" # 塔层高策略
 tower_extrude_ratio = 1 # 支撑体挤出倍率

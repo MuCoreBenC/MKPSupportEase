@@ -209,6 +209,11 @@ pub struct VerdictFacts {
     pub source_version_at: Option<String>,
     /// 来源那一版云端**原文**的 SHA-256（不是本地文件此刻的字节）
     pub source_sha256: Option<String>,
+    /// **下载那一刻**云端原文的 SHA-256（记录里的 `origin.sha256`）。
+    ///
+    /// 与 [`source_sha256`]（履历末条）分开：没更新过时两者相同，更新过才分叉 ——
+    /// 界面上「下载」与「这份基于」是两个时间，各自配一个摘要。
+    pub download_sha256: Option<String>,
     /// 当前生效的源身份
     pub cloud_source: Option<String>,
     /// 当前这份目录的发布时刻（随包 bootstrap 目录没有）
@@ -348,6 +353,7 @@ fn judge_against(
         /* ★ 「来源版本时间」只认履历里那一格；没有就是未知（不拿写盘记录顶） */
         source_version_at: version.and_then(|v| v.at.clone()),
         source_sha256: version.and_then(|v| v.sha256.clone()),
+        download_sha256: origin.and_then(|o| o.sha256.clone()),
         cloud_source: judge.cloud.map(SourceIdentity::key),
         cloud_published_at: judge.catalog.published_at.clone(),
         cloud_sha256: None,

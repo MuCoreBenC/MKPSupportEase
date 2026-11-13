@@ -673,7 +673,19 @@ fn apply_at(
             );
             runtime::provenance::rewrite_keeping_provenance(&skeleton, previous.as_ref())
         } else {
-            runtime::provenance::record_version(&skeleton, version)
+            /*
+             * ★ **旧记录先并回骨架，再追加这一条**（2026-11-13 真机 bug）。
+             *
+             * `skeleton` 是**云端正文**：里面没有 `[mkp_source]`。直接
+             * `record_version(&skeleton, …)` 会让 `append_version` parse 成空，
+             * 于是**新建一份只剩这一条的记录** —— 原来的 `origin`（从哪来、哪个分支）
+             * 与旧履历一起被抹掉，界面看起来就是"更新完直接变成最新，旧版没了"。
+             *
+             * 顺序不能反：先 `rewrite_keeping_provenance` 把旧记录贴回去，再 append。
+             */
+            let with_old =
+                runtime::provenance::rewrite_keeping_provenance(&skeleton, previous.as_ref());
+            runtime::provenance::record_version(&with_old, version)
         }
     } else {
         tracing::info!(
@@ -724,9 +736,18 @@ fn apply_at(
      * （与 [`super::preset_params::save_preset_params`] 同一条规矩）。
      */
     if next != local_text {
-        /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
-        let _ = runtime::baseline::ensure_origin_copy(root, user, path);
         runtime::local::write_text(user, path, &next)?;
+        /*
+         * ★ 原文镜像：只有"这次合并的结果与云端当前版逐字节一致"（逐项全部采用）
+         *   才刷新。保留了任何自定义值的混合体**不是**默认 —— 恢复默认值仍回到
+         *   上一次真正用上的那一版（见 `runtime::baseline` 模块头）。
+         *   比较剥掉来源段：落盘文件带着新的 `[mkp_source]`，云端原文没有。
+         */
+        if runtime::provenance::strip_for_compare(&next)
+            == runtime::provenance::strip_for_compare(&cloud_text)
+        {
+            let _ = runtime::baseline::refresh_origin_copy(root, user, path);
+        }
         /*
          * **「上次云端值」滚动**：这一趟把这份对齐到了新云端，被换下来的那一版
          * 就成为新的「上次云端」。记不上不影响更新本身（附加信息，与出处账同口径）。
@@ -1220,6 +1241,17 @@ mod tests {
             runtime::local::read_text(&self.user, LOCAL).unwrap()
         }
 
+        /// 摆一份"下载那一刻"的默认（等价于真实下载落盘后的 `refresh_origin_copy`）
+        fn install_baseline(&self, text: &str) {
+            let p = crate::runtime::baseline::origin_path(&self.root, LOCAL).unwrap();
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            crate::fsx::atomic::atomic_write(&p, text.as_bytes()).unwrap();
+        }
+
+        fn baseline(&self) -> Option<String> {
+            crate::runtime::baseline::read_origin_copy(&self.root, LOCAL).unwrap()
+        }
+
         /// 云端当前版里某一项的值。
         ///
         /// 正文取自"目录里第一份预设"，值随那一份走 —— 断言比这个，不写死具体数字。
@@ -1359,6 +1391,70 @@ mod tests {
         );
     }
 
+    /// **全部采用** ⇒ 合并结果与云端当前版逐字节一致，默认跟着换成新版
+    #[test]
+    fn adopting_everything_refreshes_the_baseline() {
+        let w = World::new();
+        w.install_baseline(&w.based_text);
+
+        w.decide(KEY, "adopt");
+
+        let after = w.baseline().expect("全采用之后该有默认");
+        assert_eq!(
+            runtime::provenance::strip_for_compare(&after),
+            runtime::provenance::strip_for_compare(&w.current_text),
+            "全采用：默认换成云端当前版"
+        );
+        assert_ne!(after, w.based_text, "不再是下载时那一版");
+    }
+
+    /// ★ **整份接受不会把来源身份与旧履历抹掉**（2026-11-13 真机 bug）。
+    ///
+    /// `skeleton` 是云端正文、里面没有 `[mkp_source]`；曾经直接 `record_version(&skeleton)`，
+    /// `append_version` parse 成空 ⇒ 新建一份只剩最新的记录，`origin` 与旧条目一起消失。
+    #[test]
+    fn adopting_keeps_the_origin_and_the_old_history() {
+        let w = World::new();
+        w.install_baseline(&w.based_text);
+        let before = runtime::provenance::parse(&w.local_text()).expect("起始那份有来源记录");
+        assert!(!before.history.is_empty(), "起始就该有一条履历");
+
+        w.decide(KEY, "adopt");
+
+        let after = runtime::provenance::parse(&w.local_text()).expect("更新后仍有来源记录");
+        assert!(after.origin.is_some(), "origin（从哪来 / 哪个分支）不许丢");
+        assert!(
+            after.history.len() > before.history.len(),
+            "新的一条是追加，不是覆盖：{:?}",
+            after.history
+        );
+        assert_eq!(
+            after.history.first().map(|v| v.serial),
+            before.history.first().map(|v| v.serial),
+            "旧条目原样保留"
+        );
+    }
+
+    /// **保留我的值** ⇒ 合出来的是混合体，不算默认；默认仍是上一次真正用上的那版
+    #[test]
+    fn holding_my_value_does_not_refresh_the_baseline() {
+        let w = World::new();
+        w.install_baseline(&w.based_text);
+
+        w.decide(KEY, "hold");
+
+        assert_eq!(
+            w.baseline().as_deref(),
+            Some(w.based_text.as_str()),
+            "没采用就不算默认 —— 恢复默认值仍回到下载时那一版"
+        );
+        assert_ne!(
+            runtime::provenance::strip_for_compare(&w.local_text()),
+            runtime::provenance::strip_for_compare(&w.current_text),
+            "文件确实不是云端原文（保留了 -5）"
+        );
+    }
+
     /// 场景 C：保持 = **这一项还是我原来的值** + 水位推到当前版；之后同一版不再待处理
     ///
     /// （2026-10-20：写那一趟改成「以云端当前版为底重写」，所以文件不再是"一个字节都不动" ——
@@ -1390,6 +1486,10 @@ mod tests {
         /* 值一项都没有变，只多了一行注释 —— 摘要照样变（来源记录比的是全文） */
         w.publish_text(format!("# 这一版只改了注释\n{}", w.current_text));
 
+        let before_history = runtime::provenance::parse(&w.local_text())
+            .expect("来源记录还在")
+            .history
+            .len();
         let before = w.sync();
         assert_eq!(before.pending_count, 0, "值一项都没动：{before:?}");
         assert!(before.version_advanced, "摘要变了 ⇒ 云端换版了");
@@ -1423,8 +1523,8 @@ mod tests {
         );
         assert_eq!(
             source.history.len(),
-            1,
-            "接整版 = 一条履历（旧条目一个字不改）"
+            before_history + 1,
+            "接整版 = **追加**一条（旧条目原样保留；2026-11-13 之前被覆盖成 1 条）"
         );
     }
 

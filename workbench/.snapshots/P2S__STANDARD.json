@@ -1,6 +1,6 @@
 {
   "toolhead.MKP_extrude": 0.0,
-  "toolhead.MKP_retract": -5.0,
+  "toolhead.MKP_retract": -6.0,
   "toolhead.custom_mount_gcode": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000",
   "toolhead.custom_unmount_gcode": "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 F30000\nM106 P1 S[AUTO] ; 风扇",
   "toolhead.first_pen_revitalization_flag": false,
@@ -48,7 +48,7 @@
   "wiping.have_wiping_components": "tower",
   "wiping.ironing_coverage_threshold": 10.0,
   "wiping.ironing_e_sum_threshold": 7.9,
-  "wiping.ironing_mode": "off",
+  "wiping.ironing_mode": "auto",
   "wiping.ironing_suppress_expand": 0.0,
   "wiping.ironing_suppress_expand_mode": "bbox",
   "wiping.min_support_interface_enabled": true,

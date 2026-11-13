@@ -617,9 +617,9 @@ pub async fn fetch_cloud_preset(
                     &file.file_name,
                     line.as_ref(),
                 )?;
-                /* ★ 原文镜像：下载**落盘之后**存一份 —— 这份的"最初那样"= 云端当前版
-                落到我盘上那一刻（「恢复默认值」退的就是它） */
-                let _ = runtime::baseline::ensure_origin_copy(&root, &user, &rel);
+                /* ★ 原文镜像：下载**落盘之后**覆盖一份 —— 文件此刻就是云端那一版的原样，
+                「恢复默认值」退的就是它（见 `runtime::baseline` 模块头） */
+                let _ = runtime::baseline::refresh_origin_copy(&root, &user, &rel);
                 /* 来路账：记不上不影响下载本身（附加信息，与原文镜像同一条口径） */
                 let _ = runtime::source_ledger::record_download(
                     &root,
@@ -641,7 +641,7 @@ pub async fn fetch_cloud_preset(
                 let rel = format!("{dir}/{name}");
                 runtime::local::save_cloud_as_new(&user, file, &text, &name, line.as_ref())?;
                 /* 原文镜像同上一支 */
-                let _ = runtime::baseline::ensure_origin_copy(&root, &user, &rel);
+                let _ = runtime::baseline::refresh_origin_copy(&root, &user, &rel);
                 /* 撞名另存也是从云端下载来的，照样记（用户看到的仍不是"拷贝"） */
                 let _ = runtime::source_ledger::record_download(
                     &root,

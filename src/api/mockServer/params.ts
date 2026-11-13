@@ -117,8 +117,6 @@ function toRecipeParam(param: RawParam, machineId: string, versionId: string | n
     step: param.step,
     value: hasOverride ? toText(overrideRaw) : base,
     origin: hasOverride ? 'variant' : 'base',
-    // 只有被这个版本盖过才带 —— 界面靠它显示「还原成基础配方的值」
-    baseValue: hasOverride ? base : undefined,
   }
 }
 

@@ -24,6 +24,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import type { BaselineSnapshot } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import { msg, useT, useText, type Text } from '../../i18n'
 import { useStickyState } from '../../hooks/useStickyState'
@@ -57,7 +58,7 @@ import type { HistoryEntry, ParamDef } from './useParams'
 /* 两态框架那两颗按钮的词 —— 与「编辑文件」/「参数对比台」**同一个源**（作者要的"三处同一句话"） */
 import { EDIT_TEXT } from '../presets/presetTree'
 /* 云端发布时刻是 ISO/UTC —— 与「选择要更新的参数」副标题同一支格式化，两处念同一个时间 */
-import { longStatText } from '../store/package'
+import { instantText, longStatText } from '../store/package'
 import s from './PageParams.module.css'
 
 interface Props {
@@ -442,6 +443,9 @@ export default function PageParams({
   const [historyView, setHistoryView] = useState<HistoryView>('item')
   const [expandedDetailKey, setExpandedDetailKey] = useState<string | null>(null)
   const [askRestore, setAskRestore] = useState(false)
+  /** 「恢复默认值」要回到的那一版（点按钮时取；`null` = 取不到，框里如实说） */
+  const [restoreSnap, setRestoreSnap] = useState<BaselineSnapshot | null>(null)
+  const [restoreBusy, setRestoreBusy] = useState(false)
   const [askSave, setAskSave] = useState(false)
   const [attachBody, bodyWidth] = useWidth()
   /**
@@ -702,7 +706,34 @@ export default function PageParams({
   /* 超出取值范围的改动 —— 弹层里列出来、把「确认保存」灰掉（作者 2026-10-20） */
   const invalidEntries = changedEntries.filter((e) => e.bad !== null)
 
+  /**
+   * 恢复确认框要列的变化：只收「当前草稿值 ≠ 那一版值」的项（旧 → 新）。
+   *
+   * 那一版（`baseline-local/`）里没有的键不列、也不动 —— 新增参数在老版里本来就没有。
+   */
+  const restoreEntries = useMemo(() => {
+    if (restoreSnap === null) return []
+    const byKey = new Map(u.defs.map((d) => [d.key, d]))
+    const out: { key: string; label: string; from: string; to: string }[] = []
+    for (const v of restoreSnap.values) {
+      const def = byKey.get(v.key)
+      if (def === undefined) continue
+      const from = valueText(def, u.valueOf(v.key), tr)
+      const to = valueText(def, v.value, tr)
+      if (from !== to) out.push({ key: v.key, label: def.label, from, to })
+    }
+    return out
+  }, [restoreSnap, u, tr])
+
   const confirmSave = () => {
+    /*
+     * 采用了任意一项并保存 ⇒ 这一版视为已处理：入口收进「更多」的「云端更新已忽略」，
+     * 横幅消失（作者 2026-11-13）。全部采用也一样 —— 入口留着，随时能回看。
+     */
+    if (u.syncDirty > 0) {
+      localStorage.setItem(syncDismissSig, '1')
+      setSyncDismissTick((n) => n + 1)
+    }
     u.save()
     setAskSave(false)
   }
@@ -767,7 +798,13 @@ export default function PageParams({
    * 存在 localStorage：这是纯界面偏好，不该占 `app-state.json` 的位置，
    * 更不该跟着预设文件走。
    */
-  const syncDismissSig = `mkp:sync-dismissed:${u.pendingCount}:${cloudTimeText}:${basedOnTimeText}`
+  /*
+   * 签名只跟**云端当前这一版**走（2026-11-13）：用户点「忽略」或**采用了任意一项并保存**
+   * 之后都算"这一版已经看过"，入口留在「更多」里；云端真发新版时时刻一变，忽略自动失效。
+   * ★ 不再把 `pendingCount` 算进签名 —— 部分采用会把待选数从 3 变 0，
+   *   算进去的话保存完签名就变了，刚记的忽略等于没记（入口又不见了）。
+   */
+  const syncDismissSig = `mkp:sync-dismissed:${cloudTimeText}`
   const [syncDismissTick, setSyncDismissTick] = useState(0)
   const syncDismissed = useMemo(
     () => localStorage.getItem(syncDismissSig) === '1',
@@ -899,7 +936,6 @@ export default function PageParams({
         valueOf={u.valueOf}
         savedValueOf={u.savedValueOf}
         prevSavedOf={u.prevSavedOf}
-        factoryOf={u.factoryOf}
         dirtyOf={u.dirtyOf}
         blockedByOf={u.blockedBy}
         /* 分支摊开 / 折叠的判据（A43 移植） */
@@ -951,13 +987,23 @@ export default function PageParams({
      * 「更多」这一页的最末尾留一个入口：被忽略的云端更新从这里找回。
      * 不放在底栏 —— 作者「不想随时看到它」，但也不能点完就再也找不到。
      */
-    if (categoryId === 'advanced' && syncDismissed && (u.pendingCount > 0 || u.syncNeedsFetch)) {
+    /*
+     * 只要这一版被记过「已忽略」，入口就一直在（2026-11-13 作者）：不再要求
+     * `pendingCount > 0` —— 部分采用 / 全部采用之后待选数会归零，那个条件一挡，
+     * 入口就永远不出现（真机截图）。云端真发新版时签名变 ⇒ `syncDismissed` 自己变 false。
+     */
+    if (categoryId === 'advanced' && syncDismissed) {
       list.push(
         <div key="sync-dismissed" className={s.syncRestoreRow}>
           <span className={s.syncRestoreText}>
-            {tr('params.sync.dismissedHint')}
+            {u.pendingCount === 0 ? tr('params.sync.done') : tr('params.sync.dismissedHint')}
           </span>
-          <button type="button" className={s.textBtn} onClick={restoreSync}>
+          <button
+            type="button"
+            className={s.textBtn}
+            disabled={u.pendingCount === 0}
+            onClick={restoreSync}
+          >
             {tr('params.sync.showDismissed')}
           </button>
         </div>,
@@ -1506,9 +1552,29 @@ export default function PageParams({
               <div className={s.footLeft}>
                 {/*
                  * 「恢复默认值」留在左下（右下的保存组离它远一点 —— 它一按下去
-                 * 全部参数回出厂值，虽然在撤销栈里、也不该挨着保存键）。
+                 * 全部参数回到上次同步那一版，虽然在撤销栈里、也不该挨着保存键）。
+                 * 点它先取那一版（`baseline-local/`）：取不到就不编，框里如实说。
                  */}
-                <button type="button" className={s.textBtn} onClick={() => setAskRestore(true)}>
+                <button
+                  type="button"
+                  className={s.textBtn}
+                  disabled={restoreBusy}
+                  onClick={() => {
+                    setRestoreBusy(true)
+                    u.loadRestoreSnapshot().then(
+                      (snap) => {
+                        setRestoreBusy(false)
+                        setRestoreSnap(snap)
+                        setAskRestore(true)
+                      },
+                      () => {
+                        setRestoreBusy(false)
+                        setRestoreSnap(null)
+                        setAskRestore(true)
+                      },
+                    )
+                  }}
+                >
                   {tr('params.restoreDefaults')}
                 </button>
                 <span className={s.state} data-tip={stateText}>
@@ -1649,20 +1715,46 @@ export default function PageParams({
         {askRestore && (
           <div className={s.scrim} role="presentation" onClick={() => setAskRestore(false)}>
             <div
-              className={s.sheet}
+              className={`${s.sheet} ${s.sheetWide}`}
               role="dialog"
               aria-label={tr('params.restoreDefaults')}
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className={s.sheetTitle}>{tr('params.restoreDefaults')}</h3>
-              <p className={s.sheetText}>
-                {/*
-                 * 退回的是**目录里的出厂值**（2026-10-08 资源库改判）：那套"退到这份预设
-                 * 当初那版云端的默认值"整个退场了。后果一样安全 —— 一次可整体撤销的改动，
-                 * 都要按「保存修改」才落地。
-                 */}
-                {tr('params.restore.body')}
-              </p>
+              {restoreSnap === null ? (
+                <p className={s.sheetText}>{tr('params.restore.none')}</p>
+              ) : (
+                <>
+                  {/*
+                    正文只说三件事：回到哪一版、可撤销、保存才写回。
+                    清单只列**真正会变**的项 —— 「20 → 20」这种不出现。
+                  */}
+                  <p className={s.sheetText}>
+                    {restoreSnap.at !== null
+                      ? tr('params.restore.body', {
+                          time: instantText(restoreSnap.at) ?? restoreSnap.at,
+                        })
+                      : tr('params.restore.bodyNoTime')}
+                  </p>
+                  <ul className={s.changeList}>
+                    {restoreEntries.slice(0, MAX_CONFIRM_ITEMS).map((e) => (
+                      <li key={e.key} className={s.changeItem}>
+                        <span className={s.changeLabel}>{e.label}</span>
+                        <span className={s.changeArrow}>
+                          {e.from} → <b>{e.to}</b>
+                        </span>
+                      </li>
+                    ))}
+                    {restoreEntries.length > MAX_CONFIRM_ITEMS && (
+                      <li className={s.changeMore}>
+                        {tr('params.restore.more', {
+                          count: restoreEntries.length - MAX_CONFIRM_ITEMS,
+                        })}
+                      </li>
+                    )}
+                  </ul>
+                </>
+              )}
               <div className={s.sheetFoot}>
                 <button type="button" className={s.ghost} onClick={() => setAskRestore(false)}>
                   {tr('common.cancel')}
@@ -1670,8 +1762,9 @@ export default function PageParams({
                 <button
                   type="button"
                   className={s.danger}
+                  disabled={restoreSnap === null || restoreEntries.length === 0}
                   onClick={() => {
-                    u.restoreDefaults()
+                    if (restoreSnap !== null) u.restoreDefaults(restoreSnap.values)
                     setAskRestore(false)
                   }}
                 >
@@ -1697,34 +1790,49 @@ export default function PageParams({
                 本地文件 → 写回它自己。原来那句"将写入 A1xxx.toml"说的是云端原件，
                 实际却落 presets-local/ —— 测试报告里"我不敢赌"的那句话就是它。
               */}
+              {/*
+                正文只留句干；**目标文件名单独一行**（等宽、超长省略）——
+                塞进句子里会把长文件名折成两行、断在名字中间（真机截图）。
+              */}
               <p className={s.sheetText}>
-                {u.editingPreset?.origin === 'local' ? (
-                  <>
-                    {tr('params.save.lead')}
-                    <b>{changedEntries.length}</b>
-                    {tr('params.save.writeBackMid')}
-                    <b>{fileLabel}</b>
-                    {tr('params.save.colon')}
-                  </>
-                ) : /\.[a-z0-9]+$/i.test(fileLabel) ? (
-                  <>
-                    {tr('params.save.lead')}
-                    <b>{changedEntries.length}</b>
-                    {tr('params.save.saveAsMid')}
-                    {tr('params.save.colon')}
-                    presets-local/
-                    <b>{fileLabel.replace(/\.([a-z0-9]+)$/i, `${tr('params.save.modifiedSuffix')}.$1`)}</b>
-                    {tr('params.save.untouchedTail')}
-                  </>
-                ) : (
-                  <>
-                    {tr('params.save.lead')}
-                    <b>{changedEntries.length}</b>
-                    {tr('params.save.saveAsMid')}
-                    {tr('params.save.saveAsLocalTail')}
-                  </>
+                {tr('params.save.lead')}
+                <b>{changedEntries.length}</b>
+                {tr(
+                  u.editingPreset?.origin === 'local'
+                    ? 'params.save.writeBackMid'
+                    : 'params.save.saveAsMid',
                 )}
+                {u.editingPreset?.origin === 'local' ? null : tr('params.save.colon')}
+                {u.editingPreset?.origin !== 'local' && !/\.[a-z0-9]+$/i.test(fileLabel)
+                  ? tr('params.save.saveAsLocalTail')
+                  : null}
               </p>
+              {u.editingPreset?.origin === 'local' ? (
+                <div className={s.targetLine}>
+                  <span className={s.targetName} title={fileLabel}>
+                    {fileLabel}
+                  </span>
+                </div>
+              ) : /\.[a-z0-9]+$/i.test(fileLabel) ? (
+                <>
+                  <div className={s.targetLine}>
+                    <span className={s.targetDir}>presets-local/</span>
+                    <span
+                      className={s.targetName}
+                      title={`presets-local/${fileLabel.replace(
+                        /\.([a-z0-9]+)$/i,
+                        `${tr('params.save.modifiedSuffix')}.$1`,
+                      )}`}
+                    >
+                      {fileLabel.replace(
+                        /\.([a-z0-9]+)$/i,
+                        `${tr('params.save.modifiedSuffix')}.$1`,
+                      )}
+                    </span>
+                  </div>
+                  <p className={s.saveNote}>{tr('params.save.untouchedTail')}</p>
+                </>
+              ) : null}
               <ul className={s.changeList}>
                 {changedEntries.slice(0, MAX_CONFIRM_ITEMS).map((e) => (
                   <li key={e.key} className={s.changeItem}>

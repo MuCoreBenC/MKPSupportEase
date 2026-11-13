@@ -748,7 +748,7 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgb(16 24 32 / 26%);
+  background: rgb(16 24 32 / 46%);
 }
 
 .sheet {
@@ -758,6 +758,11 @@
   border-radius: var(--r-lg);
   background: var(--surface-solid);
   box-shadow: var(--shadow-lift);
+}
+
+/* 带清单的框（恢复默认值）：加宽只给这一种，保存框的宽度不变 */
+.sheetWide {
+  width: 420px;
 }
 
 .sheetTitle {
@@ -819,9 +824,48 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 新值是这一下会落到的那个数：比旧值重一档 */
+.changeArrow b {
+  color: var(--text-1);
+  font-weight: 500;
+}
+
 .changeMore {
   padding: 8px 12px;
   border-top: 1px solid var(--line);
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* ---------- 保存确认里的目标文件名（独立一行） ---------- */
+
+.targetLine {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: -8px 0 14px;
+  min-width: 0;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+
+.targetDir {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.targetName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--fs-label);
+}
+
+.saveNote {
+  margin: -8px 0 14px;
   font-size: var(--fs-label);
   color: var(--text-3);
 }

@@ -65,12 +65,16 @@ fn send_tick(on_tick: &Channel<BackupTick>, at: &Progress) {
 /// `include_presets = false`：跟预设有关的那几棵（用户 toml / 修改历史 / 云端原文镜像 /
 /// 原文备份 / 回收站）不进包 —— 界面那一扇里的「连同预设一起备份」就是它。
 ///
+/// `include_history = false`：执行归档（`user/gcode_history`）不进包 —— 那是包里最大的一块，
+/// 界面那一扇里的「连同执行记录一起备份」就是它。
+///
 /// 返回**备份文件的绝对路径** —— 界面照原样显示（用户要知道东西落在哪了）。
 #[tauri::command]
 pub async fn create_backup(
     app: AppHandle,
     dest_dir: String,
     include_presets: bool,
+    include_history: bool,
     on_tick: Channel<BackupTick>,
 ) -> Result<BackupSummary, AppError> {
     let task = tauri::async_runtime::spawn_blocking(move || {
@@ -90,13 +94,19 @@ pub async fn create_backup(
                 )));
             }
             let mut forward = |at: &Progress| send_tick(&on_tick, at);
-            let sum =
-                crate::runtime::backup::create(&internal, dest, include_presets, &mut forward)?;
+            let sum = crate::runtime::backup::create(
+                &internal,
+                dest,
+                include_presets,
+                include_history,
+                &mut forward,
+            )?;
             tracing::info!(
                 path = %sum.path,
                 files = sum.files,
                 bytes = sum.bytes,
                 presets = include_presets,
+                history = include_history,
                 "备份打好了"
             );
             Ok(sum)

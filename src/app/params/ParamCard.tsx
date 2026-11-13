@@ -58,7 +58,6 @@ interface Props {
   savedValueOf: (key: string) => string
   /** 这一项「上一次保存之前的值」（2026-10-21）；不传就不画那一格 */
   prevSavedOf?: (key: string) => string | null
-  factoryOf: (key: string) => string
   dirtyOf: (key: string) => boolean
   blockedByOf: (key: string) => BlockedBy | null
   /**
@@ -214,7 +213,6 @@ export default function ParamCard({
   valueOf,
   savedValueOf,
   prevSavedOf,
-  factoryOf,
   dirtyOf,
   blockedByOf,
   condOn,
@@ -308,7 +306,6 @@ export default function ParamCard({
             value={shownValueOf(node.def.key)}
             savedValue={savedValueOf(node.def.key)}
             prevSavedValue={prevSavedOf?.(node.def.key) ?? null}
-            factoryValue={factoryOf(node.def.key)}
             dirty={dirtyOf(node.def.key)}
             sync={syncOf?.(node.def.key)}
             syncDraft={syncDraftOf?.(node.def.key) ?? null}

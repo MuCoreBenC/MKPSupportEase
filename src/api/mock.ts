@@ -15,7 +15,8 @@ const demoLanded = new Set<string>()
  *
  * 为什么要有：作者连着两轮说「模态框尺寸变化了」，而那一屏在浏览器里**根本到不了**
  * （钩子那一趟是切片器带参数把桌面版拉起来的）。于是给 dev 开一个口子：
- * 打开 `/?pp=result` 或 `/?pp=relocate`，快照就返回一份假的那一趟 —— 探针据此
+ * 打开 `/?pp=result` 或 `/?pp=relocate`（还有 `warn` / `glue` / `vh` / `mismatch`），
+ * 快照就返回一份假的那一趟 —— 探针据此
  * 量两屏的 `.box` 高度，判"换一屏框就长大"（`scripts/probes/pp-modal-height.mjs`）。
  *
  * ★ 只在 `import.meta.env.DEV` 下生效；生产构建里整段被摇掉，`getPostProcessRun`
@@ -91,6 +92,29 @@ function devPostProcessRun(): PostProcessRun | null {
           t('mock.warn.scarf'),
         ],
         result: { penX: -1, penY: 18.6, penZ: 3.8, glueSpeed: 70 },
+      },
+    }
+  }
+
+  /*
+   * **开了热床预涂胶**那一屏：结果屏默认落在警告页，卡片说"本次打印已开启热床预涂胶"。
+   * 真机上这一格由钩子按那一趟的 IR 给（`ResultFacts::bed_glue`），这里只是浏览器里的样张。
+   */
+  if (which === 'glue') {
+    return {
+      ...base,
+      question: null,
+      finished: {
+        ok: true,
+        cancelled: false,
+        message: t('mock.ask.done'),
+        code: null,
+        stage: null,
+        exitCode: 0,
+        elapsedMs: 11_840,
+        output: null,
+        warnings: [],
+        result: { penX: -1, penY: 18.6, penZ: 3.8, glueSpeed: 70, bedGlue: true },
       },
     }
   }
@@ -1615,7 +1639,8 @@ export const mockApi: MkpApi = {
    *
    * ★ 只有 **dev 且 URL 带 `?pp=…`** 时给一份假快照 —— 那是给探针用的
    *   （`scripts/probes/pp-modal-height.mjs`：量「结果」与「挪塔那一问」两屏是不是一样高）。
-   *   `?pp=result` / `?pp=warn` / `?pp=vh`（可变层高）/ `?pp=relocate` / `?pp=mismatch`。
+   *   `?pp=result` / `?pp=warn` / `?pp=glue`（开了热床预涂胶）/ `?pp=vh`（可变层高）/
+   *   `?pp=relocate` / `?pp=mismatch`。
    *   生产构建里这函数直接 `null`
    *   （`import.meta.env.DEV` 在 build 里是常量 false，整段被摇掉）。
    */
@@ -2003,6 +2028,15 @@ export const mockApi: MkpApi = {
   /** 「恢复默认值」（编辑文件那颗）读的原文 —— 见 `mockLocalOrigin` 的注释 */
   async readLocalOriginText(path) {
     return mockLocalOrigin.get(path) ?? null
+  },
+
+  /**
+   * 「恢复默认值」要回到的那一版。浏览器预览没有 `baseline-local`（那是桌面端的
+   * 原文镜像），这里如实给 `null` —— 按钮禁用，不编一个"默认"出来。
+   */
+  async readPresetBaselineValues(path) {
+    void path
+    return null
   },
 
   /** 参数草稿的**摘要** —— 预设列表行上的「未保存」标记用。没有草稿就是 `null` */
