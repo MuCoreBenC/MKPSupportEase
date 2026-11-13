@@ -38,6 +38,18 @@ pub struct ToolheadConfig {
     /// 收笔时回填的挤出量。`0` = 按 `|回抽| + 0.5` 自动，非 0 = 用它（联动关闭）。
     #[serde(rename = "MKP_extrude", default)]
     pub mkp_extrude: f64,
+    /// 回抽那一笔的进给速度（mm/s）。`0` = 没配，用内核默认 25。
+    #[serde(rename = "MKP_retract_speed", default)]
+    pub mkp_retract_speed: f64,
+    /// 回填那一笔的进给速度（mm/s）。`0` = 没配，用内核默认 25。
+    #[serde(rename = "MKP_extrude_speed", default)]
+    pub mkp_extrude_speed: f64,
+    /// 回抽插在换笔的哪一刻：`model` / `wait` / `after_dock`。认不出就报错，不兜底。
+    #[serde(rename = "MKP_retract_at", default)]
+    pub mkp_retract_at: String,
+    /// 回填量分摊到塔上的擦料移动里（一次挤完 vs 分摊）。
+    #[serde(rename = "MKP_extrude_spread", default)]
+    pub mkp_extrude_spread: bool,
     #[serde(default)]
     pub custom_mount_gcode: String,
     #[serde(default)]

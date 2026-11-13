@@ -183,6 +183,10 @@ export interface RawShowWhen {
 
 export interface RawParam {
   key: string
+  /** 值为 0 时读作「自动」（2026-11-13）；缺 = 这一条没有这种含义 */
+  zeroMeansAuto?: boolean
+  /** 那个自动值怎么算（2026-11-13）；缺 = 只说得清"是自动" */
+  autoValue?: { from: string; abs?: boolean; offset?: number }
   label: string
   /** 英文显示名（缺 = 回落 `label`） */
   labelEn?: string

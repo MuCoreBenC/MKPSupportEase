@@ -277,6 +277,19 @@ pub struct ParamDef {
     /// 标了之后只有机型基底/版本**真的写了值**才落盘。
     #[serde(default)]
     pub omit_when_unset: bool,
+    /// **值为 0 时显示「自动」**（2026-11-13）。
+    ///
+    /// 只对「0 有专门含义」的字段有意义：`MKP_extrude = 0` 的含义是"按回抽长度算"，
+    /// 界面只显示 `0.00 mm` 会让人读成"不挤出"。标了它，参数格把 0 说成「自动」。
+    /// 判据看标记，不看 key，别在界面上按名字写死。
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub zero_means_auto: bool,
+    /// **那个「自动」到底是多少**（2026-11-13）。
+    ///
+    /// 与 `zero_means_auto` 分开：前者只说「0 不读成 0.00」，这一格才说数从哪来。
+    /// 两件事合在一个字段里的话，「显示自动但算不出数」这种状态就表达不了。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_value: Option<AutoValue>,
     #[serde(default)]
     pub serialization: Option<Serialization>,
     /// **哪几册译文跟着这份中文一起过期了**（2026-11-02）。
@@ -301,6 +314,37 @@ pub struct ParamDef {
 #[serde(rename_all = "camelCase")]
 pub struct Serialization {
     pub subfields_order: Vec<String>,
+}
+
+/// 一条「这一格的自动值怎么算」的登记（[`ParamDef::auto_value`]）。
+///
+/// 只认这一种形状：**跟着另一条参数的当前值走**。够用就不再加表达式语言 ——
+/// 加得越多，界面上那一格越难说清"它为什么是这个数"。
+///
+/// ```toml
+/// autoValue = { from = "toolhead.MKP_retract", abs = true, offset = 0.5 }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoValue {
+    /// 跟着哪条参数（同一条注册表里的 `key`）
+    pub from: String,
+    /// 取绝对值：回抽是负数，回填量要的是它的长度
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub abs: bool,
+    /// 在这个数上再加多少
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub offset: f64,
+}
+
+/// `skip_serializing_if` 用：0 不落盘（"加 0" 与"没写"是同一件事）
+fn is_zero_f64(v: &f64) -> bool {
+    *v == 0.0
+}
+
+/// `skip_serializing_if` 用：`false` 不落盘，空字段不进 catalog 字节。
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 impl ParamDef {
@@ -1046,6 +1090,21 @@ impl ParamRegistry {
                     )));
                 }
             }
+        }
+
+        // ⑤ 「自动值跟着谁算」必须指得着
+        let dangling_auto: Vec<String> = self
+            .params
+            .iter()
+            .filter_map(|p| p.auto_value.as_ref().map(|a| (p, a)))
+            .filter(|(_, a)| !param_keys.contains(a.from.as_str()))
+            .map(|(p, a)| format!("{} → {}", p.key, a.from))
+            .collect();
+        if !dangling_auto.is_empty() {
+            return Err(
+                AppError::corrupted(messages::text("ui.presetdata.registry.357", &[]))
+                    .with_detail(dangling_auto.join("；")),
+            );
         }
 
         Ok(())
@@ -4410,7 +4469,7 @@ order = 2.0
         Some(ParamRegistry::load_from(&root).expect("字段定义或布局读不通"))
     }
 
-    /// 75 条字段全读到，而且关键字段真的落进模型 ——
+    /// 每条字段全读到，而且关键字段真的落进模型 ——
     /// 只断言条数的话，一个全是默认值的空壳也能通过
     #[test]
     fn all_registry_params_load_with_their_fields() {
@@ -4418,7 +4477,7 @@ order = 2.0
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
-        assert_eq!(r.params().len(), 92, "字段条数");
+        assert_eq!(r.params().len(), 96, "字段条数");
         assert!(!r.tabs().is_empty());
         assert!(!r.updated().is_empty(), "updated 没读到");
 
@@ -4428,7 +4487,7 @@ order = 2.0
         assert_eq!(p.toml_key, "MKP_retract");
         assert_eq!(p.unit.as_deref(), Some("mm"));
         assert_eq!(p.min, Some(-50.0));
-        assert_eq!(p.max, Some(50.0));
+        assert_eq!(p.max, Some(0.0), "回抽只允许负值（正数没有物理意义）");
         assert_eq!(p.layout.section_id, "motion");
 
         // 四个子表各至少有一条真数据 —— 它们是最容易在换 loader 时静默丢掉的部分
@@ -4575,6 +4634,10 @@ order = 2.0
             "pinned",
             // 「该机型没写值就整行不落盘」（2026-11-10）；读进 `ParamDef::omit_when_unset`
             "omitWhenUnset",
+            // 「值为 0 时显示自动」（2026-11-13）；读进 `ParamDef::zero_means_auto`
+            "zeroMeansAuto",
+            // 「那个自动值怎么算」（2026-11-13）；读进 `ParamDef::auto_value`
+            "autoValue",
             "serialization",
             // 刻意不读的两个：实测 74/74 全 true，零区分度
             "mergeable",
@@ -4752,7 +4815,15 @@ order = 2.0
         );
 
         let (removed, inserted) = one_edit_only(&before, &again.to_toml());
-        assert!(inserted.contains("-1.5"), "新值不在插入段：{inserted:?}");
+        /*
+         * 判据是「那一行真的变成了 -1.5」，不是「差分段里有 -1.5」：
+         * 旧值 -6.0 与新值 -1.5 共用那个负号，负号落在两边的公共前缀里，
+         * 最小差分段只有 "6.0" → "1.5"。按差分段断言会把一次正确的改动判成红。
+         */
+        assert!(
+            again.to_toml().contains("\"A1:STANDARD\" = -1.5"),
+            "那一行没有变成新值（差分段 {removed:?} → {inserted:?}）"
+        );
         // **别的字段一个都不许进这次改动的范围**
         assert!(
             !removed.contains("[[params]]"),
@@ -4761,6 +4832,64 @@ order = 2.0
         assert!(
             !inserted.contains("[[params]]"),
             "插入段跨到了别的字段：{inserted:?}"
+        );
+    }
+
+    /// 改一条定义（这里只改名字）**不许把同一块里的显示标记抹掉**。
+    ///
+    /// `zeroMeansAuto` 不是 `ParamMetaEdit` 的字段 —— 它跟着定义块一起活着，
+    /// 只有「就地改那几个键、不重建整块」的写路径能保住它。哪天有人把这里换成
+    /// 「结构体反序列化再整份序列化」，这条会第一个红。
+    #[test]
+    fn a_meta_edit_keeps_the_zero_means_auto_flag() {
+        let Some((tmp, mut r)) = copy_of_real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let mut edit = meta_edit("挤出长度");
+        edit.desc = "改过的说明".into();
+        r.set_param_meta("toolhead.MKP_extrude", edit)
+            .expect("定义改得动");
+        r.write_back().expect("落盘");
+
+        assert!(
+            r.to_toml().contains("zeroMeansAuto = true"),
+            "写回之后标记没了"
+        );
+        let again = ParamRegistry::load_from(tmp.path()).expect("改完还得读得通");
+        assert!(
+            again.param("toolhead.MKP_extrude").unwrap().zero_means_auto,
+            "重读之后标记没了 —— 界面会把「自动」读回成 0.00"
+        );
+    }
+
+    /// 「自动值跟着谁算」指错了参数 ⇒ **加载时就拒**，不留到界面上算不出数。
+    ///
+    /// 这条判据存在的理由：`autoValue.from` 是一个裸字符串，写错一个字母既不报错、
+    /// 也不缺字段 —— 界面只会安静地退回「自动」两个字，谁也发现不了。
+    #[test]
+    fn a_dangling_auto_value_source_is_rejected_on_load() {
+        let Some(root) = crate::presetdata::repo_presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        copy_tree(&root, tmp.path());
+        let file = tmp.path().join("registry").join("param_registry.toml");
+        let text = std::fs::read_to_string(&file).unwrap();
+        let broken = text.replace(
+            "\"from\" = \"toolhead.MKP_retract\"",
+            "\"from\" = \"toolhead.MKP_retractt\"",
+        );
+        assert_ne!(broken, text, "夹具里那条 autoValue 没找到");
+        atomic_write(&file, broken.as_bytes()).unwrap();
+
+        let e = ParamRegistry::load_from(tmp.path()).expect_err("指错了就该读不通");
+        assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
+        let detail = format!("{e:?}").to_ascii_lowercase();
+        assert!(
+            detail.contains("mkp_retractt") || detail.contains("自动"),
+            "报错里得说清是哪一条指的：{detail}"
         );
     }
 

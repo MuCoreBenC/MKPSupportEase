@@ -1,6 +1,10 @@
 {
   "toolhead.MKP_extrude": 0.0,
+  "toolhead.MKP_extrude_speed": 25.0,
+  "toolhead.MKP_extrude_spread": false,
   "toolhead.MKP_retract": -6.0,
+  "toolhead.MKP_retract_at": "model",
+  "toolhead.MKP_retract_speed": 25.0,
   "toolhead.custom_mount_gcode": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
   "toolhead.custom_unmount_gcode": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000",
   "toolhead.first_pen_revitalization_flag": false,

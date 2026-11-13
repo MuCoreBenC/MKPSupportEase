@@ -28,8 +28,20 @@ id = 'item_0_1_1'
 paramKey = 'toolhead.MKP_retract'
 
 [[tabs.sections.items]]
+id = 'item_0_1_3'
+paramKey = 'toolhead.MKP_retract_speed'
+
+[[tabs.sections.items]]
 id = 'item_0_1_2'
 paramKey = 'toolhead.MKP_extrude'
+
+[[tabs.sections.items]]
+id = 'item_0_1_4'
+paramKey = 'toolhead.MKP_extrude_speed'
+
+[[tabs.sections.items]]
+id = 'item_0_1_5'
+paramKey = 'toolhead.MKP_extrude_spread'
 
 [[tabs]]
 id = 'wiping'
@@ -274,6 +286,10 @@ id = 'gcode'
 
 [[tabs.sections]]
 id = 'custom_gcode'
+
+[[tabs.sections.items]]
+id = 'item_4_0_6'
+paramKey = 'toolhead.MKP_retract_at'
 
 [[tabs.sections.items]]
 id = 'item_4_0_0'

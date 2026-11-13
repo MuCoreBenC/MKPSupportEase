@@ -275,16 +275,55 @@ pub struct MachineIr {
     pub forbidden_zones: Vec<Polygon>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+/// 回抽 / 回填的默认进给速度（mm/s）。25 等于原来那句硬编码的 `F1500`。
+pub const DEFAULT_E_SPEED_MM_PER_S: f64 = 25.0;
+
+fn default_e_speed_mm_per_s() -> f64 {
+    DEFAULT_E_SPEED_MM_PER_S
+}
+
+fn default_retract_at() -> String {
+    "model".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct GCodeIr {
     #[serde(rename = "MKPRetract")]
     pub mkp_retract: f64,
     #[serde(rename = "MKPExtrude")]
     pub mkp_extrude: f64,
+    /// 回抽那一笔的进给速度（mm/s）。鼠标点在轴上：太快挤出机会咬料，太慢会挂丝。
+    #[serde(rename = "MKPRetractSpeed", default = "default_e_speed_mm_per_s")]
+    pub mkp_retract_speed: f64,
+    /// 回填那一笔的进给速度（mm/s）。
+    #[serde(rename = "MKPExtrudeSpeed", default = "default_e_speed_mm_per_s")]
+    pub mkp_extrude_speed: f64,
+    /// 回抽插在换笔的哪一刻：`model`（起飞前）/ `wait`（到达等待位、推入之前）/ `after_dock`。
+    #[serde(rename = "MKPRetractAt", default = "default_retract_at")]
+    pub mkp_retract_at: String,
+    /// 回填量分摊到塔上的擦料移动里（一次挤完 vs 分摊）。
+    #[serde(rename = "MKPExtrudeSpread", default)]
+    pub mkp_extrude_spread: bool,
     pub refill_extrude_command: String,
     pub wait_for_drying_command: String,
     pub custom_gcode_e_ownership: bool,
+}
+
+impl Default for GCodeIr {
+    fn default() -> Self {
+        Self {
+            mkp_retract: 0.0,
+            mkp_extrude: 0.0,
+            mkp_retract_speed: DEFAULT_E_SPEED_MM_PER_S,
+            mkp_extrude_speed: DEFAULT_E_SPEED_MM_PER_S,
+            mkp_retract_at: default_retract_at(),
+            mkp_extrude_spread: false,
+            refill_extrude_command: String::new(),
+            wait_for_drying_command: String::new(),
+            custom_gcode_e_ownership: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]

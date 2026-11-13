@@ -687,28 +687,92 @@ fn extended_travel_z(ir_data: &Ir, layer_z: f64) -> f64 {
     glue_nozzle_z(ir_data, layer_z, PenZ::Travel)
 }
 
-/// 一次换笔该发多少回抽：`Some(v)` = 内核发这一笔，`None` = 模板自带（模板那句就是这一笔）。
-///
-/// **整段 swap 只有一笔回抽。** 两个发起 swap 的地方各发一次：涂胶块把它带在脱层小螺旋上，
-/// 首笔活化在抬 Z 之后单独一行。`mount_toolhead` 自己不发 E —— 它被这两处共用，
-/// 谁在里面补一笔，就等于每次换笔抽两遍（0.0.11 就是这么把 E 抽成了两笔）。
-pub(crate) fn swap_retract_amount(ir_data: &Ir) -> Option<f64> {
-    if custom_mount_gcode_has_retract(ir_data) {
-        None
-    } else {
-        Some(ir_data.gcode.mkp_retract)
+/// 一次换笔的回抽：抽多少（`amount`，负数）与抽多快（`speed_mm_per_s`）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SwapRetract {
+    pub amount: f64,
+    pub speed_mm_per_s: f64,
+}
+
+impl SwapRetract {
+    /// 独立一行 `G1 E{量} F{速度}`（面板是 mm/s，G-code 要 mm/min）。
+    pub(crate) fn line(&self) -> String {
+        format!(
+            "G1 E{} F{}",
+            format_e(self.amount),
+            format_speed(self.speed_mm_per_s * super::MM_PER_MINUTE)
+        )
     }
 }
 
+/// 回抽插在换笔的哪一刻。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetractAt {
+    /// 脱层小螺旋之前（模型处，起飞前）
+    Model,
+    /// 挂载块里第一条带 X 的移动之后（到达等待位、推入之前）
+    Wait,
+    /// 挂载块末尾（换笔动作之后）
+    AfterDock,
+}
+
+/// 面板那一格 `MKP_retract_at` → 枚举。认不出的值由 `build` 在更早一步报错，
+/// 直接吃 IR JSON 的那条路按 `model` 处理并留一条 warn（不静默换成别的档）。
+pub(crate) fn retract_at(ir_data: &Ir) -> RetractAt {
+    match ir_data.gcode.mkp_retract_at.as_str() {
+        "wait" => RetractAt::Wait,
+        "after_dock" => RetractAt::AfterDock,
+        "model" | "" => RetractAt::Model,
+        other => {
+            tracing::warn!(value = other, "MKP_retract_at 认不出，按 model 处理");
+            RetractAt::Model
+        }
+    }
+}
+
+/// 一次换笔该发多少回抽：`Some(..)` = 内核发这一笔，`None` = 不发（模板自带，或量填 0）。
+///
+/// **整段 swap 只有一笔回抽。** 两个发起 swap 的地方各发一次：涂胶块与首笔活化，
+/// 插在哪由 [`retract_at`] 决定。`mount_toolhead` 只在 `wait` / `after_dock` 两档动手 ——
+/// 谁在里面无条件补一笔，就等于每次换笔抽两遍（0.0.11 就是这么把 E 抽成了两笔）。
+pub(crate) fn swap_retract(ir_data: &Ir) -> Option<SwapRetract> {
+    if custom_mount_gcode_has_retract(ir_data) || ir_data.gcode.mkp_retract == 0.0 {
+        return None;
+    }
+    Some(SwapRetract {
+        amount: ir_data.gcode.mkp_retract,
+        speed_mm_per_s: ir_data.gcode.mkp_retract_speed,
+    })
+}
+
+/// 这一行是不是「带 X 的 G1 移动」（判断是否已经到等待位）。
+fn is_x_move(line: &str) -> bool {
+    let code = line.split(';').next().unwrap_or("").trim();
+    code.starts_with("G1") && code.contains('X')
+}
+
 /// `mountToolhead`（glue_block.go:376）：custom_mount_gcode 切换下笔。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn mount_toolhead(
     sink: &mut LineSink,
     ir_data: &Ir,
     current_layer_height: f64,
     skip_final_z: bool,
+    retract: Option<SwapRetract>,
+    at: RetractAt,
 ) {
     sink.push_str(";Mounting Toolhead");
     sink.push_str(&stage_comment_line(MkpStage::MountToolhead, ""));
+
+    /* `model` 那一档由调用方在起飞前发过，这里只管另外两档：
+     * `wait` 插在「到达等待位」那一行之后（推入之前），`after_dock` 落在块尾。 */
+    let mut pending = if at == RetractAt::Model {
+        None
+    } else {
+        retract
+    };
+    let mut injected = false;
+
     for mount_line in &ir_data.toolhead.custom_mount_gcode {
         let ml = mount_line.trim();
         if ml.is_empty() {
@@ -724,6 +788,22 @@ pub(crate) fn mount_toolhead(
         } else {
             sink.push_str(ml);
         }
+        /* 「到达等待位」= 挂载块里第一条带 X 移动的 G1。模板里已经没有 E，
+         * 也不许再塞占位符，所以只能按这个形状认。 */
+        if at == RetractAt::Wait && !injected && is_x_move(ml) {
+            if let Some(r) = pending.take() {
+                sink.push_str(&r.line());
+            }
+            injected = true;
+        }
+    }
+    if let Some(r) = pending.take() {
+        if at == RetractAt::Wait {
+            tracing::warn!(
+                "挂载模板里找不到带 X 的移动，回抽落到换笔之后（本该插在到达等待位那一刻）"
+            );
+        }
+        sink.push_str(&r.line());
     }
     sink.push_str(";Toolhead Mounted");
     if !skip_final_z {
@@ -836,14 +916,18 @@ pub(crate) fn emit_glue_block(
     //    I/J 分量照抄切片器（`sqrt(.706² + .991²) = 1.217`），不用 `I{半径} J0` 那种写法。
     sink.push_str("M204 S10000");
     sink.push_str("G17");
-    // 整段 swap 的回抽就带在这一句小螺旋上：脱层与回抽同一次动作，之后一路到换笔位都不再抽。
-    let spiral_retract = swap_retract_amount(ir_data)
-        .map(|v| format!(" E{}", format_e(v)))
-        .unwrap_or_default();
+    /* 回抽单独一行，位置由 `MKP_retract_at` 决定（默认就是这里：起飞前）。
+     * 小螺旋只做脱层 —— 它那句的 F 是空走速度（700 mm/s），带着 E 就等于按空走速度抽。 */
+    let retract = swap_retract(ir_data);
+    let at = retract_at(ir_data);
+    if at == RetractAt::Model {
+        if let Some(r) = retract {
+            sink.push_str(&r.line());
+        }
+    }
     sink.push_str(&format!(
-        "G3 Z{} I.706 J.991 P1{} F{}",
+        "G3 Z{} I.706 J.991 P1 F{}",
         format_z(current_layer_height + ir_data.glue.swap_hop_height),
-        spiral_retract,
         format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
     ));
 
@@ -863,7 +947,7 @@ pub(crate) fn emit_glue_block(
         format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
     ));
 
-    mount_toolhead(sink, ir_data, current_layer_height, false);
+    mount_toolhead(sink, ir_data, current_layer_height, false, retract, at);
     sink.push_str(&marks::end("swap"));
 
     sink.push_str(";Glueing Started");
@@ -1563,52 +1647,152 @@ mod continuity_tests {
             .filter(|v| *v < 0.0)
     }
 
-    /// 回抽归谁发：模板带 E 就归模板（内核一条都不发），否则归内核。
+    /// 回抽归谁发：模板带 E 就归模板（内核一条都不发），量填 0 也不发。
     #[test]
     fn swap_retract_follows_template_ownership() {
         let mut ir = test_ir();
         ir.gcode.mkp_retract = -5.0;
+        ir.gcode.mkp_retract_speed = 18.0;
         ir.toolhead.custom_mount_gcode = ["G92 E0", "L801"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(swap_retract_amount(&ir), Some(-5.0));
+        let r = swap_retract(&ir).expect("模板没有 E 时该由内核发");
+        assert_eq!(r.amount, -5.0);
+        assert_eq!(r.speed_mm_per_s, 18.0);
+        assert_eq!(r.line(), "G1 E-5.0 F1080.0");
 
         ir.toolhead.custom_mount_gcode = ["G92 E0", "G1 E-5 F1800", "L801"]
             .iter()
             .map(|s| s.to_string())
             .collect();
-        assert_eq!(
-            swap_retract_amount(&ir),
-            None,
+        assert!(
+            swap_retract(&ir).is_none(),
             "模板自带 E 时内核不许再发第二笔"
         );
+
+        ir.toolhead.custom_mount_gcode = ["G92 E0", "L801"].iter().map(|s| s.to_string()).collect();
+        ir.gcode.mkp_retract = 0.0;
+        assert!(swap_retract(&ir).is_none(), "回抽填 0 就一行都不发");
     }
 
-    /// 一次换笔只许一笔回抽。
+    /// 默认那一档：一笔 `G1 E..` 落在小螺旋之前，挂载段里干净。
     ///
     /// 0.0.11 在 `mount_toolhead` 末尾又补了一笔，小螺旋那笔没让位 —— 每次换笔抽 −10，
     /// 收笔只补 +5.5，净账每层 −4.5mm。模板骨架里不含 E 时，这条判据必须恰好是 1 笔。
     #[test]
     fn swap_block_retracts_exactly_once() {
-        let mut ir = test_ir();
-        ir.gcode.mkp_retract = -5.0;
-        ir.gcode.mkp_extrude = 5.5;
-        ir.tower.use_towers = false;
-        ir.toolhead.custom_mount_gcode = [
-            "G92 E0",
-            "L801",
-            "M204 S10000",
-            "G1 X168 F30000",
-            "G1 X182 F10000",
-            "G1 X168 F30000",
-            "G1 F30000",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-        ir.toolhead.custom_unmount_gcode = ["G92 E0", "G1 F30000"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let out = emit_swap_block(RetractAt::Model);
+        let retracts: Vec<&String> = out.iter().filter(|l| negative_e(l).is_some()).collect();
+        assert_eq!(
+            retracts.len(),
+            1,
+            "换笔回抽应恰好 1 笔，实际 {} 笔：{retracts:?}\n输出：\n{}",
+            retracts.len(),
+            out.join("\n")
+        );
+        assert_eq!(
+            retracts[0], "G1 E-5.0 F1500.0",
+            "回抽应是一句独立移动（速度 25 mm/s = F1500）"
+        );
 
+        let hop_at = out
+            .iter()
+            .position(|l| l.starts_with("G3 "))
+            .expect("没有脱层小螺旋");
+        assert!(
+            !out[hop_at].contains(" E"),
+            "小螺旋只做脱层：{}",
+            out[hop_at]
+        );
+        let mount_at = out
+            .iter()
+            .position(|l| l.contains(";Mounting Toolhead"))
+            .expect("没有 ;Mounting Toolhead");
+        let mounted_at = out
+            .iter()
+            .position(|l| l.contains(";Toolhead Mounted"))
+            .expect("没有 ;Toolhead Mounted");
+        assert!(
+            out[mount_at..mounted_at]
+                .iter()
+                .all(|l| negative_e(l).is_none()),
+            "挂载段里不许再有第二笔回抽：\n{}",
+            out[mount_at..mounted_at].join("\n")
+        );
+
+        fn emit_swap_block(at: RetractAt) -> Vec<String> {
+            let mut ir = swap_ir();
+            ir.gcode.mkp_retract_at = match at {
+                RetractAt::Model => "model",
+                RetractAt::Wait => "wait",
+                RetractAt::AfterDock => "after_dock",
+            }
+            .to_string();
+            let iface: Vec<String> = ["G1 X108.532 Y124.075 E.00154", "G1 X108.9 Y124.2 E.00154"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let mut sink = LineSink { lines: Vec::new() };
+            let mut stats = crate::postproc::pass1::ProcessStats::default();
+            let features = HashMap::new();
+            emit_glue_block(
+                &mut sink,
+                &iface,
+                &mut ir,
+                LAYER_Z,
+                LAST_LAYER_Z,
+                "A1",
+                &features,
+                &mut stats,
+            )
+            .expect("emit_glue_block 失败");
+            sink.lines
+        }
+    }
+
+    /// `wait`：回抽插在「到达等待位」那一行之后、推入之前。
+    #[test]
+    fn retract_at_wait_sits_between_wait_and_dock() {
+        let out = emit_with_position("wait");
+        let retract_at = out
+            .iter()
+            .position(|l| negative_e(l).is_some())
+            .expect("没有回抽");
+        assert_eq!(out[retract_at], "G1 E-5.0 F1500.0");
+        assert!(
+            out[retract_at - 1].starts_with("G1 X168"),
+            "回抽前一句该是到达等待位，实际：{}",
+            out[retract_at - 1]
+        );
+        assert!(
+            out[retract_at + 1].starts_with("G1 X182"),
+            "回抽后一句该是推入动作位，实际：{}",
+            out[retract_at + 1]
+        );
+        assert_eq!(
+            out.iter().filter(|l| negative_e(l).is_some()).count(),
+            1,
+            "仍然只许一笔"
+        );
+    }
+
+    /// `after_dock`：回抽落在挂载块末尾（`;Toolhead Mounted` 之前）。
+    #[test]
+    fn retract_after_dock_sits_at_the_end_of_the_mount_block() {
+        let out = emit_with_position("after_dock");
+        let retract_at = out
+            .iter()
+            .position(|l| negative_e(l).is_some())
+            .expect("没有回抽");
+        assert_eq!(out[retract_at + 1].trim(), ";Toolhead Mounted");
+        assert!(
+            out[retract_at - 1].starts_with("G1 F30000"),
+            "回抽前一句该是挂载块的最后一句，实际：{}",
+            out[retract_at - 1]
+        );
+    }
+
+    fn emit_with_position(position: &str) -> Vec<String> {
+        let mut ir = swap_ir();
+        ir.gcode.mkp_retract_at = position.to_string();
         let iface: Vec<String> = ["G1 X108.532 Y124.075 E.00154", "G1 X108.9 Y124.2 E.00154"]
             .iter()
             .map(|s| s.to_string())
@@ -1627,46 +1811,32 @@ mod continuity_tests {
             &mut stats,
         )
         .expect("emit_glue_block 失败");
+        sink.lines
+    }
 
-        let retracts: Vec<&String> = sink
-            .lines
+    /// 换笔块的固定底盘：骨架模板（不含 E）、无塔、收笔只留一句。
+    fn swap_ir() -> Ir {
+        let mut ir = test_ir();
+        ir.gcode.mkp_retract = -5.0;
+        ir.gcode.mkp_extrude = 5.5;
+        ir.gcode.mkp_retract_speed = 25.0;
+        ir.tower.use_towers = false;
+        ir.toolhead.custom_mount_gcode = [
+            "G92 E0",
+            "L801",
+            "M204 S10000",
+            "G1 X168 F30000",
+            "G1 X182 F10000",
+            "G1 X168 F30000",
+            "G1 F30000",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        ir.toolhead.custom_unmount_gcode = ["G92 E0", "G1 F30000"]
             .iter()
-            .filter(|l| negative_e(l).is_some())
+            .map(|s| s.to_string())
             .collect();
-        assert_eq!(
-            retracts.len(),
-            1,
-            "换笔回抽应恰好 1 笔，实际 {} 笔：{retracts:?}\n输出：\n{}",
-            retracts.len(),
-            sink.lines.join("\n")
-        );
-        assert!(
-            retracts[0].starts_with("G3 "),
-            "回抽应带在脱层小螺旋上（起飞前那一笔），实际：{}",
-            retracts[0]
-        );
-        assert_eq!(
-            negative_e(retracts[0]),
-            Some(-5.0),
-            "回抽量应等于 mkp_retract"
-        );
-
-        let mount_at = sink
-            .lines
-            .iter()
-            .position(|l| l.contains(";Mounting Toolhead"))
-            .expect("没有 ;Mounting Toolhead");
-        let mounted_at = sink
-            .lines
-            .iter()
-            .position(|l| l.contains(";Toolhead Mounted"))
-            .expect("没有 ;Toolhead Mounted");
-        assert!(
-            sink.lines[mount_at..mounted_at]
-                .iter()
-                .all(|l| negative_e(l).is_none()),
-            "挂载段里不许再有第二笔回抽：\n{}",
-            sink.lines[mount_at..mounted_at].join("\n")
-        );
+        ir
     }
 }

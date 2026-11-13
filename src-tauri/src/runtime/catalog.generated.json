@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "a0bfbe106e6414e9",
+  "revision": "0694d810b84f49fc",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -895,7 +895,7 @@
           "sectionId": "motion"
         },
         "min": -50.0,
-        "max": 50.0,
+        "max": 0.0,
         "step": 0.1,
         "unit": "mm",
         "parentKey": null,
@@ -920,6 +920,47 @@
           "X1C": -6.0,
           "X1C:LITE": -6.0
         },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.MKP_retract_speed",
+        "configKey": "MKPRetractSpeed",
+        "tomlKey": "MKP_retract_speed",
+        "jsonKey": "MKP_retract_speed",
+        "label": "回抽速度",
+        "labelEn": "Retract speed",
+        "labelJa": "リトラクト速度",
+        "labelTw": "回抽速度",
+        "desc": "回抽那一笔的进给速度。太快咬料，太慢挂丝",
+        "descEn": "Feedrate of the retract move. Too fast chews the filament, too slow leaves strings",
+        "descJa": "リトラクト動作の送り速度。速すぎると噛み、遅すぎると糸を引きます",
+        "descTw": "回抽那一筆的進給速度。太快咬料，太慢掛絲",
+        "tomlComment": "回抽速度(mm/s)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 25.0,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 200.5,
+          "sectionId": "motion"
+        },
+        "min": 1.0,
+        "max": 100.0,
+        "step": 1.0,
+        "unit": "mm/s",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -957,6 +998,160 @@
         "parentKey": null,
         "showWhen": null,
         "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "zeroMeansAuto": true,
+        "autoValue": {
+          "from": "toolhead.MKP_retract",
+          "abs": true,
+          "offset": 0.5
+        },
+        "serialization": null
+      },
+      {
+        "key": "toolhead.MKP_extrude_speed",
+        "configKey": "MKPExtrudeSpeed",
+        "tomlKey": "MKP_extrude_speed",
+        "jsonKey": "MKP_extrude_speed",
+        "label": "挤出速度",
+        "labelEn": "Extrude speed",
+        "labelJa": "押し出し速度",
+        "labelTw": "擠出速度",
+        "desc": "回填那一笔的进给速度，与挤出长度各管一件事",
+        "descEn": "Feedrate of the refill move; length and speed are separate knobs",
+        "descJa": "押し出し動作の送り速度。長さと速さは別の設定です",
+        "descTw": "回填那一筆的進給速度，與擠出長度各管一件事",
+        "tomlComment": "挤出速度(mm/s)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 25.0,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 201.5,
+          "sectionId": "motion"
+        },
+        "min": 1.0,
+        "max": 100.0,
+        "step": 1.0,
+        "unit": "mm/s",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.MKP_extrude_spread",
+        "configKey": "MKPExtrudeSpread",
+        "tomlKey": "MKP_extrude_spread",
+        "jsonKey": "MKP_extrude_spread",
+        "label": "挤出分摊",
+        "labelEn": "Spread refill",
+        "labelJa": "押し出し分散",
+        "labelTw": "擠出分攤",
+        "desc": "开启后回填量分摊到塔上的擦料移动里，不在原地挤成一团",
+        "descEn": "Spread the refill over the tower wipe moves instead of dumping it in one spot",
+        "descJa": "オンにすると押し出し量をタワーの拭き取り移動に分散し、一点に溜めません",
+        "descTw": "開啟後回填量分攤到塔上的擦料移動裡，不在原地擠成一團",
+        "tomlComment": "挤出分摊到擦料移动(开关)",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": false,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 201.6,
+          "sectionId": "motion"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.MKP_retract_at",
+        "configKey": "MKPRetractAt",
+        "tomlKey": "MKP_retract_at",
+        "jsonKey": "MKP_retract_at",
+        "label": "回抽位置",
+        "labelEn": "Retract at",
+        "labelJa": "リトラクト位置",
+        "labelTw": "回抽位置",
+        "desc": "回抽发生在换笔的哪一刻",
+        "descEn": "Which moment of the pen swap performs the retract",
+        "descJa": "リトラクトを換筆のどの時点で行うか",
+        "descTw": "回抽發生在換筆的哪一刻",
+        "tomlComment": "回抽位置(model/wait/after_dock)",
+        "valueType": "string",
+        "uiComponent": "select",
+        "defaultValue": "model",
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 0.45,
+          "sectionId": "custom_gcode"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [
+          {
+            "label": "起飞前",
+            "labelEn": "Before the flight",
+            "labelJa": "移動前",
+            "labelTw": "起飛前",
+            "value": "model",
+            "deprecated": false
+          },
+          {
+            "label": "到达等待位",
+            "labelEn": "At the wait position",
+            "labelJa": "待機位置",
+            "labelTw": "到達等待位",
+            "value": "wait",
+            "deprecated": false
+          },
+          {
+            "label": "换笔之后",
+            "labelEn": "After the swap",
+            "labelJa": "換筆後",
+            "labelTw": "換筆之後",
+            "value": "after_dock",
+            "deprecated": false
+          }
+        ],
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
@@ -5996,8 +6191,20 @@
                 "paramKey": "toolhead.MKP_retract"
               },
               {
+                "id": "item_0_1_3",
+                "paramKey": "toolhead.MKP_retract_speed"
+              },
+              {
                 "id": "item_0_1_2",
                 "paramKey": "toolhead.MKP_extrude"
+              },
+              {
+                "id": "item_0_1_4",
+                "paramKey": "toolhead.MKP_extrude_speed"
+              },
+              {
+                "id": "item_0_1_5",
+                "paramKey": "toolhead.MKP_extrude_spread"
               }
             ],
             "component": null,
@@ -6319,6 +6526,10 @@
           {
             "id": "custom_gcode",
             "items": [
+              {
+                "id": "item_4_0_6",
+                "paramKey": "toolhead.MKP_retract_at"
+              },
               {
                 "id": "item_4_0_0",
                 "paramKey": "toolhead.custom_mount_gcode"

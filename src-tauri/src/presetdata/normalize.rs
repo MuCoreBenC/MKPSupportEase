@@ -537,7 +537,7 @@ A1 = 3.85
         );
     }
 
-    /// **真文件**：把仓库里那份 75 个参数的注册表跑一遍。
+    /// **真文件**：把仓库里那份注册表（96 个参数）跑一遍。
     ///
     /// 合成夹具只能证明"我想到的情况都对"；真文件里那些
     /// `showWhen` / `choices` / `parentKey` / 多行 G-code 才是检验。
@@ -558,7 +558,7 @@ A1 = 3.85
             report.problems.len(),
             report.problems
         );
-        assert_eq!(report.params, 92, "参数个数");
+        assert_eq!(report.params, 96, "参数个数");
         assert_eq!(report.tabs, 7, "分组个数");
 
         let twice = normalize_registry(&once).expect("第二遍");

@@ -426,6 +426,23 @@ impl<'a> Ctx<'a> {
         Ok(())
     }
 
+    /// 只算不写：先攒进 `Vec`，之后可能还要往上挂 E（回填分摊）。
+    fn offset_line(
+        &self,
+        gcommand: &str,
+        x_offset: f64,
+        y_offset: f64,
+    ) -> Result<String, PostprocError> {
+        process_gcode_offset(
+            gcommand,
+            x_offset,
+            y_offset,
+            0.0,
+            crate::gcode::OffsetMode::Normal,
+            self.ir_data,
+        )
+    }
+
     fn tower_x_off(&self) -> f64 {
         self.ir_data.wiping.wiper_x - self.tower_bbox.min_x
     }
@@ -525,70 +542,24 @@ impl<'a> Ctx<'a> {
             self.write_line(&format!("G1 Z{}", format_z(self.nominal_tower_height)));
             let variable_wipe_code = format!("G1 X15 Y2{}", crate::gcode::get_pseudo_random());
             let (x_off, y_off) = (self.tower_x_off(), self.tower_y_off());
+            let center_code = format!(
+                "G1 X{} Y{}",
+                crate::gcode::format_float(tower::WIPE_CENTER_X),
+                crate::gcode::format_float(tower::WIPE_CENTER_Y)
+            );
+            /* 擦料移动先收进 vec：回填分摊要把 E 挂在这几句上。
+             * 分摊关掉时逐字等于以前（先走完擦料移动，再单独挤一笔）。 */
+            let mut wipe_moves: Vec<String> = Vec::new();
             if self.ir_data.filament.filament_type == "PLA" {
-                self.write_line_offset(
-                    &variable_wipe_code,
-                    x_off,
-                    y_off,
-                    0.0,
-                    crate::gcode::OffsetMode::Normal,
-                )?;
-                self.write_line_offset(
-                    &format!(
-                        "G1 X{} Y{}",
-                        crate::gcode::format_float(tower::WIPE_CENTER_X),
-                        crate::gcode::format_float(tower::WIPE_CENTER_Y)
-                    ),
-                    x_off,
-                    y_off,
-                    0.0,
-                    crate::gcode::OffsetMode::Normal,
-                )?;
-                self.write_line_offset(
-                    &variable_wipe_code,
-                    x_off,
-                    y_off,
-                    0.0,
-                    crate::gcode::OffsetMode::Normal,
-                )?;
-                self.write_line_offset(
-                    &format!(
-                        "G1 X{} Y{}",
-                        crate::gcode::format_float(tower::WIPE_CENTER_X),
-                        crate::gcode::format_float(tower::WIPE_CENTER_Y)
-                    ),
-                    x_off,
-                    y_off,
-                    0.0,
-                    crate::gcode::OffsetMode::Normal,
-                )?;
+                wipe_moves.push(self.offset_line(&variable_wipe_code, x_off, y_off)?);
+                wipe_moves.push(self.offset_line(&center_code, x_off, y_off)?);
+                wipe_moves.push(self.offset_line(&variable_wipe_code, x_off, y_off)?);
+                wipe_moves.push(self.offset_line(&center_code, x_off, y_off)?);
             }
-            self.write_line_offset(
-                &variable_wipe_code,
-                x_off,
-                y_off,
-                0.0,
-                crate::gcode::OffsetMode::Normal,
-            )?;
-            self.write_line_offset(
-                &format!(
-                    "G1 X{} Y{}",
-                    crate::gcode::format_float(tower::WIPE_CENTER_X),
-                    crate::gcode::format_float(tower::WIPE_CENTER_Y)
-                ),
-                x_off,
-                y_off,
-                0.0,
-                crate::gcode::OffsetMode::Normal,
-            )?;
-            self.write_line_offset(
-                &variable_wipe_code,
-                x_off,
-                y_off,
-                0.0,
-                crate::gcode::OffsetMode::Normal,
-            )?;
-            self.write_line_offset(
+            wipe_moves.push(self.offset_line(&variable_wipe_code, x_off, y_off)?);
+            wipe_moves.push(self.offset_line(&center_code, x_off, y_off)?);
+            wipe_moves.push(self.offset_line(&variable_wipe_code, x_off, y_off)?);
+            wipe_moves.push(self.offset_line(
                 &format!(
                     "G1 X{} Y{}",
                     crate::gcode::format_float(tower::WIPE_ALT_X),
@@ -596,26 +567,45 @@ impl<'a> Ctx<'a> {
                 ),
                 x_off,
                 y_off,
-                0.0,
-                crate::gcode::OffsetMode::Normal,
-            )?;
-            self.write_line_offset(
+            )?);
+            wipe_moves.push(self.offset_line(
                 &format!("G1 X20 Y1{}", crate::gcode::get_pseudo_random()),
                 x_off,
                 y_off,
-                0.0,
-                crate::gcode::OffsetMode::Normal,
-            )?;
+            )?);
+
+            /* 回填分摊：把这一笔摊到上面几条擦料移动里，边上边走料，不在原地挤成一团。
+             * 模板自带 E、或量不是正数、或没有移动可挂时，退回单行那一档。 */
+            let spread = self.pen_change_flag
+                && !crate::postproc::pass1::custom_unmount_gcode_has_extrude(self.ir_data)
+                && self.ir_data.gcode.mkp_extrude_spread
+                && self.ir_data.gcode.mkp_extrude > 0.0
+                && wipe_moves.len() > 1;
+            if spread {
+                /* 挂上 E 之后这几句已经是挤出移动：先按回填速度走，
+                 * 不然就是拿 200 mm/s 的塔空走速度甩过去、让 E 轴去顶固件限速。
+                 * 块尾那句 `G1 F{空走速度}` 会把速度还原。 */
+                self.write_line(&format!(
+                    "G1 F{}",
+                    format_speed(self.ir_data.gcode.mkp_extrude_speed * MM_PER_MINUTE)
+                ));
+                spread_extrude(&mut wipe_moves, self.ir_data.gcode.mkp_extrude);
+            }
+            self.write_lines(&wipe_moves);
+
             // UserDryTime 等待移到 Prime 之前
             if self.ir_data.wiping.user_dry_time != 0 {
                 self.write_line(";User Dry Time Activated");
                 self.write_line(&format!("G4 P{}", self.ir_data.wiping.user_dry_time * 1000));
             }
             if self.pen_change_flag {
-                if !crate::postproc::pass1::custom_unmount_gcode_has_extrude(self.ir_data) {
+                if !crate::postproc::pass1::custom_unmount_gcode_has_extrude(self.ir_data)
+                    && !spread
+                {
                     self.write_line(&format!(
-                        "G1 E{} F1500",
-                        format_e(self.ir_data.gcode.mkp_extrude)
+                        "G1 E{} F{}",
+                        format_e(self.ir_data.gcode.mkp_extrude),
+                        format_speed(self.ir_data.gcode.mkp_extrude_speed * MM_PER_MINUTE)
                     ));
                 }
                 self.pen_change_flag = false;
@@ -642,6 +632,30 @@ impl<'a> Ctx<'a> {
         }
 
         Ok(())
+    }
+}
+
+/// 把回填量摊到几条擦料移动上：每条挂一小段 E，余数落在最后一条。
+///
+/// 相对 E，合计必须精确等于 `total`（差一点就是欠料或多料），所以**按 1e-5 的整数**
+/// 分：前 n−1 条各拿商，最后一条收下全部余数。不走浮点减法 ——
+/// `5.5 − 4×1.1` 会落成 `1.0999999999999996`，那个数会原样进 G-code。
+fn spread_extrude(moves: &mut [String], total: f64) {
+    let n = moves.len() as i64;
+    if n == 0 || total <= 0.0 {
+        return;
+    }
+    let units = (total * 100_000.0).round() as i64;
+    let unit = units / n;
+    let mut assigned = 0i64;
+    for (i, line) in moves.iter_mut().enumerate() {
+        let e = if i as i64 + 1 == n {
+            units - assigned
+        } else {
+            unit
+        };
+        assigned += e;
+        line.push_str(&format!(" E{}", format_e(e as f64 / 100_000.0)));
     }
 }
 
@@ -1815,4 +1829,62 @@ pub fn second_pass(
         lines: ctx.sink.lines,
         tower_height,
     })
+}
+
+#[cfg(test)]
+mod spread_extrude_tests {
+    use super::spread_extrude;
+
+    /// 分摊：每条挂一段 E，合计精确等于总量 —— 相对 E，差一点就是欠料或多料。
+    #[test]
+    fn spread_extrude_keeps_the_total_exact() {
+        let mut moves: Vec<String> = (0..5).map(|i| format!("G1 X{i} Y{i}")).collect();
+        spread_extrude(&mut moves, 6.5);
+        assert_eq!(moves.len(), 5, "分摊不许增删移动");
+        assert!(
+            moves.iter().all(|l| l.ends_with(" E1.3")),
+            "6.5 摊 5 条正好每条 1.3，不许带浮点尾巴：{moves:?}"
+        );
+        let total: f64 = moves
+            .iter()
+            .map(|l| {
+                l.split_whitespace()
+                    .find_map(|t| t.strip_prefix('E'))
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .expect("每条都该带 E")
+            })
+            .sum();
+        assert!((total - 6.5).abs() < 1e-9, "合计必须精确：{total}");
+        assert!(
+            moves[0].starts_with("G1 X0 Y0 E"),
+            "E 挂在原句尾：{}",
+            moves[0]
+        );
+        assert!(
+            moves.iter().all(|l| !l.contains("F")),
+            "分摊不碰进给，速度跟着擦料移动走"
+        );
+    }
+
+    /// 量不是正数、或没有移动可挂：一句都不许改（关掉那一档就是这样）。
+    #[test]
+    fn spread_extrude_leaves_moves_alone_when_nothing_to_spread() {
+        let mut moves = vec!["G1 X1 Y1".to_string()];
+        spread_extrude(&mut moves, 0.0);
+        assert_eq!(moves, vec!["G1 X1 Y1".to_string()]);
+
+        let mut empty: Vec<String> = Vec::new();
+        spread_extrude(&mut empty, 6.5);
+        assert!(empty.is_empty());
+    }
+
+    /// 除不尽时余数全给最后一条：前几条同额，最后一条收尾，合计仍然一分不差。
+    #[test]
+    fn spread_extrude_gives_the_remainder_to_the_last_move() {
+        let mut moves: Vec<String> = (0..3).map(|i| format!("G1 X{i} Y{i}")).collect();
+        spread_extrude(&mut moves, 5.5);
+        assert_eq!(moves[0], "G1 X0 Y0 E1.83333");
+        assert_eq!(moves[1], "G1 X1 Y1 E1.83333");
+        assert_eq!(moves[2], "G1 X2 Y2 E1.83334", "余数收在最后一条");
+    }
 }

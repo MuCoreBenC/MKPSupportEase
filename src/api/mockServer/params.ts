@@ -170,6 +170,9 @@ export function paramMeta(): ParamMeta[] {
       uiComponent: p.uiComponent,
       unit: p.unit,
       tomlComment: p.tomlComment,
+      /* 值为 0 读作「自动」：只对注册表标了的那几条出现 */
+      zeroMeansAuto: p.zeroMeansAuto,
+      autoValue: p.autoValue,
       mergeGroup: p.mergeGroup,
       pinned: p.pinned,
       deprecated: p.deprecated,

@@ -322,6 +322,7 @@ export default function ParamCard({
             onRevertToSaved={onRevertToSaved}
             readonly={readonly}
             query={query}
+            valueOf={shownValueOf}
           />
         )
       }

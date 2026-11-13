@@ -79,6 +79,11 @@ const UNKNOWN_KEYS: &[&str] = &[
     "parentKey",
     "serialization",
     "showWhen",
+    /* 「0 = 自动」的显示标记（2026-11-13）：只对客户端参数格有意义，
+     * 本 crate 的轻量结构不读它 */
+    "zeroMeansAuto",
+    /* 「那个自动值怎么算」（2026-11-13）：同上，纯显示侧 */
+    "autoValue",
 ];
 
 #[test]

@@ -25,8 +25,8 @@ mod stages;
 mod validity;
 
 pub(crate) use glue_block::{
-    calc_glue_z, custom_unmount_gcode_has_extrude, mount_toolhead, restore_fan_state,
-    swap_retract_amount, unmount_toolhead,
+    RetractAt, calc_glue_z, custom_unmount_gcode_has_extrude, mount_toolhead, restore_fan_state,
+    retract_at, swap_retract, unmount_toolhead,
 };
 
 use std::collections::HashMap;

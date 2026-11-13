@@ -954,6 +954,16 @@ export interface ParamMeta {
   unit?: string
   /** 写进 TOML 的行尾注释 */
   tomlComment?: string
+  /**
+   * 值为 0 时读作「自动」（2026-11-13）。只对「0 有专门含义」的字段出现，
+   * 没标的字段不给这一格（不是 false，是 undefined）。
+   */
+  zeroMeansAuto?: boolean
+  /**
+   * 那个「自动」到底是多少（2026-11-13）：跟着 `from` 这条参数的当前值算。
+   * 缺这一格 = 只说得清"是自动"，说不清数（界面就只写「自动」）。
+   */
+  autoValue?: { from: string; abs?: boolean; offset?: number }
   mergeGroup?: string
   pinned?: boolean
   deprecated?: boolean

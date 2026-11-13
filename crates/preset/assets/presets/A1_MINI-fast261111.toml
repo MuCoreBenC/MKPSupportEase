@@ -1,6 +1,6 @@
 # machine: A1_MINI
 # variant: fast261111
-# generated_at: 2026-11-13T11:49:04+08:00
+# generated_at: 2026-11-13T23:05:56+08:00
 
 [toolhead]
 # 落笔 G-code
@@ -27,7 +27,11 @@ G1 F30000
 first_pen_revitalization_flag = false # 首笔活化标志
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
 MKP_extrude = 0 # 挤出长度(mm)
+MKP_extrude_speed = 25 # 挤出速度(mm/s)
+MKP_extrude_spread = false # 挤出分摊到擦料移动(开关)
 MKP_retract = -6 # 回抽长度(mm)
+MKP_retract_at = "model" # 回抽位置(model/wait/after_dock)
+MKP_retract_speed = 25 # 回抽速度(mm/s)
 offset_x = -0.9 # 笔尖偏移
 offset_y = 23 # 笔尖偏移
 offset_z = 4 # 笔尖偏移

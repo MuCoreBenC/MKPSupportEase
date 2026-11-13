@@ -508,7 +508,7 @@ max = 226.0
             &text,
             "toolhead.MKP_retract",
             Some(-50.0),
-            Some(50.0),
+            Some(0.0),
             Some(0.1),
         )
         .expect("真注册表要能读能改");

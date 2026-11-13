@@ -82,8 +82,8 @@ import type {
 } from '../../api'
 import type { FieldSchema } from '../../components/field'
 import { isDirtyValue } from './dirtyValue'
-/* 显示精度唯一出口（`mm` 两位、其余原样）—— 与 `FieldControl` / `NumberField` 同一套 */
-import { displayDecimals, formatNum } from '../../components/field/value'
+/* 数字显示的唯一出口（修浮点尾巴、按 step 收精度）—— 与 `FieldControl` / `NumberField` 同一套 */
+import { formatNum } from '../../components/field/value'
 /* 关掉模态框再进来的会话缓存（草稿层 + 撤销重做 + 修改历史），见它头注 */
 import {
   clearParamSession,
@@ -476,63 +476,10 @@ function controlFromUi(ui: string): 'number' | 'switch' | 'choice' | 'text' {
   return 'number'
 }
 
-/**
- * 单位字段的写法归一：**长得像区间的 unit 当成没有单位**。
- *
- * 真注册表里 `unit` 不是每次都写单位 —— 风扇速度那条写的是 `"unit": "0-255"`
- * （同一个对象的 min 0 / max 255 就在旁边），也就是 **min/max 被塞进了 unit 位**。
- * 照原样渲染出来是三处一样的话：
- *
- *   行里的步进器   `250 0-255`    —— 值后面跟着一个假单位
- *   行里的还原胶囊 `已保存的 255 0-255`
- *   保存确认       `255 0-255 → 250 0-255`
- *
- * 作者的原话：「不要显示区间 0-255 这种」。所以这里只认这一种脏数据，把它当**没有单位**：
- *
- *   · 范围一点没丢 —— 它在 min/max 上，行展开的「取值范围」写的是 `0 ~ 255`，
- *     步进器也照样按 0/255 夹值（`FieldControl` 已经把 min/max 递下去了）
- *   · 真单位（mm / mm/s / 秒 / %）一律照原样显示，**不在这里发明第二种规则** ——
- *     全仓库只有这一条 unit 是区间形状（实测 grep：`"unit": "<数字>-<数字>"` 命中 1 条）
- */
-const RANGE_LIKE_UNIT = /^\s*\d+(?:\.\d+)?\s*[-~～—–]\s*\d+(?:\.\d+)?\s*$/
-
-/**
- * 单位归一：`null` 与 `undefined` **同义 = 没有单位**。
- *
- * ★ 2026-10-17：「擦料塔挤出倍率」曾显示成 `1 null`。注册表里那一条根本没有 `unit`
- *   字段，但配方/定义通道过来是 JSON 的 `null` —— 而下游判的是 `!== undefined`，
- *   `null` 就那么一字不改地拼进了字符串。这不是脏数据，是**两种"没有"**。
- *   所以这里把 `null` 也吞掉，往后的类型只有 `string | undefined` 一种缺失形态。
- */
-function unitOf(raw: string | null | undefined): string | undefined {
-  if (raw == null) return undefined
-  return RANGE_LIKE_UNIT.test(raw) ? undefined : raw
-}
-
-/**
- * 某个值该显示成什么字 —— 还原 chip、历史条目、保存确认、行内只读值全走这一套翻译。
- *
- * 两条规矩（2026-10-17）：
- *   1. **有单位才拼单位**（`null` 不算，见 `unitOf`）；
- *   2. **数字按显示精度渲染**（`formatNum`）：`mm` 固定两位（`-0.50` / `24.00` / `3.70`），
- *      其余单位原样、只修浮点尾巴。盘上的原文一个字都不改 —— 这里只管"给我看的字"。
- */
-export function valueText(def: ParamDef | undefined, raw: string, tr: Tr): string {
-  if (raw === '') return tr('params.value.empty')
-  if (def === undefined) return raw
-  if (def.field.control === 'switch') {
-    return raw === 'true' ? tr('params.value.on') : tr('params.value.off')
-  }
-  if (def.field.control === 'choice') {
-    return def.field.choices?.find((c) => c.value === raw)?.label ?? raw
-  }
-  if (def.field.control === 'gcode') {
-    return tr('params.value.lines', { count: raw.split('\n').length })
-  }
-  /* 数字按显示精度走；非数字（`tower` / G-code 之类）`formatNum` 原样退回 */
-  const text = formatNum(raw, displayDecimals(def.unit, def.field.step))
-  return def.unit != null ? `${text} ${def.unit}` : text
-}
+/* 显示格式化住 `valueText.ts`（纯函数、能单独测）；这里只把它转出去，
+   页面上那些调用点不用改 import 路径 */
+import { unitOf, valueText } from './valueText'
+export { unitOf, valueText }
 
 const cellKey = (machineId: string, versionId: string, key: string) =>
   `${machineId}:${versionId}:${key}`
@@ -1498,6 +1445,10 @@ export function useParams(opts: UseParamsOptions = {}): Params {
               min: p?.min ?? rd.min,
               max: p?.max ?? rd.max,
               step: p?.step ?? rd.step,
+              /* 「0 = 自动」的字段（注册表 `zeroMeansAuto`）：0 不是"不生效" */
+              zeroMeansAuto: meta?.zeroMeansAuto === true ? true : undefined,
+              /* 那个自动值怎么算（注册表 `autoValue`）：界面照它算，不按 key 写死 */
+              autoValue: meta?.autoValue,
               /*
                * 选项级弃用映射到共用件的 `FieldOption.deprecated`（划线）。**不新造第二个信号**
                * （FieldOption.deprecated 早就在，SegmentedField / SelectField 已经在画）。

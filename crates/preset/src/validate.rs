@@ -463,6 +463,7 @@ mod tests {
         );
     }
 
+    /// 回抽只允许 −50 ~ 0：正数没有物理意义，界面上也不该给机会填。
     #[test]
     fn registry_rejects_out_of_range_mkpretract() {
         let mut cfg = cfg_from("");
@@ -470,7 +471,7 @@ mod tests {
         let err = validate_against_registry(&cfg, &load_param_registry(), "A1", None).unwrap_err();
         assert_eq!(
             msg(err),
-            "param toolhead.MKP_retract value 60 is out of range [-50, 50]"
+            "param toolhead.MKP_retract value 60 is out of range [-50, 0]"
         );
     }
 

@@ -3066,6 +3066,12 @@ text_zh_tw = "譯文台帳裡沒有「{k}」這一格 —— 只認這六冊：{
 text_ja = "翻訳台帳に「{k}」という枠はありません。指定できるのは次の 6 つです：{names}"
 params = ["k", "names"]
 
+["ui.presetdata.registry.357"]
+text = "自动值的来源指错了参数"
+text_en = "The auto-value source points at a parameter that does not exist"
+text_zh_tw = "自動值的來源指錯了參數"
+text_ja = "自動値の参照先が存在しないパラメーターを指しています"
+
 ["ui.runtime.app_state.345"]
 text = "读不到应用状态"
 text_en = "Cannot read the application state"

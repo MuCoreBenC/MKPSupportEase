@@ -52,6 +52,18 @@ export interface FieldSchema {
   max?: number
   step?: number
   choices?: FieldOption[]
+  /**
+   * 值为 0 时读作「自动」（2026-11-13）。
+   *
+   * 只对「0 有专门含义」的字段有意义：`MKP_extrude = 0` 是"按回抽长度算"，
+   * 摆一个 `0.00` 会让人读成"不挤出"。判据来自注册表的 `zeroMeansAuto`，不按 key 写死。
+   */
+  zeroMeansAuto?: boolean
+  /**
+   * 那个「自动」是多少（2026-11-13）：跟着 `from` 的当前值算。
+   * 缺这一格 = 只说得清"是自动"，说不清数 —— 界面就只写「自动」。
+   */
+  autoValue?: { from: string; abs?: boolean; offset?: number }
 }
 
 /**

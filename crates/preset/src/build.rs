@@ -415,6 +415,34 @@ pub fn build(
     }
     ir.gcode.mkp_extrude = mkp_extrude;
 
+    /* 回抽 / 回填的速度与位置（2026-11-13）。
+     *
+     * 速度为 0 = 老预设没有这一格 ⇒ 用默认 25 mm/s（正好是原来硬编码的 F1500），
+     * 所以老文件出来的字节不变。位置只认三档：认不出就报错，不拿默认值把它圆过去。 */
+    ir.gcode.mkp_retract_speed = if cfg.toolhead.mkp_retract_speed > 0.0 {
+        cfg.toolhead.mkp_retract_speed
+    } else {
+        DEFAULT_E_SPEED_MM_PER_S
+    };
+    ir.gcode.mkp_extrude_speed = if cfg.toolhead.mkp_extrude_speed > 0.0 {
+        cfg.toolhead.mkp_extrude_speed
+    } else {
+        DEFAULT_E_SPEED_MM_PER_S
+    };
+    let retract_at = cfg.toolhead.mkp_retract_at.trim();
+    ir.gcode.mkp_retract_at = match retract_at {
+        "" => "model".to_string(),
+        "model" | "wait" | "after_dock" => retract_at.to_string(),
+        other => {
+            return Err(PostprocError::InvalidConfig {
+                message: format!(
+                    "参数 toolhead.MKP_retract_at 的值 {other} 认不出：只能是 model / wait / after_dock"
+                ),
+            });
+        }
+    };
+    ir.gcode.mkp_extrude_spread = cfg.toolhead.mkp_extrude_spread;
+
     for line in &ir.toolhead.custom_unmount_gcode {
         if line.contains("G1 E") && !line.contains("Wipe") {
             ir.gcode.refill_extrude_command = line.trim().to_string();

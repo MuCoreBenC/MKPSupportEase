@@ -192,6 +192,10 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
+}
+
 /* ---------- getMachines ---------- */
 
 #[derive(Debug, Clone, Serialize)]
@@ -631,6 +635,17 @@ pub struct ShowWhenDto {
     pub value: String,
 }
 
+/// 「这一格的自动值怎么算」—— 注册表 `autoValue` 原样过给界面。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoValueDto {
+    pub from: String,
+    #[serde(skip_serializing_if = "is_false")]
+    pub abs: bool,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub offset: f64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParamMetaDto {
@@ -663,6 +678,12 @@ pub struct ParamMetaDto {
     pub machine_filter: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub show_when: Option<ShowWhenDto>,
+    /// 「值为 0 时读作自动」（注册表 `zeroMeansAuto`）。缺省 = 0 就是 0
+    #[serde(skip_serializing_if = "is_false")]
+    pub zero_means_auto: bool,
+    /// 「那个自动值怎么算」（注册表 `autoValue`）。缺省 = 算不出数，只说「自动」
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_value: Option<AutoValueDto>,
 }
 
 /// 全部参数的元信息。**不过滤** —— 界面要能看到废弃的参数为什么不显示
@@ -694,6 +715,12 @@ fn param_meta_dto(catalog: &runtime::Catalog) -> Vec<ParamMetaDto> {
                 key: s.key.clone(),
                 op: s.op,
                 value: to_text(&s.value),
+            }),
+            zero_means_auto: p.zero_means_auto,
+            auto_value: p.auto_value.as_ref().map(|a| AutoValueDto {
+                from: a.from.clone(),
+                abs: a.abs,
+                offset: a.offset,
             }),
         })
         .collect()
@@ -1714,9 +1741,9 @@ mod tests {
             "bundled 档不进客户端菜单"
         );
 
-        // —— 参数元信息：全部 83 条，含废弃 ——
+        // —— 参数元信息：全部 96 条，含废弃 ——
         let meta = param_meta_dto(&catalog);
-        assert_eq!(meta.len(), 92, "实测 92 条字段定义，一条不少");
+        assert_eq!(meta.len(), 96, "实测 96 条字段定义，一条不少");
         let offset_x = meta
             .iter()
             .find(|p| p.key == "toolhead.offset.x")
@@ -1774,6 +1801,34 @@ mod tests {
         // 机型不存在的报错要说出是谁
         let err = machine_params_dto(&catalog, "NOPE", None).unwrap_err();
         assert!(err.message.contains("NOPE"));
+    }
+
+    /// **「0 = 自动」与「自动值怎么算」都要穿过 definition 通道**。
+    ///
+    /// 这两格是参数格上的一个补丁（`MKP_extrude = 0` 不能读成"不挤出"），
+    /// 少传一格界面就退回 `0.00` 或只剩「自动」两个字 —— 两种都静默，
+    /// 没有一处会报错，所以只能在这里钉住。
+    #[test]
+    fn auto_display_flags_travel_through_definition_channel() {
+        let catalog = catalog();
+        let meta = param_meta_dto(&catalog);
+        let p = meta
+            .iter()
+            .find(|p| p.key == "toolhead.MKP_extrude")
+            .expect("挤出长度必须在");
+        assert!(p.zero_means_auto, "0 该读作自动");
+        let link = p.auto_value.as_ref().expect("自动值的来源该跟下来");
+        assert_eq!(link.from, "toolhead.MKP_retract");
+        assert!(link.abs, "回抽是负数，回填量要的是长度");
+        assert_eq!(link.offset, 0.5);
+
+        // 没标这两格的字段不许凭空长出它们（缺省 = 0 就是 0）
+        let q = meta
+            .iter()
+            .find(|p| p.key == "toolhead.offset.x")
+            .expect("偏移 X 在");
+        assert!(!q.zero_means_auto);
+        assert!(q.auto_value.is_none());
     }
 
     /// **弃用标记要真的穿过整条链，但两条通道的语义各自保持不动**（① 的判据）。

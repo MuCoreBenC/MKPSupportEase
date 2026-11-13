@@ -119,6 +119,11 @@ interface Props {
    * 不搜索时是空串 —— `Highlight` 收到空串原样返回，不白包一层。
    */
   query?: string
+  /**
+   * 按 key 取**当前显示值**（草稿优先）。只给「自动」那类字段算数用：
+   * 注册表的 `autoValue.from` 指的是同一张表里的另一条，行自己手里没有它。
+   */
+  valueOf?: (key: string) => string
 }
 
 /**
@@ -177,6 +182,7 @@ export default function ParamRow({
   onRevertToSaved,
   readonly = false,
   query = '',
+  valueOf,
 }: Props) {
   /* 这一行的话术入口：语言一变整行重渲染（`t` 那个模块级出口不订阅语言） */
   const tr = useT()
@@ -448,7 +454,7 @@ export default function ParamRow({
           )}
           {readonly ? (
             /* 只读态：纯文本值（编辑模式之外的那一态，见 Props.readonly） */
-            <span className={s.roVal}>{valueText(def, value, tr)}</span>
+            <span className={s.roVal}>{valueText(def, value, tr, valueOf)}</span>
           ) : def.field.control === 'number' ? (
             /*
              * 数字步进器包一层同款的 `.edNum`（作者：「我专门调整过的，应该可以复用」）：
@@ -459,18 +465,30 @@ export default function ParamRow({
              *   （共用 NumberField 的既有开关，行内那一档开着，默认关）。
              * 其余控件类型不包：它们有自己的稳定宽度行为。
              */
-            <span className={s.edNum}>
-              <FieldControl
-                field={def.field}
-                raw={value}
-                form="row"
-                disabled={locked}
-                focusOnBoxClick
-                onInvalidTyping={onInvalidTyping}
-                resetSignal={resetNonce}
-                onChange={(next) => onEdit(def.key, next)}
-              />
-            </span>
+            <>
+              <span className={s.edNum}>
+                <FieldControl
+                  field={def.field}
+                  raw={value}
+                  form="row"
+                  disabled={locked}
+                  focusOnBoxClick
+                  onInvalidTyping={onInvalidTyping}
+                  resetSignal={resetNonce}
+                  onChange={(next) => onEdit(def.key, next)}
+                />
+              </span>
+              {/*
+                0 有专门含义的字段（注册表 `zeroMeansAuto`）：0 不是"不生效"，
+                是"按另一格算"。详情里那句说明用户多半不展开，所以值旁边直接说；
+                注册表登记了 `autoValue` 就把算出来的数一起摆（`valueText` 那边算）。
+              */}
+              {def.field.zeroMeansAuto === true && value.trim() !== '' && Number(value) === 0 && (
+                <span className={s.autoChip} data-tip={tr('params.row.auto.tip')}>
+                  {valueText(def, value, tr, valueOf)}
+                </span>
+              )}
+            </>
           ) : (
             <FieldControl
               field={def.field}
