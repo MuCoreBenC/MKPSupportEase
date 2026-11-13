@@ -1,7 +1,7 @@
 {
   "catalogSchema": 1,
-  "revision": "6e4cb3acbdbb3d50",
-  "publishedAt": "2026-11-12T17:30:22Z",
+  "revision": "67bca9eeb51f089d",
+  "publishedAt": "2026-11-13T03:50:59Z",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -905,7 +905,22 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1": -6.0,
+          "A1:FAST260326": -6.0,
+          "A1:FAST261111": -6.0,
+          "A1:STANDARD": -6.0,
+          "A1_MINI": -6.0,
+          "A1_MINI:FAST260326": -6.0,
+          "A1_MINI:FAST261111": -6.0,
+          "A1_MINI:STANDARD": -6.0,
+          "P1S": -6.0,
+          "P1S:LITE": -6.0,
+          "P2S": -6.0,
+          "P2S:STANDARD": -6.0,
+          "X1C": -6.0,
+          "X1C:LITE": -6.0
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -1833,14 +1848,14 @@
         ],
         "deprecated": false,
         "machineVariants": {
-          "A1": 3.9,
-          "A1:FAST260326": 3.9,
-          "A1:FAST261111": 3.9,
-          "A1:STANDARD": 3.9,
-          "A1_MINI": 3.9,
-          "A1_MINI:FAST260326": 3.9,
-          "A1_MINI:FAST261111": 3.9,
-          "A1_MINI:STANDARD": 3.9,
+          "A1": 4.0,
+          "A1:FAST260326": 4.0,
+          "A1:FAST261111": 4.0,
+          "A1:STANDARD": 4.0,
+          "A1_MINI": 4.0,
+          "A1_MINI:FAST260326": 4.0,
+          "A1_MINI:FAST261111": 4.0,
+          "A1_MINI:STANDARD": 4.0,
           "P1S": 1.1,
           "P1S:LITE": 1.1,
           "P2S": 1.1,
@@ -3736,9 +3751,18 @@
         "deprecated": false,
         "machineVariants": {
           "A1": "auto",
+          "A1:FAST260326": "auto",
           "A1:FAST261111": "auto",
           "A1:STANDARD": "auto",
-          "A1_MINI:FAST261111": "auto"
+          "A1_MINI": "auto",
+          "A1_MINI:FAST260326": "auto",
+          "A1_MINI:FAST261111": "auto",
+          "A1_MINI:STANDARD": "auto",
+          "P1S": "auto",
+          "P1S:LITE": "off",
+          "P2S": "auto",
+          "P2S:STANDARD": "auto",
+          "X1C:LITE": "off"
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -4664,11 +4688,14 @@
         "machineFilter": [],
         "deprecated": false,
         "machineVariants": {
-          "A1": 0.8,
-          "A1_MINI": 0.7,
-          "A1_MINI:FAST260326": 0.7,
-          "A1_MINI:FAST261111": 0.7,
-          "A1_MINI:STANDARD": 0.7
+          "A1": 0.75,
+          "A1:FAST260326": 0.75,
+          "A1:FAST261111": 0.75,
+          "A1:STANDARD": 0.75,
+          "A1_MINI": 0.75,
+          "A1_MINI:FAST260326": 0.75,
+          "A1_MINI:FAST261111": 0.75,
+          "A1_MINI:STANDARD": 0.75
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -6548,8 +6575,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "0b380e19af79c2f2d8ab61125bc3595fb07d2c61eaf1108b2688938c41d2456c",
-      "size": 5046
+      "sha256": "715bae40e50a82a5391e7ac6a49a23aa6eeaf7d056281363626b821aedb80115",
+      "size": 5045
     },
     {
       "kind": "mkp_preset",
@@ -6557,8 +6584,8 @@
       "path": "delivery/mkp/presets/A1-fast260326.toml",
       "machineId": "A1",
       "versionId": "FAST260326",
-      "sha256": "d358b1245af9acd95206b2296c498a182c2bc4b9f9b457c4df1fe5446a5563fd",
-      "size": 5050
+      "sha256": "6bb43d2338b4fe9b8d3687b59e882ed9ff107390c51b87feed96b1d7512ac2b0",
+      "size": 5049
     },
     {
       "kind": "mkp_preset",
@@ -6566,8 +6593,8 @@
       "path": "delivery/mkp/presets/A1-fast261111.toml",
       "machineId": "A1",
       "versionId": "FAST261111",
-      "sha256": "fcfe500543f11569748926ff45ff4a414537b4e8abe70b3ac805a5001b1a7f11",
-      "size": 5050
+      "sha256": "43093aaaa18eae97a43350a437ed868b3c3488debdc991a971fcf06b85ca7bb9",
+      "size": 5049
     },
     {
       "kind": "mkp_preset",
@@ -6575,7 +6602,7 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "7e9b5f4792940a6b005d14b009cce1b5e5fbd7c047912a9e643a83610ea46af0",
+      "sha256": "b5d28a84ebf04d76313e9da48e50b5da2b6bb8240f0b968d3afb57401a3a4c26",
       "size": 5052
     },
     {
@@ -6584,7 +6611,7 @@
       "path": "delivery/mkp/presets/A1_MINI-fast260326.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST260326",
-      "sha256": "95b7b60a5704d5bb0006d6dba40a404f9d3e5f9496ea574c222aba205f429700",
+      "sha256": "9d0cd9603215981a74f486825cb2d2fbaac9c5eec062b9704ad5a6ed6c6784b6",
       "size": 5052
     },
     {
@@ -6593,8 +6620,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast261111.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST261111",
-      "sha256": "a62ba195026e797d27d1750c536211132d79d4a056458d898855bc71c68d0c96",
-      "size": 5053
+      "sha256": "aa83c0373b5dcce6ab23742004da29913833f0ac8508706bc3470fa1c4fd23c2",
+      "size": 5052
     },
     {
       "kind": "mkp_preset",
@@ -6602,7 +6629,7 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "871235d1dd47a25c7bb9346bf5cb01d334a0ab338edde920ed0fcda80f0d67bc",
+      "sha256": "0a3620a24da93882f45985a5e501134d4ca0814cb50dcfd73bf61281bb8f20dd",
       "size": 5193
     },
     {
@@ -6611,7 +6638,7 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "87481c3707c59e892e91537b93c39aa9100ad4c423a6f93f1c3b4345757e0aa1",
+      "sha256": "95910fb4bfe157f992e0238465bdb4c921110a25a78af1acf6558d8901c92555",
       "size": 5193
     },
     {

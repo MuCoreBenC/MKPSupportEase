@@ -29,7 +29,7 @@ M106 P1 S[AUTO] ; 风扇
 first_pen_revitalization_flag = false # 首笔活化标志
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
 MKP_extrude = 0 # 挤出长度(mm)
-MKP_retract = -5 # 回抽长度(mm)
+MKP_retract = -6 # 回抽长度(mm)
 offset_x = -25.9 # 笔尖偏移
 offset_y = 14 # 笔尖偏移
 offset_z = 1.1 # 笔尖偏移
@@ -75,7 +75,7 @@ glue_z_lift_height_first_layers = 6 # 前3层抬升高度(mm) 范围:6~10
 have_wiping_components = "tower" # 使用擦嘴塔而非擦嘴组件
 ironing_coverage_threshold = 10 # 熨烫覆盖率阈值(%) 范围:0~100
 ironing_e_sum_threshold = 7.9 # 熨烫E总和阈值 范围:0~100
-ironing_mode = "off" # 熨烫模式: off=始终移除, on=始终保留, auto=自动判断
+ironing_mode = "auto" # 熨烫模式: off=始终移除, on=始终保留, auto=自动判断
 ironing_suppress_expand = 0 # 熨烫抑制扩展(mm) 范围:0~20
 ironing_suppress_expand_mode = "bbox" # 熨烫抑制扩展模式(bbox/centroid)
 min_support_interface_enabled = true # 最小支撑涂胶面过滤
