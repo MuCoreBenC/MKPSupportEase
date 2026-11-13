@@ -29,11 +29,15 @@
  * # 发布序号自动 +1（2026-10-30）
  *
  * `PRESET_TEST_BUMP_SERIAL=1`（或 `--bump-serial`）时，返回的 `catalog.json` 里
- * `publishSerial` 往前拨一格、`publishedAt` 换成此刻 —— **只改响应，盘上一个字节不动**。
+ * `publishSerial` 往前拨一格 —— **只改响应，盘上一个字节不动**。
  *
  * 为什么要拨：客户端手上那份目录和这份源同号、内容却不同 ⇒ 逐文件判据给
  * `Inconsistent`（"那一代目录不再唯一"），看着像坏了。拨一格就成了正常的
- * "云端发了下一版"，和真发布一模一样。工作台那颗「启动」按钮默认带上这个开关。
+ * "云端发了下一版"。工作台那颗「启动」按钮默认带上这个开关。
+ *
+ * ★ **`publishedAt` 不跟着拨**。它是"这一代目录实际发布的时刻"，只做展示
+ *   （`based_on` 不拿它判新旧）。拿请求时刻顶上去，界面上的「云端新版」会每刷新
+ *   一次就变一个时间 —— 用户没法判断那到底是不是自己发的一版。
  *
  * 起好之后可以把它填进「设置 → 高级设置 → 预设数据源 → 自定义地址」，
  * 或者用 `npm run dev:test-update` 让 dev 脚本自动注入。
@@ -140,12 +144,12 @@ const server = createServer((req, res) => {
   }
   readFile(target).then(
     (buf) => {
-      /* 序号 +1：只碰 `catalog.json` 这一份响应的两格，其余字节原样 */
+      /* 序号 +1：只碰 `catalog.json` 这一份响应的一格，其余字节原样 */
       if (BUMP && target.endsWith(`${sep}catalog.json`)) {
         try {
           const catalog = JSON.parse(buf.toString('utf8'))
+          /* 只拨号，不碰 `publishedAt`：那个时刻属于发布，不属于这次请求（见文件头那段） */
           catalog.publishSerial = Number(catalog.publishSerial ?? 1) + 1
-          catalog.publishedAt = new Date().toISOString()
           buf = Buffer.from(JSON.stringify(catalog, null, 2), 'utf8')
         } catch {
           /* 读不出 JSON 就照原样端出去 —— 客户端那边会如实说"目录读不出来"，
