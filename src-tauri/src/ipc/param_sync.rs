@@ -802,7 +802,34 @@ fn apply_at(
         })
         .collect();
     if !record.is_empty() {
-        runtime::app_state::record_param_decisions(root, path, &record)?;
+        /*
+         * **可审计**：这一趟表了哪几项态，日志里查得到。
+         *
+         * 只记 `key:kind`，不记值 —— 值在文件里，日志只回答"这一趟表了什么态"。
+         * `remaining` 一起记：它是"还剩几项没表态"，也是"为什么还挂着有新版"的答案。
+         */
+        let decided: Vec<String> = record
+            .iter()
+            .map(|(key, d)| format!("{key}:{}", kind_text(d.kind)))
+            .collect();
+        let joined = decided.join(",");
+        if let Err(e) = runtime::app_state::record_param_decisions(root, path, &record) {
+            tracing::warn!(
+                path = %path,
+                decisions = %joined,
+                error = %e,
+                "云端更新表态没落上"
+            );
+            return Err(e);
+        }
+        tracing::info!(
+            path = %path,
+            serial = catalog.publish_serial,
+            cloud_sha = %current_sha,
+            remaining,
+            decisions = %joined,
+            "云端更新表态已落"
+        );
     }
 
     sync_at(root, user, path, false)
@@ -1473,6 +1500,50 @@ mod tests {
             param_alg::read_param_values(&w.local_text(), &defs()).unwrap()[KEY],
             "-5",
             "保持 = 这一项还是我原来的值"
+        );
+    }
+
+    /// **勾一项就只算一项**：三选一之后剩下两项仍在待处理里。
+    ///
+    /// 云端这一版改了三项，用户只采用其中一项 ⇒ 待处理还剩两项、来源记录不推进、
+    /// 仍然「有新版」—— 界面可以再打开、再选一次。面板只交勾选项，没勾的不进 decisions。
+    #[test]
+    fn adopting_one_of_three_leaves_the_other_two_pending() {
+        let w = World::new();
+        /* 云端发一版：三项都动（x 是场景里那一项，y / z 只是凑出"三选一"） */
+        let defs = defs();
+        let text = param_alg::apply_param_edits(
+            &w.current_text,
+            &defs,
+            &[
+                FieldEdit::new(KEY, "1.5"),
+                FieldEdit::new("toolhead.offset.y", "30.5"),
+                FieldEdit::new("toolhead.offset.z", "5.5"),
+            ],
+        )
+        .unwrap();
+        w.publish_text(text);
+
+        let before = w.sync();
+        assert_eq!(before.pending_count, 3, "三项都该挂着：{before:?}");
+
+        /* 界面上「勾一项」交回来的就这一条（未勾的不进 decisions） */
+        let after = w.decide(KEY, "adopt");
+        assert_eq!(after.pending_count, 2, "没勾的两项继续待处理");
+        assert!(after.version_advanced, "没接受完就不许说已对齐到云端当前版");
+        for key in ["toolhead.offset.y", "toolhead.offset.z"] {
+            let e = after
+                .entries
+                .iter()
+                .find(|e| e.key == key)
+                .expect("该在结果里");
+            assert!(e.pending, "{key} 该继续待处理");
+            assert_eq!(e.decided, None, "{key} 没表态过");
+        }
+        /* 采用了的那一项真写进去了 */
+        assert_eq!(
+            param_alg::read_param_values(&w.local_text(), &defs).unwrap()[KEY],
+            "1.5"
         );
     }
 

@@ -1037,6 +1037,21 @@ export interface GenerationReceipt {
   baseline: ReceiptCounts
   files: string[]
   error: string | null
+  /** 生成时**沿用**的发布线（`null` = 账本读不出来 / 老回执） */
+  catalogId?: string | null
+  /** 生成时**沿用**的序号 —— 生成不分配号（`null` = 同上） */
+  publishSerial?: number | null
+}
+
+/** `build::PublishSerialView` —— 当前发布序号（只读，不分配） */
+export interface PublishSerialView {
+  catalogId: string
+  /** 已经发出去的号；`null` = 这条线还没发布过 */
+  serial: number | null
+  /** 下一次发布会拿到的号 */
+  nextSerial: number
+  /** 账本与盘上目录是不是同一代 */
+  inSync: boolean
 }
 
 /** `build::GenerateReport` */
@@ -3170,6 +3185,11 @@ export const wb = {
   /** 历次生成的回执（新的在前；应用数据目录，按份数自动清理） */
   receipts: (limit?: number) =>
     invoke<GenerationReceipt[]>('wb_receipts', { limit: limit ?? null }),
+  /**
+   * **当前发布序号**（只读）：页头常驻显示，不用点进发布闸。
+   * 取账本与 `catalog.json` 的最大值；不写盘、不分配号。
+   */
+  publishSerial: () => invoke<PublishSerialView>('wb_publish_serial'),
   revertPreview: (uid: string) => invoke<RevertPreview>('wb_revert_preview', { uid }),
   /**
    * **发布闸**（第二刀）：十五项逐项结果。

@@ -111,6 +111,16 @@ pub struct GenerationReceipt {
     pub files: Vec<String>,
     /// 失败时的那一句（`AppError.message`）
     pub error: Option<String>,
+    /*
+     * **生成时这条线发到第几号**。
+     *
+     * 生成**不分配号** —— 只把账本上"这一代沿用的那一号"抄下来，措辞是「沿用」。
+     * 老回执没有这两格：`default` 让它们照常读得出来，不编一个 0 冒充第零号。
+     */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publish_serial: Option<u64>,
 }
 
 impl GenerationReceipt {
@@ -126,6 +136,8 @@ impl GenerationReceipt {
             baseline: Counts::default(),
             files: Vec::new(),
             error: None,
+            catalog_id: None,
+            publish_serial: None,
         }
     }
 

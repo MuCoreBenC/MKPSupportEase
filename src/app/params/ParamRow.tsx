@@ -205,11 +205,15 @@ export default function ParamRow({
    *   还没表态   云端已更新 · 云端 18.6 → 19.0          [用新值] [保持原样]
    *   已采用     已采用云端新值 · 我的 18.6 → 云端 19.0   （点这一行展开，右栏能「用回我的值」）
    *   已保持     保持原样 · 云端 18.6 → 19.0            [改用新值]
-   *   保存过了   已采用云端新值 / 保持原样（一枚淡徽章，说明云端这一版已经处理过）
+   *   保存过了·采用  已采用 · 我的 18.6 → 云端 19.0（灰字记录）
+   *   保存过了·保持  **一个字都不留** —— 行回到平常样子（作者：留着就在提醒"还有新值"）
    */
   const syncPending = sync?.pending === true
-  /** 草稿层的表态只对**还在待处理**的项有意义（保存过之后归 `sync.decided` 管） */
-  const syncDraftKind = syncPending ? syncDraft : null
+  /**
+   * 草稿层的表态：待处理项上有意义；保存过的项上也可能有（在「云端更新」那一屏里
+   * 点了「改用新值」）—— 那一笔保存之前就该画成采用态。没再动过 ⇒ `null`。
+   */
+  const syncDraftKind = syncDraft ?? null
   const syncDecided = sync?.decided ?? null
   /**
    * 「上次云端」那一格 —— **滚动记录优先**（2026-10-31）。
@@ -247,6 +251,7 @@ export default function ParamRow({
           after: valueText(def, sync.cloudNew, tr),
         })
       : diffText
+
 
   return (
     <div
@@ -339,14 +344,27 @@ export default function ParamRow({
                 {diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
               </span>
             )}
-            {!syncPending && syncDecided !== null && (
+            {/* 保存过的「保持原样」行上又点了「改用新值」：当场画成还没保存的采用（绿章） */}
+            {!syncPending && syncDraftKind === 'adopt' && (
+              <span className={s.syncNote}>
+                <span className={s.syncBadgeAdopted}>{t('params.syncAdopted')}</span>
+                {mineToCloud !== null && <span className={s.syncDiff}>{mineToCloud}</span>}
+              </span>
+            )}
+            {/*
+              保存过的**采用**留一行灰字记录（这个值是从云端来的）；保存过的**保持**
+              **一个字都不留** —— 留着就在提醒"还有云端新值"，而用户刚刚明确说了不要。
+              想改用新值的，去「云端更新」那一屏（「更多」末尾的入口），那里还列着这一版。
+            */}
+            {!syncPending && syncDraftKind === null && syncDecided === 'adopt' && (
               <span className={s.syncDecided}>
-                {syncDecided === 'adopt' ? t('params.syncAdopted') : t('params.syncHold')}
-                {/* 保存过的那一版也把数字留着（2026-10-21）：
-                    采用 =「我的旧值 → 云端新值」，保持 =「云端旧值 → 云端新值」 */}
-                {syncDecided === 'adopt'
-                  ? mineToCloud !== null && <span className={s.syncDiff}>{mineToCloud}</span>
-                  : diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
+                {t('params.sync.adoptedShort')}
+                {mineToCloud !== null && (
+                  <>
+                    {' · '}
+                    <span className={s.syncDiff}>{mineToCloud}</span>
+                  </>
+                )}
               </span>
             )}
           </span>
@@ -354,8 +372,12 @@ export default function ParamRow({
 
         <span className={s.right}>
           {/*
-           * 云端更新那两个动作。**只有待处理的项才画它们** —— 处理过的项显示一枚淡徽章
-           * （在上面名字那一格），不再给按钮：已经处理完的事不该留着可点的入口。
+           * 云端更新的动作：**只在它还能改变结果、而且这一笔还没结束时出现**。
+           *
+           *   待处理                两个都能改变结果 ⇒ 两颗
+           *   已保持·还没保存       「改用新值」仍能改变结果 ⇒ 留这一颗
+           *   已保持·保存过了       整行回到平常样子 ⇒ 一颗都不给（改用新值去「云端更新」那一屏）
+           *   已采用                文件值已经等于云端值 ⇒ 一颗都不给
            *
            * 「用新值」在云端当前版字节还没取回来时是灰的（新值不知道是哪来的，点下去
            * 只会得到一个错），原因写在 title 里 —— 灰一颗按钮不说为什么，用户只会以为坏了。
@@ -400,6 +422,11 @@ export default function ParamRow({
               {tr('params.row.adoptShort')}
             </button>
           )}
+          {/*
+           * 保存过的「保持原样」**行上一颗按钮都不留**：那一笔已经结束，留着任何东西
+           * 都会让人以为"还有云端新值等着我"。要改用新值的去「云端更新」那一屏 ——
+           * 这一版仍列在那里，点那颗「改用新值」再保存即可。
+           */}
           {/* 弃用的行不许写新值 → 不摆「还原」chip（它的值本来就等于已保存值/无值）。
               打字不合法（未提交）时也摆 —— 那是失焦闸困住之后的可见出口（见上面 badTyping 注） */}
           {(dirty || badTyping) && !locked && !readonly && (

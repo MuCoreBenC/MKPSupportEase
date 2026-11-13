@@ -162,6 +162,66 @@ pub fn wb_receipts(
     ))
 }
 
+/// **当前发布序号**：页头常驻读数，不用点进发布闸才看得到。
+///
+/// 真值只有两处：账本 `publish-serial.json` 与 `catalog.json` 的 `publishSerial`；
+/// 已发出去的号取两者最大（账本落后时按目录校正，与 `Book::next_after` 同一口径）。
+///
+/// **只读**：不写盘、不修盘、不分配号 —— 分配只发生在正式发布事务
+/// （`delivery::publish_into`）里。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishSerialView {
+    /// 这条发布线是谁（`support-ease`）
+    pub catalog_id: String,
+    /// 已经发出去的号；`None` = 这条线还没发布过
+    pub serial: Option<u64>,
+    /// 下一次发布会拿到的号
+    pub next_serial: u64,
+    /// 账本与盘上目录是不是同一代（`false` = 上一次发布没写完，或生成后还没发）
+    pub in_sync: bool,
+}
+
+#[tauri::command(async)]
+pub fn wb_publish_serial() -> Result<PublishSerialView, AppError> {
+    traced("wb_publish_serial", |_| {
+        with_ctx(|ctx| publish_serial_at(&super::super::paths::delivery_root_at(&ctx.real_root)))
+    })
+}
+
+/// [`wb_publish_serial`] 的判据本体（只读，取一个交付根 —— 命令与单测走同一条路）。
+fn publish_serial_at(root: &std::path::Path) -> Result<PublishSerialView, AppError> {
+    let on_disk = super::delivery::PublishIdentity::inherit_from(root);
+    let state = super::publish_book::inspect(root, super::delivery::NEW_CATALOG_FILE)?;
+    let (catalog_id, serial, in_sync) = match &state {
+        super::publish_book::State::NoBook => (
+            on_disk
+                .catalog_id
+                .clone()
+                .unwrap_or_else(|| super::publish_book::DEFAULT_LINE.to_owned()),
+            on_disk.serial,
+            false,
+        ),
+        super::publish_book::State::InSync(b) => (
+            b.catalog_id.clone(),
+            Some(b.serial.max(on_disk.serial.unwrap_or(0))),
+            true,
+        ),
+        super::publish_book::State::Stale(b) => (
+            b.catalog_id.clone(),
+            Some(b.serial.max(on_disk.serial.unwrap_or(0))),
+            false,
+        ),
+    };
+    let next_serial = serial.unwrap_or(0) + 1;
+    Ok(PublishSerialView {
+        catalog_id,
+        serial,
+        next_serial,
+        in_sync,
+    })
+}
+
 /// 预检（b05 Task 11.8）：[`issues::inspect`] 的全部 + 交付目录自查 + 内嵌目录自查。
 ///
 /// 2026-11-12：旧的「清单 ↔ `preset_recipes.toml` 配方」对齐已随 `gen-presets` 整链
@@ -729,6 +789,18 @@ pub(super) fn generate_with(
     let receipts_root = crate::workbench::paths::repo_root();
     let mut receipt =
         super::receipt::GenerationReceipt::start(&receipts_root, clock::now_iso8601());
+    /*
+     * 生成**不分配号**：这里只把"这一代沿用的那一号"抄进回执，措辞是「沿用」。
+     * 与页头那枚 chip 读同一条判据（账本与盘上目录取最大）；读不出来就留 `None`，
+     * 不编一个 0。
+     */
+    let delivery_root = super::super::paths::delivery_root_at(&ctx.real_root);
+    if let Ok(view) = publish_serial_at(&delivery_root) {
+        receipt.publish_serial = view.serial;
+        if view.serial.is_some() {
+            receipt.catalog_id = Some(view.catalog_id);
+        }
+    }
     match generate_inner(ctx, scope, force, &mut receipt) {
         Ok(mut out) => {
             /* **`passed` 不能只看"流程没报错"**（2026-11-01）。
@@ -4449,5 +4521,67 @@ mod tests {
             "要点名是哪一份"
         );
         assert_eq!(snapshot_tree(dir.path()), before, "拒绝时一个字节都不写");
+    }
+
+    /* ---------- 页头那枚「第几号」（只读视图） ---------- */
+
+    /// 账本 16 + 盘上 17 ⇒ **已发出去的号是 17，下一号 18**，且判「待核对」。
+    ///
+    /// 取最大值的理由与 `Book::next_after` 同一条：写到 catalog 就断了的那一次，
+    /// 那一号已经躺在盘上发出去了，按账本 16 显示等于骗人。
+    #[test]
+    fn publish_serial_view_takes_the_max_of_book_and_catalog() {
+        let (_dir, ctx) = published_ctx();
+        let delivery = crate::workbench::paths::delivery_root_at(ctx.real_root());
+
+        // 盘上那一代已经盖成 17，账本还停在 16（上一次发布写一半断掉）
+        let catalog_path = delivery.join(super::super::delivery::NEW_CATALOG_FILE);
+        let catalog = std::fs::read_to_string(&catalog_path).expect("读 catalog");
+        let bumped = catalog.replace("\"publishSerial\": 1", "\"publishSerial\": 17");
+        assert_ne!(catalog, bumped, "夹具的目录该带着第 1 号");
+        crate::fsx::atomic::atomic_write(&catalog_path, bumped.as_bytes()).expect("写 catalog");
+
+        let book_path = super::super::publish_book::book_path(&delivery);
+        let book = std::fs::read_to_string(&book_path).expect("读账本");
+        crate::fsx::atomic::atomic_write(
+            &book_path,
+            book.replace("\"serial\": 1", "\"serial\": 16").as_bytes(),
+        )
+        .expect("写账本");
+
+        let view = publish_serial_at(&delivery).expect("只读视图算得出");
+        assert_eq!(view.catalog_id, "support-ease");
+        assert_eq!(view.serial, Some(17), "盘上那一号已经发出去了");
+        assert_eq!(view.next_serial, 18);
+        assert!(!view.in_sync, "账本与目录不是同一代 ⇒ 待核对");
+    }
+
+    /// 账本与目录同一代 ⇒ `in_sync`；两者都没号（还没发布过的线）不许编出第 0 号。
+    #[test]
+    fn publish_serial_view_says_unknown_instead_of_zero() {
+        let empty = tempfile::tempdir().expect("临时目录");
+        let view = publish_serial_at(empty.path()).expect("空目录也读得出");
+        assert_eq!(view.catalog_id, super::super::publish_book::DEFAULT_LINE);
+        assert_eq!(view.serial, None, "没发布过就是没有号，不编 0");
+        assert_eq!(view.next_serial, 1);
+        assert!(!view.in_sync, "没有账本谈不上同代");
+
+        let (_dir, mut ctx) = published_ctx();
+        let delivery = crate::workbench::paths::delivery_root_at(ctx.real_root());
+        let view = publish_serial_at(&delivery).expect("已发布的夹具");
+        assert_eq!(view.serial, Some(1));
+        assert_eq!(view.next_serial, 2);
+        assert!(view.in_sync, "账本 hash 与盘上目录逐字节一致");
+
+        /* 生成**不分配号**：回执抄的是沿用的那一号，生成之后序号也不动 */
+        let report = generate_with(&mut ctx, &Scope::All, false).expect("再生成一次");
+        let receipt = report.receipt.expect("该有回执");
+        assert_eq!(receipt.publish_serial, Some(1), "生成沿用第 1 号");
+        assert_eq!(receipt.catalog_id.as_deref(), Some("support-ease"));
+        assert_eq!(
+            publish_serial_at(&delivery).expect("再看一眼").serial,
+            Some(1),
+            "生成不推进序号"
+        );
     }
 }

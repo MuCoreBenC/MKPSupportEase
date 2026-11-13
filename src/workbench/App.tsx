@@ -45,6 +45,7 @@ import {
   type IssueReport,
   type MetaApplied,
   type Patch,
+  type PublishSerialView,
   type Refresh,
   type TxnState,
   type Words,
@@ -363,6 +364,31 @@ export function WorkbenchApp() {
 
   /** 「后端状态变过了」计数器：每写一次 +1，页面据此重取（理由见旧版的教训注释） */
   const [tick, setTick] = useState(0)
+
+  /**
+   * **页头那枚「第几号」**：进生成页就摆出来，不用点进发布闸才看得到。
+   *
+   * 只在生成页取（其它页不亮这枚 chip），每次 `tick` 与进页各取一次；只读命令，
+   * 不写盘、不分配号。读不出来就照实说读不出来 —— 不摆一个 0 冒充第零号。
+   */
+  const [publishSerial, setPublishSerial] = useState<PublishSerialView | null>(null)
+  const [publishSerialError, setPublishSerialError] = useState<string | null>(null)
+  useEffect(() => {
+    if (page !== 'build') return
+    let alive = true
+    wb.publishSerial()
+      .then((v) => {
+        if (!alive) return
+        setPublishSerial(v)
+        setPublishSerialError(null)
+      })
+      .catch((e: unknown) => {
+        if (alive) setPublishSerialError(isAppError(e) ? e.message : String(e))
+      })
+    return () => {
+      alive = false
+    }
+  }, [page, tick])
 
 
   /* 页面常驻（C14 第十八轮）：第一次去才挂载，切走只藏起来 */
@@ -1279,6 +1305,32 @@ export function WorkbenchApp() {
                   */}
                   {headOpsVisible && (
                     <div className={s.headOps}>
+                      {/*
+                        生成页常驻的一枚只读 chip：`support-ease · 第 17 号`。
+                        账本与目录不同代时补「待核对」（不弹窗 —— 它只是"这一页看到的号
+                        可能与下一代接不上"，点进发布闸才谈得上处理）。
+                      */}
+                      {page === 'build' && publishSerialError !== null && (
+                        <span className={`${s.tag} ${s.tagGhost}`} data-tip={publishSerialError}>
+                          序号读不到
+                        </span>
+                      )}
+                      {page === 'build' && publishSerial !== null && (
+                        <span
+                          className={s.tag}
+                          data-tip={
+                            publishSerial.serial === null
+                              ? '这条发布线还没有正式发布过 —— 第一次发布会是第 1 号'
+                              : '已发出去的号取账本与交付目录的较大值；只在正式发布时推进'
+                          }
+                        >
+                          {publishSerial.serial === null
+                            ? `${publishSerial.catalogId} · 还没发过`
+                            : `${publishSerial.catalogId} · 第 ${publishSerial.serial} 号${
+                                publishSerial.inSync ? '' : ' · 待核对'
+                              }`}
+                        </span>
+                      )}
                       {pageSlot !== null ? (
                         <>
                           <span

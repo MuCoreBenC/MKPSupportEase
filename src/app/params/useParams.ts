@@ -2082,21 +2082,22 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       return
     }
     /*
-     * **这一批云端更新的表态**（2026-10-20）：只交还"还在待处理、而且表过态"的那几项。
+     * **这一批云端更新的表态**（2026-10-20）：只交还**这一趟表过态**的那几项。
      * 没表态的项不能捎带（那等于替用户做了决定），保存完它仍然挂着。
      *
-     * ★ 表态表只活在内存里（关掉这一屏就没了）；草稿却会跟到下一次打开。
-     *   所以这里补一条**从草稿反推**：某一项还没表态，可草稿里的值已经就是云端新值
-     *   ——那等于"用过了"，只是那一笔表态在关窗时丢了。不补的话值已经改了、
-     *   水位却没推进，云端更新会一直挂着，逼用户再点一次「用新值」（还是 noop）。
-     *   保持原样推不出来（没有值线索），丢了就丢了 —— 那一版下次再问一遍，不算错。
+     * ★ **只认表态表**：草稿值等于云端新值**不算表态** ——
+     *   用户可能只是手打了一个恰好相同的数。从草稿值反推 adopt 会让**没勾的项**
+     *   被静默记成已处理。
+     *   代价是关窗丢掉的那笔表态不再自动认领：云端下次再问一遍，用户再点「用新值」
+     *   是 noop —— 宁可多问一次，也不替用户做决定。
+     *
+     * ★ **不再按 `pending` 过滤**：保存过的项在「云端更新」那一屏里还能点
+     *   「改用新值」—— 那一笔要照样交上去（后端按 key 记账、原地把表态改成
+     *   adopt），不然值写进去了、账还写着"保持"。
      */
     const decisions: ParamDecision[] = []
     for (const e of sync?.entries ?? []) {
-      if (!e.pending) continue
-      const kind =
-        syncDecisions[e.key] ??
-        (e.cloudNew !== null && draft[e.key] === e.cloudNew ? 'adopt' : undefined)
+      const kind = syncDecisions[e.key]
       if (kind !== undefined) decisions.push({ paramKey: e.key, kind })
     }
     /*
@@ -2746,7 +2747,11 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const syncDraftOf = useCallback(
     (key: string): SyncDraftKind | null => {
       const entry = syncByKey.get(key)
-      if (entry === undefined || !entry.pending) return null
+      if (entry === undefined) return null
+      /*
+       * 不再要求 `entry.pending`：保存过的项也能在「云端更新」那一屏里点「改用新值」，
+       * 那一笔同样是"还没保存的决定"，行上要当场画成采用态（不然值变了、行上什么都没说）。
+       */
       return syncDecisions[key] ?? null
     },
     [syncByKey, syncDecisions],

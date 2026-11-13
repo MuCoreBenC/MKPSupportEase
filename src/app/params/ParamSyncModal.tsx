@@ -8,13 +8,20 @@
  * # 它回答什么
  *
  * 云端持续发布新默认值，但它**不许直接顶掉本地参数**。于是每一版发布之后，
- * 云端改过的那几项先是**待处理**：我这里列出来，用户勾选（采用云端新值）
- * 或者不勾（保持我现在用的值），一次交回去。
+ * 云端改过的那几项先是**待处理**：我这里列出来，用户勾选（采用云端新值）；
+ * **不勾 = 还没表态**，它继续待处理，下次还能再选。
  *
  * ★ **这一屏不再写盘**（2026-10-20 作者：「应该保存的时候才算真的用，跟编辑一样」）：
- *   点「应用」只是把勾上的项写进**草稿**（一次撤销能整批退回来）、没勾的记成
- *   「保持原样」；真正的落盘在「保存」那一下。点「暂不修改」则什么都不记，
- *   回到修改参数里逐项照旧能选。
+ *   点「应用」只是把勾上的项写进**草稿**（一次撤销能整批退回来）；真正的落盘在
+ *   「保存」那一下。点「暂不修改」则什么都不记。
+ *
+ * # 已处理的那几项也留在这里
+ *
+ * 保存之后它不再是待处理，但**不许从列表里消失** —— 重开这一屏就是来确认
+ * 「上次我收的 / 否的是哪一个」的。所以末尾有一组「上次已处理」：采用 = 绿行，
+ * 保持 = 灰行。**行上不再显示保持的痕迹**（作者：一直挂着徽章等于一直提醒"还有新值"），
+ * 想改用新值就在这一屏点那一行的「改用新值」。云端再发新版时水位不在当前版，
+ * 这一组自动清空。
  *
  * 与行上那两个动作（「用新值」/「保持原样」）是**同一件事的两条路**：
  * 一屏能全看完时走这里，只想改一行时就地在那一行上改。两条路落的是同一张草稿。
@@ -89,7 +96,7 @@ interface Props {
    */
   draftOf?: (key: string) => 'adopt' | 'hold' | null
   /**
-   * 把这一批勾选交回去（勾上的采用、没勾的保持）—— **只写进草稿**，
+   * 把这一批**勾选的**交回去（未勾的不送 = 还没表态，继续待处理）—— **只写进草稿**，
    * 「保存」才落盘。空数组 = 一项都没勾。
    */
   onDecide: (decisions: ParamDecision[]) => void
@@ -139,6 +146,19 @@ export default function ParamSyncModal({
   const tr = useT()
   const pending = useMemo(() => (sync?.entries ?? []).filter((e) => e.pending), [sync])
   const groups = useMemo(() => groupOf(pending), [pending])
+  /*
+   * **这一版已经处理过的项**（保存之后它不再是待处理，但 `decided` 还记着表态）。
+   *
+   * 必须留在列表里：重开这一屏就是来确认"上次我收的 / 否的是哪一个"的，直接消失
+   * 等于把刚做过的事抹掉。**只读**：不给勾、不再交回去。
+   * 采用过的排前面（它改了文件，是最该被确认的那一笔）。
+   * 云端再发新版 ⇒ 水位不在当前版，`decided` 自动归空、这一组跟着消失：
+   * 下一轮拿新的当前版重比，不把这一批的结论带过去。
+   */
+  const done = useMemo(() => {
+    const rows = (sync?.entries ?? []).filter((e) => !e.pending && e.decided !== null)
+    return [...rows.filter((e) => e.decided === 'adopt'), ...rows.filter((e) => e.decided !== 'adopt')]
+  }, [sync])
   const [checked, setChecked] = useState<Record<string, boolean>>({})
 
   /*
@@ -160,6 +180,17 @@ export default function ParamSyncModal({
 
   const chosen = pending.filter((e) => checked[e.key] === true).length
   const all = pending.length
+  /*
+   * 这一趟「应用」会落几笔「保持原值」：**机器专属那几项没勾的**（默认保持）。
+   * 其余没勾的照旧不算 —— 它们还没表态，这一屏不该替用户拒绝。
+   */
+  const machineHolds = pending.filter(
+    (e) => checked[e.key] !== true && neverPreset(e.key),
+  ).length
+  /** 这一屏关掉之后仍会挂着「待处理」的项数（给按钮 tooltip 用） */
+  const stillPending = pending.filter(
+    (e) => checked[e.key] !== true && !neverPreset(e.key),
+  ).length
   /*
    * **云端这一版的字节还没取回来**（从预设页「更新」顺势进来时常见）：
    * 那一瞬间 `pendingCount` 天然是 0（缺新值就不报待处理）——
@@ -195,21 +226,36 @@ export default function ParamSyncModal({
     })
   }
 
-  /* 交回一批决定：勾上的采用、没勾的保持 —— 只写进草稿，「保存」才落盘 */
+  /*
+   * 交回去的是两批：
+   *
+   *   · **勾上的** ⇒ 采用；
+   *   · **机器专属那几项没勾** ⇒ 保持原值（它们的数是逐台标定出来的，云端换默认值
+   *     本来就不该动它 —— 所以这几项不再"没勾就一直挂着"，而是默认保持）。
+   *
+   * 其余没勾的（没冲突 / 有冲突那两组）**什么都不交** = 还没表态，继续待处理。
+   * 把那些也补成 `hold` 会让"勾 1 项"实际提交 1 adopt + N-1 hold，`remaining` 归零、
+   * 来源记录被推进，剩下那几项再也回不来。
+   * 行上显式点过的「保持原样」不靠这一屏补发 —— 它已经在 `syncDecisions` 里，
+   * 保存那一趟会带上（那是用户真做过的决定，与"没勾"不是一回事）。
+   */
   const confirm = () => {
-    onDecide(
-      pending.map((e) => ({
-        paramKey: e.key,
-        kind: checked[e.key] === true ? 'adopt' : 'hold',
-      })),
-    )
+    onDecide([
+      ...pending
+        .filter((e) => checked[e.key] === true)
+        .map((e) => ({ paramKey: e.key, kind: 'adopt' as const })),
+      ...pending
+        .filter((e) => checked[e.key] !== true && neverPreset(e.key))
+        .map((e) => ({ paramKey: e.key, kind: 'hold' as const })),
+    ])
     onClose()
   }
 
   return (
     <Modal
       open={open}
-      title={tr('params.sync.title')}
+      /* 待选清零（从「更多」进来复查）时不再叫「去选择」—— 没有要选的东西 */
+      title={all === 0 && done.length > 0 ? tr('params.sync.titleView') : tr('params.sync.title')}
       subtitle={
         /*
          * 2026-10-13 口径：只有「本地 / 云端」（作者：「没有我的、没有官方这种说法」——
@@ -219,6 +265,8 @@ export default function ParamSyncModal({
          *   原来那串「勾上的那几项改成云端新值，没勾的保持你现在用的值」是**重复**——
          *   每一行右边都写着「确认后：X」，勾与不勾的结果一看就懂。副标题只留
          *   「哪一版 + 改了几项」，一行说得完。
+         *
+         * 项数 = 还要选的 + 已经处理过的：这一版一共改了几项，不该因为处理过几项就变小。
          */
         sync === null
           ? tr('params.sync.reading')
@@ -228,7 +276,7 @@ export default function ParamSyncModal({
               release:
                 longStatText(sync.currentReleaseTime ?? undefined) ??
                 tr('params.sync.newRelease'),
-              count: all,
+              count: all + done.length,
             })
       }
       /*
@@ -241,7 +289,8 @@ export default function ParamSyncModal({
       boxClass={s.syncBox}
       host={host}
       closeOnScrim={false}
-      closeTitle={tr('params.sync.closeTitle')}
+      /* 「一项都还没处理」那句只在真有待选时成立；复查态（待选 0）退回「关闭」 */
+      closeTitle={all > 0 ? tr('params.sync.closeTitle') : undefined}
       onClose={onClose}
       footer={
         <>
@@ -249,37 +298,56 @@ export default function ParamSyncModal({
            * **底栏左侧那句提示**（2026-10-20）：原来这一格是空的。
            * 「暂不修改」是什么意思、0 项应用会发生什么，都写在这里 ——
            * 不再靠页面底部那条一次性 toast（关了就看不到了）。
+           * 没有待选（从「更多」进来复查）时不摆 —— 那时只有"关掉"这一个动作。
            */}
-          <span className={s.hint}>{hint ?? tr('params.sync.hint')}</span>
+          {all > 0 && <span className={s.hint}>{hint ?? tr('params.sync.hint')}</span>}
           <button type="button" className={s.ghost} onClick={onClose}>
-            {tr('params.sync.later')}
+            {all > 0 ? tr('params.sync.later') : tr('params.sync.close')}
           </button>
-          <button type="button" className={s.primary} disabled={fetching} onClick={confirm}>
-            {tr('params.sync.apply', { count: chosen })}
-          </button>
+          {all > 0 && (
+            <button
+              type="button"
+              className={s.primary}
+              disabled={fetching}
+              /* 没勾的那几项**不处理**：这里说清，别让人以为"点一下全处理了" */
+              title={
+                stillPending > 0
+                  ? tr('params.sync.applyRest', { count: stillPending })
+                  : undefined
+              }
+              onClick={confirm}
+            >
+              {/* 有几笔默认保持时，说"勾选的 N 项"就漏了它们 */}
+              {machineHolds > 0
+                ? tr('params.sync.applyN', { count: chosen + machineHolds })
+                : tr('params.sync.apply', { count: chosen })}
+            </button>
+          )}
         </>
       }
     >
       {fetching ? (
         <p className={s.empty}>{tr('params.sync.loading')}</p>
-      ) : all === 0 ? (
+      ) : all === 0 && done.length === 0 ? (
         <p className={s.empty}>{tr('params.sync.nothing')}</p>
       ) : (
         <>
-          <div className={s.selectbar}>
-            <Check
-              ariaLabel={tr('params.sync.selectAll')}
-              className={s.checkLabel}
-              checked={selectable > 0 && cleanChosen === selectable}
-              indeterminate={cleanChosen > 0 && cleanChosen < selectable}
-              onChange={toggleAll}
-            >
-              {tr('params.sync.selectAll')}
-            </Check>
-            <span className={s.selHint}>
-              {tr('params.sync.chosen', { chosen, all })}
-            </span>
-          </div>
+          {all > 0 && (
+            <div className={s.selectbar}>
+              <Check
+                ariaLabel={tr('params.sync.selectAll')}
+                className={s.checkLabel}
+                checked={selectable > 0 && cleanChosen === selectable}
+                indeterminate={cleanChosen > 0 && cleanChosen < selectable}
+                onChange={toggleAll}
+              >
+                {tr('params.sync.selectAll')}
+              </Check>
+              <span className={s.selHint}>
+                {tr('params.sync.chosen', { chosen, all })}
+              </span>
+            </div>
+          )}
 
           {/* 三组共用一个滚动区（一组一个滚动框的话，三项就能把弹窗撑成半屏） */}
           <div className={s.list}>
@@ -347,6 +415,100 @@ export default function ParamSyncModal({
                 </div>
               </div>
             ))}
+
+            {/* 上次已处理的那几项：绿 = 收了的，灰 = 保持原样的 —— 排在最下面，不挡这一轮 */}
+            {done.length > 0 && (
+              <div className={s.group}>
+                <div className={s.groupLabel} data-group="done">
+                  {tr('params.sync.doneGroup')}
+                </div>
+                <div className={s.rows}>
+                  {done.map((e) => {
+                    const def = defOf(e.key)
+                    const adopted = e.decided === 'adopt'
+                    /* 「上次云端」用滚动记录；没有才退回水位那格（采用后它等于新值） */
+                    const before = e.origin ?? e.baselineOld
+                    return (
+                      <div
+                        key={e.key}
+                        className={adopted ? `${s.row} ${s.rowDone}` : s.row}
+                      >
+                        <span
+                          className={adopted ? s.doneMark : s.heldMark}
+                          aria-hidden="true"
+                        >
+                          {adopted ? '✓' : '—'}
+                        </span>
+                        <div className={s.what}>
+                          <div className={s.name}>
+                            {def?.label ?? e.key}
+                            {def?.unit !== undefined && <span className={s.unit}>{def.unit}</span>}
+                            <span className={adopted ? s.doneTag : s.heldTag}>
+                              {adopted
+                                ? tr('params.sync.adoptedShort')
+                                : tr('params.syncHold')}
+                            </span>
+                          </div>
+                          <div className={s.vals}>
+                            {e.cloudNew === null ? (
+                              tr('params.sync.unknownCloud')
+                            ) : adopted ? (
+                              <>
+                                {/* 采用过的那一行：云端旧值 → 云端新值（收的就是后者，绿） */}
+                                <span className={s.valsTag}>{tr('params.sync.cloud')}</span>{' '}
+                                {before !== null && before !== e.cloudNew && (
+                                  <>
+                                    <span className={s.oldVal}>{text(e.key, before)}</span>
+                                    <i className={s.arrow} aria-hidden="true">
+                                      →
+                                    </i>
+                                  </>
+                                )}
+                                <span className={s.doneNew}>{text(e.key, e.cloudNew)}</span>
+                              </>
+                            ) : (
+                              <>
+                                {/* 保持过的那一行：本地值 → 云端值 —— 拒绝的是哪个一眼看得出 */}
+                                <span className={s.valsTag}>{tr('params.sync.local')}</span>{' '}
+                                <span className={s.local}>
+                                  {e.local === null ? '—' : text(e.key, e.local)}
+                                </span>
+                                <i className={s.arrow} aria-hidden="true">
+                                  →
+                                </i>
+                                <span className={s.valsTag}>{tr('params.sync.cloud')}</span>{' '}
+                                <span className={s.newVal}>{text(e.key, e.cloudNew)}</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className={s.after} data-on={adopted ? 'true' : 'false'}>
+                          <span className={s.afterLabel}>{tr('params.sync.now')}</span>
+                          <span className={s.afterVal}>{afterOf(e)}</span>
+                          {/*
+                            保持过的那几项：**行上不再给回头路**，改在这里 ——
+                            点它把云端新值写进草稿（保存才落盘），这一屏随即关掉。
+                          */}
+                          {!adopted && (
+                            <button
+                              type="button"
+                              className={s.rowAdopt}
+                              disabled={e.cloudNew === null}
+                              onClick={() => {
+                                onDecide([{ paramKey: e.key, kind: 'adopt' }])
+                                onClose()
+                              }}
+                            >
+                              {tr('params.row.adoptShort')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

@@ -656,7 +656,7 @@ export default function BuildPage({
    * 后端内部还有两道硬闸：检查阻断 + 残留拦截（一个字节都不许在带残留时写出）。
    * 这一层**不吞错**：抛出去让闸那屏把原因显示在原地，别把失败伪装成成功。
    */
-  const publish = async () => {
+  const publish = async (opts?: { republish?: boolean }) => {
     /*
      * 发布事务：审计 → 生成 → 定稿 → 本地 git → 平台 PR。
      * 这里**只发一次**、只把阶段快照摆出来 —— 前端不再串「生成 / 发布 / 建 PR」三个动作。
@@ -665,8 +665,9 @@ export default function BuildPage({
      * 这一屏也留一份 —— 关掉模态框之后，②卡还能「查看发布结果」再打开。
      */
     /* `confirmed` = 人刚点过这颗「确认发布」按钮（2026-11-05 硬约束）。
-       内核默认 false，缺了会零副作用地拒绝 —— CLI / CI 那条路必须显式带 --confirm。 */
-    const rep = await wb.publish({ confirmed: true })
+       内核默认 false，缺了会零副作用地拒绝 —— CLI / CI 那条路必须显式带 --confirm。
+       `republish` 只由回执上那颗「仍然发一版」给（内容没变也要一个号）。 */
+    const rep = await wb.publish({ confirmed: true, republish: opts?.republish === true })
     setLastPublish(rep)
     /* 发布改了交付目录 → 整本、报告、①卡交付读数一起重取（③ 基线 / ④ 残留也跟着 tick 走） */
     onArtifactsRefresh()

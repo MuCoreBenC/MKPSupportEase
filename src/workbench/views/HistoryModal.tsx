@@ -144,6 +144,22 @@ export default function HistoryModal({ onClose }: Props) {
   const releaseRows = releases?.records ?? []
   const commitRows = commits ?? []
 
+  /**
+   * 同一条发布线上**更早的那一号**（`null` = 这是这条线的第一条回执）。
+   *
+   * 回执是最新在前 ⇒ 往列表后面找第一条同线的号就是上一代。只用来把
+   * 「16 → 17」摆出来，不参与任何判定。
+   */
+  const prevSerialOf = (index: number): number | null => {
+    const line = records[index]?.catalogId ?? null
+    for (let i = index + 1; i < records.length; i++) {
+      const r = records[i]
+      if ((r.catalogId ?? null) !== line) continue
+      if (r.publishSerial != null && r.publishSerial > 0) return r.publishSerial
+    }
+    return null
+  }
+
   const sectionError = (which: 'publish' | 'release' | 'commits') =>
     errors[which] !== undefined ? (
       <p className={h.error} role="alert">
@@ -183,9 +199,10 @@ export default function HistoryModal({ onClose }: Props) {
         )}
         {records.length > 0 && (
         <div className={`${h.list} ${h.listShort}`} role="list">
-          {records.map((r) => {
+          {records.map((r, index) => {
             const key = keyOf(r)
             const rev = live[key] ?? r.review
+            const prevSerial = prevSerialOf(index)
             return (
               <div key={key} className={h.row} role="listitem">
                 <div className={h.when}>{whenText(r.at)}</div>
@@ -207,10 +224,14 @@ export default function HistoryModal({ onClose }: Props) {
                     )}
                   </div>
                   <div className={h.meta}>
-                    {/* 那一次发的是第几号（2026-10-29）：老记录没有这两格 ⇒ 照实不显示 */}
+                    {/* 那一次发的是第几号（2026-10-29）：老记录没有这两格 ⇒ 照实不显示。
+                        「16 → 17」一起摆：只看一个数答不了「这次往前走了没有」 */}
                     {r.publishSerial != null && r.publishSerial > 0 && (
                       <span>
-                        {r.catalogId ?? '未知'} 第 {r.publishSerial} 号
+                        {r.catalogId ?? '未知'} 第{' '}
+                        {prevSerial === null
+                          ? `${r.publishSerial} 号`
+                          : `${prevSerial} 号 → 第 ${r.publishSerial} 号`}
                       </span>
                     )}
                     {r.commit !== null && <span className={c.mono}>{r.commit}</span>}

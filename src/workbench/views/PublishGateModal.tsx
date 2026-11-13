@@ -296,7 +296,7 @@ function clientVerdict(
 interface Props {
   onClose: () => void
   /** 闸全绿、人点了「确认发布」之后才走这里。**报错请抛出来**，这一屏会把它显示在原地 */
-  onPublish: () => Promise<PublishTxReport>
+  onPublish: (opts?: { republish?: boolean }) => Promise<PublishTxReport>
   /** 带一份"上一次的发布结果"打开 ⇒ 直接进回执视图（② 卡的「查看发布结果」） */
   initialReport?: PublishTxReport | null
   /**
@@ -382,11 +382,11 @@ export default function PublishGateModal({
     }
   }
 
-  const publish = async () => {
+  const publish = async (opts?: { republish?: boolean }) => {
     setBusy(true)
     setError(null)
     try {
-      const rep = await onPublish()
+      const rep = await onPublish(opts)
       // ★ 不再直接关掉：就地把这一屏切成回执 —— "关掉再打开又是新的"正是这一刀要治的
       setReport(rep)
       setReview(rep.review)
@@ -546,6 +546,21 @@ export default function PublishGateModal({
                   {syncBusy ? '补同步中…' : '手动补同步'}
                 </button>
               )}
+            {/*
+              **内容没变也可以显式再发一版**（发到分支自测要一个号）。
+              `republish` 是内核的用户显式逃生口：只涨号、字节不动；默认那条路照旧不涨号。
+            */}
+            {report.stage === 'noChange' && (
+              <button
+                type="button"
+                className={c.btn}
+                disabled={busy || mergeBusy || refreshBusy || syncBusy}
+                title="内容不变，只把序号 +1（自测要用新号时点这里）"
+                onClick={() => void publish({ republish: true })}
+              >
+                {busy ? '发布中…' : '仍然发一版（序号 +1）'}
+              </button>
+            )}
             <button type="button" className={c.btn} onClick={onClose} disabled={mergeBusy}>
               关闭
             </button>
@@ -645,10 +660,15 @@ export default function PublishGateModal({
         <section className={s.block}>
           <h3 className={s.blockTitle}>过程</h3>
           {report.stage === 'noChange' ? (
-            <p className={s.blockLine}>
-              审计过了、也生成过了，但盘上这一代与已发布的 {report.catalogId ?? '这条线'} 第{' '}
-              {report.publishSerial ?? '—'} 号逐字节相同 —— 没有提交、没有推送，序号也没动。
-            </p>
+            <>
+              <p className={s.blockLine}>
+                审计过了、也生成过了，但盘上这一代与已发布的 {report.catalogId ?? '这条线'} 第{' '}
+                {report.publishSerial ?? '—'} 号逐字节相同 —— 没有提交、没有推送，序号也没动。
+              </p>
+              <p className={s.blockLine}>
+                要发一版只涨号的用页脚那颗按钮：只涨号、不改字节，待处理项不会复活。
+              </p>
+            </>
           ) : (
             <div className={s.chain} role="list">
               {steps.map((st) => (

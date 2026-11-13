@@ -984,6 +984,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::build::wb_generate,
         // 历次生成的回执（应用数据目录，按份数自动清理）
         app::build::wb_receipts,
+        app::build::wb_publish_serial,
         app::build::wb_revert_preview,
         // 发布闸（第二刀）：逐项打勾的结果；`can_publish` 是"能不能往下走"的唯一答案
         app::build::wb_publish_audit,

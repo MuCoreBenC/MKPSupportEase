@@ -776,6 +776,14 @@ export default function PageParams({
   const savingToLocal = u.editingPreset?.origin === 'local'
   /** 云端更新里**还没表态**的项数（0 = 都选好了，只差保存） */
   const syncUndecided = Math.max(0, u.pendingCount - u.syncDirty)
+  /**
+   * 这一版**已经处理过**的项数（保存过的采用 / 保持）。
+   *
+   * 待选归零之后它就是"这一版还有东西可看"的唯一判据 —— 「更多」里那个入口
+   * 靠它留着：入口不是为了催人处理，是为了**还能再看一眼 / 反悔**。
+   */
+  const syncHandled =
+    u.sync?.entries.reduce((n, e) => (!e.pending && e.decided !== null ? n + 1 : n), 0) ?? 0
   /*
    * 云端那一版的发布时刻：ISO/UTC → 本机时区的 `2026-11-10 17:19`。
    * 横幅那两档都要缀这一段，只在这儿翻一次（原来两处各摆一遍原始 ISO）。
@@ -988,23 +996,35 @@ export default function PageParams({
      * 不放在底栏 —— 作者「不想随时看到它」，但也不能点完就再也找不到。
      */
     /*
-     * 只要这一版被记过「已忽略」，入口就一直在（2026-11-13 作者）：不再要求
-     * `pendingCount > 0` —— 部分采用 / 全部采用之后待选数会归零，那个条件一挡，
-     * 入口就永远不出现（真机截图）。云端真发新版时签名变 ⇒ `syncDismissed` 自己变 false。
+     * 两件事共用这一行，**都不许因为待选归零就消失**；两颗按钮都**直接开那一屏**：
+     *
+     *   · 被忽略、还有待选   ⇒「显示云端更新」：横幅亮回来（`restoreSync`）+ 开那一屏；
+     *   · 待选已经清零、但这一版处理过几项 ⇒「查看」：开那一屏（「上次已处理」就在里面，
+     *     保持那几行还能「改用新值」）。处理完不等于再也看不到 —— 用户点「保持原样」
+     *     多半只是看着那几条不顺眼，不是"以后别让我看见"。
+     *
+     * 云端真发新版 ⇒ 签名变、`syncDismissed` 自己变 false；`entries` 重算，
+     * `decided` 归空 ⇒ `syncHandled` 归零，这一行跟着走。
      */
-    if (categoryId === 'advanced' && syncDismissed) {
+    const canRestore = syncDismissed && u.pendingCount > 0
+    const canReview = u.pendingCount === 0 && syncHandled > 0
+    if (categoryId === 'advanced' && (canRestore || canReview)) {
       list.push(
-        <div key="sync-dismissed" className={s.syncRestoreRow}>
+        <div key="sync-handled" className={s.syncRestoreRow}>
           <span className={s.syncRestoreText}>
-            {u.pendingCount === 0 ? tr('params.sync.done') : tr('params.sync.dismissedHint')}
+            {canRestore ? tr('params.sync.dismissedHint') : tr('params.sync.handledHint')}
           </span>
           <button
             type="button"
             className={s.textBtn}
-            disabled={u.pendingCount === 0}
-            onClick={restoreSync}
+            onClick={() => {
+              /* 点它两件事一起做：把横幅亮回来 + 直接把那一屏打开（不用再点第二下） */
+              if (canRestore) restoreSync()
+              if (ro) setEditMode(true)
+              setSyncOpen(true)
+            }}
           >
-            {tr('params.sync.showDismissed')}
+            {canRestore ? tr('params.sync.showDismissed') : tr('params.sync.view')}
           </button>
         </div>,
       )
