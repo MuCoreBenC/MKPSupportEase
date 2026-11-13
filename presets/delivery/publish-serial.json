@@ -1,8 +1,8 @@
 {
   "serialSchema": 1,
   "catalogId": "support-ease",
-  "serial": 15,
+  "serial": 16,
   "revision": "67bca9eeb51f089d",
-  "catalogHash": "a1b424aa3198184b86a063b4fef7c873f0a2be046366becc815ab5eb5b145450",
-  "commitSha": "2da4536"
+  "catalogHash": "f0d16464abd3b8444f081c06456724a1cdd1eed670542254f6bf55505cf29ab4",
+  "commitSha": "dc39e01"
 }

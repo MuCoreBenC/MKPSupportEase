@@ -1,7 +1,7 @@
 {
   "catalogSchema": 1,
   "revision": "67bca9eeb51f089d",
-  "publishedAt": "2026-11-13T03:50:59Z",
+  "publishedAt": "2026-11-13T03:52:35Z",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -6798,5 +6798,5 @@
   "structureSignature": "2242174c52e8a9b6",
   "minClientVersion": "0.0.6",
   "catalogId": "support-ease",
-  "publishSerial": 15
+  "publishSerial": 16
 }
