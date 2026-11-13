@@ -1934,33 +1934,41 @@ export default function PresetTable({
                                     </span>
                                   </div>
                                 )}
-                                  <div className={s.dRow} data-tip={verdictFacts.sourceSha256 ?? undefined}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.more.shaBased')}
-                                    </span>
-                                    <span className={`${s.dVal} ${s.dMono}`}>
-                                      {shortSha(verdictFacts.sourceSha256) ??
-                                        tr('presets.table.detail.more.none')}
-                                    </span>
-                                  </div>
-                                  <div className={s.dRow} data-tip={verdictFacts.cloudSha256 ?? undefined}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.more.shaCloud')}
-                                    </span>
-                                    <span className={`${s.dVal} ${s.dMono}`}>
-                                      {shortSha(verdictFacts.cloudSha256) ??
-                                        tr('presets.table.detail.more.none')}
-                                    </span>
-                                  </div>
-                                  <div className={s.dRow} data-tip={verdictFacts.downloadSha256 ?? undefined}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.more.shaDownload')}
-                                    </span>
-                                    <span className={`${s.dVal} ${s.dMono}`}>
-                                      {shortSha(verdictFacts.downloadSha256) ??
-                                        tr('presets.table.detail.more.none')}
-                                    </span>
-                                  </div>
+                                {/*
+                                  三行 SHA 都是「事实」：没有来源记录（老文件）就整组不摆 ——
+                                  与上面发布线那一行同一个判据，不拿「无」填满三行。
+                                */}
+                                {verdictFacts != null && (
+                                  <>
+                                    <div className={s.dRow} data-tip={verdictFacts.sourceSha256 ?? undefined}>
+                                      <span className={s.dKey}>
+                                        {tr('presets.table.detail.more.shaBased')}
+                                      </span>
+                                      <span className={`${s.dVal} ${s.dMono}`}>
+                                        {shortSha(verdictFacts.sourceSha256) ??
+                                          tr('presets.table.detail.more.none')}
+                                      </span>
+                                    </div>
+                                    <div className={s.dRow} data-tip={verdictFacts.cloudSha256 ?? undefined}>
+                                      <span className={s.dKey}>
+                                        {tr('presets.table.detail.more.shaCloud')}
+                                      </span>
+                                      <span className={`${s.dVal} ${s.dMono}`}>
+                                        {shortSha(verdictFacts.cloudSha256) ??
+                                          tr('presets.table.detail.more.none')}
+                                      </span>
+                                    </div>
+                                    <div className={s.dRow} data-tip={verdictFacts.downloadSha256 ?? undefined}>
+                                      <span className={s.dKey}>
+                                        {tr('presets.table.detail.more.shaDownload')}
+                                      </span>
+                                      <span className={`${s.dVal} ${s.dMono}`}>
+                                        {shortSha(verdictFacts.downloadSha256) ??
+                                          tr('presets.table.detail.more.none')}
+                                      </span>
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             </details>
                           )}

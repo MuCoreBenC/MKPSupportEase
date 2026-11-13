@@ -462,6 +462,7 @@ const MOCK_FACTS: BasedOnFacts = {
   sourceRelease: null,
   sourceVersionAt: null,
   sourceSha256: null,
+  downloadSha256: null,
   cloudSource: null,
   cloudPublishedAt: null,
   cloudSha256: null,
@@ -473,13 +474,17 @@ const MOCK_FACTS: BasedOnFacts = {
   unverifiedReason: null,
 }
 
+/** 演示里那一版云端原文的摘要（这一档没更新过 ⇒ 下载那一刻与来源那一版同值） */
+const MOCK_DOWNLOAD_SHA = 'a2'.padEnd(64, '0')
+
 /** 演示里的"从 main 下载"那一档：源身份 + 对应版本的发布时间都定格在下载那一刻 */
 const MOCK_DOWNLOAD_FACTS: BasedOnFacts = {
   ...MOCK_FACTS,
   sourceKind: 'download',
   sourceRef: 'github#MuCoreBenC/MKPSupportEase@main',
   sourceVersionAt: '2026-10-15T05:46:00Z',
-  sourceSha256: 'a2'.padEnd(64, '0'),
+  sourceSha256: MOCK_DOWNLOAD_SHA,
+  downloadSha256: MOCK_DOWNLOAD_SHA,
   cloudSource: 'github#MuCoreBenC/MKPSupportEase@main',
   cloudPublishedAt: '2026-10-15T05:46:00Z',
   sourceCatalog: 'support-ease',
