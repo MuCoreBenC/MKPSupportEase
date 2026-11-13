@@ -4,11 +4,13 @@
 //! 校准模式强制禁用。四象限小螺旋复用 tower::generate_mini_spiral_gcode。
 
 use crate::diag::{PostprocError, messages};
-use crate::gcode::{format_float, format_speed, format_z};
+use crate::gcode::{format_e, format_float, format_speed, format_z};
 use crate::ir::Ir;
 
 use crate::postproc::pass1::{LineSink, MM_PER_MINUTE, ProcessStats};
-use crate::postproc::pass1::{calc_glue_z, mount_toolhead, restore_fan_state, unmount_toolhead};
+use crate::postproc::pass1::{
+    calc_glue_z, mount_toolhead, restore_fan_state, swap_retract_amount, unmount_toolhead,
+};
 use crate::postproc::tower;
 
 /// `emitFirstPenRevitalization`（revitalization_block.go:32）。
@@ -33,6 +35,11 @@ pub(crate) fn emit_first_pen_revitalization(
         format_speed(ir_data.machine.travel_speed * MM_PER_MINUTE)
     ));
     sink.push_str(&format!("G1 Z{}", format_z(safe_z)));
+
+    // 1.5 换笔回抽：与涂胶块同一口径 —— 整段 swap 一笔，模板自带 E 就不再发第二笔
+    if let Some(retract) = swap_retract_amount(ir_data) {
+        sink.push_str(&format!("G1 E{} F1500", format_e(retract)));
+    }
 
     // 2. 切换下笔（skipFinalZ=true：Z 已在安全高度）
     mount_toolhead(sink, ir_data, current_layer_height, true);

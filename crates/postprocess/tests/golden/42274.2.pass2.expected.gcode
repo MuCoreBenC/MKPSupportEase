@@ -1787,7 +1787,6 @@ G1 Z6.7
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z6.7
 ;MKP_END swap
@@ -2512,7 +2511,6 @@ G1 Z6.9
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z6.9
 ;MKP_END swap
@@ -3184,7 +3182,6 @@ G1 Z7.1
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z7.1
 ;MKP_END swap
@@ -3972,7 +3969,6 @@ G1 Z7.3
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z7.3
 ;MKP_END swap
@@ -4705,7 +4701,6 @@ G1 Z7.5
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z7.5
 ;MKP_END swap
@@ -5677,7 +5672,6 @@ G1 Z7.7
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z7.7
 ;MKP_END swap
@@ -6736,7 +6730,6 @@ G1 Z7.9
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z7.9
 ;MKP_END swap
@@ -7785,7 +7778,6 @@ G1 Z8.1
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z8.1
 ;MKP_END swap
@@ -8821,7 +8813,6 @@ G1 Z8.3
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z8.3
 ;MKP_END swap
@@ -9783,7 +9774,6 @@ G1 Z8.5
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z8.5
 ;MKP_END swap

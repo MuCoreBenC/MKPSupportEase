@@ -26,7 +26,7 @@ mod validity;
 
 pub(crate) use glue_block::{
     calc_glue_z, custom_unmount_gcode_has_extrude, mount_toolhead, restore_fan_state,
-    unmount_toolhead,
+    swap_retract_amount, unmount_toolhead,
 };
 
 use std::collections::HashMap;
