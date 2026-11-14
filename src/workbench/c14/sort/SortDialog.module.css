@@ -1,0 +1,89 @@
+/* 排序框的页眉工具、页脚与按钮 */
+
+.headTools {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--text-2);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+}
+
+.iconBtn:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--hover-1);
+  border-color: var(--line);
+}
+
+.iconBtn:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.linkBtn {
+  padding: 4px 6px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+}
+
+.linkBtn:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--hover-1);
+}
+
+.linkBtn:disabled {
+  color: var(--text-3);
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* 页脚说明只占一行：宁可截断，也不许把按钮挤成「取 / 消」两行 */
+.footNote {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-right: 8px;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn {
+  flex: none;
+  padding: 5px 12px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  white-space: nowrap;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.btn:hover {
+  border-color: var(--line-strong);
+}
+
+.btnPrimary {
+  color: var(--surface-solid);
+  background: var(--wb-primary);
+  border-color: var(--wb-primary);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.55;
+}

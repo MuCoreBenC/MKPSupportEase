@@ -1,0 +1,193 @@
+/*
+ * 可拖次序列表。行高由 JS 写进 `--sort-row-h`：落点判定、让位距离、
+ * 占位块高度都读它，改一处就一起变。
+ */
+
+.list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  /* 不留行间缝：绿色是通长色带，被 2px 缝切断就成了一块块绿方块 */
+  gap: 0;
+  max-height: 56vh;
+  padding: 0;
+  overflow: auto;
+}
+
+/*
+ * 落点占位是一整格背景色，不是一条横线。其余行已经 translateY 让位，
+ * 让位空出来的是 over × 行高 那一格，用一块实底绿铺满它，松手行吸附进去。
+ */
+.slot {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 0;
+  height: var(--sort-row-h, 30px);
+  /* 比「当前项」的 20% 深、比「浮起行」的 32% 浅：三档绿一眼分得开 */
+  background: color-mix(in srgb, var(--accent) 26%, var(--surface-solid));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 70%, transparent);
+  border-radius: var(--r-sm);
+  pointer-events: none;
+}
+
+.row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  height: var(--sort-row-h, 30px);
+  padding: 0 6px 0 8px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-solid);
+  /* 让位要平滑；被拖的那一行在下面单独关掉，否则跟手就有拖影 */
+  transition: transform 140ms ease, background-color 140ms ease;
+  /* 整行可拖：触屏 / 触控板别把这一下抢去做滚动，也别顺手选中文字 */
+  touch-action: none;
+  user-select: none;
+  cursor: grab;
+}
+
+.row:hover {
+  background: var(--hover-1);
+}
+
+/* 当前项：整行通长色带，不留竖轨、不留圆角块 */
+.row[data-self='true'] {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface-solid));
+}
+
+/*
+ * 拖起来：实底、跟着指针走（transform 由 JS 直接写）。关掉 transition
+ * 是不滞后的关键 —— 一有过渡，行就永远慢指针半拍。
+ */
+.row[data-drag='true'] {
+  z-index: 5;
+  background: color-mix(in srgb, var(--accent) 32%, var(--surface-solid));
+  box-shadow: 0 6px 18px rgb(0 0 0 / 22%), 0 0 0 1px var(--accent);
+  opacity: 1;
+  transition: none;
+  /* 单独一层合成，指针每动一像素都不必等重排 */
+  will-change: transform;
+  cursor: grabbing;
+}
+
+/*
+ * 落地动画：松手之后这一行从手指位置滑到落点。滑到位之前不重排 order，
+ * 动画结束时行正好压在占位块上，那一刻清 transform + 重排是同一份坐标。
+ */
+.row[data-landing='true'] {
+  z-index: 5;
+  background: color-mix(in srgb, var(--accent) 32%, var(--surface-solid));
+  box-shadow: 0 6px 18px rgb(0 0 0 / 22%), 0 0 0 1px var(--accent);
+  transition: transform 160ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: transform;
+}
+
+/* 重排那一帧：整列都不许有 transform 过渡，过渡只在下一帧恢复 */
+.list[data-snap='true'] .row {
+  transition: none;
+}
+
+/* 位次：平时就是一个数字，点进去才给一道细下划线，回车 / 失焦即认 */
+.posPreview {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.pos {
+  flex: none;
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  /* 位次仍要能选中 / 改数字：整行禁选中在这里放开 */
+  user-select: text;
+  cursor: text;
+}
+
+.pos:hover,
+.pos:focus {
+  color: var(--text-1);
+  background: transparent;
+  border: 0;
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.by {
+  flex: none;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.arrow {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: var(--text-3);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+}
+
+.arrow:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--hover-2);
+}
+
+.arrow:disabled {
+  cursor: default;
+  opacity: 0.28;
+}
+
+/* 拖拽手柄：平时淡淡的，悬停整行才显形；整行接管拖拽 */
+.handle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 22px;
+  color: var(--line-strong);
+  pointer-events: none;
+}
+
+.row:hover .handle {
+  color: var(--text-3);
+}
+
+.handle:active {
+  cursor: grabbing;
+}
