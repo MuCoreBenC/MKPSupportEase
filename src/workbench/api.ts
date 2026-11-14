@@ -427,6 +427,17 @@ export interface GroupMembersEdit {
   sectionId: string
   /** 该组最终成员 key 序列；顺序值沿用这一组原有的槽位 */
   keys: string[]
+  /** 这一笔顺手新建的分组（幂等） */
+  newSections?: NewSection[]
+  /** 分组在自己页签里挪几格 */
+  moves?: SectionMoveStep[]
+}
+
+/** `registry::SectionMoveStep` —— 分组在自己页签里挪几格 */
+export interface SectionMoveStep {
+  sectionId: string
+  /** 正 = 往后，负 = 往前 */
+  steps: number
 }
 
 /* ---------- 矩阵 ---------- */

@@ -5,7 +5,13 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { removeMember, sameKeys, toggleMember, usableSections } from './useMembersDraft'
+import {
+  applyMoves,
+  removeMember,
+  sameKeys,
+  toggleMember,
+  usableSections,
+} from './useMembersDraft'
 
 describe('成员草稿', () => {
   it('加入与取消落在同一份序列，且不改原数组', () => {
@@ -42,6 +48,21 @@ describe('成员草稿', () => {
     expect(keys).toEqual(['b', 'c', 'a'])
     expect(removeMember(keys, 'c')).toEqual(['b', 'a'])
     expect(sameKeys(initial, ['a', 'b'])).toBe(true)
+  })
+
+  it('换位净位移摊回显示顺序，到头就停', () => {
+    const rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
+    expect(applyMoves(rows, [{ sectionId: 'c', steps: -2 }]).map((r) => r.id)).toEqual([
+      'c', 'a', 'b',
+    ])
+    expect(applyMoves(rows, [{ sectionId: 'a', steps: 9 }]).map((r) => r.id)).toEqual([
+      'b', 'c', 'a',
+    ])
+    expect(applyMoves(rows, [{ sectionId: 'a', steps: -1 }]).map((r) => r.id)).toEqual([
+      'a', 'b', 'c',
+    ])
+    expect(applyMoves(rows, []).map((r) => r.id)).toEqual(['a', 'b', 'c'])
+    expect(rows.map((r) => r.id)).toEqual(['a', 'b', 'c'])
   })
 
   it('组件卡与整块卡不进候选', () => {

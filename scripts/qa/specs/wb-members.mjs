@@ -83,10 +83,37 @@ export default async function (t, page, url) {
   const dlg3 = await openTabMembers(page)
   t.check('页签编辑框开着', await dlg3.isVisible())
   t.check('页签层有归到这一组', (await dlg3.getByRole('radiogroup', { name: '归到这一组' }).count()) > 0)
-  t.check('目标分组至少一组', (await dlg3.getByRole('radio').count()) > 0)
+  const radios = dlg3.getByRole('radio')
+  const radios0 = await radios.allInnerTexts()
+  t.check('目标分组至少一组', radios0.length > 0)
   t.check('没改动时确认是灰的', await dlg3.getByRole('button', { name: '确认', exact: true }).isDisabled())
-  await t.shot(page, '页签成员框 · 两列')
-  await dlg3.getByRole('button', { name: '取消', exact: true }).click()
+
+  /* ⑦ 新增分组：名字回车进框内草稿，确认前不落盘 */
+  await dlg3.getByRole('button', { name: '新增分组' }).click()
+  await dlg3.getByRole('textbox', { name: '新分组名字' }).fill('临时分组')
+  await dlg3.getByRole('textbox', { name: '新分组名字' }).press('Enter')
+  await page.waitForTimeout(120)
+  t.check('新增分组进了框', (await radios.count()) === radios0.length + 1)
+  t.check('新组标着待新建', (await dlg3.getByText('待新建').count()) === 1)
+
+  /* ⑧ 改变位置：新组上移一格 */
+  await dlg3.getByRole('button', { name: '临时分组 上移' }).click()
+  await page.waitForTimeout(120)
+  const radios1 = await radios.allInnerTexts()
+  t.check('上移真的换了位', radios1[radios1.length - 2] === '临时分组', radios1.join('/'))
+  t.check('有改动时确认可点', !(await dlg3.getByRole('button', { name: '确认', exact: true }).isDisabled()))
+  await t.shot(page, '页签成员框 · 新增与换位')
+  await dlg3.getByRole('button', { name: '确认', exact: true }).click()
+  await page.waitForTimeout(500)
+  t.check('确认后页签框关掉', (await dlg3.count()) === 0)
+
+  /* ⑨ 重开：新组与位置都在，确认只是一笔应用 */
+  const dlg4 = await openTabMembers(page)
+  const radios2 = await dlg4.getByRole('radio').allInnerTexts()
+  t.check('重开新组还在', radios2.includes('临时分组'))
+  t.check('重开位置没变', radios2[radios2.length - 2] === '临时分组', radios2.join('/'))
+  await t.shot(page, '页签成员框 · 重开')
+  await dlg4.getByRole('button', { name: '取消', exact: true }).click()
   await page.waitForTimeout(150)
-  t.check('取消后页签框关掉', (await dlg3.count()) === 0)
+  t.check('取消后页签框关掉', (await dlg4.count()) === 0)
 }

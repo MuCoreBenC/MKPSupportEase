@@ -616,6 +616,14 @@ pub enum GroupScope {
     Tab,
 }
 
+/// 一次分组换位：正 = 往后挪，负 = 往前挪（格数由界面给，后端一格一格走）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SectionMoveStep {
+    pub section_id: String,
+    pub steps: i32,
+}
+
 /// 一次「成员编辑」的载荷 —— `wb_edit_group`。
 ///
 /// 只交**最终成员序列**和一个名字：改名、归类、移出由后端一次算差集写完。
@@ -634,6 +642,12 @@ pub struct GroupMembersEdit {
     pub section_id: String,
     /// 该组的最终成员 key 序列；顺序值沿用这一组原有的槽位
     pub keys: Vec<String>,
+    /// 这一笔顺手新建的分组（幂等：撤销 / 重放时按「确保它在」处理）
+    #[serde(default)]
+    pub new_sections: Vec<NewSection>,
+    /// 分组在自己页签里挪几格
+    #[serde(default)]
+    pub moves: Vec<SectionMoveStep>,
 }
 
 /// 一次「参数定义」编辑的载荷 —— `wb_set_param_meta` 整包提交（模态框一次
@@ -3026,6 +3040,10 @@ impl ParamRegistry {
     /// 整笔只写一次盘、只留一条撤销；搬运复用 `set_param_meta` 那一层的两半同步，
     /// 不重抄定义载荷。
     pub fn set_group_members(&mut self, edit: GroupMembersEdit) -> Result<(), AppError> {
+        /* 新建分组先落地：目标 sectionId 可能正指向其中一个 */
+        for fresh in &edit.new_sections {
+            self.ensure_section(&fresh.tab_id, &fresh.id, &fresh.label)?;
+        }
         let target = edit.section_id.trim();
         let id = edit.id.trim();
 
@@ -3179,6 +3197,28 @@ impl ParamRegistry {
         }
         if let Some(fid) = fallback.as_deref() {
             self.layout_reorder_section(fid)?;
+        }
+
+        /* 分组换位：位置是数据，交给 set_section_meta 那份唯一实现，一次一格 */
+        for step in &edit.moves {
+            if step.steps == 0 {
+                continue;
+            }
+            let dir = if step.steps > 0 {
+                SectionMove::Down
+            } else {
+                SectionMove::Up
+            };
+            for _ in 0..step.steps.unsigned_abs().min(64) {
+                self.set_section_meta(
+                    &step.section_id,
+                    SectionMetaEdit {
+                        label: None,
+                        move_dir: Some(dir),
+                        new_section: None,
+                    },
+                )?;
+            }
         }
         Ok(())
     }
@@ -5481,6 +5521,8 @@ order = 2.0
             label: Some("回抽与落笔".to_owned()),
             section_id: target.clone(),
             keys: want.clone(),
+            new_sections: Vec::new(),
+            moves: Vec::new(),
         })
         .expect("一次写得完");
         r.write_back().expect("落盘");
@@ -5549,6 +5591,8 @@ order = 2.0
                 label: None,
                 section_id: card,
                 keys: Vec::new(),
+                new_sections: Vec::new(),
+                moves: Vec::new(),
             });
             assert!(e.is_err(), "组件卡不能当归类目标");
         }
@@ -5581,6 +5625,8 @@ order = 2.0
             label: Some("新页签名".to_owned()),
             section_id: section,
             keys,
+            new_sections: Vec::new(),
+            moves: Vec::new(),
         })
         .expect("页签改名写得完");
         r.write_back().expect("落盘");
@@ -5594,6 +5640,72 @@ order = 2.0
                 .label,
             "新页签名"
         );
+    }
+
+    /// 新建分组与换位跟成员编辑同一笔：重读后新组在、位置也变了。
+    #[test]
+    fn editing_group_members_creates_and_moves_sections() {
+        let Some((tmp, mut r)) = copy_of_real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let tab_id = r
+            .tabs()
+            .first()
+            .map(|t| t.id.clone())
+            .expect("至少一个页签");
+        let section = r
+            .layout()
+            .iter()
+            .find(|t| t.id == tab_id)
+            .and_then(|t| {
+                t.sections
+                    .iter()
+                    .find(|s| s.component.is_none() && s.layout.as_deref() != Some("component"))
+            })
+            .map(|s| s.id.clone())
+            .expect("这个页签下得有普通组");
+        let keys: Vec<String> = r
+            .params()
+            .iter()
+            .filter(|p| p.layout.section_id == section)
+            .map(|p| p.key.clone())
+            .collect();
+        let fresh_id = "custom_qa_1".to_owned();
+        r.set_group_members(GroupMembersEdit {
+            scope: GroupScope::Tab,
+            id: tab_id.clone(),
+            label: None,
+            section_id: section,
+            keys,
+            new_sections: vec![NewSection {
+                id: fresh_id.clone(),
+                tab_id: tab_id.clone(),
+                label: "新分组".to_owned(),
+            }],
+            moves: vec![SectionMoveStep {
+                section_id: fresh_id,
+                steps: -1,
+            }],
+        })
+        .expect("新建与换位写得完");
+        r.write_back().expect("落盘");
+
+        let again = ParamRegistry::load_from(tmp.path()).expect("改完还得读得通");
+        let labels: Vec<String> = again
+            .tabs()
+            .iter()
+            .find(|t| t.id == tab_id)
+            .expect("页签还在")
+            .sections
+            .iter()
+            .map(|s| s.label.clone())
+            .collect();
+        let at = labels
+            .iter()
+            .position(|l| l == "新分组")
+            .expect("新分组要在注册表里");
+        assert_eq!(at, labels.len() - 2, "上移一格后该在倒数第二位");
     }
 
     /// **整组重排：一次写盘，落盘后 items 与 order 同向。**

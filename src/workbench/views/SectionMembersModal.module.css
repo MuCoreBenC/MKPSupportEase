@@ -175,11 +175,92 @@
   white-space: nowrap;
 }
 
+.groupBar {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.groupBarHead {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.addBtn {
+  padding: 2px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.addBtn:hover {
+  color: var(--text-1);
+  border-color: var(--line-strong);
+}
+
+.addInput {
+  flex: none;
+  height: 24px;
+  padding: 0 6px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-sunken-solid);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  outline: none;
+}
+
 .targets {
   display: flex;
   flex: none;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+.targetItem {
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.targetItem .target {
+  border: 0;
+  border-radius: 0;
+}
+
+.arrow {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 22px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--line);
+}
+
+.arrow:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--hover-1);
+}
+
+.arrow:disabled {
+  cursor: default;
+  opacity: 0.28;
 }
 
 .target {

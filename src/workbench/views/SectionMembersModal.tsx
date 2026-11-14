@@ -13,7 +13,8 @@ import type { GroupMembersEdit, ParamView, SectionTarget } from '../api'
 import { isAppError } from '../api'
 import ModalC14 from '../c14/ModalC14'
 import { toasts } from '../c14/toast'
-import { usableSections, useMembersDraft } from './useMembersDraft'
+import { nextSectionId } from './sectionId'
+import { applyMoves, usableSections, useMembersDraft } from './useMembersDraft'
 import s from './SectionMembersModal.module.css'
 
 /** 与后端 `ensure_section` 的 24 字上限同一把尺子 */
@@ -73,6 +74,8 @@ export default function SectionMembersModal({
   const draft = useMembersDraft({ label, keys: initialKeys, targetSection: defaultTarget })
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [newName, setNewName] = useState('')
 
   const groups = useMemo(() => {
     const usableIds = new Set(usable.map((x) => x.id))
@@ -120,6 +123,37 @@ export default function SectionMembersModal({
     (n, g) => n + g.blocks.reduce((m, b) => m + b.params.length, 0),
     0,
   )
+  /* 分组条管的是目标组所在那个页签；分组层也能改兄弟组的位置、顺手建新组 */
+  const tabId = scope === 'tab' ? id : (targets[0]?.tabId ?? '')
+  const rowsOf = (sectionId: string): string[] =>
+    params
+      .filter((p) => p.sectionId === sectionId)
+      .sort(byOrder)
+      .map((p) => p.key)
+  const baseRows = useMemo(
+    () =>
+      sections
+        .filter((x) => x.tabId === tabId && x.component === null && !x.standalone)
+        .map((x) => ({ id: x.id, label: x.label, isNew: false })),
+    [sections, tabId],
+  )
+  /* 待新建的排在末尾，换位后的显示顺序与后端一格一格走完的结果同一份。
+     确认落盘那一帧注册表里已经有它了，别再当「待新建」画第二遍 */
+  const groupRows = useMemo(() => {
+    const known = new Set(sections.map((x) => x.id))
+    const fresh = draft.newSections
+      .filter((ns) => !known.has(ns.id))
+      .map((ns) => ({ id: ns.id, label: ns.label, isNew: true }))
+    return applyMoves([...baseRows, ...fresh], draft.moves)
+  }, [baseRows, draft.newSections, draft.moves, sections])
+  const submitAdd = () => {
+    const name = newName.trim()
+    setAdding(false)
+    setNewName('')
+    if (name === '' || tabId === '') return
+    const used = [...sections, ...draft.newSections].map((x) => ({ id: x.id }))
+    draft.addSection({ id: nextSectionId(used), tabId, label: name })
+  }
   const movedOut = draft.initialKeys.filter((k) => !draft.has(k))
   const name = draft.label.trim()
   const canConfirm = draft.dirty && name !== '' && draft.targetSection !== '' && !busy
@@ -134,6 +168,8 @@ export default function SectionMembersModal({
         label: name !== label ? name : null,
         sectionId: draft.targetSection,
         keys: draft.keys,
+        newSections: draft.newSections,
+        moves: draft.moves.filter((m) => m.steps !== 0),
       })
       onClose()
     } catch (e) {
@@ -240,31 +276,81 @@ export default function SectionMembersModal({
         </div>
 
         <div className={s.right}>
-          {scope === 'tab' && (
+          <div className={s.groupBar}>
+            <div className={s.groupBarHead}>
+              <span>分组</span>
+              <button
+                type="button"
+                className={s.addBtn}
+                aria-label="新增分组"
+                onClick={() => {
+                  setAdding(true)
+                  setNewName('')
+                }}
+              >
+                ＋ 新增分组
+              </button>
+            </div>
+            {adding && (
+              <input
+                className={s.addInput}
+                aria-label="新分组名字"
+                value={newName}
+                maxLength={LABEL_MAX}
+                autoFocus
+                placeholder="分组名字"
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') submitAdd()
+                  else if (e.key === 'Escape') {
+                    setAdding(false)
+                    setNewName('')
+                  }
+                }}
+                onBlur={() => {
+                  setAdding(false)
+                  setNewName('')
+                }}
+              />
+            )}
             <div className={s.targets} role="radiogroup" aria-label="归到这一组">
-              {targets.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={draft.targetSection === t.id}
-                  className={`${s.target} ${draft.targetSection === t.id ? s.targetOn : ''}`}
-                  onClick={() => {
-                    if (t.id === draft.targetSection) return
-                    draft.retarget(
-                      t.id,
-                      params
-                        .filter((p) => p.sectionId === t.id)
-                        .sort(byOrder)
-                        .map((p) => p.key),
-                    )
-                  }}
-                >
-                  {t.label}
-                </button>
+              {groupRows.map((row, i) => (
+                <div key={row.id} data-section={row.id} className={s.targetItem}>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={draft.targetSection === row.id}
+                    className={`${s.target} ${draft.targetSection === row.id ? s.targetOn : ''}`}
+                    onClick={() => {
+                      if (row.id === draft.targetSection) return
+                      draft.retarget(row.id, rowsOf(row.id))
+                    }}
+                  >
+                    {row.label}
+                  </button>
+                  {row.isNew && <span className={s.tag}>待新建</span>}
+                  <button
+                    type="button"
+                    className={s.arrow}
+                    aria-label={`${row.label} 上移`}
+                    disabled={i === 0}
+                    onClick={() => draft.moveSection(row.id, -1)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className={s.arrow}
+                    aria-label={`${row.label} 下移`}
+                    disabled={i === groupRows.length - 1}
+                    onClick={() => draft.moveSection(row.id, 1)}
+                  >
+                    ↓
+                  </button>
+                </div>
               ))}
             </div>
-          )}
+          </div>
           <div className={s.rightHead}>这一组 · {draft.keys.length}</div>
           <div className={s.scroll}>
             {draft.keys.map((k) => {

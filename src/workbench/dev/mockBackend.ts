@@ -2074,7 +2074,20 @@ export function installMockBackend() {
           label?: string | null
           sectionId?: string
           keys?: string[]
+          newSections?: { id: string; tabId: string; label: string }[]
+          moves?: { sectionId: string; steps: number }[]
         } | undefined
+        /* 新建分组先落地：目标 sectionId 可能正指向其中一个 */
+        for (const ns of e?.newSections ?? []) {
+          const t = TABS.find((x) => x.id === ns.tabId)
+          if (t === undefined) {
+            return Promise.reject({ code: 'INVALID', message: `演示桩里没有页签 ${ns.tabId}`, traceId: 'mock' })
+          }
+          if (!t.sections.some((s) => s.id === ns.id)) {
+            t.sections.push({ id: ns.id, label: ns.label, order: t.sections.length + 1 })
+            SECTION_LABEL.set(ns.id, ns.label)
+          }
+        }
         const sectionId = e?.sectionId ?? ''
         const keys = e?.keys ?? []
         const tab = TABS.find((t) => t.sections.some((s) => s.id === sectionId))
@@ -2131,6 +2144,22 @@ export function installMockBackend() {
           const p = PARAMS.find((x) => x.key === k)
           if (p !== undefined) p.order = i + 1
         })
+        /* 分组换位：一次一格，与真机 set_section_meta 的方向语义同一套 */
+        for (const m of e?.moves ?? []) {
+          const t = TABS.find((x) => x.sections.some((s) => s.id === m.sectionId))
+          if (t === undefined) continue
+          let at = t.sections.findIndex((s) => s.id === m.sectionId)
+          const n = Math.min(Math.abs(m.steps), t.sections.length)
+          for (let k = 0; k < n; k += 1) {
+            const to = at + Math.sign(m.steps)
+            if (to < 0 || to >= t.sections.length) break
+            const [moved] = t.sections.splice(at, 1)
+            if (moved === undefined) break
+            t.sections.splice(to, 0, moved)
+            at = to
+          }
+          t.sections.forEach((sec, i) => { sec.order = i + 1 })
+        }
         return Promise.resolve(buildRegistry())
       }
       case 'wb_set_section_order': {
