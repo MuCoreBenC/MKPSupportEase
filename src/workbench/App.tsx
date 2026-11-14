@@ -36,6 +36,8 @@ import { FieldLayer } from './components/field'
 import PageSkeleton from './components/Skeleton'
 import { modalShortcutGate } from './components/modal'
 import { editQueue, settleAll } from './editQueue'
+/* 撤销的作用域：当前这一屏认哪几份（2026-11-14，见那个文件的头注） */
+import { scopeOf } from './scopeState'
 import { useDensity } from './useDensity'
 import {
   isAppError,
@@ -302,6 +304,17 @@ export function WorkbenchApp() {
   const [busy, setBusy] = useState(false)
 
   const [page, setPage] = useState<NavId>('machines')
+  /*
+   * **切页先让焦点离开输入框**（2026-11-14）。
+   *
+   * 机型那几格是 `onBlur` 才提交的：切页时焦点留在框里，那一笔就悬着 ——
+   * 到了新页面按 Cmd+Z，撤的是更早的一笔（作者实测：「点外面再撤销，多撤了几条」）。
+   * 点按钮切页浏览器会自己 blur，但 `goto` / 快捷键切页不会，所以这里统一补一下。
+   */
+  useEffect(() => {
+    const el = document.activeElement
+    if (el instanceof HTMLElement) el.blur()
+  }, [page])
   /**
    * 只认**当前页**那一槽：非激活页的元素被冻结、不会重渲染 ⇒ 它没机会注销自己，
    * 所以靠"页对不上就当没有"来失效（见 `pageActions.ts` 头注）。
@@ -667,7 +680,24 @@ export function WorkbenchApp() {
    */
   /* 两个都返回 `boolean`（真撤成了没有）：未保存改动框里的「撤销这一笔」要据此
      决定要不要重取它自己那份 diff —— 没撤成还重取一次，等于把同一份账读两遍。 */
+  /*
+   * **撤销在途锁**（2026-11-14）。
+   *
+   * 作者：「它有延迟的话，用户多点几次就会多触发几次」。一条撤销要排空队列 → 回后端
+   * 写影子树 → 重读整本 → 让页面重取，链条几百毫秒起；这期间再按一次 Cmd+Z，
+   * 旧代码会**再发一条**，于是连点三次真的撤三条。锁住之后连点只算第一次。
+   */
+  const txnFlight = useRef(false)
+  /** 撤销 toast 上那颗「重做」要调后面才定义的 `redo` —— ref 绕开声明顺序 */
+  const redoRef = useRef<(() => Promise<boolean>) | null>(null)
+
+  /** 把归属 token 说成人话：`A1:FAST261111` → `A1/FAST261111`（与界面别处一致） */
+  const ownersText = (owners: string[]): string =>
+    owners.length === 0 ? '别处' : owners.map((o) => o.replace(':', '/')).join('、')
+
   const undo = useCallback(async (): Promise<boolean> => {
+    if (txnFlight.current) return false
+    txnFlight.current = true
     /* 飞在空中的值写先落完 —— 否则撤销撤的是"落完之前的那一半" */
     await settleAll()
     /* ★ 参数台 v2 那一条队列也得先排空（2026-11-03）。它不走 `editQueue`：
@@ -678,8 +708,14 @@ export function WorkbenchApp() {
     editQueue.clear()
     setBusy(true)
     try {
-      const st = await wb.txnUndo()
-      applyTxn(st)
+      /* 作用域（2026-11-14）：栈顶不是当前这一份 ⇒ 后端一格不动、回 `refused` */
+      const out = await wb.txnUndo(scopeOf())
+      applyTxn(out.state)
+      if (out.refused !== null) {
+        toasts.push(`没撤：那一笔是 ${ownersText(out.refused.owners)} 的改动`)
+        return false
+      }
+      if (out.done === null) return false
       /* 后端那一笔被撤掉了，参数台 v2 手里的草稿就不再是真话 —— 让它丢掉 */
       sheetWrites.drop()
       await refreshBook()
@@ -694,37 +730,52 @@ export function WorkbenchApp() {
        */
       setTick((n) => n + 1)
       refreshReport()
+      /* 右下角回执（2026-11-14）：撤了哪一条 + 一颗「重做」。连点时它也让人看清点了几次 */
+      toasts.push(`已撤销：${out.done.label}`, { label: '重做', run: () => void redoRef.current?.() })
       return true
     } catch (e) {
       fail(e)
       return false
     } finally {
       setBusy(false)
+      txnFlight.current = false
     }
   }, [applyTxn, fail, refreshBook, refreshReport])
 
   const redo = useCallback(async (): Promise<boolean> => {
+    if (txnFlight.current) return false
+    txnFlight.current = true
     await settleAll()
     /* 同 `undo`：队列里没落的写先发完，否则它们会落在重做之后 */
     await sheetWrites.settle().catch(() => undefined)
     editQueue.clear()
     setBusy(true)
     try {
-      const st = await wb.txnRedo()
-      applyTxn(st)
+      const out = await wb.txnRedo(scopeOf())
+      applyTxn(out.state)
+      if (out.refused !== null) {
+        toasts.push(`没重做：那一笔是 ${ownersText(out.refused.owners)} 的改动`)
+        return false
+      }
+      if (out.done === null) return false
       sheetWrites.drop()
       await refreshBook()
       /* 同 `undo`：重做也改了影子树，参数台那一屏必须重取 desk */
       setTick((n) => n + 1)
       refreshReport()
+      toasts.push(`已重做：${out.done.label}`)
       return true
     } catch (e) {
       fail(e)
       return false
     } finally {
       setBusy(false)
+      txnFlight.current = false
     }
   }, [applyTxn, fail, refreshBook, refreshReport])
+
+  /* 上面那条 toast 里的「重做」从这一刻起能点到真函数 */
+  redoRef.current = redo
 
   const save = useCallback(async (): Promise<boolean> => {
     if (busy) return false
@@ -820,6 +871,21 @@ export function WorkbenchApp() {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return
       if (modalShortcutGate.blocking()) return
+      /*
+       * **焦点在可编辑元素里 ⇒ 这条快捷键不归外壳**（2026-11-14）。
+       *
+       * 作者在「描述」框里按 Cmd+Z：「好像没有生效」，点外面再撤却连撤了几条 ——
+       * 因为这里无条件 `preventDefault`：文字撤不了（原生被掐掉），撤掉的反而是
+       * **上一条已提交的改动**（往往还是别的字段 / 别的版本）。
+       *
+       * 现在的口径：框内归框（浏览器原生文字撤销），失焦之后才归应用。
+       * 光标在框里时 `Cmd+S` 也不拦 —— 那是页面自己的事（`pageActions`）。
+       */
+      const el = e.target as HTMLElement | null
+      const editable =
+        el !== null &&
+        (el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')
+      if (editable) return
       const k = e.key.toLowerCase()
       if (k === 'z' && !e.shiftKey) {
         e.preventDefault()
@@ -838,6 +904,7 @@ export function WorkbenchApp() {
       }
     }
     window.addEventListener('keydown', onKey)
+
     return () => window.removeEventListener('keydown', onKey)
   }, [undo, redo, save, page])
 

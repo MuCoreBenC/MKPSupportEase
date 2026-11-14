@@ -31,6 +31,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
+import { useScope } from '../scopeState'
 import type {
   AssetList,
   BundleList,
@@ -102,6 +103,8 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
   const [machines, setMachines] = useState<MachineList | null>(null)
   const [assets, setAssets] = useState<AssetList | null>(null)
   const [sel, setSel] = useState<string | null>(initialSel ?? null)
+  /* 撤销作用域：套餐那一页认 bundles.toml（2026-11-14） */
+  useScope(['bundles'])
   const [filter, setFilter] = useState('')
   const [assignPicks, setAssignPicks] = useState<string[]>([])
   /** 「选择版本」的多选框（作者 2026-10-03：多选；不限机型） */

@@ -2329,21 +2329,15 @@ impl ParamRegistry {
         } else {
             t["machineFilter"] = toml_edit::value(machine_filter.join(","));
         }
-        // 搬组 / 调顺序：参数自己的 `[params.layout]` 跟着走（布局文件那一半在下面）
+        // 搬组 / 调顺序：参数自己的 `layout` 跟着走（布局文件那一半在下面）
         if let Some(order) = new_order {
-            let lt = t
-                .get_mut("layout")
-                .and_then(toml_edit::Item::as_table_mut)
-                .ok_or_else(|| {
-                    AppError::corrupted(messages::text(
-                        "ui.presetdata.registry.331",
-                        &[("key", key)],
-                    ))
-                })?;
-            if let Some(target) = &target_section {
-                lt["sectionId"] = toml_edit::value(target.as_str());
-            }
-            lt["order"] = toml_edit::value(order);
+            let lt = t.get_mut("layout").ok_or_else(|| {
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.registry.331",
+                    &[("key", key)],
+                ))
+            })?;
+            set_layout_fields(lt, order, target_section.as_deref(), key)?;
         }
 
         /* ---------- 布局文件：把条目从旧组搬到新组 ---------- */
@@ -2894,6 +2888,105 @@ impl ParamRegistry {
         }
 
         Ok(())
+    }
+
+    /// 把一个分组的参数**整组重排**成 `keys` 给的次序（排序模态框的落点）。
+    ///
+    /// # 为什么不是「逐条调 `set_param_meta`」
+    ///
+    /// 那是**改一条定义**的入口：载荷是整包（label / desc / 六册译文 / 选项 / 机型…），
+    /// 拿它去挪别人的位次要先把别人的定义原样抄一遍 —— 抄漏一格就是静默改坏一条参数。
+    /// 而且 N 条就是 N 次写盘、N 条撤销。这里只动 `layout` 里那个 `order`，一次写盘。
+    ///
+    /// # 顺序值从哪来
+    ///
+    /// **沿用这一组原有的那几个数**（升序槽位），只是重新分配给人：
+    /// 排序不该顺手造出一堆新浮点（中点算法反复取会慢慢漂），挪动之后 diff 也只有
+    /// 真正换位的那几行。旧数据里若有并列的 `order`（手写进去的），排序判据不确定，
+    /// 这时整段重排成 `1..N`。
+    pub fn set_section_order(&mut self, section_id: &str, keys: &[String]) -> Result<(), AppError> {
+        let section = section_id.trim();
+        let current: Vec<(usize, String, f64)> = self
+            .params
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.layout.section_id == section)
+            .map(|(at, p)| (at, p.key.clone(), p.layout.order))
+            .collect();
+        if current.is_empty() {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.358",
+                &[("section", section)],
+            )));
+        }
+
+        /* 集合必须**完全相等**：少一条会把它的位次让给别人、多一条没有落点。
+        缺字段就报错，不兜底 —— 详情里把三种差异都说清楚。 */
+        let here: BTreeSet<&str> = current.iter().map(|(_, k, _)| k.as_str()).collect();
+        let mut seen: BTreeSet<&str> = BTreeSet::new();
+        let mut dup: Vec<&str> = Vec::new();
+        for k in keys {
+            if !seen.insert(k.as_str()) {
+                dup.push(k.as_str());
+            }
+        }
+        let want: BTreeSet<&str> = keys.iter().map(String::as_str).collect();
+        let missing: Vec<&str> = here.difference(&want).copied().collect();
+        let extra: Vec<&str> = want.difference(&here).copied().collect();
+        if !dup.is_empty() || !missing.is_empty() || !extra.is_empty() {
+            let mut why: Vec<String> = Vec::new();
+            if !dup.is_empty() {
+                why.push(format!("重复：{}", dup.join(", ")));
+            }
+            if !missing.is_empty() {
+                why.push(format!("缺：{}", missing.join(", ")));
+            }
+            if !extra.is_empty() {
+                why.push(format!("多：{}", extra.join(", ")));
+            }
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.359",
+                &[("section", section)],
+            ))
+            .with_detail(why.join("；")));
+        }
+
+        let mut slots: Vec<f64> = current.iter().map(|(_, _, o)| *o).collect();
+        slots.sort_by(f64::total_cmp);
+        let distinct = slots.windows(2).all(|w| w[0] < w[1]);
+        if !distinct {
+            slots = (1..=keys.len()).map(|i| i as f64).collect();
+        }
+
+        let mut changed: Vec<(usize, String, f64)> = Vec::new();
+        for (i, key) in keys.iter().enumerate() {
+            let Some((at, _, old)) = current.iter().find(|(_, k, _)| k == key) else {
+                continue;
+            };
+            if slots[i] != *old {
+                changed.push((*at, key.clone(), slots[i]));
+            }
+        }
+        if changed.is_empty() {
+            return Ok(());
+        }
+
+        for (at, key, order) in &changed {
+            let t = self.param_table_mut(*at, key)?;
+            let lt = t.get_mut("layout").ok_or_else(|| {
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.registry.331",
+                    &[("key", key)],
+                ))
+            })?;
+            set_layout_fields(lt, *order, None, key)?;
+        }
+        for (at, _, order) in &changed {
+            self.params[*at].layout.order = *order;
+        }
+
+        /* items[] 跟着 order 走 —— 漏了它，下一次加载 `check_consistency` ③ 就起不来 */
+        self.layout_reorder_section(section)
     }
 
     /// 把一个 section 的 `items[]` 重排成与 `[params.layout].order` 一致（文件 + 内存两半）。
@@ -3640,6 +3733,45 @@ where
             .collect(),
         other => Err(serde::de::Error::custom(format!(
             "machineFilter 要么是逗号分隔字符串，要么是字符串数组，见到：{other}"
+        ))),
+    }
+}
+
+/// 把 `layout` 里的 `order` / `sectionId` 写进一条参数的定义（**两种形状都认**）。
+///
+/// 真注册表里每一条写的是**内联表**：
+///
+/// ```toml
+/// layout = { "order" = 200.0, "sectionId" = "motion" }
+/// ```
+///
+/// 而手写的、或更早的写法可能是子表 `[params.layout]`。只认子表的话，
+/// `as_table_mut()` 对 `Item::Value(Value::InlineTable)` 返回 `None` ——
+/// 改一次组内顺序就必然报「不是一个表」，跟用户怎么点无关。
+fn set_layout_fields(
+    item: &mut toml_edit::Item,
+    order: f64,
+    section_id: Option<&str>,
+    key: &str,
+) -> Result<(), AppError> {
+    match item {
+        toml_edit::Item::Table(t) => {
+            if let Some(id) = section_id {
+                t["sectionId"] = toml_edit::value(id);
+            }
+            t["order"] = toml_edit::value(order);
+            Ok(())
+        }
+        toml_edit::Item::Value(toml_edit::Value::InlineTable(it)) => {
+            if let Some(id) = section_id {
+                it.insert("sectionId", toml_edit::Value::from(id));
+            }
+            it.insert("order", toml_edit::Value::from(order));
+            Ok(())
+        }
+        _ => Err(AppError::corrupted(messages::text(
+            "ui.presetdata.registry.331",
+            &[("key", key)],
         ))),
     }
 }
@@ -4861,6 +4993,249 @@ order = 2.0
             again.param("toolhead.MKP_extrude").unwrap().zero_means_auto,
             "重读之后标记没了 —— 界面会把「自动」读回成 0.00"
         );
+    }
+
+    /// 把一条参数**现在的定义**原样包成载荷。
+    ///
+    /// 模态框发的就是这一整包（它只知道界面上那几格），所以这里的测试也得这么发 ——
+    /// 只填 `order` 的话其余格子会被空值洗掉，测出来的东西跟真实路径不是一件事。
+    fn edit_of(p: &ParamDef) -> ParamMetaEdit {
+        ParamMetaEdit {
+            label: p.label.clone(),
+            label_en: Some(p.label_en.clone()),
+            desc: p.desc.clone(),
+            desc_en: Some(p.desc_en.clone()),
+            label_ja: Some(p.label_ja.clone()),
+            label_tw: Some(p.label_tw.clone()),
+            desc_ja: Some(p.desc_ja.clone()),
+            desc_tw: Some(p.desc_tw.clone()),
+            unit: p.unit.clone(),
+            value_type: p.value_type,
+            ui_component: p.ui_component,
+            default_value: p.default_value.clone(),
+            min: p.min,
+            max: p.max,
+            step: p.step,
+            parent_key: p.parent_key.clone(),
+            show_when: p.show_when.clone(),
+            deprecated: p.deprecated,
+            deprecated_machines: p.deprecated_machines.clone(),
+            choices: p.choices.clone(),
+            machine_filter: p.machine_filter.clone(),
+            section_id: None,
+            new_section: None,
+            order: None,
+        }
+    }
+
+    /// **改组内顺序：点确认就该成**。
+    ///
+    /// 真注册表里每一条写的是内联表 `layout = { "order" = …, "sectionId" = … }`；
+    /// 只认子表的那一版会在这里报 `registry.331`「不是一个表」——
+    /// 那是**每一颗参数都必错**，不是某一条数据坏了。
+    #[test]
+    fn changing_the_order_of_a_real_param_succeeds() {
+        let Some((tmp, mut r)) = copy_of_real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        const KEY: &str = "toolhead.MKP_retract";
+        let p = r.param(KEY).expect("回抽长度必须在");
+        let section = p.layout.section_id.clone();
+        /* 挪到这一组最前面：比现有最小值再小半格 */
+        let min_order = r
+            .params()
+            .iter()
+            .filter(|q| q.layout.section_id == section)
+            .map(|q| q.layout.order)
+            .fold(f64::INFINITY, f64::min);
+        let mut edit = edit_of(p);
+        edit.order = Some(min_order - 0.5);
+
+        r.set_param_meta(KEY, edit).expect("这次该写得动");
+        r.write_back().expect("落盘");
+
+        let again = ParamRegistry::load_from(tmp.path()).expect("改完还得读得通");
+        assert_eq!(again.param(KEY).unwrap().layout.order, min_order - 0.5);
+        // items[] 与 order 必须同向：`check_consistency` ③ 靠它，漏改下次就起不来
+        let items = again
+            .layout()
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .find(|s| s.id == section)
+            .expect("这一组在布局里")
+            .items
+            .iter()
+            .map(|i| i.param_key.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(items.first().map(String::as_str), Some(KEY), "该排到第一个");
+        // 内联表那一种写法不许被改写成子表（整份文件排版会跟着炸开）
+        assert!(
+            again.to_toml().contains("layout = {"),
+            "layout 被改写成了别的形状"
+        );
+    }
+
+    /// **搬组走真注册表（内联表那一种）：两份文件一起改，重读不报错。**
+    ///
+    /// 与 `moving_a_param_to_another_section_rewrites_both_files` 是同一件事的两种形状：
+    /// 那一条的夹具是 `toml::to_string` 写出来的**子表** `[params.layout]`，
+    /// 真文件里却是**内联表** `layout = { … }` —— 只认子表的那一版两种测试只会红后一条，
+    /// 而真机上恰恰是后一种。所以这条必须留在真数据上跑。
+    #[test]
+    fn moving_a_real_param_keeps_the_inline_layout_shape() {
+        let Some((tmp, mut r)) = copy_of_real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查没执行（不是通过）");
+            return;
+        };
+        const KEY: &str = "toolhead.MKP_retract";
+        let p = r.param(KEY).expect("回抽长度必须在");
+        let from = p.layout.section_id.clone();
+        /* 目标组：挑一个与它不同、且真能装参数的组 */
+        let to = r
+            .params()
+            .iter()
+            .map(|q| q.layout.section_id.clone())
+            .find(|s| *s != from)
+            .expect("真注册表不止一个分组");
+        let mut edit = edit_of(r.param(KEY).expect("刚读过"));
+        edit.section_id = Some(to.clone());
+
+        r.set_param_meta(KEY, edit).expect("搬得动");
+        r.write_back().expect("落盘");
+
+        let again = ParamRegistry::load_from(tmp.path()).expect("改完还得读得通");
+        assert_eq!(again.param(KEY).unwrap().layout.section_id, to);
+        let section_of = |reg: &ParamRegistry, id: &str| -> Vec<String> {
+            reg.layout()
+                .iter()
+                .flat_map(|t| t.sections.iter())
+                .find(|s| s.id == id)
+                .map(|s| s.items.iter().map(|i| i.param_key.clone()).collect())
+                .unwrap_or_default()
+        };
+        assert!(
+            !section_of(&again, &from).iter().any(|k| k == KEY),
+            "源组里还留着它"
+        );
+        let target = section_of(&again, &to);
+        assert_eq!(
+            target.last().map(String::as_str),
+            Some(KEY),
+            "该落到目标组末尾"
+        );
+    }
+
+    /// **整组重排：一次写盘，落盘后 items 与 order 同向。**
+    ///
+    /// 排序模态框点确认走的就是这条。判据有三处：key 顺序按提交的排、
+    /// 顺序值没有平白多出一堆新浮点（沿用原有那几个数）、`layout` 还是内联表。
+    #[test]
+    fn setting_a_section_order_reorders_both_files() {
+        let Some((tmp, mut r)) = copy_of_real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let section = r
+            .param("toolhead.MKP_retract")
+            .expect("回抽长度必须在")
+            .layout
+            .section_id
+            .clone();
+        let before_orders: Vec<f64> = {
+            let mut v: Vec<f64> = r
+                .params()
+                .iter()
+                .filter(|p| p.layout.section_id == section)
+                .map(|p| p.layout.order)
+                .collect();
+            v.sort_by(f64::total_cmp);
+            v
+        };
+        let mut keys: Vec<String> = r
+            .params()
+            .iter()
+            .filter(|p| p.layout.section_id == section)
+            .map(|p| p.key.clone())
+            .collect();
+        keys.reverse();
+
+        r.set_section_order(&section, &keys).expect("排得动");
+        r.write_back().expect("落盘");
+
+        let again = ParamRegistry::load_from(tmp.path()).expect("排完还得读得通");
+        let mut ordered: Vec<(f64, String)> = again
+            .params()
+            .iter()
+            .filter(|p| p.layout.section_id == section)
+            .map(|p| (p.layout.order, p.key.clone()))
+            .collect();
+        ordered.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let got: Vec<&str> = ordered.iter().map(|(_, k)| k.as_str()).collect();
+        assert_eq!(got, keys, "落盘后的次序不是提交的那个");
+
+        // 顺序值只是重新分配，不该多出新的浮点
+        let after_orders: Vec<f64> = ordered.iter().map(|(o, _)| *o).collect();
+        assert_eq!(after_orders, before_orders, "顺序值被改写成了另一批数");
+
+        let items: Vec<String> = again
+            .layout()
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .find(|s| s.id == section)
+            .expect("这一组在布局里")
+            .items
+            .iter()
+            .map(|i| i.param_key.clone())
+            .collect();
+        assert_eq!(items, keys, "布局 items 没跟着 order 走");
+        assert!(again.to_toml().contains("layout = {"), "内联表被改写");
+    }
+
+    /// 排序清单与分组对不上 ⇒ **整笔拒**，并说清缺谁、多谁。
+    ///
+    /// 少一条会把它的位次让给别人（那条参数从此没人认领），多一条没有落点 ——
+    /// 两种都不能兜底成"能排几条算几条"。
+    #[test]
+    fn setting_a_section_order_rejects_a_mismatched_key_list() {
+        let Some((_tmp, mut r)) = copy_of_real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let section = r
+            .param("toolhead.MKP_retract")
+            .expect("回抽长度必须在")
+            .layout
+            .section_id
+            .clone();
+        let keys: Vec<String> = r
+            .params()
+            .iter()
+            .filter(|p| p.layout.section_id == section)
+            .map(|p| p.key.clone())
+            .collect();
+
+        let short = keys[..keys.len() - 1].to_vec();
+        let e = r
+            .set_section_order(&section, &short)
+            .expect_err("少一条该被拒");
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(
+            format!("{e:?}").contains(keys.last().unwrap()),
+            "报错里得说清缺的是哪一条"
+        );
+
+        let mut dup = keys.clone();
+        dup.push(keys[0].clone());
+        assert!(
+            r.set_section_order(&section, &dup).is_err(),
+            "同一条出现两次该被拒"
+        );
+
+        let e = r
+            .set_section_order("没有这个分组", &keys)
+            .expect_err("分组不存在该被拒");
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
     }
 
     /// 「自动值跟着谁算」指错了参数 ⇒ **加载时就拒**，不留到界面上算不出数。

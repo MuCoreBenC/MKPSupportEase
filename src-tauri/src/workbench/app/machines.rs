@@ -70,6 +70,12 @@ pub struct VersionView {
     /// 显式键。`false` = 纯继承基底，界面上标「参数源待补」——
     /// **版本不因缺参数源而隐藏**（它的有效配方靠 defaults 兜底照样能渲染）
     pub has_recipe: bool,
+    /// **哪几册译文跟着中文一起过期了**（2026-11-14，形如 `nameEn` / `tagJa`）。
+    ///
+    /// 空 = 一册都不欠。多语言框按它给那几格标「与中文不一致」——
+    /// 作者的问题原话：「我改了多语言的中文，怎么让 AI 知道我改了？」
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stale_translations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -856,6 +862,7 @@ fn list_of(p: &Presets) -> MachineList {
                             remark: v.remark.clone(),
                             image: v.image.clone(),
                             has_recipe: p.registry.version_has_variants(&uid),
+                            stale_translations: v.stale_translations.clone(),
                         }
                     })
                     .collect(),

@@ -81,6 +81,7 @@ import {
 import type { GotoFocus } from '../c14/types'
 import { locateAnchor } from '../c14/locate'
 import { toasts } from '../c14/toast'
+import { useScope } from '../scopeState'
 import GcodeModal from '../c14/GcodeModal'
 import SplitterC14 from '../c14/SplitterC14'
 import { useSplitWidth } from '../c14/useSplitWidth'
@@ -216,6 +217,12 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
   const [compareCols, setCompareCols] = useState<string[]>([])
   /** 仅显示差异（对照模式） */
   const [diffOnly, setDiffOnly] = useState(false)
+
+  /*
+   * 撤销作用域（2026-11-14）：选着某一版时**只认那一版**。
+   * 不能连机型一起认 —— 那会让别的版本的改动也算成"这一屏的"。
+   */
+  useScope([target === null ? (machineId ?? '') : target])
   /**
    * 「仍然展开看」摊开的那几张卡（C15 A2）。**只装 session 里点开过的** ——
    * 收不收起来每次渲染按后端给的行态现判，所以条件一变回来，卡自己就正常了。
@@ -683,6 +690,16 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
   }
 
   /**
+   * 组内顺序排完了（排序模态框自己落盘）。与上一条同一跳：
+   * 换掉注册表视图、让桌面与右栏按新次序重取。
+   */
+  const applySectionOrder = (next: RegistryView) => {
+    setRegistry(next)
+    setMetaTick((t) => t + 1)
+    onEditApplied()
+  }
+
+  /**
    * 卡片头交上来的：改分组名 / 换这一组在页签里的位置。
    *
    * 位置只给方向 —— 后端一次写完两处（注册表数组次序给客户端、`order` 给卡片），
@@ -1067,42 +1084,12 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       .map(({ key: k, label }) => ({ key: k, label }))
   }
 
-  /**
-   * 把这一条在组里上 / 下挪一位。
-   *
-   * ★ 用词：这里**不是**"直接落盘"（2026-11-02 作者纠正：「会进影子树对吧，我放弃
-   * 也能成功取消修改」）。所有 `wb_*` 命令写到的都是影子树 `workbench/.draft/presets/`，
-   * 右上角「保存」才 commit 到 `presets/`，「放弃」一定撤得掉。
-   * 与编辑定义框的区别只在**前端撤销栈的粒度**：那边攒一次「确认」发一笔，
-   * 这边每点一下箭头发一笔（连挪三次要撤三次）。
-   *
-   * 顺序值与编辑定义框里那条 `moveOrder` 用同一个算法：取两个邻居的中点，
-   * 到头就往外扩一格。两处各算一套的话，同一次挪动在不同入口下会得到不同的
-   * `order`，`layout_schema` 的 items 顺序就飘了。
+  /*
+   * 「挪一位」那条独立命令（`moveOrderOf`）**已经退役**（2026-11-14）：
+   * 右栏与定义框都换成同一个排序模态框，整组一次提交（`wb_set_section_order`）。
+   * 逐条发 `wb_set_param_meta` 的写法留着就等于：连挪三次 = 三次写盘 + 三条撤销，
+   * 而且那条载荷是整份定义（label/desc/六册译文全都要重抄一遍）。
    */
-  const moveOrderOf = async (key: string, dir: -1 | 1) => {
-    if (registry === null) return
-    const self = registry.params.find((p) => p.key === key)
-    if (self === undefined) return
-    const list = registry.params
-      .filter((p) => p.sectionId === self.sectionId)
-      .sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
-    const at = list.findIndex((p) => p.key === key)
-    if (at < 0) return
-    const other = list[at + dir]
-    if (other === undefined) return
-    const outer = list[at + dir * 2]
-    const nextOrder =
-      outer === undefined ? other.order + dir : (other.order + outer.order) / 2
-    try {
-      const next = await wb.setParamMeta(key, { ...metaOf(self), order: nextOrder })
-      setRegistry(next)
-      setMetaTick((t) => t + 1)
-    } catch {
-      /* 失败就让下一次重取把状态拉回来（不静默改界面） */
-      setMetaTick((t) => t + 1)
-    }
-  }
   /** 「编辑定义」正在改的那条（null = 关着） */
   const defParam = defEditKey !== null ? paramOf(defEditKey) : null
   /*
@@ -1925,13 +1912,13 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                   groupLabel={groupLabelOf(registry, selRow)}
                   /*
                    * 「组内顺序」（2026-11-02）：这一条在它所属分组里的同级清单，
-                   * 按 `order` 排好（含自己）。右栏那一格与编辑定义框里那座下拉
-                   * 长相一致、数据同源（`[params.layout].order`）。
+                   * 按 `order` 排好（含自己）。2026-11-14 起与编辑定义框**共用同一个
+                   * 排序模态框**（拖 / 输位次 / 撤销重做 / 恢复）。
                    */
                   siblings={siblingsOf(sel)}
-                  /* 每点一下箭头就发一条 `wb_set_param_meta` —— 进的是**影子树 + 事务**，
-                     「放弃」照样撤得掉；与定义框的差别只是撤销栈粒度（它攒一次「确认」发一笔） */
-                  onMoveOrder={(dir) => void moveOrderOf(sel, dir)}
+                  sectionId={selParam?.sectionId}
+                  sectionLabel={groupLabelOf(registry, selRow)}
+                  onOrderApplied={applySectionOrder}
                   onClose={() => setSel(null)}
                   onLocate={sel === null ? undefined : () => locateParam(sel)}
                   /* 「属于 X 的子参数」点 X 就换到 X —— 那一行是入口，不是注解 */
@@ -2179,6 +2166,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
           onClose={() => setDefEditKey(null)}
           onCommit={(edit) => commitDef(defEditKey, defParam, edit)}
           onStaleCleared={applyStaleCleared}
+          onOrderApplied={applySectionOrder}
         />
       )}
 

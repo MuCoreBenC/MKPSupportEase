@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "67bca9eeb51f089d",
+  "revision": "b4001a9f747dd6e6",
   "publishedAt": "2026-11-13T03:52:35Z",
   "brands": [
     {
@@ -73,15 +73,20 @@
           "nameTw": "標準版",
           "nameJa": "スタンダード版",
           "recommendedBundle": "A1_STANDARD",
-          "tag": "推荐",
+          "tag": "经典",
           "tagEn": "Recommended",
           "tagTw": "推薦",
           "tagJa": "おすすめ",
-          "description": "标准配置，适合大多数用户",
+          "description": "官方模型，适合多数用户",
           "descriptionEn": "Standard configuration for most users",
           "descriptionTw": "標準配置，適合大多數使用者",
           "descriptionJa": "標準構成，ほとんどのユーザーに適しています",
-          "image": null
+          "image": null,
+          "staleTranslations": [
+            "descriptionEn",
+            "descriptionTw",
+            "descriptionJa"
+          ]
         },
         {
           "id": "FAST260326",
@@ -90,15 +95,26 @@
           "nameTw": "快拆版（6月以前）",
           "nameJa": "クイックリリース版（6月以前）",
           "recommendedBundle": "A1_FAST260326",
-          "tag": "旧版",
+          "tag": "旧版快拆",
           "tagEn": "Popular",
           "tagTw": "熱門",
           "tagJa": "人気",
-          "description": "很久之前的，暂时保留预设，建议打印新版",
+          "description": "暂时保留旧版预设文件，建议打印新版",
           "descriptionEn": "Modded setup for quick-release parts",
           "descriptionTw": "支援快拆配件的改裝配置",
           "descriptionJa": "クイックリリースパーツに対応した改造構成",
-          "image": null
+          "image": null,
+          "staleTranslations": [
+            "tagEn",
+            "tagTw",
+            "tagJa",
+            "descriptionEn",
+            "descriptionTw",
+            "descriptionJa",
+            "nameEn",
+            "nameTw",
+            "nameJa"
+          ]
         },
         {
           "id": "FAST261111",
@@ -111,11 +127,19 @@
           "tagEn": "Newest",
           "tagTw": "最新",
           "tagJa": "最新",
-          "description": "v3.3.7的，兼容260628",
+          "description": "v3.3.7的261111版，兼容260628版",
           "descriptionEn": "For units bought after June, plus the open-sourced 260628 quick-release design",
           "descriptionTw": "6月以後在閒魚購買的機器，以及6月28開源的快拆260628版本",
           "descriptionJa": "6月以降にフリマアプリで購入した機体、および6月28日に公開されたクイックリリース260628に対応",
-          "image": null
+          "image": null,
+          "staleTranslations": [
+            "descriptionEn",
+            "descriptionTw",
+            "descriptionJa",
+            "nameEn",
+            "nameTw",
+            "nameJa"
+          ]
         }
       ],
       "zones": []
@@ -185,15 +209,23 @@
           "nameTw": "標準版",
           "nameJa": "スタンダード版",
           "recommendedBundle": "A1_MINI_STANDARD",
-          "tag": "推荐",
+          "tag": "经典",
           "tagEn": "Recommended",
           "tagTw": "推薦",
           "tagJa": "おすすめ",
-          "description": "标准配置",
+          "description": "官方模型，适合多数用户",
           "descriptionEn": "Standard configuration",
           "descriptionTw": "標準配置",
           "descriptionJa": "標準構成",
-          "image": null
+          "image": null,
+          "staleTranslations": [
+            "descriptionEn",
+            "descriptionTw",
+            "descriptionJa",
+            "tagEn",
+            "tagTw",
+            "tagJa"
+          ]
         },
         {
           "id": "FAST260326",
@@ -202,15 +234,26 @@
           "nameTw": "快拆版（6月以前）",
           "nameJa": "クイックリリース版（6月以前）",
           "recommendedBundle": "A1_MINI_FAST260326",
-          "tag": "旧版",
+          "tag": "旧版快拆",
           "tagEn": "Popular",
           "tagTw": "熱門",
           "tagJa": "人気",
-          "description": "很久之前的，暂时保留预设，建议打印新版",
+          "description": "暂时保留旧版预设文件，建议打印新版",
           "descriptionEn": "Modded setup for quick-release parts",
           "descriptionTw": "支援快拆配件的改裝配置",
           "descriptionJa": "クイックリリースパーツに対応した改造構成",
-          "image": null
+          "image": null,
+          "staleTranslations": [
+            "descriptionEn",
+            "descriptionTw",
+            "descriptionJa",
+            "tagEn",
+            "tagTw",
+            "tagJa",
+            "nameEn",
+            "nameTw",
+            "nameJa"
+          ]
         },
         {
           "id": "FAST261111",
@@ -223,11 +266,19 @@
           "tagEn": "Newest",
           "tagTw": "最新",
           "tagJa": "最新",
-          "description": "v3.3.7的，兼容260628",
+          "description": "v3.3.7的261111，兼容260628版",
           "descriptionEn": "For units bought after June, plus the open-sourced 260628 quick-release design",
           "descriptionTw": "6月以後在閒魚購買的機器，以及6月28開源的快拆260628版本",
           "descriptionJa": "6月以降にフリマアプリで購入した機体、および6月28日に公開されたクイックリリース260628に対応",
-          "image": null
+          "image": null,
+          "staleTranslations": [
+            "descriptionEn",
+            "descriptionTw",
+            "descriptionJa",
+            "nameEn",
+            "nameTw",
+            "nameJa"
+          ]
         }
       ],
       "zones": []
@@ -807,7 +858,7 @@
         "a1-fast",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-11-12"
+      "updatedAt": "2026-11-14"
     },
     {
       "id": "A1_FAST261111",
@@ -817,7 +868,7 @@
         "a1-fastv3.3",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-11-12"
+      "updatedAt": "2026-11-14"
     },
     {
       "id": "A1_MINI_STANDARD",
@@ -837,7 +888,7 @@
         "a1_mini-fast",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-11-12"
+      "updatedAt": "2026-11-14"
     },
     {
       "id": "A1_MINI_FAST261111",
@@ -847,7 +898,7 @@
         "a1_mini-fastv3.3",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-11-12"
+      "updatedAt": "2026-11-14"
     },
     {
       "id": "P1S_default",
@@ -896,7 +947,7 @@
           "sectionId": "motion"
         },
         "min": -50.0,
-        "max": 50.0,
+        "max": 0.0,
         "step": 0.1,
         "unit": "mm",
         "parentKey": null,
@@ -921,6 +972,47 @@
           "X1C": -6.0,
           "X1C:LITE": -6.0
         },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.MKP_retract_speed",
+        "configKey": "MKPRetractSpeed",
+        "tomlKey": "MKP_retract_speed",
+        "jsonKey": "MKP_retract_speed",
+        "label": "回抽速度",
+        "labelEn": "Retract speed",
+        "labelJa": "リトラクト速度",
+        "labelTw": "回抽速度",
+        "desc": "回抽那一笔的进给速度。太快咬料，太慢挂丝",
+        "descEn": "Feedrate of the retract move. Too fast chews the filament, too slow leaves strings",
+        "descJa": "リトラクト動作の送り速度。速すぎると噛み、遅すぎると糸を引きます",
+        "descTw": "回抽那一筆的進給速度。太快咬料，太慢掛絲",
+        "tomlComment": "回抽速度(mm/s)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 25.0,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 200.5,
+          "sectionId": "motion"
+        },
+        "min": 1.0,
+        "max": 100.0,
+        "step": 1.0,
+        "unit": "mm/s",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -958,6 +1050,160 @@
         "parentKey": null,
         "showWhen": null,
         "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "zeroMeansAuto": true,
+        "autoValue": {
+          "from": "toolhead.MKP_retract",
+          "abs": true,
+          "offset": 0.5
+        },
+        "serialization": null
+      },
+      {
+        "key": "toolhead.MKP_extrude_speed",
+        "configKey": "MKPExtrudeSpeed",
+        "tomlKey": "MKP_extrude_speed",
+        "jsonKey": "MKP_extrude_speed",
+        "label": "挤出速度",
+        "labelEn": "Extrude speed",
+        "labelJa": "押し出し速度",
+        "labelTw": "擠出速度",
+        "desc": "回填那一笔的进给速度，与挤出长度各管一件事",
+        "descEn": "Feedrate of the refill move; length and speed are separate knobs",
+        "descJa": "押し出し動作の送り速度。長さと速さは別の設定です",
+        "descTw": "回填那一筆的進給速度，與擠出長度各管一件事",
+        "tomlComment": "挤出速度(mm/s)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 25.0,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 201.5,
+          "sectionId": "motion"
+        },
+        "min": 1.0,
+        "max": 100.0,
+        "step": 1.0,
+        "unit": "mm/s",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.MKP_extrude_spread",
+        "configKey": "MKPExtrudeSpread",
+        "tomlKey": "MKP_extrude_spread",
+        "jsonKey": "MKP_extrude_spread",
+        "label": "挤出分摊",
+        "labelEn": "Spread refill",
+        "labelJa": "押し出し分散",
+        "labelTw": "擠出分攤",
+        "desc": "开启后回填量分摊到塔上的擦料移动里，不在原地挤成一团",
+        "descEn": "Spread the refill over the tower wipe moves instead of dumping it in one spot",
+        "descJa": "オンにすると押し出し量をタワーの拭き取り移動に分散し、一点に溜めません",
+        "descTw": "開啟後回填量分攤到塔上的擦料移動裡，不在原地擠成一團",
+        "tomlComment": "挤出分摊到擦料移动(开关)",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": false,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 201.6,
+          "sectionId": "motion"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.MKP_retract_at",
+        "configKey": "MKPRetractAt",
+        "tomlKey": "MKP_retract_at",
+        "jsonKey": "MKP_retract_at",
+        "label": "回抽位置",
+        "labelEn": "Retract at",
+        "labelJa": "リトラクト位置",
+        "labelTw": "回抽位置",
+        "desc": "回抽发生在换笔的哪一刻",
+        "descEn": "Which moment of the pen swap performs the retract",
+        "descJa": "リトラクトを換筆のどの時点で行うか",
+        "descTw": "回抽發生在換筆的哪一刻",
+        "tomlComment": "回抽位置(model/wait/after_dock)",
+        "valueType": "string",
+        "uiComponent": "select",
+        "defaultValue": "model",
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 0.45,
+          "sectionId": "custom_gcode"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [
+          {
+            "label": "起飞前",
+            "labelEn": "Before the flight",
+            "labelJa": "移動前",
+            "labelTw": "起飛前",
+            "value": "model",
+            "deprecated": false
+          },
+          {
+            "label": "到达等待位",
+            "labelEn": "At the wait position",
+            "labelJa": "待機位置",
+            "labelTw": "到達等待位",
+            "value": "wait",
+            "deprecated": false
+          },
+          {
+            "label": "换笔之后",
+            "labelEn": "After the swap",
+            "labelJa": "換筆後",
+            "labelTw": "換筆之後",
+            "value": "after_dock",
+            "deprecated": false
+          }
+        ],
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
@@ -5997,8 +6243,20 @@
                 "paramKey": "toolhead.MKP_retract"
               },
               {
+                "id": "item_0_1_3",
+                "paramKey": "toolhead.MKP_retract_speed"
+              },
+              {
                 "id": "item_0_1_2",
                 "paramKey": "toolhead.MKP_extrude"
+              },
+              {
+                "id": "item_0_1_4",
+                "paramKey": "toolhead.MKP_extrude_speed"
+              },
+              {
+                "id": "item_0_1_5",
+                "paramKey": "toolhead.MKP_extrude_spread"
               }
             ],
             "component": null,
@@ -6321,6 +6579,10 @@
             "id": "custom_gcode",
             "items": [
               {
+                "id": "item_4_0_6",
+                "paramKey": "toolhead.MKP_retract_at"
+              },
+              {
                 "id": "item_4_0_0",
                 "paramKey": "toolhead.custom_mount_gcode"
               },
@@ -6575,8 +6837,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "715bae40e50a82a5391e7ac6a49a23aa6eeaf7d056281363626b821aedb80115",
-      "size": 5045
+      "sha256": "c16865e791657db088b586b79766f3d62ec2e04a59308b4af319e6c7b8f31474",
+      "size": 5261
     },
     {
       "kind": "mkp_preset",
@@ -6584,8 +6846,8 @@
       "path": "delivery/mkp/presets/A1-fast260326.toml",
       "machineId": "A1",
       "versionId": "FAST260326",
-      "sha256": "6bb43d2338b4fe9b8d3687b59e882ed9ff107390c51b87feed96b1d7512ac2b0",
-      "size": 5049
+      "sha256": "952daf8e2017d696cc43d6f697886bc0e2e9767e47fccd97ce25a70e712e6bd3",
+      "size": 5265
     },
     {
       "kind": "mkp_preset",
@@ -6593,8 +6855,8 @@
       "path": "delivery/mkp/presets/A1-fast261111.toml",
       "machineId": "A1",
       "versionId": "FAST261111",
-      "sha256": "43093aaaa18eae97a43350a437ed868b3c3488debdc991a971fcf06b85ca7bb9",
-      "size": 5049
+      "sha256": "a72627d4e306eccbbfa3b89ce90730f42447afe004529780c63083656bdb4033",
+      "size": 5265
     },
     {
       "kind": "mkp_preset",
@@ -6602,8 +6864,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "b5d28a84ebf04d76313e9da48e50b5da2b6bb8240f0b968d3afb57401a3a4c26",
-      "size": 5052
+      "sha256": "6cb489d936fa780140212bedd3b75bfe238ed33110964cd09f1acd9fdfb4a35e",
+      "size": 5268
     },
     {
       "kind": "mkp_preset",
@@ -6611,8 +6873,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast260326.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST260326",
-      "sha256": "9d0cd9603215981a74f486825cb2d2fbaac9c5eec062b9704ad5a6ed6c6784b6",
-      "size": 5052
+      "sha256": "71000e5a32f03ec17b403e54bbcb6e166a053b6879a23d7a984a42b8f1840465",
+      "size": 5268
     },
     {
       "kind": "mkp_preset",
@@ -6620,8 +6882,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast261111.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST261111",
-      "sha256": "aa83c0373b5dcce6ab23742004da29913833f0ac8508706bc3470fa1c4fd23c2",
-      "size": 5052
+      "sha256": "f650b1d3b378e72c154e547b7e8405ea53d97c5d8544ba4eeb40bb35b9dfc74b",
+      "size": 5268
     },
     {
       "kind": "mkp_preset",
@@ -6629,8 +6891,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "0a3620a24da93882f45985a5e501134d4ca0814cb50dcfd73bf61281bb8f20dd",
-      "size": 5193
+      "sha256": "7586ff0c26314b887fe5ecd255838fce4eadd8af834b572db36566fc8c00cce2",
+      "size": 5409
     },
     {
       "kind": "mkp_preset",
@@ -6638,8 +6900,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "95910fb4bfe157f992e0238465bdb4c921110a25a78af1acf6558d8901c92555",
-      "size": 5193
+      "sha256": "1f260ce133103c50a5c66e47a767c1f599cad814df9c54d4615509e018618a84",
+      "size": 5409
     },
     {
       "kind": "icon",

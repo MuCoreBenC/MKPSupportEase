@@ -778,7 +778,11 @@ impl Ctx {
             } else {
                 self.txn.undo_top()
             }
-            .map(|(label, fields)| TopOp { label, fields }),
+            .map(|(label, fields, owners)| TopOp {
+                label,
+                fields,
+                owners,
+            }),
             /* 回执与事务状态同一趟取走：前端本来就在轮询这一个（800ms），
             不必为它另开一条通道 */
             receipt: take_receipt(),
@@ -932,6 +936,7 @@ const COMMAND_LABELS: &[(&str, &str)] = &[
     ("wb_set_group", "改资产分组"),
     ("wb_remove_group", "删除资产分组"),
     ("wb_set_param_meta", "改参数定义"),
+    ("wb_set_section_order", "改组内顺序"),
     ("wb_clear_stale_translations", "清译文标记"),
     ("wb_set_section_meta", "改分组名与位置"),
     ("wb_remove_section", "删除分组"),
@@ -1435,6 +1440,25 @@ pub struct TopOp {
     pub label: String,
     /// 这一笔改了几处字段（同一格合并之后的条数）
     pub fields: usize,
+    /// **这一笔属于哪几份**（`A1` / `A1:STANDARD` / `bundles`…）。
+    ///
+    /// 撤销的作用域判据就是它（2026-11-14）：页面说得出自己认哪几个 token，
+    /// 与这里没交集就不许撤。空 = 说不清 ⇒ 不拦（见 `domain::scopes` 头注）。
+    pub owners: Vec<String>,
+}
+
+/// 撤销 / 重做的结果（2026-11-14）。
+///
+/// 只回 `TxnState` 的话，前端说不清"到底撤了哪一条 / 为什么没撤"——
+/// 而作者要的正是这两句（右下角那条提示与拒绝说明）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UndoOutcome {
+    pub state: TxnState,
+    /// 真撤 / 真重做了哪一条；`None` = 栈空或被拒
+    pub done: Option<TopOp>,
+    /// 被作用域闸拦下时，栈顶那一笔（前端要指名道姓说"是它的"）
+    pub refused: Option<TopOp>,
 }
 
 /// 统一事务的状态（页头三按钮 + 状态栏读它）
@@ -1994,6 +2018,40 @@ pub fn wb_set_param_meta(key: String, edit: ParamMetaEdit) -> Result<RegistryVie
                             structural_fields(&key, new.label.clone(), new.summary(&old));
                     }
                 }
+                Ok(registry_view(&ctx.presets.registry))
+            },
+        )
+    })
+}
+
+/// **把一个分组的参数整组重排**（排序模态框的落点）。
+///
+/// 与 [`wb_set_param_meta`] 各管一件事：那条改的是**一条参数是什么**
+/// （载荷是整包定义），这条只回答**它们按什么次序摆**。
+/// 排序能挪到别人的位置，拿定义载荷去实现就得把别人的定义原样重抄一遍 —— 抄漏一格
+/// 就是静默改坏一条参数；而且 N 条就是 N 次写盘、N 条撤销。
+///
+/// 顺序值由后端算（沿用这一组原有的那几个数），前端只提交最终 key 序列 ——
+/// 界面不写第二套排序数学。
+#[tauri::command(async)]
+pub fn wb_set_section_order(
+    section_id: String,
+    keys: Vec<String>,
+) -> Result<RegistryView, AppError> {
+    traced("wb_set_section_order", |_| {
+        with_struct_ctx(
+            /* 空 = 一次性动作：每次确认都是自己的一条撤销，不与前后合并 */
+            "",
+            |_| {
+                vec![
+                    "registry/param_registry.toml".to_owned(),
+                    "layout_schema.toml".to_owned(),
+                ]
+            },
+            |ctx| {
+                ctx.presets.registry.set_section_order(&section_id, &keys)?;
+                ctx.presets.registry.write_back()?;
+                ctx.reload_presets()?;
                 Ok(registry_view(&ctx.presets.registry))
             },
         )
@@ -3303,15 +3361,74 @@ fn swap_struct_files(
     Ok(())
 }
 
-/// 撤销一条（服务器侧）：把影子树里那份 `before` 写回去，再重读
+/// **栈顶那一笔属于谁**（撤销 / 重做的作用域闸用它）。
+///
+/// 两套栈按时间取最近那一条 —— **与真会弹的那一条同一条判据**
+/// （`Ctx::undo_uses_history`），否则闸判的是 A、弹的是 B。
+fn undo_top_of(ctx: &Ctx) -> Option<TopOp> {
+    let raw = if ctx.undo_uses_history() {
+        ctx.history.top_op()
+    } else {
+        ctx.txn.undo_top()
+    };
+    raw.map(|(label, fields, owners)| TopOp {
+        label,
+        fields,
+        owners,
+    })
+}
+
+/// 重做栈顶那一笔（同 [`undo_top_of`] 的取向规则，只是看 redo 那一侧）。
+fn redo_top_of(ctx: &Ctx) -> Option<TopOp> {
+    let use_history = match (ctx.history.redo_last_at(), ctx.txn.redo_last_at()) {
+        (Some(h), Some(t)) => h >= t,
+        (Some(_), None) => true,
+        _ => false,
+    };
+    let raw = if use_history {
+        ctx.history.redo_top()
+    } else {
+        ctx.txn.redo_top()
+    };
+    raw.map(|(label, fields, owners)| TopOp {
+        label,
+        fields,
+        owners,
+    })
+}
+
+/// 撤销一条（服务器侧）：把影子树里那份 `before` 写回去，再重读。
+///
+/// `scope` = 当前页面认的归属 token（`A1` / `A1:FAST261111` / `bundles`…）。
+/// 给了就**只撤属于它的一条**：栈顶不是它 ⇒ 一格都不动，回 `refused` 让界面说清楚。
+/// `None` / 空 = 不看作用域（命令行与老调用）。
 #[tauri::command]
-pub fn wb_txn_undo() -> Result<TxnState, AppError> {
-    traced("wb_txn_undo", |_| with_ctx_mut(undo_in))
+pub fn wb_txn_undo(scope: Option<Vec<String>>) -> Result<UndoOutcome, AppError> {
+    traced("wb_txn_undo", |_| {
+        with_ctx_mut(|ctx| undo_in(ctx, scope.as_deref()))
+    })
 }
 
 /// [`wb_txn_undo`] 的本体（**抽出来是为了可测**）：先撤值编辑那条内存历史，
 /// 撤空了才回落到结构编辑的文件事务栈。
-pub(super) fn undo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
+pub(super) fn undo_in(ctx: &mut Ctx, scope: Option<&[String]>) -> Result<UndoOutcome, AppError> {
+    /* ① 作用域闸：**先判再动**，判不过时栈、文件、内存一个字都不许变 */
+    let top = undo_top_of(ctx);
+    if let Some(top) = &top {
+        let empty: &[String] = &[];
+        if !crate::workbench::domain::scopes::allows(scope.unwrap_or(empty), &top.owners) {
+            tracing::info!(
+                label = %top.label,
+                owners = %top.owners.join(","),
+                "撤销被作用域拦下"
+            );
+            return Ok(UndoOutcome {
+                state: ctx.txn_state(),
+                done: None,
+                refused: Some(top.clone()),
+            });
+        }
+    }
     {
         /*
          * ★ **两套栈并存时，撤销必须退"最近的那一笔"**（2026-11-03）。
@@ -3334,7 +3451,11 @@ pub(super) fn undo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
                 .peek_undo()
                 .map(|e| matches!(&e.action, edit_history::Action::Value { .. }))
             else {
-                return Ok(ctx.txn_state());
+                return Ok(UndoOutcome {
+                    state: ctx.txn_state(),
+                    done: None,
+                    refused: None,
+                });
             };
             /* 值编辑必须有一份算好的行；到这里还是 None 说明算的与弹的不是同一条 */
             if top_is_value && staged.is_none() {
@@ -3343,7 +3464,11 @@ pub(super) fn undo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
                 ));
             }
             let Some(entry) = ctx.history.undo() else {
-                return Ok(ctx.txn_state());
+                return Ok(UndoOutcome {
+                    state: ctx.txn_state(),
+                    done: None,
+                    refused: None,
+                });
             };
             match &entry.action {
                 edit_history::Action::Value { .. } => {
@@ -3359,7 +3484,11 @@ pub(super) fn undo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
             ctx.draft = Draft::default();
             ctx.touch();
             tracing::info!(label = %entry.label, "撤销（命令历史）");
-            return Ok(ctx.txn_state());
+            return Ok(UndoOutcome {
+                state: ctx.txn_state(),
+                done: top,
+                refused: None,
+            });
         }
         let mut undo_after_commit = false;
         if let Some(label) = ctx.txn.undo(&ctx.shadow_root)? {
@@ -3378,18 +3507,41 @@ pub(super) fn undo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
         if undo_after_commit {
             ctx.reload_from_disk()?;
         }
-        Ok(ctx.txn_state())
+        Ok(UndoOutcome {
+            state: ctx.txn_state(),
+            done: if undo_after_commit { top } else { None },
+            refused: None,
+        })
     }
 }
 
-/// 重做一条
+/// 重做一条（`scope` 语义同 [`wb_txn_undo`]）
 #[tauri::command]
-pub fn wb_txn_redo() -> Result<TxnState, AppError> {
-    traced("wb_txn_redo", |_| with_ctx_mut(redo_in))
+pub fn wb_txn_redo(scope: Option<Vec<String>>) -> Result<UndoOutcome, AppError> {
+    traced("wb_txn_redo", |_| {
+        with_ctx_mut(|ctx| redo_in(ctx, scope.as_deref()))
+    })
 }
 
 /// [`wb_txn_redo`] 的本体（同 [`undo_in`]）
-pub(super) fn redo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
+pub(super) fn redo_in(ctx: &mut Ctx, scope: Option<&[String]>) -> Result<UndoOutcome, AppError> {
+    /* 同撤销：先判作用域，判不过就一格都不动 */
+    let top = redo_top_of(ctx);
+    if let Some(top) = &top {
+        let empty: &[String] = &[];
+        if !crate::workbench::domain::scopes::allows(scope.unwrap_or(empty), &top.owners) {
+            tracing::info!(
+                label = %top.label,
+                owners = %top.owners.join(","),
+                "重做被作用域拦下"
+            );
+            return Ok(UndoOutcome {
+                state: ctx.txn_state(),
+                done: None,
+                refused: Some(top.clone()),
+            });
+        }
+    }
     {
         /* 同 `undo`：重做也按"谁被撤得更晚"选栈 */
         let use_history = match (ctx.history.redo_last_at(), ctx.txn.redo_last_at()) {
@@ -3406,7 +3558,11 @@ pub(super) fn redo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
                 .peek_redo()
                 .map(|e| matches!(&e.action, edit_history::Action::Value { .. }))
             else {
-                return Ok(ctx.txn_state());
+                return Ok(UndoOutcome {
+                    state: ctx.txn_state(),
+                    done: None,
+                    refused: None,
+                });
             };
             if top_is_value && staged.is_none() {
                 return Err(AppError::internal(
@@ -3414,7 +3570,11 @@ pub(super) fn redo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
                 ));
             }
             let Some(entry) = ctx.history.redo() else {
-                return Ok(ctx.txn_state());
+                return Ok(UndoOutcome {
+                    state: ctx.txn_state(),
+                    done: None,
+                    refused: None,
+                });
             };
             match &entry.action {
                 edit_history::Action::Value { .. } => {
@@ -3427,7 +3587,11 @@ pub(super) fn redo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
             ctx.draft = Draft::default();
             ctx.touch();
             tracing::info!(label = %entry.label, "重做（命令历史）");
-            return Ok(ctx.txn_state());
+            return Ok(UndoOutcome {
+                state: ctx.txn_state(),
+                done: top,
+                refused: None,
+            });
         }
         let mut redone = false;
         if let Some(label) = ctx.txn.redo(&ctx.shadow_root)? {
@@ -3440,7 +3604,11 @@ pub(super) fn redo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
         if redone {
             ctx.reload_from_disk()?;
         }
-        Ok(ctx.txn_state())
+        Ok(UndoOutcome {
+            state: ctx.txn_state(),
+            done: if redone { top } else { None },
+            refused: None,
+        })
     }
 }
 
@@ -4550,7 +4718,7 @@ mod tests {
         assert_eq!(ctx.history.undo_depth(), 1, "撤销栈 +1");
 
         /* ② 撤销：值回原样，仍然不写文件 */
-        undo_in(&mut ctx).unwrap();
+        undo_in(&mut ctx, None).unwrap();
         assert_eq!(
             ctx.presets
                 .registry
@@ -4569,7 +4737,7 @@ mod tests {
         );
 
         /* ③ 重做：值又变成新的 */
-        redo_in(&mut ctx).unwrap();
+        redo_in(&mut ctx, None).unwrap();
         assert_eq!(
             ctx.presets
                 .registry
@@ -4653,7 +4821,7 @@ mod tests {
         assert_eq!(ctx.txn.undo_depth(), 1, "结构编辑进事务栈");
 
         /* ③ 撤销一次 ⇒ **退的是机型信息**（最近那笔），参数的改动还在 */
-        undo_in(&mut ctx).unwrap();
+        undo_in(&mut ctx, None).unwrap();
         assert_eq!(
             ctx.presets.catalog.machine("A1").unwrap().display,
             "A1",
@@ -4672,7 +4840,7 @@ mod tests {
         );
 
         /* ④ 再撤销一次 ⇒ 这才轮到参数 */
-        undo_in(&mut ctx).unwrap();
+        undo_in(&mut ctx, None).unwrap();
         assert_eq!(
             ctx.presets
                 .registry
@@ -4684,6 +4852,68 @@ mod tests {
             Some(serde_json::json!(-1.0)),
             "第二次撤销退回参数那一笔"
         );
+
+        drop(fx_dir);
+    }
+
+    /// **栈顶不是当前这一份 ⇒ 撤销一格都不许动**（2026-11-14）。
+    ///
+    /// 作者的原话：「我点了我当前这个版本，我撤销它可以撤销到我其他版本的」。
+    /// 这条钉三件事：拒绝时文件 / 栈 / 返回值三样都不变；拒绝要回得出栈顶那一笔
+    /// 属于谁（界面要指名道姓）；换成对得上的作用域就能撤。
+    #[test]
+    fn undo_refuses_when_the_top_entry_belongs_to_another_machine() {
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        /* 一笔属于 A1 的结构编辑（碰的是 machines/A1.toml ⇒ 归属 A1） */
+        use crate::presetdata::MachineField;
+        let rename = |ctx: &mut Ctx| -> Result<(), AppError> {
+            ctx.presets
+                .catalog
+                .machine_mut("A1")?
+                .set_field(MachineField::Display, Some("A1 改名"))?;
+            ctx.presets.catalog.write_machine("A1")
+        };
+        run_ctx(&mut ctx, Some("改机型信息"), rename).unwrap();
+        assert_eq!(ctx.txn.undo_depth(), 1);
+
+        /* ① 拿着 P1S 的身份去撤 ⇒ 拒绝 */
+        let wrong = vec!["P1S".to_owned()];
+        let refused = undo_in(&mut ctx, Some(&wrong)).unwrap();
+        assert!(refused.done.is_none(), "不该真撤");
+        let top = refused.refused.expect("拒绝要说清栈顶是谁");
+        assert_eq!(top.label, "改机型信息");
+        assert!(
+            top.owners.contains(&"A1".to_owned()),
+            "栈顶归属：{:?}",
+            top.owners
+        );
+        assert_eq!(
+            ctx.presets.catalog.machine("A1").unwrap().display,
+            "A1 改名",
+            "被拒时文件一个字都不许变"
+        );
+        assert_eq!(ctx.txn.undo_depth(), 1, "被拒时栈也不许动");
+
+        /* ② 换成对得上的作用域（版本层级也认这台机器）⇒ 真撤 */
+        let right = vec!["A1:FAST261111".to_owned()];
+        let done = undo_in(&mut ctx, Some(&right)).unwrap();
+        assert!(done.refused.is_none());
+        assert_eq!(
+            done.done.map(|d| d.label).as_deref(),
+            Some("改机型信息"),
+            "撤的就是栈顶那一笔"
+        );
+        assert_eq!(
+            ctx.presets.catalog.machine("A1").unwrap().display,
+            "A1",
+            "撤完回到原值"
+        );
+        assert_eq!(ctx.txn.undo_depth(), 0);
 
         drop(fx_dir);
     }
@@ -4722,7 +4952,7 @@ mod tests {
         );
 
         /* ② 撤销 ⇒ 显示名回原样 */
-        undo_in(&mut ctx).unwrap();
+        undo_in(&mut ctx, None).unwrap();
         assert_eq!(
             ctx.presets.catalog.machine("A1").unwrap().display,
             "A1",
@@ -4731,7 +4961,7 @@ mod tests {
         assert_eq!(ctx.history.undo_depth(), 0);
 
         /* ③ 重做 ⇒ 又是改过的名字 */
-        redo_in(&mut ctx).unwrap();
+        redo_in(&mut ctx, None).unwrap();
         assert_eq!(
             ctx.presets.catalog.machine("A1").unwrap().display,
             "A1 改名"
@@ -4831,7 +5061,7 @@ mod tests {
         .unwrap();
         assert!(ctx.shadow_root.join("machines/NEW.toml").exists());
 
-        undo_in(&mut ctx).unwrap();
+        undo_in(&mut ctx, None).unwrap();
         assert!(
             !ctx.shadow_root.join("machines/NEW.toml").exists(),
             "新建的那一份撤销时要删掉"
@@ -4966,7 +5196,7 @@ mod tests {
         /* 撤销：反向同样要认得新 uid（旧清单会把反向拒掉、再被 `.ok()?` 吞掉）。
         跟随状态的语义是"值同步回基底、状态置跟随"，所以这一格回到 0.0 而不是消失 */
         let depth_before = ctx.history.undo_depth();
-        undo_in(&mut ctx).unwrap();
+        undo_in(&mut ctx, None).unwrap();
         assert_eq!(
             ctx.presets
                 .registry
@@ -5228,7 +5458,7 @@ mod tests {
             "机型文件真的被改了"
         );
 
-        undo_in(&mut ctx).unwrap();
+        undo_in(&mut ctx, None).unwrap();
         assert_eq!(
             std::fs::read(ctx.shadow_root.join(rel)).unwrap(),
             before,

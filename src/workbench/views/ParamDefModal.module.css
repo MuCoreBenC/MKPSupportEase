@@ -457,3 +457,17 @@
   line-height: 1.6;
   color: var(--text-3);
 }
+
+/*
+ * 触发器上那颗「待保存」（所属分组里新建的那一组还没落盘）。
+ * 与 `SectionPicker` 的 `.badge` 同长相 —— 同一个词不该有两副样子。
+ */
+.pendingBadge {
+  flex: none;
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: calc(var(--fs-label) - 1px);
+  color: var(--text-3);
+  background: var(--surface-sunken);
+  border-radius: 999px;
+}

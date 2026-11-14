@@ -28,6 +28,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
+import { useScope } from '../scopeState'
 import type { AssetInspectView, AssetList, AssetView, Words } from '../api'
 import { assetsBus } from '../assetsBus'
 import GroupManagerModal from './GroupManagerModal'
@@ -163,6 +164,8 @@ export default function AssetsPage({
   /** 检查面板（第四刀）：盘上那个文件的样子 —— 选中一条才问（重字段要读真实字节） */
   const [inspect, setInspect] = useState<AssetInspectView | null>(null)
   const [sel, setSel] = useState<string | null>(initialSel ?? null)
+  /* 撤销作用域：资产那一页认 assets.toml（2026-11-14） */
+  useScope(['assets'])
   /**
    * 「校准身份」那一栏的选择框展开与否（2026-10-19）。
    *

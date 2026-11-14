@@ -964,6 +964,13 @@
   outline: 2px solid var(--wb-primary-soft);
 }
 
+/* 译文欠账：中文改过、这一册没跟着重写。只用一条琥珀色内描边，
+   不换底色 —— 这一格的内容本身没错，错的是"它可能已经旧了" */
+.inp[data-stale] {
+  border-color: var(--warn-line);
+  background: var(--warn-surface);
+}
+
 .sel {
   height: 28px;
   padding: 0 6px;

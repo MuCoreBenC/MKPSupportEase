@@ -923,6 +923,25 @@ export interface TopOp {
   label: string
   /** 这一笔改了几处字段（同一格合并之后的条数） */
   fields: number
+  /**
+   * 这一笔属于哪几份（`A1` / `A1:STANDARD` / `bundles`…，2026-11-14）。
+   * 空 = 说不清（崩溃恢复那条合成 op）—— 界面不拿它拦。
+   */
+  owners: string[]
+}
+
+/**
+ * `app::UndoOutcome` —— 撤销 / 重做的结果（2026-11-14）。
+ *
+ * 只回 `TxnState` 的话，界面说不清「撤了哪一条」与「为什么没撤」；
+ * 而右下角那条提示与拒绝说明要的正是这两句。
+ */
+export interface UndoOutcome {
+  state: TxnState
+  /** 真撤 / 真重做了哪一条；`null` = 栈空或被拒 */
+  done: TopOp | null
+  /** 被作用域闸拦下时，栈顶那一笔（界面指名道姓说"是它的"） */
+  refused: TopOp | null
 }
 
 export interface SaveResult {
@@ -2112,6 +2131,11 @@ export interface VersionView {
   image: string | null
   /** 参数正文已补（14.4）。false = 纯继承基底，界面标「参数源待补」，**不隐藏该版本** */
   hasRecipe: boolean
+  /**
+   * 哪几册译文跟着中文一起过期了（2026-11-14，形如 `nameEn` / `tagJa`）。
+   * 空 = 一册都不欠 —— 多语言框按它给那几格标「与中文不一致」。
+   */
+  staleTranslations?: string[]
 }
 
 /*
@@ -2857,6 +2881,15 @@ export const wb = {
   setParamMeta: (key: string, edit: ParamMetaEdit) =>
     invoke<RegistryView>('wb_set_param_meta', { key, edit }),
   /**
+   * **整组重排**：提交这一组参数的最终次序（key 数组），顺序值由后端算。
+   *
+   * 与 `setParamMeta` 分开是刻意的：那条改的是「这条参数是什么」，载荷是整包定义，
+   * 拿它挪别人的位次就得把别人的定义原样重抄一遍。这条只回答「按什么次序摆」，
+   * 一次写盘、一条撤销。`keys` 必须与该分组现有的参数**完全相等**（少/多/重复一律拒）。
+   */
+  setSectionOrder: (sectionId: string, keys: string[]) =>
+    invoke<RegistryView>('wb_set_section_order', { sectionId, keys }),
+  /**
    * **清掉译文台账里的几格**（逃生通道，2026-11-02）。
    *
    * 台账平日的摘法只有一条：`setParamMeta` 里"这一笔把值改了"。可译文也能从别的
@@ -3167,8 +3200,16 @@ export const wb = {
   discard: () => invoke<BookView>('wb_discard'),
   /* —— 统一编辑事务（2026-10-31）：撤销/重做/状态在服务器侧，前端只按结果重取 —— */
   txnState: () => invoke<TxnState>('wb_txn_state'),
-  txnUndo: () => invoke<TxnState>('wb_txn_undo'),
-  txnRedo: () => invoke<TxnState>('wb_txn_redo'),
+  /*
+   * 撤销 / 重做（2026-11-14）。
+   *
+   * `scope` = 当前页面认的归属 token（`A1` / `A1:FAST261111` / `bundles`…）。
+   * 给了就**只撤属于它的一条**：栈顶不是它 ⇒ 一格不动，回 `refused` 让界面说清楚
+   * （作者：「我点了我当前这个版本，我撤销它可以撤销到我其他版本的」）。
+   * 不给 = 不看作用域（命令行 / 老调用）。
+   */
+  txnUndo: (scope?: string[]) => invoke<UndoOutcome>('wb_txn_undo', { scope: scope ?? null }),
+  txnRedo: (scope?: string[]) => invoke<UndoOutcome>('wb_txn_redo', { scope: scope ?? null }),
 
   preflight: () => invoke<IssueReport>('wb_preflight'),
   /**

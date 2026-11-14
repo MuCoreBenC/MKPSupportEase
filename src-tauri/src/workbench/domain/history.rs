@@ -74,6 +74,27 @@ pub struct Entry {
     pub fields: Vec<super::txn::FieldEntry>,
 }
 
+/// **这一条碰过哪些「归属」**（2026-11-14，撤销作用域用）。
+///
+/// 两个来源合并：
+/// - 值编辑 / 带字段账的结构编辑 → `FieldEntry.owner`（`A1` / `A1:STANDARD`）；
+/// - 结构编辑碰的文件路径 → `machines/A1.toml` → `A1`（见 [`super::scopes::owner_of_rel`]）。
+///
+/// 去重后按字典序，保证同一条每次算出来一样（界面上那一句不会忽前忽后）。
+fn owners_of(e: &Entry) -> Vec<String> {
+    let mut out: Vec<String> = e.fields.iter().map(|f| f.owner.clone()).collect();
+    if let Action::Struct(cmd) = &e.action {
+        out.extend(
+            cmd.files
+                .iter()
+                .filter_map(|f| super::scopes::owner_of_rel(&f.path)),
+        );
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// 一条命令的正/反向。
 #[derive(Debug, Clone)]
 pub enum Action {
@@ -273,9 +294,17 @@ impl History {
     ///
     /// 「未保存改动」框里那颗「撤销这一笔（N 处）」用它 —— 那一笔是**一次手势**
     /// （批量设值就是一条），逐行各给一颗按钮会让人以为只撤那一格。
-    pub fn top_op(&self) -> Option<(String, usize)> {
+    pub fn top_op(&self) -> Option<(String, usize, Vec<String>)> {
         let e = self.undo.back()?;
-        Some((e.label.clone(), e.fields.len()))
+        Some((e.label.clone(), e.fields.len(), owners_of(e)))
+    }
+
+    /// 重做栈顶那一条（形状同 [`Self::top_op`]）。
+    ///
+    /// 重做也要过作用域闸：撤销跳版本已经够吓人了，重做跳版本一样。
+    pub fn redo_top(&self) -> Option<(String, usize, Vec<String>)> {
+        let e = self.redo.last()?;
+        Some((e.label.clone(), e.fields.len(), owners_of(e)))
     }
 
     /// **记一条命令**（不碰草稿、不碰文档 —— 调用方已经应用过了）。

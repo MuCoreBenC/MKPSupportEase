@@ -52,6 +52,7 @@ import PickOrType from '../c14/PickOrType'
 import SelectField from '../c14/field/SelectField'
 import { fieldState, machineFieldLabels, placeholderText } from '../c14/labels'
 import { toasts } from '../c14/toast'
+import { useScope } from '../scopeState'
 import { useSplitRail } from '../c14/SplitRail'
 import MachineDimensionsModal from './MachineDimensionsModal'
 import ZoneEditorModal from './ZoneEditorModal'
@@ -325,6 +326,23 @@ export default function MachinesPage({
     const [, pv] = pickedVid.split('/')
     if (!m.versions.some((v) => v.id === pv)) setPickedVid(null)
   }, [pickedVid, m])
+
+  /*
+   * 撤销作用域（2026-11-14）：这一屏认这台机器 + 正在看的那一版。
+   * 后端每条命令碰过 `machines/<id>.toml`，归属就是 `<id>` / `<id>:<版本>` ——
+   * 换成另一版时栈顶那一笔就不属于这一屏了，撤销会拒绝并说明。
+   */
+  useScope(
+    machineId === ''
+      ? []
+      : [
+          /*
+           * 选着某一版时**只认那一版**：带着机型 token 会把兄弟版本的改动
+           * 也认成"我的"（`A1` 是 `A1:FAST260326` 的前缀）—— 正是作者报的那个串。
+           */
+          pickedVid === null ? machineId : pickedVid.replace('/', ':'),
+        ],
+  )
 
   /**
    * 机型行在右键菜单里的键。**带 `machine:` 前缀** —— 版本行用的是没前缀的
@@ -849,6 +867,20 @@ export default function MachinesPage({
       failToast(e)
     }
   }
+
+  /*
+   * 多语言框里那几册的**译文欠账**（2026-11-14）：`nameEn` 这种键的集合。
+   * 中文一改、那一册没跟着重写，后端就把它登记进 `staleTranslations`；
+   * 框里据此标「待重写」，改完保存就消 —— 这样人才知道哪几格要重看。
+   */
+  const i18nStale = (() => {
+    const set = new Set<string>()
+    if (i18nOpen === null || list === null) return set
+    const [mid, vid] = i18nOpen.split('/')
+    const v = list.machines.find((m) => m.id === mid)?.versions.find((x) => x.id === vid)
+    for (const k of v?.staleTranslations ?? []) set.add(k)
+    return set
+  })()
 
   /** 提交多语言模态框：只提交**有变化的**格，一格失败就停，不静默半成功 */
   const submitI18n = async () => {
@@ -2492,31 +2524,50 @@ export default function MachinesPage({
           </>
         }
       >
-        {I18N_LANGS.map((l) => (
-          <div key={l.suffix} style={{ marginBottom: 14 }}>
-            <div className={s.cardNote}>{l.label}</div>
-            <label className={s.kv} style={{ display: 'grid' }}>
-              {I18N_FIELDS.map((f) => {
-                const key = `${f.suffix}${l.suffix}` as I18nKey
-                return (
-                  <div key={key} style={{ display: 'contents' }}>
-                    <span className={s.kvKey}>{f.label}</span>
-                    <input
-                      className={s.inp}
-                      value={i18nDraft[key] ?? ''}
-                      aria-label={`${l.label} · ${f.label}`}
-                      placeholder={f.ph}
-                      onChange={(e) => setI18nDraft((d) => ({ ...d, [key]: e.target.value }))}
-                    />
-                  </div>
-                )
-              })}
-            </label>
-          </div>
-        ))}
+        {I18N_LANGS.map((l) => {
+          const langStale = I18N_FIELDS.filter((f) =>
+            i18nStale.has(`${f.suffix}${l.suffix}`),
+          ).length
+          return (
+            <div key={l.suffix} style={{ marginBottom: 14 }}>
+              <div className={s.cardNote}>
+                {l.label}
+                {langStale > 0 && (
+                  <span
+                    className={s.tag}
+                    style={{ marginLeft: 6 }}
+                    title="中文改过，这一册还没跟着重写（保存后消）"
+                  >
+                    待重写 {langStale}
+                  </span>
+                )}
+              </div>
+              <label className={s.kv} style={{ display: 'grid' }}>
+                {I18N_FIELDS.map((f) => {
+                  const key = `${f.suffix}${l.suffix}` as I18nKey
+                  return (
+                    <div key={key} style={{ display: 'contents' }}>
+                      <span className={s.kvKey}>{f.label}</span>
+                      <input
+                        className={s.inp}
+                        value={i18nDraft[key] ?? ''}
+                        aria-label={`${l.label} · ${f.label}`}
+                        placeholder={f.ph}
+                        /* 欠账只标那一格：三册里往往只有名称那一册要重写 */
+                        data-stale={i18nStale.has(key) ? '1' : undefined}
+                        title={i18nStale.has(key) ? '与现在的中文不一致 —— 改完保存就消' : undefined}
+                        onChange={(e) => setI18nDraft((d) => ({ ...d, [key]: e.target.value }))}
+                      />
+                    </div>
+                  )
+                })}
+              </label>
+            </div>
+          )
+        })}
         <p className={s.cardNoteDim}>
           中文那一册在详情卡里改；这里空着就回落中文
-          <HelpDot text="加一种语言 = 在本文件顶部的 I18N_LANGS 加一行（后缀与 TOML 字段名对齐，如 nameTw）。一次提交所有改动：一格失败就停，不会只成功一半。" />
+          <HelpDot text="改中文时，那三册如果没跟着改，会被记成「待重写」；改完这三册保存，标记就消。待办清单：npm run translations:todo。一次提交所有改动：一格失败就停，不会只成功一半。" />
         </p>
       </ModalC14>
 

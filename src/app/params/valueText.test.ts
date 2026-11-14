@@ -22,13 +22,7 @@ const tr: Tr = ((key: string, vars?: Record<string, unknown>) => {
 
 function def(over: Partial<TextDef['field']> = {}): TextDef {
   return {
-    key: 'toolhead.MKP_extrude',
-    label: '挤出长度',
-    desc: '',
-    group: '动作',
-    sectionId: 'motion',
     unit: 'mm',
-    deprecated: false,
     field: {
       key: 'toolhead.MKP_extrude',
       label: '挤出长度',

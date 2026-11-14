@@ -365,7 +365,7 @@ let mockFields: Array<{
 const SHADOW_MUTATORS = new Set([
   'wb_set_brand_field', 'wb_add_brand', 'wb_move_machine_to_brand',
   'wb_set_machine_dimensions', 'wb_set_section_meta', 'wb_set_param_meta', 'wb_remove_section',
-  'wb_clear_stale_translations',
+  'wb_set_section_order', 'wb_clear_stale_translations',
   'wb_set_machine_zones', 'wb_set_bundle_refs', 'wb_add_bundle',
   'wb_rename_bundle', 'wb_copy_bundle', 'wb_assign_bundle_versions',
   'wb_remove_bundle', 'wb_set_calibration_identity', 'wb_set_asset_delivery',
@@ -1760,6 +1760,13 @@ function buildRegistry(): Json {
       machineFilter: pdef.machineFilter ?? [],
       deprecated: pdef.deprecated,
       deprecatedMachines: pdef.deprecatedMachines ?? [],
+      /*
+       * ★ 这一格**必须给**（2026-11-14）：`ParamView.staleTranslations` 是必填，
+       * 真机那边总有（没有就是 `[]`）。桩里漏了它，浏览器一开「编辑定义」
+       * 就 `Cannot read properties of undefined (reading 'length')` ——
+       * 桩不像真后端，探针就测不到真的东西。
+       */
+      staleTranslations: pdef.staleTranslations ?? [],
     })),
     sections: TABS.flatMap((t) =>
       t.sections.map((sec) => ({
@@ -2054,6 +2061,40 @@ export function installMockBackend() {
         Object.assign(target, e)
         /* 新分组是这一笔的目标：真机把参数搬进去，桩里也照办（`sectionId: null` 别盖上去） */
         if (fresh !== null) target.sectionId = fresh.id
+        return Promise.resolve(buildRegistry())
+      }
+      case 'wb_set_section_order': {
+        /*
+         * 整组重排的演示桩：只改 `order`（与真机同一套「沿用旧槽位」几何），
+         * 校验只做「集合必须完全相等」那一条 —— 真机的其余判据在 registry::set_section_order。
+         */
+        const sectionId = args?.sectionId as string
+        const keys = (args?.keys as string[]) ?? []
+        const here = PARAMS.filter((p) => p.sectionId === sectionId)
+        if (here.length === 0) {
+          return Promise.reject({ code: 'INVALID', message: `分组 ${sectionId} 里一个参数都没有`, traceId: 'mock' })
+        }
+        const hereKeys = here.map((p) => p.key)
+        const missing = hereKeys.filter((k) => !keys.includes(k))
+        const extra = keys.filter((k) => !hereKeys.includes(k))
+        const dup = keys.filter((k, i) => keys.indexOf(k) !== i)
+        if (missing.length > 0 || extra.length > 0 || dup.length > 0) {
+          const why = [
+            dup.length > 0 ? `重复：${dup.join(', ')}` : '',
+            missing.length > 0 ? `缺：${missing.join(', ')}` : '',
+            extra.length > 0 ? `多：${extra.join(', ')}` : '',
+          ]
+            .filter((s) => s !== '')
+            .join('；')
+          return Promise.reject({ code: 'INVALID', message: `排序清单与分组 ${sectionId} 的参数对不上（${why}）`, traceId: 'mock' })
+        }
+        const slots = here.map((p) => p.order).sort((a, b) => a - b)
+        const distinct = slots.every((v, i) => i === 0 || slots[i - 1] < v)
+        const use = distinct ? slots : slots.map((_, i) => i + 1)
+        keys.forEach((k, i) => {
+          const p = PARAMS.find((x) => x.key === k)
+          if (p) p.order = use[i]
+        })
         return Promise.resolve(buildRegistry())
       }
       case 'wb_set_machine_zones': {
@@ -3060,6 +3101,26 @@ export function installMockBackend() {
         structDirty = 0
         mockFields = []
         return Promise.resolve(buildBook())
+      case 'wb_txn_undo':
+      case 'wb_txn_redo':
+        /*
+         * 浏览器桩**没有撤销栈**（结构改动在桩里是 pending 覆盖表，没有逐条 op）。
+         * 如实回「什么都没撤」，不编一个假的 done 出来 —— 真机才有那条栈。
+         * 形状与 `app::UndoOutcome` 对齐，免得 UI 在浏览器里读到 undefined。
+         */
+        return Promise.resolve({
+          state: {
+            dirty: structDirty > 0,
+            dirtyCount: structDirty,
+            canUndo: false,
+            canRedo: false,
+            ops: [],
+            topOp: null,
+            receipt: null,
+          },
+          done: null,
+          refused: null,
+        })
       case 'wb_txn_state':
         /*
          * 结构类改动（分组 / 参数定义 / 机器档案 / 套餐…）桩里没有逐条撤销栈，

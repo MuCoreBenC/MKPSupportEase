@@ -103,6 +103,100 @@ pub struct MachineVersion {
     /// 不与版本混。
     #[serde(default)]
     pub image: Option<String>,
+    /// **哪几册译文跟着这份中文一起过期了**（2026-11-14）。
+    ///
+    /// 与参数注册表那一格（`ParamDef::stale_translations`）同一条口径：中文一改、
+    /// 那三册没跟着重写，就把它们登记进来（`nameEn` / `tagJa` / `descriptionTw` 这种）。
+    /// 作者的问题原话：「我的一些改了多语言的中文的，怎么让 AI 知道我改了？」——
+    /// 界面上看不出「英文还是旧中文的译本」，只能把它写成数据。
+    ///
+    /// - 登记与摘除都在 [`Machine::set_version_field`] 一处；
+    /// - **空数组不落盘**（`skip_serializing_if`），老文件一个字节不变；
+    /// - 客户端不读它，给工作台标格与 `npm run translations:todo` 出待办用。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stale_translations: Vec<String>,
+}
+
+impl MachineVersion {
+    /// 中文改了、那几册没跟着改 ⇒ 登记为过期（口径同 `ParamDef::mark_translations_stale`）。
+    ///
+    /// 三条边界都是刻意的：
+    /// - 中文**没变** ⇒ 一册都不欠账（点开又关掉不该留痕）；
+    /// - 译文**这一笔同时被重写**了 ⇒ 不是欠账（正在补）；
+    /// - 那一册本来**就是空的** ⇒ 不登记：空 = 回落中文，那是既定行为，不是待办。
+    fn mark_translations_stale(&mut self, before: &MachineVersion) {
+        let pairs: [(bool, &Option<String>, &Option<String>, &str); 9] = [
+            (
+                self.name != before.name,
+                &self.name_en,
+                &before.name_en,
+                "nameEn",
+            ),
+            (
+                self.name != before.name,
+                &self.name_tw,
+                &before.name_tw,
+                "nameTw",
+            ),
+            (
+                self.name != before.name,
+                &self.name_ja,
+                &before.name_ja,
+                "nameJa",
+            ),
+            (
+                self.tag != before.tag,
+                &self.tag_en,
+                &before.tag_en,
+                "tagEn",
+            ),
+            (
+                self.tag != before.tag,
+                &self.tag_tw,
+                &before.tag_tw,
+                "tagTw",
+            ),
+            (
+                self.tag != before.tag,
+                &self.tag_ja,
+                &before.tag_ja,
+                "tagJa",
+            ),
+            (
+                self.description != before.description,
+                &self.description_en,
+                &before.description_en,
+                "descriptionEn",
+            ),
+            (
+                self.description != before.description,
+                &self.description_tw,
+                &before.description_tw,
+                "descriptionTw",
+            ),
+            (
+                self.description != before.description,
+                &self.description_ja,
+                &before.description_ja,
+                "descriptionJa",
+            ),
+        ];
+        for (changed, now, old, key) in pairs {
+            if !changed || now != old {
+                continue;
+            }
+            let had = old.as_deref().map(str::trim).is_some_and(|s| !s.is_empty());
+            if !had || self.stale_translations.iter().any(|x| x == key) {
+                continue;
+            }
+            self.stale_translations.push(key.to_owned());
+        }
+    }
+
+    /// 这一册**被重写了** ⇒ 摘掉欠账（不分值有没有变：写过就算补过）。
+    fn clear_stale(&mut self, key: &str) {
+        self.stale_translations.retain(|x| x != key);
+    }
 }
 
 /// 一块禁区 —— 一串点围成的多边形
@@ -911,12 +1005,16 @@ impl Machine {
                 // 空壳版本：备注空着（副标题回落路径）、不带图（回落机型图）
                 remark: None,
                 image: None,
+                /* 新版本一册都不欠（没有旧译文可言）*/
+                stale_translations: Vec::new(),
             },
             Some(v) => MachineVersion {
                 id: id.to_owned(),
                 name: name.to_owned(),
                 tag: pick(tag, v.tag.as_deref()),
                 description: pick(description, v.description.as_deref()),
+                /* 抄的是译文正文，**不抄欠账**：那些待办说的是模板那一份的旧中文 */
+                stale_translations: Vec::new(),
                 ..v.clone()
             },
         });
@@ -1148,6 +1246,8 @@ impl Machine {
             VersionField::Image => v.image.clone(),
         };
         let owned = val.map(str::to_owned);
+        /* 改之前那一份（译文欠账要拿它比）—— `was` 只抄了那一格，不够 */
+        let before = v.clone();
         match field {
             VersionField::Name => v.name = owned.unwrap_or_default(),
             VersionField::NameEn => v.name_en = owned,
@@ -1164,6 +1264,38 @@ impl Machine {
             VersionField::DescriptionJa => v.description_ja = owned,
             VersionField::Remark => v.remark = owned,
             VersionField::Image => v.image = owned,
+        }
+        /*
+         * 译文欠账（2026-11-14）：
+         *   写了**某一册译文** ⇒ 那一册不欠了（不管你写的是什么值）；
+         *   写了**中文**（名称 / 标签 / 描述）⇒ 另外三册记成过期，除非这一笔同时改了它们。
+         * 与参数注册表 `ParamDef::mark_translations_stale` 同一套判据。
+         */
+        if matches!(
+            field,
+            VersionField::NameEn
+                | VersionField::NameTw
+                | VersionField::NameJa
+                | VersionField::TagEn
+                | VersionField::TagTw
+                | VersionField::TagJa
+                | VersionField::DescriptionEn
+                | VersionField::DescriptionTw
+                | VersionField::DescriptionJa
+        ) {
+            v.clear_stale(field.key());
+        } else {
+            v.mark_translations_stale(&before);
+        }
+        /* 欠账表跟着这一格一起写回（空表 = 删键）*/
+        if v.stale_translations.is_empty() {
+            t.remove("staleTranslations");
+        } else {
+            let mut arr = toml_edit::Array::new();
+            for key in &v.stale_translations {
+                arr.push(key.as_str());
+            }
+            t["staleTranslations"] = toml_edit::value(arr);
         }
         log_field_change(
             "版本信息",
@@ -1942,6 +2074,16 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
                             description_ja: g("descriptionJa"),
                             remark: g("remark"),
                             image: g("image"),
+                            /* 译文欠账（2026-11-14）：缺键 = 一册都不欠 */
+                            stale_translations: t
+                                .get("staleTranslations")
+                                .and_then(|v| v.as_array())
+                                .map(|a| {
+                                    a.iter()
+                                        .filter_map(|v| v.as_str().map(str::to_owned))
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
                         })
                     })
                     .collect()
@@ -3187,6 +3329,114 @@ mod tests {
         assert!(
             line.contains('\'') && !line.contains('"'),
             "引号风格漂了（真数据是单引号，写出来是）：{line}"
+        );
+    }
+
+    /// **改中文 ⇒ 那三册记成「待重写」；重写某一册 ⇒ 那一册销账**（2026-11-14）。
+    ///
+    /// 作者的原话：「我的一些改了多语言的中文的，怎么让 AI 知道我改了？」——
+    /// 这份台账就是那个"知道"：界面上标出来，`npm run translations:todo` 出清单。
+    /// 三条边界一起钉住：中文没变不留痕、空着的译册不算欠账、写过就销账。
+    #[test]
+    fn changing_the_chinese_marks_the_three_translations_stale() {
+        let Some((root, _c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let (tmp, mut c) = copy_of(&root);
+        /* 挑一版三册名字都填过的 —— 空着的不该被记成欠账（空 = 回落中文） */
+        let vid = c
+            .machine("A1")
+            .unwrap()
+            .versions
+            .iter()
+            .find(|v| {
+                v.name_en.as_deref().is_some_and(|s| !s.trim().is_empty())
+                    && v.name_tw.as_deref().is_some_and(|s| !s.trim().is_empty())
+                    && v.name_ja.as_deref().is_some_and(|s| !s.trim().is_empty())
+            })
+            .map(|v| v.id.clone())
+            .expect("A1 该有一版三册名字都填过");
+
+        /* ① 只改中文 → 三册全记上 */
+        c.machine_mut("A1")
+            .unwrap()
+            .set_version_field(&vid, VersionField::Name, Some("改过的名字"))
+            .expect("改得动");
+        c.write_machine("A1").expect("写回");
+        let c2 = Catalog::load_from(tmp.path()).expect("重读");
+        let v2 = c2
+            .machine("A1")
+            .unwrap()
+            .versions
+            .iter()
+            .find(|v| v.id == vid)
+            .unwrap()
+            .clone();
+        let mut got = v2.stale_translations.clone();
+        got.sort();
+        assert_eq!(
+            got,
+            vec!["nameEn", "nameJa", "nameTw"],
+            "改中文该把那三册都记上"
+        );
+        assert!(
+            c2.machine("A1")
+                .unwrap()
+                .to_toml()
+                .contains("staleTranslations"),
+            "台账要落进 TOML 才给得到 AI"
+        );
+
+        /* ② 重写英文名 → 英语那一册销账，另外两册还欠着 */
+        let mut c3 = c2;
+        c3.machine_mut("A1")
+            .unwrap()
+            .set_version_field(&vid, VersionField::NameEn, Some("Renamed"))
+            .expect("改得动");
+        c3.write_machine("A1").expect("写回");
+        let c4 = Catalog::load_from(tmp.path()).expect("重读");
+        let v4 = c4
+            .machine("A1")
+            .unwrap()
+            .versions
+            .iter()
+            .find(|v| v.id == vid)
+            .unwrap();
+        assert!(
+            !v4.stale_translations.iter().any(|k| k == "nameEn"),
+            "重写过就该销账：{:?}",
+            v4.stale_translations
+        );
+        assert_eq!(v4.stale_translations.len(), 2, "另外两册还欠着");
+
+        /* ③ 中文没变（同一个值再写一遍）→ 一册都不记：把刚才那个新名字原样再写一次 */
+        let mut c5 = c4;
+        c5.machine_mut("A1")
+            .unwrap()
+            .set_version_field(&vid, VersionField::Name, Some("改过的名字"))
+            .expect("改得动");
+        c5.write_machine("A1").expect("写回");
+        let c6 = Catalog::load_from(tmp.path()).expect("重读");
+        let v6 = c6
+            .machine("A1")
+            .unwrap()
+            .versions
+            .iter()
+            .find(|v| v.id == vid)
+            .unwrap();
+        assert_eq!(
+            v6.stale_translations.len(),
+            2,
+            "中文一个字没变，不该再往台账里加：{:?}",
+            v6.stale_translations
+        );
+        /* ④ 改中文**不会顺手把已有的欠账洗掉** —— 那两册确实还是旧译文 */
+        assert!(
+            v6.stale_translations.iter().any(|k| k == "nameTw")
+                && v6.stale_translations.iter().any(|k| k == "nameJa"),
+            "写过一次名称不该把另外两册的欠账洗掉：{:?}",
+            v6.stale_translations
         );
     }
 

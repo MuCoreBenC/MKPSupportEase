@@ -3072,6 +3072,20 @@ text_en = "The auto-value source points at a parameter that does not exist"
 text_zh_tw = "自動值的來源指錯了參數"
 text_ja = "自動値の参照先が存在しないパラメーターを指しています"
 
+["ui.presetdata.registry.358"]
+text = "分组 {section} 里一个参数都没有，排不了序"
+text_en = "Section {section} has no parameters, so there is nothing to order"
+text_zh_tw = "分組 {section} 裡一個參數都沒有，排不了序"
+text_ja = "グループ {section} にはパラメーターが一つもないため、並べ替えられません"
+params = ["section"]
+
+["ui.presetdata.registry.359"]
+text = "排序清单与分组 {section} 的参数对不上"
+text_en = "The ordering list does not match the parameters of section {section}"
+text_zh_tw = "排序清單與分組 {section} 的參數對不上"
+text_ja = "並び順のリストがグループ {section} のパラメーターと一致しません"
+params = ["section"]
+
 ["ui.runtime.app_state.345"]
 text = "读不到应用状态"
 text_en = "Cannot read the application state"

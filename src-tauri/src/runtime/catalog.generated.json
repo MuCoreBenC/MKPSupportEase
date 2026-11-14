@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "0694d810b84f49fc",
+  "revision": "c635e99e4c890602",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -72,15 +72,20 @@
           "nameTw": "標準版",
           "nameJa": "スタンダード版",
           "recommendedBundle": "A1_STANDARD",
-          "tag": "推荐",
+          "tag": "经典",
           "tagEn": "Recommended",
           "tagTw": "推薦",
           "tagJa": "おすすめ",
-          "description": "标准配置，适合大多数用户",
+          "description": "官方模型，适合多数用户",
           "descriptionEn": "Standard configuration for most users",
           "descriptionTw": "標準配置，適合大多數使用者",
           "descriptionJa": "標準構成，ほとんどのユーザーに適しています",
-          "image": null
+          "image": null,
+          "staleTranslations": [
+            "descriptionEn",
+            "descriptionTw",
+            "descriptionJa"
+          ]
         },
         {
           "id": "FAST260326",
@@ -89,15 +94,26 @@
           "nameTw": "快拆版（6月以前）",
           "nameJa": "クイックリリース版（6月以前）",
           "recommendedBundle": "A1_FAST260326",
-          "tag": "旧版",
+          "tag": "旧版快拆",
           "tagEn": "Popular",
           "tagTw": "熱門",
           "tagJa": "人気",
-          "description": "很久之前的，暂时保留预设，建议打印新版",
+          "description": "暂时保留旧版预设文件，建议打印新版",
           "descriptionEn": "Modded setup for quick-release parts",
           "descriptionTw": "支援快拆配件的改裝配置",
           "descriptionJa": "クイックリリースパーツに対応した改造構成",
-          "image": null
+          "image": null,
+          "staleTranslations": [
+            "tagEn",
+            "tagTw",
+            "tagJa",
+            "descriptionEn",
+            "descriptionTw",
+            "descriptionJa",
+            "nameEn",
+            "nameTw",
+            "nameJa"
+          ]
         },
         {
           "id": "FAST261111",
@@ -110,11 +126,19 @@
           "tagEn": "Newest",
           "tagTw": "最新",
           "tagJa": "最新",
-          "description": "v3.3.7的，兼容260628",
+          "description": "v3.3.7的261111版，兼容260628版",
           "descriptionEn": "For units bought after June, plus the open-sourced 260628 quick-release design",
           "descriptionTw": "6月以後在閒魚購買的機器，以及6月28開源的快拆260628版本",
           "descriptionJa": "6月以降にフリマアプリで購入した機体、および6月28日に公開されたクイックリリース260628に対応",
-          "image": null
+          "image": null,
+          "staleTranslations": [
+            "descriptionEn",
+            "descriptionTw",
+            "descriptionJa",
+            "nameEn",
+            "nameTw",
+            "nameJa"
+          ]
         }
       ],
       "zones": []
@@ -184,15 +208,23 @@
           "nameTw": "標準版",
           "nameJa": "スタンダード版",
           "recommendedBundle": "A1_MINI_STANDARD",
-          "tag": "推荐",
+          "tag": "经典",
           "tagEn": "Recommended",
           "tagTw": "推薦",
           "tagJa": "おすすめ",
-          "description": "标准配置",
+          "description": "官方模型，适合多数用户",
           "descriptionEn": "Standard configuration",
           "descriptionTw": "標準配置",
           "descriptionJa": "標準構成",
-          "image": null
+          "image": null,
+          "staleTranslations": [
+            "descriptionEn",
+            "descriptionTw",
+            "descriptionJa",
+            "tagEn",
+            "tagTw",
+            "tagJa"
+          ]
         },
         {
           "id": "FAST260326",
@@ -201,15 +233,26 @@
           "nameTw": "快拆版（6月以前）",
           "nameJa": "クイックリリース版（6月以前）",
           "recommendedBundle": "A1_MINI_FAST260326",
-          "tag": "旧版",
+          "tag": "旧版快拆",
           "tagEn": "Popular",
           "tagTw": "熱門",
           "tagJa": "人気",
-          "description": "很久之前的，暂时保留预设，建议打印新版",
+          "description": "暂时保留旧版预设文件，建议打印新版",
           "descriptionEn": "Modded setup for quick-release parts",
           "descriptionTw": "支援快拆配件的改裝配置",
           "descriptionJa": "クイックリリースパーツに対応した改造構成",
-          "image": null
+          "image": null,
+          "staleTranslations": [
+            "descriptionEn",
+            "descriptionTw",
+            "descriptionJa",
+            "tagEn",
+            "tagTw",
+            "tagJa",
+            "nameEn",
+            "nameTw",
+            "nameJa"
+          ]
         },
         {
           "id": "FAST261111",
@@ -222,11 +265,19 @@
           "tagEn": "Newest",
           "tagTw": "最新",
           "tagJa": "最新",
-          "description": "v3.3.7的，兼容260628",
+          "description": "v3.3.7的261111，兼容260628版",
           "descriptionEn": "For units bought after June, plus the open-sourced 260628 quick-release design",
           "descriptionTw": "6月以後在閒魚購買的機器，以及6月28開源的快拆260628版本",
           "descriptionJa": "6月以降にフリマアプリで購入した機体、および6月28日に公開されたクイックリリース260628に対応",
-          "image": null
+          "image": null,
+          "staleTranslations": [
+            "descriptionEn",
+            "descriptionTw",
+            "descriptionJa",
+            "nameEn",
+            "nameTw",
+            "nameJa"
+          ]
         }
       ],
       "zones": []
@@ -806,7 +857,7 @@
         "a1-fast",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-11-12"
+      "updatedAt": "2026-11-14"
     },
     {
       "id": "A1_FAST261111",
@@ -816,7 +867,7 @@
         "a1-fastv3.3",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-11-12"
+      "updatedAt": "2026-11-14"
     },
     {
       "id": "A1_MINI_STANDARD",
@@ -836,7 +887,7 @@
         "a1_mini-fast",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-11-12"
+      "updatedAt": "2026-11-14"
     },
     {
       "id": "A1_MINI_FAST261111",
@@ -846,7 +897,7 @@
         "a1_mini-fastv3.3",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-11-12"
+      "updatedAt": "2026-11-14"
     },
     {
       "id": "P1S_default",
