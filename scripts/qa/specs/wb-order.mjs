@@ -172,6 +172,20 @@ export default async function (t, page, url) {
   )
   await t.shot(page, '恢复之后 · 确认不可点')
 
+  /* ③b ↑↓：点在图标上也要能挪 —— pointerdown 落在 svg 上，别被整行拖拽抢走 */
+  await rowAt(page, 2).getByRole('button', { name: /上移一位/ }).click()
+  await page.waitForTimeout(200)
+  const rowsArrowUp = await sortRows(page)
+  t.check(
+    '点「上移」能挪到前一位',
+    rowsArrowUp[0] === rows0[1] && rowsArrowUp[1] === rows0[0],
+    rowsArrowUp[0],
+  )
+  await rowAt(page, 1).getByRole('button', { name: /下移一位/ }).click()
+  await page.waitForTimeout(200)
+  t.check('点「下移」能挪回来', JSON.stringify(await sortRows(page)) === JSON.stringify(rows0))
+  await t.shot(page, '↑↓ 各挪一位')
+
   /* ④ 改一次 → 确认 → 真的落盘（重开框读回来还是新序） */
   await posOf(page, 2).fill('1')
   await posOf(page, 2).press('Enter')

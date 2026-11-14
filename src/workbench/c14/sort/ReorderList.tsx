@@ -130,9 +130,12 @@ export default function ReorderList({
   }
 
   const startDrag = (e: ReactPointerEvent<HTMLDivElement>, i: number) => {
-    /* 数字框 / ↑↓ 自己都有各自的活，别被整行拖抢走 */
-    const tag = (e.target as HTMLElement).tagName
-    if (tag === 'INPUT' || tag === 'BUTTON') return
+    /*
+     * 数字框 / ↑↓ 自己都有各自的活：按 closest 认整颗控件，图标里的 svg/path 一起算。
+     * 只比 tagName 会漏掉点在图标上的那一半 —— 整行一旦接管指针，setPointerCapture
+     * 会把 click 的目标挪到行上，按钮就永远收不到。
+     */
+    if ((e.target as Element).closest('input, button') !== null) return
     /* 别把文字拖选出来：preventDefault + 清选区 + 拖动期间整页禁选 */
     e.preventDefault()
     window.getSelection()?.removeAllRanges()
@@ -273,6 +276,7 @@ export default function ReorderList({
                 inputMode="numeric"
                 aria-label={`${row.label} 的位次`}
                 defaultValue={String(i + 1)}
+                onPointerDown={(e) => e.stopPropagation()}
                 onBlur={(e) => {
                   const n = Number(e.target.value)
                   if (Number.isFinite(n)) onSetPosition(key, n)
@@ -296,6 +300,7 @@ export default function ReorderList({
               className={s.arrow}
               aria-label={`${row.label} 上移一位`}
               disabled={i === 0}
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={() => onMove(i, i - 1)}
             >
               <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -307,6 +312,7 @@ export default function ReorderList({
               className={s.arrow}
               aria-label={`${row.label} 下移一位`}
               disabled={i === order.length - 1}
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={() => onMove(i, i + 1)}
             >
               <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
