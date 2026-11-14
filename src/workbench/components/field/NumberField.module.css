@@ -20,10 +20,10 @@
 }
 
 .box:focus-within {
-  border-color: var(--wb-primary);
-  /* 跟 .inp 一个口吻：细边转蓝 + 一圈微光，不要实心粗环 */
-  outline: 2px solid var(--wb-primary-soft);
-  outline-offset: 0;
+  border-color: var(--accent);
+  /* 焦点只有一套：读 tokens 里的 `--focus-ring`，别在这里再写一遍粗细 */
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 /*

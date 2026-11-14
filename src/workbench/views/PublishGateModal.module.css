@@ -63,9 +63,10 @@
   white-space: nowrap;
 }
 
+/* 「通过」是成功语义，不是"被选中"：它读 `--wb-ok`，不跟着强调色变蓝 */
 .stPass {
-  color: var(--accent-deep);
-  background: var(--accent-soft);
+  color: var(--wb-ok);
+  background: color-mix(in srgb, var(--wb-ok) 12%, transparent);
 }
 
 .stFail {

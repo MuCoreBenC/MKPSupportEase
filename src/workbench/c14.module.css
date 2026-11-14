@@ -9,18 +9,20 @@
 
 .shell {
   /*
-   * 工作台的主色是**蓝**，不是 A 轨用户端的绿 —— 依据 `b03/tokens.css` 的
-   * `--w-primary: #3b82f6`（与真项目 workbench 一致）。C05 是工作台原型，
-   * 主操作、选中态、强调都用工作台蓝；绿只留给「成功」语义（--wb-ok）。
-   * 语义分层：蓝=主操作/选中 · 绿=成功 · 红=危险 · 灰=缺失/占位。
+   * 工作台只有一个强调色 = **蓝**（真值在 `c14tokens.css` 的 `--accent*`）。
+   *
+   * 这几行是**别名**：`--wb-primary` 全仓有一百多处引用，改名等于一次无收益的扫荡；
+   * 而 `--accent` 是搬过来的 C14 组件读的名字。两个名字指同一个值，一屏里才不会再出现
+   * 「一半选中是蓝、一半是绿」。语义分层：蓝 = 主操作 / 选中 / 焦点；绿 = 成功（`--wb-ok`）；
+   * 红 = 危险；灰 = 缺失 / 占位。
    */
-  --wb-primary: #3b82f6;
-  --wb-primary-deep: #2f74dd;
-  --wb-primary-soft: rgba(59, 130, 246, 0.12);
-  /* 分隔条悬停那条线：主色的半透明版（与 --wb-primary 同源，硬编码会漂） */
-  --wb-primary-line: rgba(59, 130, 246, 0.4);
-  /* 按下态：比悬停（--wb-primary-soft）再重一档（数字框步进箭头） */
-  --wb-primary-press: rgba(59, 130, 246, 0.2);
+  --wb-primary: var(--accent);
+  --wb-primary-deep: var(--accent-deep);
+  --wb-primary-soft: var(--accent-soft);
+  /* 分隔条悬停那条线：主色的半透明版（与 --accent 同源，硬编码会漂） */
+  --wb-primary-line: color-mix(in srgb, var(--accent) 40%, transparent);
+  /* 按下态：比悬停（--accent-soft）再重一档（数字框步进箭头） */
+  --wb-primary-press: color-mix(in srgb, var(--accent) 20%, transparent);
   --wb-ok: #10b981;
   /* 「要留意」那一档的字色（弃用徽章以外的几处提示行读它） */
   --wb-warn: #b45309;
@@ -150,11 +152,7 @@
  *   · 弃用红整族换成半透明底 + 提亮的字（浅色那套是"红往灰里退"，深色要反过来）。
  */
 [data-theme='dark'] .shell {
-  --wb-primary: #4b8ef7;
-  --wb-primary-deep: #7ab0fa;
-  --wb-primary-soft: rgba(75, 142, 247, 0.18);
-  --wb-primary-line: rgba(75, 142, 247, 0.55);
-  --wb-primary-press: rgba(75, 142, 247, 0.34);
+  /* 蓝族不提在这里：`--wb-primary` 是 `--accent` 的别名，深色由 tokens 里那份覆盖 */
   --wb-ok: #2f9e5b;
   --wb-warn: #d9942b;
   /* 紫色在深底上要**提亮**（与蓝同一口径：原值发闷） */
@@ -889,7 +887,8 @@
 }
 
 .shotBtn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
   outline-offset: 1px;
 }
 
@@ -960,8 +959,9 @@
 }
 
 .inp:focus {
-  border-color: var(--wb-primary);
-  outline: 2px solid var(--wb-primary-soft);
+  border-color: var(--accent);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 /* 译文欠账：中文改过、这一册没跟着重写。只用一条琥珀色内描边，
@@ -3476,8 +3476,9 @@
 }
 
 .pSearch:focus {
-  border-color: var(--wb-primary);
-  outline: 2px solid var(--wb-primary-soft);
+  border-color: var(--accent);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 .pScroll {
@@ -5386,8 +5387,9 @@
 }
 
 .dimInp:focus {
-  border-color: var(--wb-primary);
-  outline: 2px solid var(--wb-primary-soft);
+  border-color: var(--accent);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 /* 布尔那一格（第二风扇）：勾选框与「有 / 无」并排，值本身不用彩色药丸 */

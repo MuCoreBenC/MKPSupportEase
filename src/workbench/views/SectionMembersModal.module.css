@@ -86,6 +86,8 @@
 
 .nameInput:focus {
   border-color: var(--accent);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 .wrap {
@@ -132,6 +134,8 @@
 
 .search:focus {
   border-color: var(--accent);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 /* 左右各一个，互不联动；到头不把滚动链传给另一列或外壳 */

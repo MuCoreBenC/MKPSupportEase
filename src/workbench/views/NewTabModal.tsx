@@ -74,7 +74,7 @@ export default function NewTabModal({ onCancel, onCreate }: NewTabModalProps) {
             else if (e.key === 'Escape') onCancel()
           }}
         />
-        <span className={s.dim}>自带一个空分组，可直接放参数</span>
+        <span className={s.dimSrc}>自带一个空分组，可直接放参数</span>
       </label>
     </ModalC14>
   )

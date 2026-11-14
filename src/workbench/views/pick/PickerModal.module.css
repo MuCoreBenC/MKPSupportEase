@@ -30,7 +30,8 @@
 }
 
 .trigger:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
   outline-offset: 1px;
 }
 
@@ -132,7 +133,8 @@
 }
 
 .row:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
   outline-offset: -2px;
 }
 

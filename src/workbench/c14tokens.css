@@ -11,6 +11,12 @@
  *
  * 密度档随外壳根上的 `data-density` 走（App 的 `useDensity`，阈值 1600/1080/640，
  * 与试验场同一组）。
+ *
+ * # 唯一与试验场不同的地方：强调色
+ *
+ * 试验场属于客户端，强调色是绿（`#20b25a`）；工作台是蓝（`#3b82f6`，与 `--w-primary`
+ * 同值）。**两边的绿不互通**：客户端的绿在 `src/styles/tokens.css`，工作台的蓝在这里。
+ * 这一套只挂 `[data-wb]`，所以换色不会漏到客户端窗口去。
  */
 
 [data-wb] {
@@ -30,10 +36,27 @@
   --text-2: #6b7783;
   --text-3: #9aa5b0;
 
-  /* 强调色（取自打印机绿色件） */
-  --accent: #20b25a;
-  --accent-deep: #17924a;
-  --accent-soft: rgba(32, 178, 90, 0.12);
+  /*
+   * 强调色 = **工作台蓝**（2026-11-14 统一）。
+   *
+   * 这一套 token 是从试验场原样搬来的，那边属于客户端（绿）。工作台只有一个强调色：
+   * 选中、当前、聚焦、主操作都用它，绿只留给「成功」（`--wb-ok`）、红只留给危险。
+   * 之前蓝（`--wb-primary`）与绿（`--accent`）各管一半，同一屏里选中态一半蓝一半绿，
+   * 焦点环还有粗有细 —— 现在两边同值，见下面 `--focus-*`。
+   */
+  --accent: #3b82f6;
+  --accent-deep: #2f74dd;
+  --accent-soft: rgba(59, 130, 246, 0.12);
+
+  /*
+   * 焦点环全仓一套：**2px、强调色 35% 的一圈微光、贴着边**。
+   *
+   * 实心 2px 太亮（作者 2026-10-03 那一刀），只给按钮不给输入框又会变成
+   * 「有的粗有的细」—— 所以两者同一套：控件边框转强调色，外面再套同一条环。
+   * 谁要表达"焦点"就读这两个变量，别在组件里各写一遍。
+   */
+  --focus-ring: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-offset: 0;
 
   /* 危险动作（删除这类不可逆的东西）。「灰色不是错误色」——缺失状态用 --text-3 */
   --danger: #c8453c;
@@ -182,9 +205,10 @@
   --text-2: #b4b8bf;
   --text-3: #8f949b;
 
-  --accent: #2f9e5b;
-  --accent-deep: #279050;
-  --accent-soft: rgba(47, 158, 91, 0.18);
+  /* 深底上蓝要提亮一档（绿那一份是客户端口径，工作台不用） */
+  --accent: #4b8ef7;
+  --accent-deep: #7ab0fa;
+  --accent-soft: rgba(75, 142, 247, 0.18);
 
   --danger: #e2685e;
   --danger-soft: rgba(200, 69, 60, 0.16);
@@ -246,17 +270,20 @@ body,
   cursor: pointer;
 }
 
-:where([data-wb]) button:focus-visible {
-  outline: 2px solid var(--wb-primary);
-  outline-offset: 2px;
+/* 焦点只有一套（见上面 `--focus-ring`）：按钮与输入框同粗同色同偏移。
+   早先按钮是 2px 实线、输入框是细边 + 12% 微光 —— 同一屏里两种焦点。 */
+:where([data-wb]) button:focus-visible,
+:where([data-wb]) input:focus-visible,
+:where([data-wb]) select:focus-visible,
+:where([data-wb]) textarea:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
-/* 文本框的聚焦学 .inp：细边转蓝 + 一圈微光（2026-10-03 作者那一刀：
-   实心 2px 蓝环太亮 —— 要的是"很细的微微的边缘发光"那一种） */
-:where([data-wb]) input:focus-visible {
-  border-color: var(--wb-primary);
-  outline: 2px solid var(--wb-primary-soft);
-  outline-offset: 0;
+:where([data-wb]) input:focus-visible,
+:where([data-wb]) select:focus-visible,
+:where([data-wb]) textarea:focus-visible {
+  border-color: var(--accent);
 }
 
 /* 数值等宽，避免跳动（试验场 global.css 同名类的等价物，圈在壳内） */

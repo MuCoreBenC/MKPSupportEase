@@ -182,7 +182,7 @@ export default function GroupManagerModal({ open, groups, assets, onClose, onSav
         {/* 左：组列表 */}
         <div className={g.left}>
           <div className={g.leftHead}>
-            <span className={s.dim}>分组 · {groups.length}</span>
+            <span className={s.dimSrc}>分组 · {groups.length}</span>
             <button
               type="button"
               className={`${s.btn} ${s.btnSm}`}
@@ -243,7 +243,7 @@ export default function GroupManagerModal({ open, groups, assets, onClose, onSav
               placeholder="例：open-with"
               onChange={(e) => setDraftId(e.target.value)}
             />
-            <span className={s.dim}>
+            <span className={s.dimSrc}>
               {isNew
                 ? '文件名里不能有的字符会自动折成 `-`，中文可以。建好之后不再改 —— 改它等于让那份标注挪窝'
                 : '建好之后不再改（改它等于让那份标注挪窝，旧文件会成孤儿）'}
@@ -251,7 +251,7 @@ export default function GroupManagerModal({ open, groups, assets, onClose, onSav
           </label>
 
           <div className={g.memHead}>
-            <span className={s.dim}>
+            <span className={s.dimSrc}>
               成员 · {draftMembers.length} 张 · {dirHint}
             </span>
             <button
@@ -342,7 +342,7 @@ export default function GroupManagerModal({ open, groups, assets, onClose, onSav
                 <span className={s.grow} />
                 {confirmDel ? (
                   <>
-                    <span className={s.dim}>删了之后成员变回"未分组"，图不会动</span>
+                    <span className={s.dimSrc}>删了之后成员变回"未分组"，图不会动</span>
                     <button
                       type="button"
                       className={`${s.btn} ${s.btnSm}`}
