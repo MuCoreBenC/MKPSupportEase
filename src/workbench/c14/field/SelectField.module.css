@@ -30,7 +30,7 @@
 
 .trigger:focus-visible {
   outline: none;
-  border-color: var(--wb-primary);
+  border-color: var(--accent);
 }
 
 .triggerOff {
@@ -105,7 +105,7 @@
 
 .opt:focus-visible,
 .optActive:focus-visible {
-  outline: 1px solid var(--wb-primary-deep);
+  outline: 1px solid var(--accent-deep);
   outline-offset: -1px;
 }
 

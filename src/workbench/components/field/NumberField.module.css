@@ -104,13 +104,13 @@
 }
 
 .arrow:hover {
-  background: var(--wb-primary-soft);
-  color: var(--wb-primary-deep);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
 }
 
-/* 按下比悬停再重一档：走 `--wb-primary-press`（硬编码的蓝在深底上是一块发闷的斑） */
+/* 按下比悬停再重一档：走 `--accent-press`（硬编码的蓝在深底上是一块发闷的斑） */
 .arrow:active {
-  background: var(--wb-primary-press, rgb(59 130 246 / 20%));
+  background: var(--accent-press, rgb(59 130 246 / 20%));
 }
 
 .arrow svg {

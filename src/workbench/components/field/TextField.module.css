@@ -24,7 +24,7 @@
 }
 
 .view:focus-visible {
-  outline: 1px solid var(--wb-primary-deep);
+  outline: 1px solid var(--accent-deep);
   outline-offset: -1px;
 }
 
@@ -49,7 +49,7 @@
 .input:focus,
 .input:focus-visible {
   outline: none;
-  border-color: var(--wb-primary);
+  border-color: var(--accent);
 }
 
 /* ★ 红取 `--danger`（深色那边是提亮过的 `#e5484d`）—— 硬编码的那个值压在

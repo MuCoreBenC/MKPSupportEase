@@ -27,8 +27,8 @@
   font-size: var(--fs-label);
   color: var(--surface-solid);
   cursor: pointer;
-  background: var(--wb-primary);
-  border: 1px solid var(--wb-primary);
+  background: var(--accent);
+  border: 1px solid var(--accent);
   border-radius: var(--r-sm);
 }
 
@@ -364,8 +364,8 @@
 
 .targetOn {
   color: var(--surface-solid);
-  background: var(--wb-primary);
-  border-color: var(--wb-primary);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .rightHead {
@@ -485,8 +485,8 @@
 
 .btnPrimary {
   color: var(--surface-solid);
-  background: var(--wb-primary);
-  border-color: var(--wb-primary);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .btnPrimary:disabled {

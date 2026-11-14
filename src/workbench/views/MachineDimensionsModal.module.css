@@ -66,14 +66,14 @@
 }
 
 .num:focus {
-  border-color: var(--wb-primary);
+  border-color: var(--accent);
 }
 
 .check {
   flex: none;
   width: 16px;
   height: 16px;
-  accent-color: var(--wb-primary);
+  accent-color: var(--accent);
 }
 
 .copyFrom {
@@ -110,8 +110,8 @@
 
 .btnPrimary {
   color: var(--surface-solid);
-  background: var(--wb-primary);
-  border-color: var(--wb-primary);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .btnPrimary:disabled {

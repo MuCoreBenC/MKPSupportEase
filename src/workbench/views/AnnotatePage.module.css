@@ -231,7 +231,7 @@
   box-shadow:
     0 0 0 calc(var(--mark-stroke, 2px) / var(--zoom-k, 1)) var(--acc),
     0 0 0 calc((var(--mark-stroke, 2px) + 1px) / var(--zoom-k, 1)) rgb(0 0 0 / 28%),
-    0 0 0 calc((var(--mark-stroke, 2px) + 5px) / var(--zoom-k, 1)) var(--w-primary-soft);
+    0 0 0 calc((var(--mark-stroke, 2px) + 5px) / var(--zoom-k, 1)) var(--accent-soft);
 }
 
 .badge {
@@ -333,7 +333,7 @@
 }
 
 .diffMark[data-which='repo'] {
-  border-color: var(--w-primary);
+  border-color: var(--accent);
   background: rgb(59 130 246 / 8%);
 }
 
@@ -355,7 +355,7 @@
 }
 
 .diffMark[data-which='repo'] .diffTag {
-  background: var(--w-primary);
+  background: var(--accent);
 }
 
 .diffMark[data-which='local'] .diffTag {
@@ -409,7 +409,7 @@
   flex: none;
   width: 8px;
   height: 8px;
-  background: var(--w-primary);
+  background: var(--accent);
   border-radius: 999px;
 }
 
@@ -489,7 +489,7 @@
 }
 
 .row[data-on='yes'] {
-  background: var(--w-primary-soft);
+  background: var(--accent-soft);
 }
 
 .rowBadge {
@@ -501,7 +501,7 @@
   font-size: var(--w-fs-sm);
   line-height: 1;
   color: #fff;
-  background: var(--w-primary);
+  background: var(--accent);
   border-radius: 999px;
 }
 

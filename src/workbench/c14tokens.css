@@ -41,12 +41,15 @@
    *
    * 这一套 token 是从试验场原样搬来的，那边属于客户端（绿）。工作台只有一个强调色：
    * 选中、当前、聚焦、主操作都用它，绿只留给「成功」（`--wb-ok`）、红只留给危险。
-   * 之前蓝（`--wb-primary`）与绿（`--accent`）各管一半，同一屏里选中态一半蓝一半绿，
+   * 之前蓝（`--accent`）与绿（`--accent`）各管一半，同一屏里选中态一半蓝一半绿，
    * 焦点环还有粗有细 —— 现在两边同值，见下面 `--focus-*`。
    */
   --accent: #3b82f6;
   --accent-deep: #2f74dd;
   --accent-soft: rgba(59, 130, 246, 0.12);
+  /* 两个派生档：分隔条悬停的那条线 / 按下态（数字框步进箭头） */
+  --accent-line: color-mix(in srgb, var(--accent) 40%, transparent);
+  --accent-press: color-mix(in srgb, var(--accent) 20%, transparent);
 
   /*
    * 焦点环全仓一套：**2px、强调色 35% 的一圈微光、贴着边**。

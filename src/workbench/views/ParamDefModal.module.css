@@ -215,7 +215,7 @@
 }
 
 .txt:focus {
-  border-color: var(--wb-primary);
+  border-color: var(--accent);
   outline: none;
 }
 
@@ -231,7 +231,7 @@
 }
 
 .sel:focus {
-  border-color: var(--wb-primary);
+  border-color: var(--accent);
   outline: none;
 }
 
@@ -239,7 +239,7 @@
   flex: none;
   width: 16px;
   height: 16px;
-  accent-color: var(--wb-primary);
+  accent-color: var(--accent);
 }
 
 .warn {
@@ -266,8 +266,8 @@
 
 .btnPrimary {
   color: var(--surface-solid);
-  background: var(--wb-primary);
-  border-color: var(--wb-primary);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .btnPrimary:disabled {

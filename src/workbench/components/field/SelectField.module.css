@@ -112,7 +112,7 @@
 
 .opt:focus-visible,
 .optActive:focus-visible {
-  outline: 1px solid var(--wb-primary-deep);
+  outline: 1px solid var(--accent-deep);
   outline-offset: -1px;
 }
 

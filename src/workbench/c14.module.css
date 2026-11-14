@@ -9,20 +9,9 @@
 
 .shell {
   /*
-   * 工作台只有一个强调色 = **蓝**（真值在 `c14tokens.css` 的 `--accent*`）。
-   *
-   * 这几行是**别名**：`--wb-primary` 全仓有一百多处引用，改名等于一次无收益的扫荡；
-   * 而 `--accent` 是搬过来的 C14 组件读的名字。两个名字指同一个值，一屏里才不会再出现
-   * 「一半选中是蓝、一半是绿」。语义分层：蓝 = 主操作 / 选中 / 焦点；绿 = 成功（`--wb-ok`）；
-   * 红 = 危险；灰 = 缺失 / 占位。
+   * 工作台只有一个强调色 = **蓝**，名字只有一个：`--accent`（真值在 `c14tokens.css`）。
+   * 语义分层：蓝 = 主操作 / 选中 / 焦点；绿 = 成功（`--wb-ok`）；红 = 危险；灰 = 缺失 / 占位。
    */
-  --wb-primary: var(--accent);
-  --wb-primary-deep: var(--accent-deep);
-  --wb-primary-soft: var(--accent-soft);
-  /* 分隔条悬停那条线：主色的半透明版（与 --accent 同源，硬编码会漂） */
-  --wb-primary-line: color-mix(in srgb, var(--accent) 40%, transparent);
-  /* 按下态：比悬停（--accent-soft）再重一档（数字框步进箭头） */
-  --wb-primary-press: color-mix(in srgb, var(--accent) 20%, transparent);
   --wb-ok: #10b981;
   /* 「要留意」那一档的字色（弃用徽章以外的几处提示行读它） */
   --wb-warn: #b45309;
@@ -145,14 +134,13 @@
 
 /*
  * 深色那一套里**只有这几条**是 `.shell` 自己的（其余全走 `c14tokens.css` 的
- * `[data-theme='dark'] [data-wb]`）—— 它们是工作台蓝 / 弃用红那一族，客户端那一份
+ * `[data-theme='dark'] [data-wb]`）—— 它们是成功绿 / 弃用红那一族，客户端那一份
  * tokens 里没有同名变量，所以按同一套口径在这里给：
- *   · 蓝 / 绿各提亮或压暗一档（深底上原值发闷或晃眼）；
+ *   · 强调蓝与成功绿各提亮或压暗一档（深底上原值发闷或晃眼），蓝那份在 tokens 里；
  *   · 「更深的蓝」在深色里反过来是**更亮的蓝** —— dark 上往下压会看不见；
  *   · 弃用红整族换成半透明底 + 提亮的字（浅色那套是"红往灰里退"，深色要反过来）。
  */
 [data-theme='dark'] .shell {
-  /* 蓝族不提在这里：`--wb-primary` 是 `--accent` 的别名，深色由 tokens 里那份覆盖 */
   --wb-ok: #2f9e5b;
   --wb-warn: #d9942b;
   /* 紫色在深底上要**提亮**（与蓝同一口径：原值发闷） */
@@ -468,7 +456,7 @@
   position: relative;
   color: var(--text-1);
   font-weight: 600;
-  background: var(--wb-primary-soft);
+  background: var(--accent-soft);
 }
 
 .navItemOn::before {
@@ -479,7 +467,7 @@
   bottom: 6px;
   width: 3px;
   border-radius: 0 3px 3px 0;
-  background: var(--wb-primary);
+  background: var(--accent);
 }
 
 /* 导航图标：**默认不出现**。宽档名字看得见，图标只会多占一格 ——
@@ -753,7 +741,7 @@
 
 /* 有未保存改动时点它 —— 给一个「这儿有东西」的信号，但不喧哗 */
 .sbBtnOn {
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
 }
 
 /* ---------- 未保存改动清单（外壳级弹窗，C14 从参数台搬上来） ---------- */
@@ -842,15 +830,15 @@
 }
 
 .btnOn {
-  color: var(--wb-primary-deep);
-  background: var(--wb-primary-soft);
-  border-color: var(--wb-primary);
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 /*
  * 深色下的选中按钮（2026-10-16，作者截图点名：「当前生效那一栏的底色不好看，跟整体不搭」）。
  *
- * 病根：`--wb-primary-soft` 在浅色是 12% 蓝、在深色是 18% 蓝 —— 18% 的蓝压在
+ * 病根：`--accent-soft` 在浅色是 12% 蓝、在深色是 18% 蓝 —— 18% 的蓝压在
  * `#232323` 面上是一片**发闷的灰蓝**，和旁边那几个未选中的深灰按钮几乎分不出来
  * （浅色那边白底压 12% 蓝是清爽的，深色不是）。
  *
@@ -896,13 +884,13 @@
 .btnPrimary {
   color: #fff;
   font-weight: 600;
-  background: var(--wb-primary);
-  border-color: var(--wb-primary);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .btnPrimary:hover:not(:disabled) {
-  background: var(--wb-primary-deep);
-  border-color: var(--wb-primary-deep);
+  background: var(--accent-deep);
+  border-color: var(--accent-deep);
 }
 
 /*
@@ -995,8 +983,8 @@
 }
 
 .tagAccent {
-  color: var(--wb-primary-deep);
-  background: var(--wb-primary-soft);
+  color: var(--accent-deep);
+  background: var(--accent-soft);
 }
 
 /* 灰色不是错误色：缺失/占位用 text-3 */
@@ -1409,8 +1397,8 @@
 }
 
 .originMachine {
-  color: var(--wb-primary-deep);
-  background: var(--wb-primary-soft);
+  color: var(--accent-deep);
+  background: var(--accent-soft);
   border-color: transparent;
 }
 
@@ -1516,7 +1504,7 @@
 
 .cellEd:focus-within input,
 .cellEd:focus-within select {
-  border-color: var(--wb-primary);
+  border-color: var(--accent);
 }
 
 /* 数字那层壳（`.edCell` 包着共用件的 `.box`）：框与底全撤，吃满格子 */
@@ -1746,7 +1734,7 @@
 }
 
 .treeParentOn {
-  background: var(--wb-primary-soft);
+  background: var(--accent-soft);
 }
 
 /* 折叠三角：一个 18px 的小方块，收着指右、展着指下 */
@@ -1825,9 +1813,9 @@
 }
 
 .treeKidOn {
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
   font-weight: 500;
-  background: var(--wb-primary-soft);
+  background: var(--accent-soft);
 }
 
 /* 这家品牌下一台机器都没有（合法状态：刚建完品牌） */
@@ -1896,7 +1884,7 @@
 }
 
 .rowOn {
-  background: var(--wb-primary-soft);
+  background: var(--accent-soft);
 }
 
 .rowName {
@@ -2470,8 +2458,8 @@
   align-items: center;
   padding: 14px;
   font-size: var(--fs-body);
-  color: var(--wb-primary-deep);
-  background: var(--wb-primary-soft);
+  color: var(--accent-deep);
+  background: var(--accent-soft);
   border-radius: var(--r-sm);
 }
 
@@ -2666,7 +2654,7 @@
 }
 
 .filter:focus {
-  border-color: var(--wb-primary);
+  border-color: var(--accent);
   outline: none;
 }
 
@@ -2748,9 +2736,9 @@
 
 /* 选中态与 .btnOn 同一词汇：主色软底 + 深主色字 */
 .pickTabOn {
-  color: var(--wb-primary-deep);
-  background: var(--wb-primary-soft);
-  border-color: var(--wb-primary);
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 /* 网格可滚：候选会长（每种格式都可能十几张），框高不该跟着候选数长 */
@@ -2934,17 +2922,17 @@
   transition: background 0.12s ease;
 }
 
-/* 悬停：主色的半透明版 —— 取 `--wb-primary-line`（与 `--wb-primary` 同源，
+/* 悬停：主色的半透明版 —— 取 `--accent-line`（与 `--accent` 同源，
    深色那边提亮过，硬编码的 0.4 蓝在深底上就是一条看不见的线）。
    原来用 --line-strong，截图里在预览窗口的 90% 缩放下几乎看不见 ——
    提示线看不见就等于没提示 */
 .pSplit:hover::before {
-  background: var(--wb-primary-line);
+  background: var(--accent-line);
 }
 
 /* 拖动中：线是实心主色，松手前一直看得见它在哪 */
 .pSplit[data-on]::before {
-  background: var(--wb-primary);
+  background: var(--accent);
 }
 
 /* 贴住默认值（吸附中）：线加粗一点，读数牌上多「默认」两个字 */
@@ -2962,7 +2950,7 @@
 .pSplit:focus-visible[data-on]::before {
   width: 4px;
   margin-left: -2px;
-  background: var(--wb-primary);
+  background: var(--accent);
 }
 
 /* rail 线：缝的中点 = rail 宽 + 6，命中区 9px 居中对齐过去 */
@@ -2996,7 +2984,7 @@
   color: #fff;
   white-space: nowrap;
   pointer-events: none;
-  background: var(--wb-primary);
+  background: var(--accent);
   border-radius: var(--r-md);
   opacity: 0;
   transform: translateX(-50%);
@@ -3120,9 +3108,9 @@
 
 .pRailHandle:hover,
 .pRailHandleOn {
-  color: var(--wb-primary-deep);
-  border-color: var(--wb-primary);
-  background: var(--wb-primary-soft);
+  color: var(--accent-deep);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .pRailHandleOn svg {
@@ -3191,9 +3179,9 @@
 }
 
 .pVrowOn {
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
   font-weight: 500;
-  background: var(--wb-primary-soft);
+  background: var(--accent-soft);
 }
 
 /*
@@ -3235,8 +3223,8 @@
 
 /* 选中：蓝底 + 白勾（勾读 currentColor，所以颜色在这一条上给） */
 .pVmark[data-on='true'] {
-  border-color: var(--wb-primary);
-  background: var(--wb-primary);
+  border-color: var(--accent);
+  background: var(--accent);
   color: var(--surface-solid);
 }
 
@@ -3245,8 +3233,8 @@
  * SVG 不画，所以这一格里只有 `::after` 这一道杠 —— 与打勾同一副长相，只换记号。
  */
 .pVmark[data-mixed='true'] {
-  border-color: var(--wb-primary);
-  background: var(--wb-primary);
+  border-color: var(--accent);
+  background: var(--accent);
 }
 
 .pVmark[data-mixed='true']::after {
@@ -3307,7 +3295,7 @@
 }
 
 .pVrowOn .pVid {
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
 }
 
 /*
@@ -3319,12 +3307,12 @@
  * 基底都长同一副样子（一条 2px 蓝竖线 + 正文色名字），一眼和版本行分得开。
  * 它是不是差异的基准由矩阵列头说（那儿写着「A1 基底」），左树不再宣布。
  *
- * 不染色块：选中态已经是蓝底（`--wb-primary-soft`），再垫一层色就成了
+ * 不染色块：选中态已经是蓝底（`--accent-soft`），再垫一层色就成了
  * 「两种蓝」；竖线只占 2px，和选中态叠着也不打架。
  */
 .pVrow[data-kind='base'] {
   color: var(--text-1);
-  box-shadow: inset 2px 0 0 var(--wb-primary);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 /* 对照模式里「正在改的那一版」的小角标 */
@@ -3402,12 +3390,12 @@
 .pTabOn {
   color: var(--text-1);
   font-weight: 600;
-  background: var(--wb-primary-soft);
-  border-bottom-color: var(--wb-primary);
+  background: var(--accent-soft);
+  border-bottom-color: var(--accent);
 }
 
 .pTabOn em {
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
 }
 
 /* 页签栏末尾那颗笔：开了成员编辑框，不算一个 tab */
@@ -3455,13 +3443,13 @@
 }
 
 .pChipOn {
-  color: var(--wb-primary-deep);
-  background: var(--wb-primary-soft);
-  border-color: var(--wb-primary);
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .pChipOn em {
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
 }
 
 .pSearch {
@@ -3641,7 +3629,7 @@
 }
 
 .pRowOn {
-  background: var(--wb-primary-soft);
+  background: var(--accent-soft);
 }
 
 .pRowName {
@@ -3741,7 +3729,7 @@
 }
 
 .pDot[data-s='own'] {
-  color: var(--wb-primary);
+  color: var(--accent);
 }
 
 .pDot[data-s='dep'] {
@@ -3789,8 +3777,8 @@
 }
 
 .stOwn {
-  color: var(--wb-primary-deep);
-  background: var(--wb-primary-soft);
+  color: var(--accent-deep);
+  background: var(--accent-soft);
   border-color: transparent;
 }
 
@@ -4256,7 +4244,7 @@
 .pDefEdit {
   padding: 0;
   font-size: var(--fs-label);
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
   background: none;
   border: 0;
   cursor: pointer;
@@ -4343,8 +4331,8 @@
 
 /* 左侧选中的工作上下文那行：浅底标出 —— 它是「现在主要在改的」 */
 .pEdRowOn {
-  color: var(--wb-primary-deep);
-  background: var(--wb-primary-soft);
+  color: var(--accent-deep);
+  background: var(--accent-soft);
 }
 
 /* 「我是谁」：徽章 + 名字，一个整体。名字**不折行**（长了省略号）——
@@ -4456,7 +4444,7 @@
 }
 
 .pEdReset:hover {
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
   background: var(--surface-sunken);
 }
 
@@ -4475,12 +4463,12 @@
   align-items: center;
   height: 20px;
   padding: 0 7px;
-  border: 1px solid var(--wb-primary);
+  border: 1px solid var(--accent);
   border-radius: 4px;
-  background: var(--wb-primary-soft);
+  background: var(--accent-soft);
   font: inherit;
   font-size: var(--fs-label);
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -4595,7 +4583,7 @@
 .pKvLink {
   padding: 0;
   font: inherit;
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
   background: none;
   border: 0;
   cursor: pointer;
@@ -4636,7 +4624,7 @@
   padding: 0 8px;
   font-size: var(--fs-body);
   background: var(--surface-solid);
-  border: 1px solid var(--wb-primary);
+  border: 1px solid var(--accent);
   border-radius: 4px;
 }
 
@@ -4668,7 +4656,7 @@
   /* 圆角要裁掉里面两层的方角 */
   overflow: hidden;
   background: var(--surface-solid);
-  border: 1px solid var(--wb-primary);
+  border: 1px solid var(--accent);
   border-radius: 4px;
 }
 
@@ -4783,7 +4771,7 @@
 
 /* 选区的底色照旧给一层 —— 字是透明的，选区里看到的还是下层那些颜色 */
 .pGceTa::selection {
-  background: var(--wb-primary-soft);
+  background: var(--accent-soft);
 }
 
 /*
@@ -4794,7 +4782,7 @@
  * 它与行上那句「要 X = Y 才可改」同色：都是「这里不是字面量」的记号。
  */
 .pGcCmd {
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
   font-weight: 600;
 }
 
@@ -4856,12 +4844,12 @@
 }
 
 .pGbig:hover {
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
   border-color: var(--line);
 }
 
 .pGbig:focus-visible {
-  outline: 1px solid var(--wb-primary-deep);
+  outline: 1px solid var(--accent-deep);
   outline-offset: -1px;
 }
 
@@ -4893,9 +4881,9 @@
 .pBatchRowChanged {
   margin-left: -6px;
   padding: 4px 6px;
-  border-left: 2px solid var(--wb-primary);
+  border-left: 2px solid var(--accent);
   border-radius: 2px;
-  background: var(--wb-primary-soft);
+  background: var(--accent-soft);
 }
 
 /* 行尾那枚「值会变」小签 —— 与行底色同一套主色，不加第二套配色 */
@@ -4903,8 +4891,8 @@
   padding: 0 4px;
   font-size: var(--fs-label);
   line-height: 16px;
-  color: var(--wb-primary-deep);
-  border: 1px solid var(--wb-primary);
+  color: var(--accent-deep);
+  border: 1px solid var(--accent);
   border-radius: 2px;
 }
 
@@ -4933,7 +4921,7 @@
 
 .pLink {
   font-size: var(--fs-label);
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
 }
 
 .pLink:hover {
@@ -4986,18 +4974,18 @@
 }
 
 .pPickDot:hover {
-  border-color: var(--wb-primary);
+  border-color: var(--accent);
 }
 
 .pPickDot[data-on='true'] {
-  border-color: var(--wb-primary);
+  border-color: var(--accent);
 }
 
 .pPickDot[data-on='true']::after {
   content: '';
   width: 6px;
   height: 6px;
-  background: var(--wb-primary);
+  background: var(--accent);
   border-radius: 50%;
 }
 
@@ -5023,9 +5011,9 @@
 }
 
 .pAsideTabOn {
-  color: var(--wb-primary-deep);
-  background: var(--wb-primary-soft);
-  border-color: var(--wb-primary);
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 
 .pState {
@@ -5059,7 +5047,7 @@
 }
 
 .pKeyName:hover {
-  color: var(--wb-primary-deep);
+  color: var(--accent-deep);
   text-decoration: underline;
 }
 
@@ -5078,8 +5066,8 @@
  * 一个选中的蓝底垫在下面就是三种颜色拼一行（作者截图里的「颜色不一样」）。
  */
 .mRowOn > .pKey {
-  background: var(--wb-primary-soft);
-  box-shadow: inset 2px 0 0 var(--wb-primary);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 /*
@@ -5136,7 +5124,7 @@
 
 /* 焦点在藏起来的那枚输入上时，把圈画在看得见的这一行上 */
 .pAll:focus-within {
-  outline: 1px solid var(--wb-primary);
+  outline: 1px solid var(--accent);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -5179,9 +5167,9 @@
 }
 
 .pMiniBtn:hover {
-  color: var(--wb-primary-deep);
-  border-color: var(--wb-primary);
-  background: var(--wb-primary-soft);
+  color: var(--accent-deep);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /*
@@ -5652,7 +5640,7 @@
 .mnavItemOn {
   color: var(--text-1);
   font-weight: 600;
-  background: var(--wb-primary-soft);
+  background: var(--accent-soft);
 }
 
 /* chips 里图标常开（`.navIcon` 默认藏，宽档侧栏用不到它） */
@@ -5719,14 +5707,14 @@
   border: 0;
   background: none;
   font: inherit;
-  color: var(--w-primary);
+  color: var(--accent);
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
 }
 
 .linkBtn:hover {
-  color: var(--w-primary);
+  color: var(--accent);
   text-decoration-thickness: 2px;
 }
 

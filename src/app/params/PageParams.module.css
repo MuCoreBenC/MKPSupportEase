@@ -1013,10 +1013,10 @@
   margin-top: 10px;
   height: 30px;
   padding: 0 14px;
-  border: 1px solid var(--wb-primary, #2f6b4f);
+  border: 1px solid var(--accent, #2f6b4f);
   border-radius: var(--r-sm);
   background: var(--bg-1, #fff);
-  color: var(--wb-primary, #2f6b4f);
+  color: var(--accent, #2f6b4f);
   font-size: var(--fs-label);
   cursor: pointer;
 }
