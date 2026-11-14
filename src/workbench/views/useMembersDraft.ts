@@ -3,6 +3,14 @@
  *
  * 只管状态，不碰 DOM / IPC —— 与 `c14/sort/useSortDraft` 同一副骨架，
  * 状态转移抽成纯函数便于单测。确认之前一个字节都不写盘。
+ *
+ * 名字那一格有两种归属（`nameFollowsTarget`）：
+ *
+ *   · 页签层 —— 它写的是这个页签的名，换目标分组与它无关；
+ *   · 分组层 —— 它写的是**当前目标那个分组**的名，换目标它就跟着换。
+ *
+ * 打开时那一组不是这份草稿的身份，目标组才是：后端 `GroupScope::Section`
+ * 要求 `id == sectionId`（`ui.presetdata.registry.351`），两边必须同一个。
  */
 
 import { useCallback, useRef, useState } from 'react'
@@ -16,11 +24,17 @@ export interface MembersInitial {
   targetSection: string
   /** 打开时该页签下分组的最终次序 */
   groupOrder: string[]
+  /** 已有分组现在的名（id → 名） */
+  names: Record<string, string>
+  /** 名字那一格跟着目标组走（分组层），还是就是页签名（页签层） */
+  nameFollowsTarget: boolean
 }
 
 export interface MembersDraft {
   label: string
   setLabel: (v: string) => void
+  /** 每个分组现在的名（含还没落盘的新组）—— 左列块标题与右列行名都读它 */
+  names: Record<string, string>
   /** 最终成员序列 */
   keys: string[]
   targetSection: string
@@ -83,14 +97,29 @@ export function useMembersDraft(initial: MembersInitial): MembersDraft {
     ...initial,
     keys: [...initial.keys],
     groupOrder: [...initial.groupOrder],
+    names: { ...initial.names },
   })
-  const [label, setLabel] = useState(initial.label)
+  const [label, setLabelState] = useState(initial.label)
+  const [names, setNames] = useState<Record<string, string>>(() => ({ ...initial.names }))
   const [keys, setKeys] = useState<string[]>(() => [...initial.keys])
   const [initialKeys, setInitialKeys] = useState<string[]>(() => [...initial.keys])
   const [targetSection, setTargetSection] = useState(initial.targetSection)
   const [groupOrder, setGroupOrder] = useState<string[]>(() => [...initial.groupOrder])
   const [newSections, setNewSections] = useState<NewSection[]>([])
 
+  const follows = initial.nameFollowsTarget
+  const shownLabel = follows ? (names[targetSection] ?? '') : label
+
+  const setLabel = useCallback(
+    (v: string) => {
+      if (!follows) {
+        setLabelState(v)
+        return
+      }
+      setNames((prev) => ({ ...prev, [targetSection]: v }))
+    },
+    [follows, targetSection],
+  )
   const toggle = useCallback(
     (key: string) => setKeys((prev) => toggleMember(prev, key)),
     [],
@@ -106,6 +135,7 @@ export function useMembersDraft(initial: MembersInitial): MembersDraft {
   )
   const addSection = useCallback((section: NewSection) => {
     setNewSections((prev) => [...prev, section])
+    setNames((prev) => ({ ...prev, [section.id]: section.label }))
     setGroupOrder((prev) =>
       prev.includes(section.id) ? prev : [...prev, section.id],
     )
@@ -113,6 +143,11 @@ export function useMembersDraft(initial: MembersInitial): MembersDraft {
   const removeNewSection = useCallback((id: string) => {
     setNewSections((prev) => prev.filter((x) => x.id !== id))
     setGroupOrder((prev) => prev.filter((x) => x !== id))
+    setNames((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
   }, [])
   const moveGroup = useCallback(
     (from: number, to: number) =>
@@ -125,7 +160,8 @@ export function useMembersDraft(initial: MembersInitial): MembersDraft {
     setInitialKeys([...next])
   }, [])
   const reset = useCallback(() => {
-    setLabel(initialRef.current.label)
+    setLabelState(initialRef.current.label)
+    setNames({ ...initialRef.current.names })
     setKeys([...initialRef.current.keys])
     setInitialKeys([...initialRef.current.keys])
     setTargetSection(initialRef.current.targetSection)
@@ -134,8 +170,9 @@ export function useMembersDraft(initial: MembersInitial): MembersDraft {
   }, [])
 
   return {
-    label,
+    label: shownLabel,
     setLabel,
+    names,
     keys,
     targetSection,
     initialKeys,
@@ -151,7 +188,9 @@ export function useMembersDraft(initial: MembersInitial): MembersDraft {
     retarget,
     reset,
     dirty:
-      label !== initialRef.current.label ||
+      (follows
+        ? (names[targetSection] ?? '') !== (initialRef.current.names[targetSection] ?? '')
+        : label !== initialRef.current.label) ||
       targetSection !== initialRef.current.targetSection ||
       !sameKeys(keys, initialRef.current.keys) ||
       !sameKeys(groupOrder, initialRef.current.groupOrder) ||

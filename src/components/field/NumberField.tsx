@@ -27,6 +27,14 @@
  * global.css 给所有 input 上了 `outline: 2px` + `offset: 2px` 的全局聚焦环，它跟着 input
  * 自己的矩形走（圆角在外层容器上），于是会出现「套在圆角框外的直角方块」。
  * 全局那条不能改（v001–v032 都在用），所以这里在 .module.css 里压掉：聚焦看容器边框。
+ *
+ * # 0 = 自动
+ *
+ * 注册表给字段标了 `zeroMeansAuto` 时，0 不是"不生效"而是"按另一格算"。那一档
+ * 框里**不显示 `0.00`**：值算得出来就写算出来的数（`autoText`，如「自动 5.50」），
+ * 算不出来就只写「自动」。仍然只有一种交互 —— **框里没有字 = 自动**：
+ * 清空即退回来（所以空格子在本档里是合法值，见 `blurBlocked` 与 `commitTyped`）。
+ * 步进**从框里那个数起步**（`autoValue`）：6.50 上点 ▲ 得 6.60，不是 0.10。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -67,6 +75,26 @@ interface Props {
    * `value` prop 不会变，框里的原文就得靠这一拍自己清。
    */
   resetSignal?: number
+  /**
+   * 「0 = 自动」那一档（注册表 `zeroMeansAuto`）：值为 0 时框里显示这串字，
+   * **不显示 `0.00`**（不带单位 —— 单位仍旧是框里那一格）。
+   *
+   * 为什么用占位串而不是把值改成这串字：0 不是"不挤出"，是"交给另一格算"。
+   * 把 `0.00` 摆在框里等于说"这一格是零"；把「自动 5.50」写进输入框又得让
+   * 输入框懂非数字。占位串两头都躲开，而且清空框 = 回到自动这件事本身就是
+   * 那个占位串（一删掉它就重新出现）。
+   */
+  autoText?: string
+  /**
+   * 自动态那个数的**数值**（与 `autoText` 同源，只是这边要参与算数）。
+   *
+   * 步进从它起步：自动 = `|回抽| + 0.5 = 6.50` 时，点一下 ▲ 得 `6.60`。
+   * 从 0 起步会得到 `0.10` —— 框里明明写着 6.50，箭头却从 0 走，一步就凭空跳走。
+   * 键入仍是**绝对值**（打 2 就是 2），只有步进需要一个起点。
+   */
+  autoValue?: number
+  /** 自动态下框的 tooltip（这串数从哪来、怎么退回自动）；不给就照旧写取值范围 */
+  autoTip?: string
   /** cell 档用 sm：矮一点、窄一点 */
   size?: 'sm' | 'md'
   /**
@@ -100,6 +128,9 @@ export default function NumberField({
   invalid = false,
   onInvalidTyping,
   resetSignal,
+  autoText,
+  autoValue,
+  autoTip,
   size = 'md',
   focusOnBoxClick = false,
   onChange,
@@ -115,7 +146,15 @@ export default function NumberField({
   const digits = decimals ?? decimalsOf(step)
   const showDigits = decimals === undefined ? decimalsOf(step) : decimals
   const fmt = useCallback((n: number) => formatNum(String(n), showDigits), [showDigits])
-  const [text, setText] = useState(() => formatNum(String(value), showDigits))
+  /**
+   * 框里那一格显示什么字。自动档的 0 显示成**空的**（占位串由 `autoText` 给）——
+   * 全篇只走这一个口径：初始值、外部值变更、步进、提交、Esc 都读它。
+   */
+  const shownOf = useCallback(
+    (n: number) => (autoText !== undefined && n === 0 ? '' : fmt(n)),
+    [autoText, fmt],
+  )
+  const [text, setText] = useState(() => shownOf(value))
   const inputRef = useRef<HTMLInputElement>(null)
   /** 整个控件（框 + 单位 + 箭头）—— 「点框外」判据用 */
   const boxRef = useRef<HTMLSpanElement>(null)
@@ -138,9 +177,9 @@ export default function NumberField({
 
   useEffect(() => {
     /* 外部值一变（拖别的控件 / 撤销 / 应用预设）就重新按显示口径渲染 */
-    setText(fmt(value))
+    setText(shownOf(value))
     numRef.current = value
-  }, [fmt, value])
+  }, [shownOf, value])
 
   /** 修浮点尾巴：0.1 * 3 会得到 0.30000000000000004 */
   const round = useCallback(
@@ -165,12 +204,20 @@ export default function NumberField({
   /** 只改显示，不提交 —— 提交由 commit() 在手势结束时做一次 */
   const nudge = useCallback(
     (dir: 1 | -1) => {
-      const next = clamp(numRef.current + dir * step)
+      /*
+       * 自动态的起点是**框里写着的那一个数**（见 Props.autoValue）：6.50 上点一下 ▲
+       * 得 6.60。`numRef` 这时候是 0（0 就是"自动"这个标记），从它起步会得到 0.10。
+       */
+      const base =
+        autoText !== undefined && numRef.current === 0 && autoValue !== undefined
+          ? autoValue
+          : numRef.current
+      const next = clamp(base + dir * step)
       numRef.current = next
-      setText(fmt(next))
+      setText(shownOf(next))
       return next
     },
-    [clamp, fmt, step],
+    [autoText, autoValue, clamp, shownOf, step],
   )
 
   const commit = useCallback(() => {
@@ -187,17 +234,33 @@ export default function NumberField({
    *   所以任何步进都先把手输原文落进 `numRef`，再从它算步。
    */
   const commitTyped = useCallback(() => {
-    const n = Number(text)
-    if (text.trim() === '' || !Number.isFinite(n)) {
+    /*
+     * 空格子：自动档里"没有字"就是 0（见 Props.autoText）—— 提交 0 而不是退回旧值，
+     * 否则"清空 → 回到自动"这条路永远走不通（旧值还在，框里又变回那个数）。
+     * 别的字段照旧：空格子没有值可提交，退回原值。
+     */
+    if (text.trim() === '') {
+      if (autoText !== undefined) {
+        numRef.current = 0
+        setText('')
+        if (value !== 0) onChange(0)
+        return
+      }
       setText(fmt(value))
+      numRef.current = value
+      return
+    }
+    const n = Number(text)
+    if (!Number.isFinite(n)) {
+      setText(shownOf(value))
       numRef.current = value
       return
     }
     const next = round(n)
     numRef.current = next
-    setText(fmt(next))
+    setText(shownOf(next))
     if (next !== value) onChange(next)
-  }, [fmt, onChange, round, text, value])
+  }, [autoText, fmt, onChange, round, shownOf, text, value])
 
   const stopHold = useCallback(() => {
     if (delayRef.current !== null) window.clearTimeout(delayRef.current)
@@ -278,7 +341,8 @@ export default function NumberField({
   const rawTyping = text.trim()
   const hint = ((): string | null => {
     if (disabled) return null
-    if (rawTyping === '') return tr('field.hint.empty')
+    /* 自动档的空格子是"自动"，不是没填 —— 不能报空 */
+    if (rawTyping === '') return autoText === undefined ? tr('field.hint.empty') : null
     if (rawTyping === '-' || rawTyping === '+' || rawTyping === '.') return null
     if (!Number.isFinite(typed)) return tr('field.hint.notNumber')
     if (outOfRange)
@@ -298,7 +362,8 @@ export default function NumberField({
    */
   const blurBlocked = (): boolean => {
     if (disabled) return false
-    if (rawTyping === '') return true
+    /* 自动档把"空"当合法值（= 自动）放走，否则清空之后人就被锁在框里 */
+    if (rawTyping === '') return autoText === undefined
     if (!Number.isFinite(typed)) return true
     if (outOfRange) return Number.isFinite(value) ? typed !== value : true
     return false
@@ -313,9 +378,9 @@ export default function NumberField({
   /* 宿主点「还原」的那一拍：把框里没提交的原文清掉，回到外部值（见 Props.resetSignal） */
   useEffect(() => {
     if (resetSignal === undefined) return
-    setText(fmt(value))
+    setText(shownOf(value))
     numRef.current = value
-  }, [fmt, resetSignal, value])
+  }, [resetSignal, shownOf, value])
 
   /*
    * **点框外先落账**（2026-10-20）：底栏的「保存」在"没有改动"时是 disabled 的 ——
@@ -428,8 +493,16 @@ export default function NumberField({
         inputMode="decimal"
         aria-label={label}
         aria-invalid={bad || undefined}
-        data-tip={bad && range !== undefined ? tr('field.exceedsRange', { range }) : range}
-        placeholder={rangePlaceholder}
+        /* 自动档的框里那行字（占位串）要比普通提示重一档 —— 见 .module.css */
+        data-auto={autoText !== undefined && text === '' ? true : undefined}
+        data-tip={
+          bad && range !== undefined
+            ? tr('field.exceedsRange', { range })
+            : autoText !== undefined && text === ''
+              ? (autoTip ?? range)
+              : range
+        }
+        placeholder={autoText ?? rangePlaceholder}
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}
         onFocus={() => setFieldFocused(true)}
@@ -464,7 +537,7 @@ export default function NumberField({
              * 把这一下吃掉（不让它冒泡去关模态框 / 关弹层）；已经和外面一致了 →
              * 什么都不改，交给外层（第二下 Esc 才关）—— 一层 Esc 一件事。
              */
-            const shown = fmt(value)
+            const shown = shownOf(value)
             if (text === shown) return
             e.stopPropagation()
             setText(shown)

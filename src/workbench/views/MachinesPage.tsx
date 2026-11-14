@@ -726,10 +726,12 @@ export default function MachinesPage({
     try {
       const next = await wb.addMachine(addId.trim(), addBrand.trim(), addDisplay.trim())
       setList(next)
+      /* 搜索词留着的话，新建的这台会被挡在树外 —— 清掉它，人得先看见自己刚建的东西 */
+      setFilter('')
       setMachineId(addId.trim())
       setPickedVid(null)
       setAddOpen(false)
-      toasts.push(`已新增机型 ${addId.trim()} —— 已进草稿，保存后写入`)
+      toasts.push(`已新增机型 ${addId.trim()}，已进草稿，保存后写入`)
       afterStructural()
     } catch (e) {
       failToast(e)
@@ -2100,8 +2102,9 @@ export default function MachinesPage({
                 void (async () => {
                   try {
                     setList(await wb.addBrand(nbId.trim(), nbName.trim()))
-                    toasts.push(`已新增品牌 ${nbId.trim()} —— 已进草稿，保存后写入`)
+                    toasts.push(`已新增品牌 ${nbId.trim()}，已进草稿，保存后写入`)
                     setAddBrandOpen(false)
+                    setFilter('')
                     setBrandId(nbId.trim())
                     onBookRefresh()
                   } catch (e) {
@@ -2286,7 +2289,7 @@ export default function MachinesPage({
           <IdInput value={addId} label="机型 id" placeholder="A2L" onChange={setAddId} />
           {/* 拦着新建的理由当场写在输入框下面 —— 只放禁用按钮的悬停里，人只能猜 */}
           {addId.trim() !== '' && !idOk(addId) && (
-            <span className={s.inpHint}>id 只能用大写字母、数字和下划线 —— 例如 A2L、A1_MINI</span>
+            <span className={s.inpHint}>id 只能用大写字母、数字和下划线，例如 A2L、A1_MINI</span>
           )}
           {addIdTaken && <span className={s.inpHint}>id「{addId.trim()}」已经被占了 —— 换一个</span>}
           <span className={s.kvKey}>

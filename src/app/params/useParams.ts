@@ -478,8 +478,8 @@ function controlFromUi(ui: string): 'number' | 'switch' | 'choice' | 'text' {
 
 /* 显示格式化住 `valueText.ts`（纯函数、能单独测）；这里只把它转出去，
    页面上那些调用点不用改 import 路径 */
-import { unitOf, valueText } from './valueText'
-export { unitOf, valueText }
+import { autoLabel, autoNumber, unitOf, valueText } from './valueText'
+export { autoLabel, autoNumber, unitOf, valueText }
 
 const cellKey = (machineId: string, versionId: string, key: string) =>
   `${machineId}:${versionId}:${key}`

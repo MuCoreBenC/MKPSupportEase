@@ -7,7 +7,7 @@
  * 三条规矩（判据本身与搬家前一致）：
  *   1. **有单位才拼单位**（`null` / `undefined` 都不算，见 `unitOf`）；
  *   2. **数字按显示精度渲染**（`formatNum`）：`mm` 固定两位，其余原样、只修浮点尾巴；
- *   3. **0 有专门含义的字段读作「自动」**，算得出就写数（`自动（6.50 mm）`）。
+ *   3. **0 有专门含义的字段读作「自动」**，算得出就写数（`自动 6.50 mm`）。
  * 盘上的原文一个字都不改 —— 这里只管"给我看的字"。
  */
 
@@ -59,8 +59,14 @@ export function unitOf(raw: string | null | undefined): string | undefined {
  *
  * 算法登记在注册表的 `autoValue`（跟着某条参数的当前值走），**不按 key 写死** ——
  * 界面只负责把登记的那几个动作拼起来：取不取绝对值、再加多少。
+ *
+ * 除了写那句话，步进也要它：自动态里点一下箭头，是从这个数往前一步（`6.50 → 6.60`），
+ * 不是从 0 往前一步（`0 → 0.10`）—— 见 `NumberField` 的 `autoValue`。
  */
-function autoNumber(def: TextDef, lookup: ((key: string) => string) | undefined): number | null {
+export function autoNumber(
+  def: TextDef,
+  lookup: ((key: string) => string) | undefined,
+): number | null {
   const link = def.field.autoValue
   if (link === undefined || lookup === undefined) return null
   const raw = lookup(link.from).trim()
@@ -71,10 +77,35 @@ function autoNumber(def: TextDef, lookup: ((key: string) => string) | undefined)
 }
 
 /**
+ * 「0 = 自动」这一格**自动会等于多少**（不是这种字段 ⇒ `null`）。
+ *
+ * 跟当前值无关 —— 自动值只有一个：框被清空时、还原胶囊上、历史条目里说的都是它。
+ * 至于"现在该不该按自动读"，那是调用方的判据（`valueText` 看原文是不是 0，
+ * 参数行看这一格是不是这种字段）。
+ *
+ * `unit` 给不给，是两种场合：
+ *   · **框里那一格**不给 —— 数字控件里单位本来就单占一格，读作 `自动 5.50` + `mm`
+ *     （见 `NumberField` 的 `autoText`）；
+ *   · **一串话里**给 —— 还原 chip / 历史 / 保存确认里没有那一格，得写成 `自动 5.50 mm`。
+ * 算不出数时只有「自动」两个字，两种场合都不拼单位（拼出来是 `自动 mm`）。
+ */
+export function autoLabel(
+  def: TextDef,
+  tr: Tr,
+  opts?: { lookup?: (key: string) => string; unit?: string },
+): string | null {
+  if (def.field.zeroMeansAuto !== true) return null
+  const n = autoNumber(def, opts?.lookup)
+  if (n === null) return tr('params.row.auto')
+  const text = formatNum(String(n), displayDecimals(def.unit, def.field.step))
+  return tr('params.row.autoWith', { value: opts?.unit != null ? `${text} ${opts.unit}` : text })
+}
+
+/**
  * 某个值该显示成什么字 —— 还原 chip、历史条目、保存确认、行内只读值全走这一套翻译。
  *
  * `lookup` 只在**说的是"现在"**的场合给（行上那一格、只读值）：给得出就算出
- * 「自动（6.50 mm）」，给不出 / 说的是历史值时只写「自动」—— 历史那一刻的数
+ * 「自动 6.50 mm」，给不出 / 说的是历史值时只写「自动」—— 历史那一刻的数
  * 不能拿今天的来源值顶。
  */
 export function valueText(
@@ -87,10 +118,8 @@ export function valueText(
   if (def === undefined) return raw
   /* 0 有专门含义的字段：读作「自动」而不是 `0.00`（否则等于告诉用户"不挤出"） */
   if (def.field.zeroMeansAuto === true && raw.trim() !== '' && Number(raw) === 0) {
-    const n = autoNumber(def, lookup)
-    if (n === null) return tr('params.row.auto')
-    const text = formatNum(String(n), displayDecimals(def.unit, def.field.step))
-    return tr('params.row.autoWith', { value: def.unit != null ? `${text} ${def.unit}` : text })
+    const auto = autoLabel(def, tr, { lookup, unit: def.unit ?? undefined })
+    if (auto !== null) return auto
   }
   if (def.field.control === 'switch') {
     return raw === 'true' ? tr('params.value.on') : tr('params.value.off')

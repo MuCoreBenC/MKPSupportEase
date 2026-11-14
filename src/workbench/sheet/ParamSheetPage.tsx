@@ -108,7 +108,7 @@ import type { BatchTarget } from '../views/BatchEdit'
 import CellEditor from '../views/CellEditor'
 import CompareMatrix from '../views/CompareMatrix'
 import ParamDefModal from '../views/ParamDefModal'
-import { nextSectionId } from '../views/sectionId'
+import { nextSectionId, nextTabId } from '../views/sectionId'
 import ParamDetail, { StatusDot, type DetailLayer } from '../views/ParamDetail'
 /* 分组抽屉：改名 / 换位 / 这一组的参数清单都在里头（卡头只负责打开它） */
 /* 组件卡里的画布占位（作者 2026-11-01：「它就占个位置就可以了」） */
@@ -116,6 +116,7 @@ import ComponentSlot from '../views/ComponentSlot'
 import { slotSideOf } from '../views/componentSide'
 import SectionDrawer from '../views/SectionDrawer'
 import SectionMembersModal from '../views/SectionMembersModal'
+import NewTabModal from '../views/NewTabModal'
 import s from '../c14.module.css'
 
 /**
@@ -236,6 +237,8 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
   const [drawerSection, setDrawerSection] = useState<string | null>(null)
   /** 页签栏那支笔开的是哪一个页签（null = 关着） */
   const [membersTab, setMembersTab] = useState<string | null>(null)
+  /** 「＋ 新建页签」那个小框开着没有 */
+  const [tabAdding, setTabAdding] = useState(false)
   /*
    * 抽屉里那颗「当前」标记住的是哪一组 —— **不一定是 `drawerSection`**。
    *
@@ -730,6 +733,26 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
     ) : null
 
   /**
+   * 页签栏末尾那颗「＋」：新建一个页签。
+   *
+   * 与分组那颗「＋ 新增分组」同一个位置语言 —— 都长在它管的那一排的末尾。
+   * 名字就地输，id 自动取 `custom_tab_N`（id 会进两份 TOML，中文当不了 id）。
+   */
+  const tabAddButton = (
+    <button
+      type="button"
+      className={s.pTabEdit}
+      aria-label="新建页签"
+      title="新建一个页签"
+      onClick={() => setTabAdding(true)}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+    </button>
+  )
+
+  /**
    * 组内顺序排完了（排序模态框自己落盘）。与上一条同一跳：
    * 换掉注册表视图、让桌面与右栏按新次序重取。
    */
@@ -747,13 +770,12 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
    * 它挪到哪儿去了（作者原话：「没办法去换它那个上下位置」）。
    */
   /**
-   * 删掉一个空分组。
+   * 删掉一个分组。组里的参数不会跟着没：后端先把它们落到这一页末尾的「未归类」。
    *
-   * 与改名、换位走**同一条路**（作者 2026-11-01：「删除的操作也是一样的，需要点保存或者
-   * 放弃」）：这一笔只是应用进草稿，右上角「保存」才真落盘，那之前「放弃」就退回来。
+   * 与改名、换位走**同一条路**：这一笔只是应用进草稿，右上角「保存」才真落盘，
+   * 那之前「放弃」就退回来。
    *
-   * 三道门在后端（还有参数 / 是组件卡 / 带 showWhen）—— 这里不预判，拒了就把那句话
-   * 原样报出来。
+   * 两道门在后端（是组件卡 / 带 showWhen）—— 这里不预判，拒了就把那句话原样报出来。
    *
    * # 抽屉不关（2026-11-02 作者：「删除之后的刷新，不要关闭我的抽屉」）
    *
@@ -771,6 +793,8 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       const before = registry?.sections ?? []
       const gone = before.find((x) => x.id === sectionId) ?? null
       const name = gone?.label ?? sectionId
+      /* 组里那几条参数会被后端搬到同一页签末尾的「未归类」—— 条数先数下来 */
+      const moved = (registry?.params ?? []).filter((p) => p.sectionId === sectionId).length
       const next = await wb.removeSection(sectionId)
 
       /*
@@ -798,7 +822,12 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       setMetaTick((t) => t + 1)
       onEditApplied()
       if (sel === sectionId) setSel(null)
-      toasts.push(`分组已删除（保存才落盘）· ${name}`, { label: '撤销', run: onUndo })
+      toasts.push(
+        moved === 0
+          ? `分组已删除（保存才落盘）· ${name}`
+          : `分组已删除，${moved} 条参数已移到「未归类」（保存才落盘）`,
+        { label: '撤销', run: onUndo },
+      )
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
     }
@@ -828,7 +857,73 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       onEditApplied()
       setDrawerSection(id)
       setDrawerAnchor(id)
+      /*
+       * 新组里一条参数都没有 —— 它那张卡只有**限定了页签**时才画得出来（见
+       * `derive::desk` 注入空组那一段）。所以这里把领域切过去、清掉搜索词，
+       * 否则"建完页面上没有它"，也就滚不过去。
+       */
+      setTabSel(tabId)
+      if (q.trim() !== '') setQ('')
+      pendingLocateRef.current = `t-sec-${id}`
       toasts.push(`已新建分组「${label}」（保存才落盘）`, { label: '撤销', run: onUndo })
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /**
+   * **新建一个页签**（页签栏末尾那颗「＋」）。两份 TOML 各加一段 `[[tabs]]`，
+   * 后端顺手在它下面建一个空分组 —— 否则点进去是一屏空白，参数没处放。
+   *
+   * 建完直接把领域切过去、清掉搜索词：新页签里 0 条参数，只有限定领域时才画得出卡。
+   */
+  const addTab = async (label: string) => {
+    try {
+      const id = nextTabId(registry?.tabs ?? [])
+      const next = await wb.addTab(id, label)
+      setRegistry(next)
+      setMetaTick((t) => t + 1)
+      onEditApplied()
+      setTabSel(id)
+      if (q.trim() !== '') setQ('')
+      setTabAdding(false)
+      toasts.push(`已新建页签「${label}」（保存才落盘）`, { label: '撤销', run: onUndo })
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /** 页签上移 / 下移一位（「编辑页签」框里那两颗箭头） */
+  const moveTab = async (tabId: string, dir: -1 | 1) => {
+    try {
+      const next = await wb.setTabMeta(tabId, {
+        label: null,
+        move: dir < 0 ? 'up' : 'down',
+      })
+      setRegistry(next)
+      setMetaTick((t) => t + 1)
+      onEditApplied()
+      const name = next.tabs.find((t) => t.id === tabId)?.label ?? tabId
+      toasts.push(`页签换位已应用（保存才落盘）· ${name}`, { label: '撤销', run: onUndo })
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /** 删掉一个空页签。带参数 / 带功能卡的由后端拒（它给出理由） */
+  const removeTab = async (tabId: string) => {
+    try {
+      const next = await wb.removeTab(tabId)
+      setRegistry(next)
+      setMetaTick((t) => t + 1)
+      onEditApplied()
+      setMembersTab(null)
+      if (tabSel === tabId) setTabSel(null)
+      if (drawerSection !== null && !next.sections.some((x) => x.id === drawerSection)) {
+        setDrawerSection(null)
+        setDrawerAnchor(null)
+      }
+      toasts.push('页签已删除（保存才落盘）', { label: '撤销', run: onUndo })
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
     }
@@ -1706,6 +1801,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                     </button>
                   ))}
                   {tabEditButton}
+                  {tabAddButton}
                 </div>
 
                 <div className={s.pScroll} ref={scrollRef}>
@@ -1831,6 +1927,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                     </button>
                   ))}
                   {tabEditButton}
+                  {tabAddButton}
                 </div>
 
                 <div className={s.pScroll} ref={scrollRef}>
@@ -2209,6 +2306,30 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
           sections={registry.sections}
           onApply={applyGroupMembers}
           onClose={() => setMembersTab(null)}
+          /*
+           * 页签自己的两件事（上移 / 下移 / 删除）放在这一框里：那一框就是
+           * 「这一页长什么样」的编辑入口，页签名也在里面。判据与后端同一套 ——
+           * 只有空页签给删除按钮（参数没有第二个去处）。
+           */
+          tabOps={(() => {
+            const mine = registry.sections.filter((x) => x.tabId === membersTab)
+            const used = registry.params.filter((p) => mine.some((x) => x.id === p.sectionId)).length
+            const at = registry.tabs.findIndex((t) => t.id === membersTab)
+            return {
+              at,
+              total: registry.tabs.length,
+              canRemove: used === 0 && mine.every((x) => x.component === null && !x.standalone),
+              onMove: (dir: -1 | 1) => void moveTab(membersTab, dir),
+              onRemove: () => void removeTab(membersTab),
+            }
+          })()}
+        />
+      )}
+
+      {tabAdding && (
+        <NewTabModal
+          onCancel={() => setTabAdding(false)}
+          onCreate={(label) => void addTab(label)}
         />
       )}
 
@@ -2411,6 +2532,8 @@ function GroupCard({
           </div>
         )}
         <div className={s.pGroupRows}>
+          {/* 空组也占一张卡：刚建的那一组就在这儿，只是里面还没有参数 */}
+          {group.items.length === 0 && <p className={s.pGroupEmpty}>还没有参数</p>}
           {/* 父项在前、子项紧跟 —— 与后端排好的顺序一致 */}
           {group.items
             .flatMap((it) => [it.row, ...it.children])
@@ -2705,9 +2828,17 @@ function tabCountsOf(
     if (r.tabId === null) continue
     count.set(r.tabId, (count.get(r.tabId) ?? 0) + 1)
   }
+  /* 空页签也要在这儿露头，否则新建完切到对照模式就找不到它（与后端 `desk_nav` 同一条） */
+  const used = new Set(registry.params.map((p) => p.sectionId))
   return registry.tabs
-    .map((t) => ({ id: t.id, label: t.label, count: count.get(t.id) ?? 0 }))
-    .filter((t) => t.count > 0)
+    .map((t) => ({
+      id: t.id,
+      label: t.label,
+      count: count.get(t.id) ?? 0,
+      fresh: t.sections.every((s) => !used.has(s.id)),
+    }))
+    .filter((t) => t.count > 0 || t.fresh)
+    .map(({ id, label, count: n }) => ({ id, label, count: n }))
 }
 
 /** 抽屉头的小字：「领域 · 分组」。tab 名要查注册表 */

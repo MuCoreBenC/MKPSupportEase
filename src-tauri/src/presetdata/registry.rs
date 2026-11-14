@@ -608,6 +608,22 @@ pub struct SectionMetaEdit {
     pub new_section: Option<NewSection>,
 }
 
+/// 一次「页签」编辑的载荷 —— `wb_set_tab_meta`。`None` = 这一格不动。
+///
+/// 页签的位置与分组是**两把尺子**：分组的次序落在 `[[tabs.sections]]` 的数组里，
+/// 页签的次序落在 `[[tabs]]` 的数组里（外加 `order`，客户端据此排分类胶囊）。
+/// 所以这里只管名字与那一位，成员仍归 `GroupMembersEdit`。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TabMetaEdit {
+    /// 新名字（`None` = 不动）。**只写中文那一册**，另外三册留在原处不动
+    #[serde(default)]
+    pub label: Option<String>,
+    /// 往哪边挪一格（`None` = 不动）
+    #[serde(default, rename = "move")]
+    pub move_dir: Option<SectionMove>,
+}
+
 /// 成员编辑框作用在哪一层 —— `wb_edit_group`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -1361,6 +1377,39 @@ impl ParamRegistry {
                 ..t.clone()
             })
             .filter(|t| !t.sections.is_empty())
+            .collect();
+        out.sort_by(|a, b| a.order.total_cmp(&b.order));
+        out
+    }
+
+    /// 参数台认得的**全部**页签：整页组件卡（设置页那 11 张）不算，**空页签算**。
+    ///
+    /// 与 [`Self::param_tabs`] 只差这一条：分组里一条参数都没有时页签仍然留着 ——
+    /// 刚建出来的页签、以及被搬空的分组都得看得见，否则「建完就找不着」。
+    /// 分发到客户端的那份不受影响：客户端自己按"装不装得下参数"再筛一遍。
+    pub fn param_tabs_all(&self) -> Vec<TabMeta> {
+        let cards: BTreeSet<&str> = self
+            .layout
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .filter(|s| s.component.is_some() || s.layout.as_deref() == Some("component"))
+            .map(|s| s.id.as_str())
+            .collect();
+        let mut out: Vec<TabMeta> = self
+            .tabs
+            .iter()
+            .filter_map(|t| {
+                let sections: Vec<SectionMeta> = t
+                    .sections
+                    .iter()
+                    .filter(|s| !cards.contains(s.id.as_str()))
+                    .cloned()
+                    .collect();
+                (!sections.is_empty()).then(|| TabMeta {
+                    sections,
+                    ..t.clone()
+                })
+            })
             .collect();
         out.sort_by(|a, b| a.order.total_cmp(&b.order));
         out
@@ -2732,6 +2781,41 @@ impl ParamRegistry {
         Ok(left)
     }
 
+    /// 这一页签的「未归类」分组 id —— 成员被移出、整组被删时参数的落点。
+    ///
+    /// 一个页签只有一个：id 由页签名归一化（非 `[a-z0-9_]` 一律换成 `_`）成
+    /// `uncategorized_<tab>`，截到 48 字（`ensure_section` 的长度门）。
+    fn fallback_section_id(tab_id: &str) -> String {
+        let mut fid = format!(
+            "uncategorized_{}",
+            tab_id
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect::<String>()
+        );
+        fid.truncate(48);
+        fid
+    }
+
+    /// 确保这一页签末尾有「未归类」，返回它的 id。已经有了就当无事发生。
+    fn ensure_fallback_section(&mut self, tab_id: &str) -> Result<String, AppError> {
+        let fid = Self::fallback_section_id(tab_id);
+        self.ensure_section(tab_id, &fid, "未归类")?;
+        Ok(fid)
+    }
+
+    /// **删掉一个分组**。组里的参数一条不少 —— 先落到同一页签末尾的「未归类」，再删组。
+    ///
+    /// 两道门：整块组件卡（`component`）与条件分组（`show_when`）删不掉 ——
+    /// 它们在布局里占着客户端画出来的位置，参数搬得走、那张卡画不出来。
+    ///
+    /// 「未归类」自己也有参数时拒收：它的参数没有第二个去处，搬进去等于原地打转。
     pub fn remove_section(&mut self, section_id: &str) -> Result<(), AppError> {
         let id = section_id.trim();
         let ti = self
@@ -2751,21 +2835,7 @@ impl ParamRegistry {
             .position(|s| s.id == id)
             .expect("上面刚判过");
 
-        /* ---------- 三道门：有参数 / 组件卡 / 条件组 ---------- */
-        let used = self
-            .params
-            .iter()
-            .filter(|p| p.layout.section_id == id)
-            .count();
-        if used > 0 {
-            return Err(AppError::invalid_argument(messages::text(
-                "ui.presetdata.registry.354",
-                &[
-                    ("label", self.tabs[ti].sections[at].label.as_str()),
-                    ("n", &used.to_string()),
-                ],
-            )));
-        }
+        /* ---------- 两道门：组件卡 / 条件组 ---------- */
         let is_component = self
             .layout
             .iter()
@@ -2778,6 +2848,35 @@ impl ParamRegistry {
                 &[("label", self.tabs[ti].sections[at].label.as_str())],
             )));
         }
+
+        /* ---------- 先搬后删：参数进这一页末尾的「未归类」 ---------- */
+        let used: Vec<String> = self
+            .params
+            .iter()
+            .filter(|p| p.layout.section_id == id)
+            .map(|p| p.key.clone())
+            .collect();
+        if !used.is_empty() {
+            let fid = Self::fallback_section_id(&tab_id);
+            if fid == id {
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.354",
+                    &[("label", self.tabs[ti].sections[at].label.as_str())],
+                )));
+            }
+            self.ensure_fallback_section(&tab_id)?;
+            for key in &used {
+                self.move_param_to(key, &fid)?;
+            }
+            self.layout_reorder_section(&fid)?;
+        }
+
+        /* 搬参数那一趟可能新建了一组，下标重新取一次 */
+        let at = self.tabs[ti]
+            .sections
+            .iter()
+            .position(|s| s.id == id)
+            .expect("上面刚判过");
 
         /* ---------- 两份文件：按文本块删（先文件、再内存，删失败就一个字没动） ---------- */
         remove_section_block(&mut self.doc, &tab_id, at)?;
@@ -3156,22 +3255,7 @@ impl ParamRegistry {
         let fallback = if left.is_empty() {
             None
         } else {
-            let mut fid = format!(
-                "uncategorized_{}",
-                tab_id
-                    .chars()
-                    .map(|c| {
-                        if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' {
-                            c
-                        } else {
-                            '_'
-                        }
-                    })
-                    .collect::<String>()
-            );
-            fid.truncate(48);
-            self.ensure_section(&tab_id, &fid, "未归类")?;
-            Some(fid)
+            Some(self.ensure_fallback_section(&tab_id)?)
         };
 
         for key in &joined {
@@ -3399,6 +3483,188 @@ impl ParamRegistry {
             ))
         })?;
         tbl.insert("label", toml_edit::value(label));
+        Ok(())
+    }
+
+    /// **新建一个页签**（页签栏末尾那颗「＋」）。
+    ///
+    /// 两份文件各加一段 `[[tabs]]`、内存两半各加一条；新页签排在这一排的末尾
+    /// （`order` 取现有最大值 + 10 —— 真数据就是 10 / 20 / 30 这一套刻度）。
+    ///
+    /// 顺手在那下面建一个空分组（名字「未分组」）：一个页签没有任何分组时，
+    /// 点进去是一屏空白，「往里面放参数」就没有落点。
+    ///
+    /// 幂等：撤销 / 重做把同一笔载荷原样重放时，按「确保它在」处理。
+    pub fn ensure_tab(&mut self, tab_id: &str, label: &str) -> Result<(), AppError> {
+        let id = tab_id.trim();
+        let label = label.trim();
+        /* id 会进两份 TOML、也会进客户端目录 —— 与分组同一把尺子 */
+        if id.is_empty()
+            || id.len() > 48
+            || !id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.345",
+                &[("id", id)],
+            )));
+        }
+        if label.is_empty() || label.chars().count() > 24 {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.346",
+                &[],
+            )));
+        }
+
+        if !self.tabs.iter().any(|t| t.id == id) {
+            let order = self.tabs.iter().map(|t| t.order).fold(0.0_f64, f64::max) + 10.0;
+
+            let mut tbl = toml_edit::Table::new();
+            tbl["id"] = super::literal_str(id);
+            tbl["label"] = super::literal_str(label);
+            tbl["order"] = toml_edit::value(order);
+            insert_tab_block(&mut self.doc, &format!("\n[[tabs]]\n{tbl}\n"))?;
+
+            let mut ltbl = toml_edit::Table::new();
+            ltbl["id"] = super::literal_str(id);
+            insert_tab_block(&mut self.layout_doc, &format!("\n[[tabs]]\n{ltbl}\n"))?;
+
+            self.tabs.push(TabMeta {
+                id: id.to_owned(),
+                label: label.to_owned(),
+                label_en: String::new(),
+                label_ja: String::new(),
+                label_tw: String::new(),
+                order,
+                icon: None,
+                sections: Vec::new(),
+            });
+            self.layout.push(LayoutTab {
+                id: id.to_owned(),
+                sections: Vec::new(),
+            });
+        }
+
+        /* 初始分组：`{页签}_g1` 里第一个没被占的（全局唯一，与 `check_consistency` ④ 同一口径） */
+        let base: String = id.chars().take(40).collect();
+        let mut n = 1;
+        let section_id = loop {
+            let cand = format!("{base}_g{n}");
+            let taken = self
+                .tabs
+                .iter()
+                .flat_map(|t| t.sections.iter())
+                .any(|s| s.id == cand);
+            if !taken {
+                break cand;
+            }
+            n += 1;
+        };
+        self.ensure_section(id, &section_id, "未分组")
+    }
+
+    /// **改页签的名字 / 位置**（「编辑页签」那一框里的 ↑↓ 与名字）。
+    ///
+    /// 位置落在两份文件的 `[[tabs]]` 数组次序上，`order` 跟着换值 ——
+    /// 客户端按 `order` 排分类胶囊，工作台页签栏按数组排，两处一次写完。
+    pub fn set_tab_meta(&mut self, tab_id: &str, edit: TabMetaEdit) -> Result<(), AppError> {
+        let id = tab_id.trim();
+        let ti = self.tabs.iter().position(|t| t.id == id).ok_or_else(|| {
+            AppError::invalid_argument(messages::text("ui.presetdata.registry.349", &[("tab", id)]))
+        })?;
+
+        if let Some(label) = edit.label.as_deref() {
+            self.set_tab_label(id, label)?;
+        }
+
+        if let Some(dir) = edit.move_dir {
+            let n = self.tabs.len();
+            let to = match dir {
+                SectionMove::Up => ti.checked_sub(1),
+                SectionMove::Down => (ti + 1 < n).then_some(ti + 1),
+            };
+            let Some(to) = to else {
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.360",
+                    &[("label", self.tabs[ti].label.as_str())],
+                )));
+            };
+            /* 先改文件（两份），都成了才动内存 —— 与分组换位同一条纪律 */
+            swap_tab_blocks(&mut self.doc, ti, to)?;
+            let lmove = self.layout.iter().position(|t| t.id == id).and_then(|lti| {
+                let lto = match dir {
+                    SectionMove::Up => lti.checked_sub(1),
+                    SectionMove::Down => (lti + 1 < self.layout.len()).then_some(lti + 1),
+                }?;
+                Some((lti, lto))
+            });
+            if let Some((lti, lto)) = lmove {
+                swap_tab_blocks(&mut self.layout_doc, lti, lto)?;
+            }
+
+            self.tabs.swap(ti, to);
+            /* 刻度换值，不重排成 0..n：真数据是 10 / 20 / 30，重排会让整段 diff */
+            let a = self.tabs[ti].order;
+            self.tabs[ti].order = self.tabs[to].order;
+            self.tabs[to].order = a;
+            if let Some((lti, lto)) = lmove {
+                self.layout.swap(lti, lto);
+            }
+            write_tab_orders(&mut self.doc, &self.tabs);
+        }
+        Ok(())
+    }
+
+    /// **删掉一个空页签**。带参数、或者带功能卡（组件 / 条件分组）的一律拒。
+    ///
+    /// 参数没有第二个去处：页签之间不存在「未归类页签」，所以只能先搬走。
+    pub fn remove_tab(&mut self, tab_id: &str) -> Result<(), AppError> {
+        let id = tab_id.trim();
+        let ti = self.tabs.iter().position(|t| t.id == id).ok_or_else(|| {
+            AppError::invalid_argument(messages::text("ui.presetdata.registry.349", &[("tab", id)]))
+        })?;
+        let label = self.tabs[ti].label.clone();
+        let mine: Vec<&str> = self.tabs[ti]
+            .sections
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        let used = self
+            .params
+            .iter()
+            .filter(|p| mine.contains(&p.layout.section_id.as_str()))
+            .count();
+        if used > 0 {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.361",
+                &[("label", &label), ("n", &used.to_string())],
+            )));
+        }
+        let has_card = self
+            .layout
+            .iter()
+            .filter(|t| t.id == id)
+            .flat_map(|t| t.sections.iter())
+            .any(|s| {
+                s.component.is_some()
+                    || s.show_when.is_some()
+                    || s.layout.as_deref() == Some("component")
+            });
+        if has_card {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.362",
+                &[("label", &label)],
+            )));
+        }
+
+        /* 先文件、再内存：文本块删失败就一个字没动 */
+        remove_tab_block(&mut self.doc, ti)?;
+        if let Some(lti) = self.layout.iter().position(|t| t.id == id) {
+            remove_tab_block(&mut self.layout_doc, lti)?;
+            self.layout.remove(lti);
+        }
+        self.tabs.remove(ti);
         Ok(())
     }
 
@@ -3637,6 +3903,158 @@ fn section_table_mut<'a>(
     let arr = tab.get_mut("sections")?.as_array_of_tables_mut()?;
     arr.iter_mut()
         .find(|t| t.get("id").and_then(|v| v.as_str()) == Some(section_id))
+}
+
+/// 往文档的 `[[tabs]]` 区末尾插一段（`[[params]]` 之前；布局文件就是文件末尾）。
+///
+/// # 为什么不直接往 `ArrayOfTables` 里 `push`
+///
+/// `toml_edit` 按 **span** 定顶层表的先后：新表没有 span，`push` 进去会被排到
+/// **整份文件的最后**（`[[params]]` 之后）。那样 `[[tabs]]` 段落位置就变了，
+/// 而本文件里所有切块的助手（[`tab_region`] / [`tab_block_ranges`]）都假定
+/// 页签段落在前。所以这里走文本插入，插完整份重 parse。
+fn insert_tab_block(doc: &mut DocumentMut, block: &str) -> Result<(), AppError> {
+    let text = doc.to_string();
+    /*
+     * 插在**最后一段 `[[tabs]]` 之后**：两份文件里页签与参数的先后并不固定
+     * （夹具是先 params 后 tabs，真文件是先 tabs 后 params），按 `[[params]]` 定位会插错地方。
+     */
+    let at = tab_block_ranges(&text)
+        .last()
+        .map(|(_, e)| *e)
+        .or_else(|| text.find("[[params]]"))
+        .unwrap_or(text.len());
+    let head = text[..at].trim_end_matches('\n');
+    let mut next = String::with_capacity(text.len() + block.len() + 2);
+    next.push_str(head);
+    next.push('\n');
+    next.push_str(block);
+    next.push('\n');
+    next.push_str(&text[at..]);
+    *doc = next.parse::<DocumentMut>().map_err(|e| {
+        AppError::corrupted(messages::text(
+            "ui.presetdata.registry.349",
+            &[("tab", "new")],
+        ))
+        .with_detail(e.to_string())
+    })?;
+    Ok(())
+}
+
+/// 每一段 `[[tabs]]` 在文本里的字节范围（按数组次序）。
+///
+/// 切法：`[[tabs]]` 开头，到下一段 `[[tabs]]`（或 `[[params]]`）为止；
+/// 嵌套的 `[[tabs.sections]]` / `[[tabs.sections.items]]` 属于**同一块**。
+fn tab_block_ranges(text: &str) -> Vec<(usize, usize)> {
+    let marker = "[[tabs]]";
+    let bytes = text.as_bytes();
+    let mut starts: Vec<usize> = Vec::new();
+    let mut at = 0;
+    while let Some(i) = text[at..].find(marker) {
+        let s = at + i;
+        if s == 0 || bytes.get(s - 1) == Some(&b'\n') {
+            starts.push(s);
+        }
+        at = s + marker.len();
+    }
+    starts
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            let limit = starts.get(i + 1).copied().unwrap_or(text.len());
+            (
+                *s,
+                next_top_level_header(text, s + marker.len(), limit).unwrap_or(limit),
+            )
+        })
+        .collect()
+}
+
+/// 从 `from` 起第一个**行首的顶层表头**，且不是 `[[tabs…`（嵌套的 `[[tabs.sections]]`
+/// 属于当前这一块）。`limit` 之外不看：下一段 `[[tabs]]` 就是这一块的边界。
+fn next_top_level_header(text: &str, from: usize, limit: usize) -> Option<usize> {
+    let mut at = from;
+    while at < limit {
+        let i = at + text[at..limit].find("\n[[")? + 1;
+        if !text[i..limit].starts_with("[[tabs") {
+            return Some(i);
+        }
+        at = i + 2;
+    }
+    None
+}
+
+/// 把第 `from` / `to` 段 `[[tabs]]` **整块**对调（两份文件同一套切法）。
+///
+/// 与 [`swap_section_blocks`] 同一个理由：页签块里套着 `[[tabs.sections]]` 与
+/// `[[tabs.sections.items]]`，换表内容会只换掉 id、把参数留在原地。
+/// 换文本块最稳，代价是整份重 parse —— 这条命令不在热路径上。
+fn swap_tab_blocks(doc: &mut DocumentMut, from: usize, to: usize) -> Result<(), AppError> {
+    if from == to {
+        return Ok(());
+    }
+    let text = doc.to_string();
+    let blocks = tab_block_ranges(&text);
+    if from >= blocks.len() || to >= blocks.len() {
+        return Err(AppError::corrupted(messages::text(
+            "ui.presetdata.registry.349",
+            &[("tab", &format!("tabs[{from}]"))],
+        )));
+    }
+    let mut parts: Vec<&str> = blocks.iter().map(|(s, e)| &text[*s..*e]).collect();
+    parts.swap(from, to);
+    let mut next = String::with_capacity(text.len());
+    next.push_str(&text[..blocks[0].0]);
+    for p in parts {
+        next.push_str(p);
+    }
+    next.push_str(&text[blocks[blocks.len() - 1].1..]);
+    *doc = next.parse::<DocumentMut>().map_err(|e| {
+        AppError::corrupted(messages::text(
+            "ui.presetdata.registry.349",
+            &[("tab", &format!("tabs[{from}]"))],
+        ))
+        .with_detail(e.to_string())
+    })?;
+    Ok(())
+}
+
+/// 删掉第 `at` 段 `[[tabs]]`（连同它下面的分组与 items）。
+fn remove_tab_block(doc: &mut DocumentMut, at: usize) -> Result<(), AppError> {
+    let text = doc.to_string();
+    let blocks = tab_block_ranges(&text);
+    let Some((s, e)) = blocks.get(at).copied() else {
+        return Err(AppError::corrupted(messages::text(
+            "ui.presetdata.registry.349",
+            &[("tab", &format!("tabs[{at}]"))],
+        )));
+    };
+    let mut next = String::with_capacity(text.len());
+    next.push_str(&text[..s]);
+    next.push_str(&text[e..]);
+    *doc = next.parse::<DocumentMut>().map_err(|e| {
+        AppError::corrupted(messages::text(
+            "ui.presetdata.registry.349",
+            &[("tab", &format!("tabs[{at}]"))],
+        ))
+        .with_detail(e.to_string())
+    })?;
+    Ok(())
+}
+
+/// 按**数组次序**把每个页签的 `order` 写回 `[[tabs]]`（换位之后调）。
+fn write_tab_orders(doc: &mut DocumentMut, tabs: &[TabMeta]) {
+    let Some(arr) = doc
+        .get_mut("tabs")
+        .and_then(toml_edit::Item::as_array_of_tables_mut)
+    else {
+        return;
+    };
+    for (i, t) in tabs.iter().enumerate() {
+        if let Some(tbl) = arr.get_mut(i) {
+            tbl.insert("order", toml_edit::value(t.order));
+        }
+    }
 }
 
 /// 把某个页签里 `[[tabs.sections]]` 的第 `from` / `to` **整块**对调。
@@ -6884,27 +7302,18 @@ order = 2.0
         assert_eq!(again.param("a.x").unwrap().choices.len(), 2);
     }
 
-    /// 空分组删得掉（两份文件一起删、order 重排）；有参数 / 组件卡 / 条件组拦住
+    /// 删分组：空组直接删；有参数的组先把它那些参数搬到同一页签末尾的「未归类」，
+    /// 参数一条不少；「未归类」自己被删时拒收
     #[test]
-    fn an_empty_section_can_be_removed_but_never_one_in_use() {
+    fn removing_a_section_moves_its_params_to_the_fallback_group() {
         let (p, l) = editable();
         let (d, r) = load(p, l);
         let mut r = r.unwrap();
 
-        /* 先建两个空组（作者 2026-11-01：「不小心建多了也可以删除」） */
+        /* 先建两个空组（不小心建多了也得能删） */
         r.ensure_section("t1", "custom_1", "多建的一").unwrap();
         r.ensure_section("t1", "custom_2", "多建的二").unwrap();
         r.write_back().unwrap();
-
-        /* 有参数的那一组删不动 —— 参数会成孤儿 */
-        let err = r.set_param_meta("a.y", meta_edit("a.y"));
-        assert!(err.is_ok(), "先确认这一笔无关的编辑不受影响");
-        let e = r.remove_section("s1").expect_err("s1 还有 3 条参数");
-        assert!(
-            e.to_string().contains("s1") || e.to_string().contains("参数"),
-            "拒绝的理由要说清楚：{e}"
-        );
-        assert!(r.param("a.y").is_some(), "被拒之后一个字都不许动");
 
         /* 删空组：两份文件都要少一条，order 重排成 0..n-1 */
         r.remove_section("custom_1").expect("空组删得掉");
@@ -6934,8 +7343,6 @@ order = 2.0
         );
         let orders: Vec<f64> = again.tabs[0].sections.iter().map(|s| s.order).collect();
         assert_eq!(orders, [0.0, 1.0], "order 没按新次序重排：{orders:?}");
-        // 「参数一条都不许少」查的是三条参数与它们的归属，不是组数：
-        // fixture 只有 s1 装参数，custom_2 是空组（param_section_ids 只数有 items 的组）。
         for key in ["a.mode", "a.x", "a.y"] {
             let p = again
                 .param(key)
@@ -6954,6 +7361,141 @@ order = 2.0
             1,
             "空组不许被算成装参数的组"
         );
+
+        /* 删一个**还有参数**的组：参数进同一页签末尾的「未归类」，组本身消失 */
+        let mut r = again;
+        r.remove_section("s1").expect("有参数的组也能删");
+        r.write_back().unwrap();
+
+        let after = ParamRegistry::load_from(d.path()).expect("删完还得读得通");
+        let ids: Vec<&str> = after
+            .tabs
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .map(|s| s.id.as_str())
+            .collect();
+        assert!(!ids.contains(&"s1"), "被删的组还在：{ids:?}");
+        let fid = "uncategorized_t1";
+        let t1_ids: Vec<&str> = after
+            .tabs
+            .iter()
+            .find(|t| t.id == "t1")
+            .expect("t1 还在")
+            .sections
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(
+            t1_ids.last().copied(),
+            Some(fid),
+            "「未归类」要挂在页签末尾：{t1_ids:?}"
+        );
+        let fallback = after
+            .tabs
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .find(|s| s.id == fid)
+            .expect("「未归类」没建出来");
+        assert_eq!(fallback.label, "未归类");
+        for key in ["a.mode", "a.x", "a.y"] {
+            let p = after
+                .param(key)
+                .unwrap_or_else(|| panic!("参数 {key} 跟着被删的组一起没了"));
+            assert_eq!(p.layout.section_id, fid, "{key} 没落到「未归类」");
+        }
+        let items = after
+            .layout
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .find(|s| s.id == fid)
+            .map(|s| s.items.len());
+        assert_eq!(items, Some(3), "「未归类」的布局条目要跟参数一起到");
+        let holders = after.param_section_ids();
+        assert_eq!(holders.len(), 1, "参数只该在「未归类」这一组");
+        assert!(holders.contains(fid), "参数落到了别的组：{holders:?}");
+
+        /* 「未归类」自己有参数时删不掉：搬进去等于原地打转 */
+        let mut after = after;
+        let e = after
+            .remove_section(fid)
+            .expect_err("「未归类」里还有参数，删不了");
+        assert!(e.to_string().contains("未归类"), "理由要说清楚：{e}");
+        assert_eq!(
+            after.param("a.y").map(|p| p.layout.section_id.as_str()),
+            Some(fid),
+            "被拒之后一个字都不许动"
+        );
+    }
+
+    /// 页签：新建（两份文件各一段 + 一个空分组）／上下移／只有空页签能删
+    #[test]
+    fn tabs_can_be_added_moved_and_removed_only_when_empty() {
+        let (p, l) = editable();
+        let (d, r) = load(p, l);
+        let mut r = r.unwrap();
+
+        /* 有参数的那一页删不掉：参数没有第二个去处 */
+        let e = r.remove_tab("t1").expect_err("t1 里还有 3 条参数");
+        assert!(
+            e.to_string().contains('3') || e.to_string().contains("参数"),
+            "理由要说清楚：{e}"
+        );
+
+        r.ensure_tab("custom_tab_1", "测试页").expect("建页签");
+        r.write_back().unwrap();
+
+        let again = ParamRegistry::load_from(d.path()).expect("重读");
+        let fresh = again
+            .tabs()
+            .iter()
+            .find(|t| t.id == "custom_tab_1")
+            .expect("注册表里没有新页签");
+        assert_eq!(fresh.label, "测试页");
+        assert_eq!(fresh.sections.len(), 1, "顺手建的那个空分组没建出来");
+        assert_eq!(
+            again.tabs().last().map(|t| t.id.as_str()),
+            Some("custom_tab_1"),
+            "新页签该排在这一排末尾"
+        );
+        assert!(
+            again.layout().iter().any(|t| t.id == "custom_tab_1"),
+            "布局那份里没有它 —— 两份文件必须同一套页签"
+        );
+
+        /* 往上挪一位：两份文件的数组次序与 order 一起换 */
+        let mut r = again;
+        r.set_tab_meta(
+            "custom_tab_1",
+            TabMetaEdit {
+                label: None,
+                move_dir: Some(SectionMove::Up),
+            },
+        )
+        .expect("换位");
+        r.write_back().unwrap();
+
+        let after = ParamRegistry::load_from(d.path()).expect("重读");
+        assert_eq!(
+            after.tabs().first().map(|t| t.id.as_str()),
+            Some("custom_tab_1")
+        );
+        assert_eq!(
+            after.layout().first().map(|t| t.id.as_str()),
+            Some("custom_tab_1"),
+            "布局那份没跟着换位"
+        );
+        assert_eq!(after.tabs()[0].order, 10.0, "order 该换值");
+        assert_eq!(after.tabs()[1].order, 20.0, "order 该换值");
+
+        /* 删空页签：连它那个空分组一起删，参数一条不牵连 */
+        let mut r = after;
+        r.remove_tab("custom_tab_1").expect("空页签该删得掉");
+        r.write_back().unwrap();
+        let gone = ParamRegistry::load_from(d.path()).expect("重读");
+        assert!(!gone.tabs().iter().any(|t| t.id == "custom_tab_1"));
+        assert!(!gone.layout().iter().any(|t| t.id == "custom_tab_1"));
+        assert_eq!(gone.tabs().len(), 1);
+        assert_eq!(gone.params().len(), 3, "删页签不许动参数");
     }
 
     /// 弃用可以**只对某几台机型**生效：显式清单落盘、判据按机型分叉、

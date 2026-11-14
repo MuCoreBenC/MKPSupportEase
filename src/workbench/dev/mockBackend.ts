@@ -369,6 +369,7 @@ const SHADOW_MUTATORS = new Set([
   'wb_set_brand_field', 'wb_add_brand', 'wb_move_machine_to_brand',
   'wb_set_machine_dimensions', 'wb_set_section_meta', 'wb_set_param_meta', 'wb_remove_section',
   'wb_set_section_order', 'wb_edit_group', 'wb_clear_stale_translations',
+  'wb_add_tab', 'wb_set_tab_meta', 'wb_remove_tab',
   'wb_set_machine_zones', 'wb_set_bundle_refs', 'wb_add_bundle',
   'wb_rename_bundle', 'wb_copy_bundle', 'wb_assign_bundle_versions',
   'wb_remove_bundle', 'wb_set_calibration_identity', 'wb_set_asset_delivery',
@@ -1479,6 +1480,29 @@ function buildDesk(machineId: string, uid: string | null, tab: string | null, qu
     const y = secKey(b.sectionId)
     return x[0] - y[0] || x[1] - y[1]
   })
+  /*
+   * 空组也占一张卡（与真后端 `derive::desk` 同口径）：只在限定了页签、且没在
+   * 搜索时补 —— 「全部」下塞一堆空卡会撑满页面，搜索结果里也不该混进空组。
+   */
+  if (tab !== null && !q) {
+    const order = TABS.find((t) => t.id === tab)?.sections.map((sec) => sec.id) ?? []
+    const at = (id: string) => {
+      const i = order.indexOf(id)
+      return i < 0 ? Number.MAX_SAFE_INTEGER : i
+    }
+    for (const id of order) {
+      if (groups.some((g) => g.sectionId === id)) continue
+      const here = at(id)
+      const idx = groups.findIndex((g) => at(g.sectionId) > here)
+      groups.splice(idx < 0 ? groups.length : idx, 0, {
+        sectionId: id,
+        label: groupLabelOf(id),
+        count: 0,
+        offNote: null,
+        items: [],
+      })
+    }
+  }
   const nav = TABS.map((t) => ({
     id: t.id,
     label: t.label,
@@ -1923,6 +1947,78 @@ export function installMockBackend() {
         m.hasDimensions = true
         return Promise.resolve(machineListOf())
       }
+      case 'wb_add_tab': {
+        /*
+         * 新建页签（真机 `ensure_tab`）：`TABS` 末尾追加一段，顺手在它下面建一个
+         * 空分组 —— 一个页签没有任何分组时点进去是一屏空白，参数没处放。
+         */
+        const tabId = args?.tabId as string
+        const label = ((args?.label as string) ?? '').trim()
+        if (TABS.some((t) => t.id === tabId)) return Promise.resolve(buildRegistry())
+        if (label === '') {
+          return Promise.reject({ code: 'INVALID', message: '页签名不能为空', traceId: 'mock' })
+        }
+        const order = TABS.reduce((n, t) => Math.max(n, t.order), 0) + 10
+        const secId = `${tabId}_g1`
+        TABS.push({
+          id: tabId,
+          label,
+          order,
+          sections: [{ id: secId, label: '未分组', order: 0 }],
+        })
+        SECTION_LABEL.set(secId, '未分组')
+        return Promise.resolve(buildRegistry())
+      }
+      case 'wb_set_tab_meta': {
+        /* 页签自己的那一笔：名字 / 上下位置（次序与 `order` 一起换，与真机同一条） */
+        const e = args?.edit as { label?: string | null; move?: 'up' | 'down' | null }
+        const tabId = args?.tabId as string
+        const at = TABS.findIndex((t) => t.id === tabId)
+        if (at < 0) {
+          return Promise.reject({ code: 'NOT_FOUND', message: `演示桩里没有页签 ${tabId}`, traceId: 'mock' })
+        }
+        if (e.label !== null && e.label !== undefined) {
+          const name = e.label.trim()
+          if (name === '') {
+            return Promise.reject({ code: 'INVALID', message: '页签名不能为空', traceId: 'mock' })
+          }
+          TABS[at]!.label = name
+        }
+        const dir = e.move ?? null
+        if (dir !== null) {
+          const to = dir === 'up' ? at - 1 : at + 1
+          if (to < 0 || to >= TABS.length) {
+            return Promise.reject({ code: 'INVALID', message: '页签已经在这一排的边上了', traceId: 'mock' })
+          }
+          const moved = TABS[at]!
+          TABS[at] = TABS[to]!
+          TABS[to] = moved
+          const o = TABS[at]!.order
+          TABS[at]!.order = TABS[to]!.order
+          TABS[to]!.order = o
+        }
+        return Promise.resolve(buildRegistry())
+      }
+      case 'wb_remove_tab': {
+        /* 只有空页签能删：参数没有第二个去处（页签之间没有「未归类页签」） */
+        const tabId = args?.tabId as string
+        const at = TABS.findIndex((t) => t.id === tabId)
+        if (at < 0) {
+          return Promise.reject({ code: 'NOT_FOUND', message: `演示桩里没有页签 ${tabId}`, traceId: 'mock' })
+        }
+        const secs = new Set(TABS[at]!.sections.map((x) => x.id))
+        const used = PARAMS.filter((p) => secs.has(p.sectionId))
+        if (used.length > 0) {
+          return Promise.reject({
+            code: 'INVALID',
+            message: `页签「${TABS[at]!.label}」里还有 ${used.length} 条参数，先把它们搬到别的页签再删`,
+            traceId: 'mock',
+          })
+        }
+        TABS.splice(at, 1)
+        for (const id of secs) SECTION_LABEL.delete(id)
+        return Promise.resolve(buildRegistry())
+      }
       case 'wb_set_section_meta': {
         /*
          * 分组自己的那一笔（名字 / 上下位置）。真机里位置有两个真理（注册表数组次序
@@ -1992,9 +2088,9 @@ export function installMockBackend() {
       }
       case 'wb_remove_section': {
         /*
-         * 删一个空分组。真机的三道门（还有参数 / 组件卡 / 带 showWhen）在
-         * `ParamRegistry::remove_section`；桩里把**第一条**也挡上（它才是最容易被
-         * 误删的那一种），另外两道这堆夹具里本来就没有对应数据。
+         * 删一个分组。真机的两道门（组件卡 / 带 showWhen）这堆夹具里没有对应数据；
+         * 组里的参数不跟着删 —— 先落到同一页签末尾的「未归类」（与真机
+         * `ensure_section` 同语义，幂等），再删组。
          */
         const id = args?.sectionId as string
         let hit: { tab: (typeof TABS)[number]; at: number } | null = null
@@ -2008,11 +2104,20 @@ export function installMockBackend() {
         if (hit === null) {
           return Promise.reject({ code: 'NOT_FOUND', message: `演示桩里没有分组 ${id}`, traceId: 'mock' })
         }
-        const used = PARAMS.filter((p) => p.sectionId === id).length
-        if (used > 0) {
-          return Promise.reject({ code: 'INVALID', message: `这一组里还有 ${used} 条参数，不能删`, traceId: 'mock' })
+        const fid = `uncategorized_${hit.tab.id}`
+        const used = PARAMS.filter((p) => p.sectionId === id)
+        if (used.length > 0) {
+          if (fid === id) {
+            return Promise.reject({ code: 'INVALID', message: '「未归类」里的参数没有第二个去处', traceId: 'mock' })
+          }
+          if (!hit.tab.sections.some((s) => s.id === fid)) {
+            hit.tab.sections.push({ id: fid, label: '未归类', order: hit.tab.sections.length })
+            SECTION_LABEL.set(fid, '未归类')
+          }
+          for (const pdef of used) pdef.sectionId = fid
         }
-        hit.tab.sections.splice(hit.at, 1)
+        const at = hit.tab.sections.findIndex((s) => s.id === id)
+        hit.tab.sections.splice(at, 1)
         SECTION_LABEL.delete(id)
         hit.tab.sections.forEach((sec, i) => {
           sec.order = i + 1

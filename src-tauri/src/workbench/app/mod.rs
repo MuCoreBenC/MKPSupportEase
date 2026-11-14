@@ -319,8 +319,8 @@ use crate::workbench::domain::variants;
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::{Committed, Level};
 use crate::workbench::presets::registry::{
-    GroupMembersEdit, ParamDef, ParamMetaEdit, SectionMetaEdit, ShowWhen, TabMeta, UiComponent,
-    ValueType,
+    GroupMembersEdit, ParamDef, ParamMetaEdit, SectionMetaEdit, ShowWhen, TabMeta, TabMetaEdit,
+    UiComponent, ValueType,
 };
 use crate::workbench::presets::Presets;
 use crate::workbench::store::{Store, TrashEntry};
@@ -939,6 +939,9 @@ const COMMAND_LABELS: &[(&str, &str)] = &[
     ("wb_set_param_meta", "改参数定义"),
     ("wb_set_section_order", "改组内顺序"),
     ("wb_edit_group", "改分组成员"),
+    ("wb_add_tab", "新建页签"),
+    ("wb_set_tab_meta", "改页签名与位置"),
+    ("wb_remove_tab", "删除页签"),
     ("wb_clear_stale_translations", "清译文标记"),
     ("wb_set_section_meta", "改分组名与位置"),
     ("wb_remove_section", "删除分组"),
@@ -1950,7 +1953,8 @@ pub fn wb_registry() -> Result<RegistryView, AppError> {
 fn registry_view(reg: &crate::workbench::presets::ParamRegistry) -> RegistryView {
     RegistryView {
         updated: reg.updated().to_owned(),
-        tabs: reg.param_tabs(),
+        /* 空页签也算：刚建出来的那一页得能在页签栏里找到（见 `param_tabs_all`） */
+        tabs: reg.param_tabs_all(),
         params: reg.params().iter().map(|p| param_view(reg, p)).collect(),
         sections: {
             /* `layout = 'component'` 的那些卡（设置页 11 张）不归这里管 —— 见 `standalone` */
@@ -2164,14 +2168,14 @@ pub fn wb_set_section_meta(
     })
 }
 
-/// **删掉一个空分组**（抽屉里那颗「删除分组」，2026-11-01）。
+/// **删掉一个分组**（抽屉里那颗「删除分组」）。
 ///
 /// 与 [`wb_set_section_meta`] 同一条路：就地写两份 TOML（注册表 + 布局），写完整份
 /// 重读。删除也是编辑事务里的一笔 —— **删完只是进草稿**，右上角「保存」才真落盘，
-/// 「放弃」就退回来（作者 2026-11-01：「删除的操作也是一样的，需要点保存或者放弃」）。
+/// 「放弃」就退回来。
 ///
-/// 只允许删「没有参数归它、不是组件卡、不带 showWhen」的组，判据在
-/// [`ParamRegistry::remove_section`]，这里不再另立一套。
+/// 组里的参数不会被删：先落到同一页签末尾的「未归类」，再删组。整块组件卡与条件分组
+/// 仍然拒收，判据在 [`ParamRegistry::remove_section`]，这里不再另立一套。
 #[tauri::command(async)]
 pub fn wb_remove_section(section_id: String) -> Result<RegistryView, AppError> {
     traced("wb_remove_section", |_| {
@@ -2185,6 +2189,78 @@ pub fn wb_remove_section(section_id: String) -> Result<RegistryView, AppError> {
             },
             |ctx| {
                 ctx.presets.registry.remove_section(&section_id)?;
+                ctx.presets.registry.write_back()?;
+                ctx.reload_presets()?;
+                Ok(registry_view(&ctx.presets.registry))
+            },
+        )
+    })
+}
+
+/// **新建一个页签**（页签栏末尾那颗「＋」）。
+///
+/// 两份文件各加一段 `[[tabs]]`，顺手在那下面建一个空分组 —— 判据在
+/// [`ParamRegistry::ensure_tab`]，这里只管事务边界（同一次撤销）。
+#[tauri::command(async)]
+pub fn wb_add_tab(tab_id: String, label: String) -> Result<RegistryView, AppError> {
+    traced("wb_add_tab", |_| {
+        with_struct_ctx(
+            "",
+            |_| {
+                vec![
+                    "registry/param_registry.toml".to_owned(),
+                    "layout_schema.toml".to_owned(),
+                ]
+            },
+            |ctx| {
+                ctx.presets.registry.ensure_tab(&tab_id, &label)?;
+                ctx.presets.registry.write_back()?;
+                ctx.reload_presets()?;
+                Ok(registry_view(&ctx.presets.registry))
+            },
+        )
+    })
+}
+
+/// **改页签的名字 / 位置**（「编辑页签」那一框里的名字与 ↑↓）。
+///
+/// 与 [`wb_set_section_meta`] 同一条路：两份 TOML 一次写完、整份重读。
+#[tauri::command(async)]
+pub fn wb_set_tab_meta(tab_id: String, edit: TabMetaEdit) -> Result<RegistryView, AppError> {
+    traced("wb_set_tab_meta", |_| {
+        with_struct_ctx(
+            "",
+            |_| {
+                vec![
+                    "registry/param_registry.toml".to_owned(),
+                    "layout_schema.toml".to_owned(),
+                ]
+            },
+            |ctx| {
+                ctx.presets.registry.set_tab_meta(&tab_id, edit)?;
+                ctx.presets.registry.write_back()?;
+                ctx.reload_presets()?;
+                Ok(registry_view(&ctx.presets.registry))
+            },
+        )
+    })
+}
+
+/// **删掉一个空页签**。带参数或带功能卡的拒收，判据在
+/// [`ParamRegistry::remove_tab`] —— 参数没有第二个去处，只能先搬走。
+#[tauri::command(async)]
+pub fn wb_remove_tab(tab_id: String) -> Result<RegistryView, AppError> {
+    traced("wb_remove_tab", |_| {
+        with_struct_ctx(
+            "",
+            |_| {
+                vec![
+                    "registry/param_registry.toml".to_owned(),
+                    "layout_schema.toml".to_owned(),
+                ]
+            },
+            |ctx| {
+                ctx.presets.registry.remove_tab(&tab_id)?;
                 ctx.presets.registry.write_back()?;
                 ctx.reload_presets()?;
                 Ok(registry_view(&ctx.presets.registry))

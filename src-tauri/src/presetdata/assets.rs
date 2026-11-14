@@ -221,7 +221,9 @@ pub struct Group {
     pub id: String,
     /// 给人看的组名（作者要的"套装的感觉"就靠它）
     pub name: String,
-    /// 成员，**有序**（第一个是"没指定角色时"的兜底）
+    /// 成员，**有序**（第一个是"没指定角色时"的兜底）。**可以是空的** ——
+    /// 先建组、再往里拉图是正常的整理顺序（空组没有目录，也就不独占任何源稿）
+    #[serde(default)]
     pub members: Vec<GroupMember>,
 }
 
@@ -713,16 +715,21 @@ impl Assets {
             t["name"] = super::literal_str(&g.name);
             /* ★ 先把**全部**成员攒进一个表数组再挂上去 —— 逐个 `t["members"] = …` 是覆盖，
             只剩最后一个（2026-10-16 实测踩到：写出去只剩一名成员，读回来少一半） */
-            let mut inner = toml_edit::ArrayOfTables::new();
-            for m in &g.members {
-                let mut mt = toml_edit::Table::new();
-                mt["asset"] = super::literal_str(&m.asset);
-                if !m.role.is_empty() {
-                    mt["role"] = super::literal_str(&m.role);
+            if g.members.is_empty() {
+                /* 空组写内联空数组：空表数组在 TOML 里一个字节都不写，重读会缺 `members` */
+                t["members"] = toml_edit::value(toml_edit::Array::new());
+            } else {
+                let mut inner = toml_edit::ArrayOfTables::new();
+                for m in &g.members {
+                    let mut mt = toml_edit::Table::new();
+                    mt["asset"] = super::literal_str(&m.asset);
+                    if !m.role.is_empty() {
+                        mt["role"] = super::literal_str(&m.role);
+                    }
+                    inner.push(mt);
                 }
-                inner.push(mt);
+                t["members"] = toml_edit::Item::ArrayOfTables(inner);
             }
-            t["members"] = toml_edit::Item::ArrayOfTables(inner);
             arr.push(t);
         }
         if arr.is_empty() {
@@ -778,7 +785,7 @@ impl Assets {
     ///
     /// 1. `id` 非空、**大小写不敏感唯一**、且是**安全的文件名**（它同时是源稿的文件名）；
     /// 2. `name` 非空（界面上要显示的就是它）；
-    /// 3. 成员至少一个、每个都指着真资产、同一组里不重复；
+    /// 3. 每个成员都指着真资产、同一组里不重复（**空组合法**：先建组、再拉图）；
     /// 4. **同一组的成员必须在同一个目录**（源稿落点 = 成员所在目录 + 组 id ⇒ 否则不唯一）；
     /// 5. **一张资产至多属于一个组**（否则"它跟谁共用一份标注"有两种答案）；
     /// 6. 组 id 不许与**同目录下某张未分组资产**的旧口径干名撞（那样两份源稿同名）。
@@ -829,15 +836,10 @@ impl Assets {
                     &[],
                 )));
             }
-            if g.members.is_empty() {
-                return Err(AppError::corrupted(messages::text(
-                    "ui.presetdata.assets.187",
-                    &[("id", id)],
-                ))
-                .with_detail(
-                    "分组就是「哪几张图共用一份标注」—— 没有成员的组没有意义，删掉它".to_owned(),
-                ));
-            }
+            /*
+             * 空组是合法的：先建好一个组、再往里拉图，是正常的整理顺序。
+             * 它没有目录，第 4 / 6 条对它无从判起（`group_dirs` 也就不收它）。
+             */
 
             let mut dirs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
             for m in &g.members {
@@ -883,10 +885,12 @@ impl Assets {
                     which.join("、")
                 )));
             }
-            group_dirs.insert(
-                lower,
-                PathBuf::from(dirs.first().cloned().unwrap_or_default()),
-            );
+            if !g.members.is_empty() {
+                group_dirs.insert(
+                    lower,
+                    PathBuf::from(dirs.first().cloned().unwrap_or_default()),
+                );
+            }
         }
 
         /* 第 6 条：未分组资产的旧口径干名，不许与同目录的组 id 撞 */
@@ -1417,5 +1421,30 @@ mod tests {
         again.remove_group("g").expect("删组");
         assert!(again.groups().is_empty());
         assert_eq!(again.items().len(), 2, "删组不许动资产");
+    }
+
+    /// **空组合法**：先建组、再往里拉图，是正常的整理顺序
+    #[test]
+    fn an_empty_group_can_be_saved() {
+        let text =
+            "[[assets]]\nid = 'a'\ntype = 'guide'\nname = 'n'\npath = 'guides/x-light.png'\n";
+        let (_d, mut a) = fixture(text);
+        a.upsert_group(Group {
+            id: "later".into(),
+            name: "先建着".into(),
+            members: Vec::new(),
+        })
+        .expect("空组该过");
+        a.write().expect("写");
+        let again = Assets::load_from(a.file().parent().expect("有父目录")).expect("重读");
+        assert_eq!(again.groups().len(), 1);
+        assert_eq!(again.groups()[0].id, "later");
+        assert!(again.groups()[0].members.is_empty());
+        /* 空组没有目录、也不独占任何资产：那张图仍旧走旧口径的干名 */
+        assert_ne!(
+            again.anno_stem_of("a").as_deref(),
+            Some("later"),
+            "未分组的图不该被空组收走"
+        );
     }
 }

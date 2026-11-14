@@ -875,6 +875,11 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 布局文件那份数组同步换（「所属分组」下拉按它出）
         app::wb_set_section_meta,
         app::wb_remove_section,
+        // 页签本身（新建 / 改名 / 上下位置 / 删除）。与分组同一套事务：
+        // 两份 TOML 一次写完，删完只是进草稿
+        app::wb_add_tab,
+        app::wb_set_tab_meta,
+        app::wb_remove_tab,
         app::wb_clear_stale_translations,
         // 状态词的唯一出处。开场取一次，前端按枚举值查 ——
         // 不给它的话，同一个词会在 TSX 里再写一遍（doc §13）

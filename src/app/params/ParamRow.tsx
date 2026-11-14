@@ -46,7 +46,7 @@ import FieldControl from '../../components/field/FieldControl'
 import { Tip } from '../../components/tooltip'
 import Highlight from './highlight'
 import RestoreChip from './RestoreChip'
-import { valueText } from './useParams'
+import { autoLabel, autoNumber, valueText } from './useParams'
 import type { BlockedBy, ParamDef } from './useParams'
 import s from './ParamRow.module.css'
 
@@ -192,6 +192,20 @@ export default function ParamRow({
   /* 改不动：条件关着，或已弃用 —— 两者控件都是 disabled，但文案与长相分开 */
   const locked = blocked || dep
   const savedText = valueText(def, savedValue, tr)
+
+  /*
+   * **0 = 自动**（注册表 `zeroMeansAuto`）：框里那个字不是 `0.00`，而是这一格
+   * 此刻等于多少（`自动 5.50`）。这串**只进那一格**，不另挂徽章 —— 徽章挂在框
+   * 右边会把这一格从右对齐那条竖线上推开，而且和框里的 `0.00` 摆在一起时，
+   * 人只看到两个数、看不出哪个是结果。
+   * 不是这种字段 ⇒ `undefined`，框里照常显示原值。
+   */
+  const autoText = autoLabel(def, tr, { lookup: valueOf }) ?? undefined
+  /*
+   * 同一个数，为了步进再给一份数值：自动态里点一下箭头从**这一格现在等于多少**
+   * 往前一步（`6.50 → 6.60`），不是从 0 步到 `0.10`（见 `NumberField` 的 `autoValue`）。
+   */
+  const autoValue = autoText === undefined ? undefined : (autoNumber(def, valueOf) ?? undefined)
 
   /*
    * **打字不合法也要有「还原」出口**（2026-10-20，作者：「这个时候就可以显示
@@ -465,30 +479,21 @@ export default function ParamRow({
              *   （共用 NumberField 的既有开关，行内那一档开着，默认关）。
              * 其余控件类型不包：它们有自己的稳定宽度行为。
              */
-            <>
-              <span className={s.edNum}>
-                <FieldControl
-                  field={def.field}
-                  raw={value}
-                  form="row"
-                  disabled={locked}
-                  focusOnBoxClick
-                  onInvalidTyping={onInvalidTyping}
-                  resetSignal={resetNonce}
-                  onChange={(next) => onEdit(def.key, next)}
-                />
-              </span>
-              {/*
-                0 有专门含义的字段（注册表 `zeroMeansAuto`）：0 不是"不生效"，
-                是"按另一格算"。详情里那句说明用户多半不展开，所以值旁边直接说；
-                注册表登记了 `autoValue` 就把算出来的数一起摆（`valueText` 那边算）。
-              */}
-              {def.field.zeroMeansAuto === true && value.trim() !== '' && Number(value) === 0 && (
-                <span className={s.autoChip} data-tip={tr('params.row.auto.tip')}>
-                  {valueText(def, value, tr, valueOf)}
-                </span>
-              )}
-            </>
+            <span className={s.edNum}>
+              <FieldControl
+                field={def.field}
+                raw={value}
+                form="row"
+                disabled={locked}
+                focusOnBoxClick
+                onInvalidTyping={onInvalidTyping}
+                resetSignal={resetNonce}
+                autoText={autoText}
+                autoValue={autoValue}
+                autoTip={autoText !== undefined ? tr('params.row.auto.tip') : undefined}
+                onChange={(next) => onEdit(def.key, next)}
+              />
+            </span>
           ) : (
             <FieldControl
               field={def.field}

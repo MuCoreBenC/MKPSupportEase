@@ -43,6 +43,27 @@
   margin-bottom: 10px;
 }
 
+/* 页签自己的两件事（第几页 / ↑↓ / 删除）—— 与名字同一行，先说"我在哪一页" */
+.tabOps {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.tabAt {
+  margin-right: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.confirmText {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.6;
+  color: var(--text-1);
+}
+
 .nameLabel {
   flex: none;
   width: 32px;
@@ -147,6 +168,26 @@
   font-size: var(--fs-label);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+
+/* 正在往哪一组里挑：通长色带铺到框边，左边一道竖轨（与右列选中行同一套语言） */
+.sectionHeadOn {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 6px 2px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-solid));
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* 空组也占一块：位置本身有用，所以只说明它是空的，不整块藏掉 */
+.emptyBlock {
+  padding: 4px 6px 6px 10px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
 }
 
 .row {

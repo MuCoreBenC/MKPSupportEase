@@ -21,7 +21,7 @@
  * 这一组是一个**整体**（名字 + 一张张成员），中途的半成品没有意义。所以草稿留在本地、
  * 一次交出去（后端也是整组一起校）。删组另说 —— 那是个独立决定，当场问一句就落。
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import type { AssetView, GroupView } from '../api'
 import ModalC14 from '../c14/ModalC14'
@@ -103,6 +103,20 @@ export default function GroupManagerModal({ open, groups, assets, onClose, onSav
     )
   }, [open, groups, selId])
 
+  /*
+   * 每次**打开**都把选中收敛一次：`selId` 的初值取的是挂载那一帧的 `groups`，
+   * 那时台账常常还没读回来（空数组）⇒ 一打开就是一张空白的新建表单。
+   */
+  const wasOpen = useRef(false)
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      setSelId((prev) =>
+        prev !== null && groups.some((g0) => g0.id === prev) ? prev : (groups[0]?.id ?? null),
+      )
+    }
+    wasOpen.current = open
+  }, [open, groups])
+
   /** 已经属于**别的**组的资产 id（小写）—— 规矩 2，不许拉进来 */
   const takenElsewhere = useMemo(() => {
     const mine = new Set(draftMembers.map((m) => m.asset.toLowerCase()))
@@ -130,7 +144,7 @@ export default function GroupManagerModal({ open, groups, assets, onClose, onSav
   const dirHint =
     draftMembers.length > 0
       ? `这一组在 ${dirOf(assets.find((a) => a.id === draftMembers[0].asset)?.path ?? '') || '（根目录）'}/`
-      : '这一组还没有成员 —— 先加一张，这一组的目录就定下来了'
+      : '还没有成员，加一张就定下目录'
 
   const save = async () => {
     const id = isNew ? draftId.trim() : selId
@@ -238,7 +252,7 @@ export default function GroupManagerModal({ open, groups, assets, onClose, onSav
 
           <div className={g.memHead}>
             <span className={s.dim}>
-              成员 · {draftMembers.length} 张 —— {dirHint}
+              成员 · {draftMembers.length} 张 · {dirHint}
             </span>
             <button
               type="button"
@@ -280,7 +294,7 @@ export default function GroupManagerModal({ open, groups, assets, onClose, onSav
 
           <div className={g.memList}>
             {draftMembers.length === 0 && (
-              <div className={s.emptyHint}>这一组还没有成员 —— 点上面「添加资产…」拉几张进来</div>
+              <div className={s.emptyHint}>这一组还没有成员，点上面「添加资产…」拉几张进来</div>
             )}
             {draftMembers.map((m, i) => (
               <div key={m.asset} className={g.memRow}>
@@ -318,7 +332,7 @@ export default function GroupManagerModal({ open, groups, assets, onClose, onSav
             <button
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
-              disabled={busy || draftName.trim() === '' || draftId.trim() === '' || draftMembers.length === 0}
+              disabled={busy || draftName.trim() === '' || draftId.trim() === ''}
               onClick={() => void save()}
             >
               {isNew ? '建立这一组（写进台账）' : '保存这一组（写进台账）'}

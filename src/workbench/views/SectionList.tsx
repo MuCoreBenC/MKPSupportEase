@@ -59,6 +59,8 @@ interface Props {
   onAdd?: (tabId: string, label: string) => void
   /** 这一行是不是还没落盘的新分组（显示「待保存」） */
   isPending?: (id: string) => boolean
+  /** 这一行是不是"这一笔不会保存"的草稿新组（改选了别的组，显示「不保存」） */
+  isDropped?: (id: string) => boolean
   /** 面板底下的那一句（两处口径不同：下拉说"跟着这次保存"，抽屉说"已应用"） */
   hint?: string
 }
@@ -114,6 +116,7 @@ export default function SectionList({
   onMove,
   onAdd,
   isPending,
+  isDropped,
   hint,
 }: Props) {
   /** 正在改名的那一组（`null` = 没在改） */
@@ -207,6 +210,7 @@ export default function SectionList({
           {g.sections.map((sec, i) => {
             const on = selectable && sec.id === value
             const pending = isPending?.(sec.id) === true
+            const dropped = isDropped?.(sec.id) === true
             if (editing === sec.id) {
               return (
                 <div key={sec.id} className={s.editRow} data-current={on ? 'true' : undefined}>
@@ -252,6 +256,7 @@ export default function SectionList({
                     </span>
                   )}
                   {pending && <span className={s.badge}>待保存</span>}
+                  {dropped && <span className={s.badge}>不保存</span>}
                 </button>
                 {/* 组件卡与普通分组同一套操作：笔改名、箭头换位（作者 2026-11-01：
                     「组件卡跟别的一样呀，只是它的样子不一样而已」） */}

@@ -131,21 +131,6 @@
   flex-shrink: 0;
 }
 
-/* 「0 = 自动」那一枚：跟着值走，不抢眼（值是 0 时才出现） */
-.autoChip {
-  display: inline-flex;
-  align-items: center;
-  height: 20px;
-  margin-left: 6px;
-  padding: 0 7px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  color: var(--text-2);
-  font-size: var(--fs-label);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
 /* 展开详情里的「状态」那一格：与弃用徽章同色系，一眼串起来 */
 .ddDep {
   margin: 0;

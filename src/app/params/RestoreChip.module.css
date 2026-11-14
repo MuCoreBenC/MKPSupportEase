@@ -38,11 +38,14 @@
 }
 
 /*
- * `↩` 在字符框里偏上，与中文差约 2px。单独下移，
- * 这样换字号（`--fs-label` 在不同主题下会变）也只需要动这一个数。
+ * `↩` 的居中是**结构**做的，不是补一个偏移量：
+ * 原来这里是 `inline-block` + 一行字高 —— SVG 落在文字基线上，而中文的字身中心
+ * 比基线高，于是图标比旁边两个字高约 2px（作者截图圈出来：「位置有点不对，有点偏高」）。
+ * 现在图标那一格自己撑满 chip 的高度、内部再居中，中心线与文字那一格同一条，
+ * 换字号 / 换 chip 高度都不用再调数。
  */
 .icon {
-  display: inline-block;
-  font-size: 13px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
 }

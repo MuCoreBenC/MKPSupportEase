@@ -30,6 +30,11 @@ export interface SortOrderButtonProps {
   currentKey?: string
   /** 只读（分组只剩一条之类）：触发器禁用 */
   disabled?: boolean
+  /**
+   * 一组都排不了的时候说明一句（比如这一组还没落盘）——
+   * 不给的话触发器只写「共 N 项」，那句"点了没反应"就只能靠猜
+   */
+  emptyHint?: string
   /** 落盘之后把新的注册表视图交回页面 */
   onApplied?: (view: RegistryView) => void
 }
@@ -40,6 +45,7 @@ export default function SortOrderButton({
   rows,
   currentKey,
   disabled = false,
+  emptyHint,
   onApplied,
 }: SortOrderButtonProps) {
   const [open, setOpen] = useState(false)
@@ -50,7 +56,7 @@ export default function SortOrderButton({
   const apply = async (order: string[]) => {
     const view = await wb.setSectionOrder(sectionId, order)
     onApplied?.(view)
-    toasts.push(`「${sectionLabel}」的组内顺序已改 —— 撤销可退回`)
+    toasts.push(`「${sectionLabel}」的组内顺序已改，撤销可退回`)
   }
 
   return (
@@ -60,7 +66,13 @@ export default function SortOrderButton({
         className={s.trigger}
         aria-label="组内顺序"
         aria-haspopup="dialog"
-        title={disabled ? '这一组只有一条，排不了' : '点开排这一组的先后 —— 可拖、可输位次'}
+        title={
+          rows.length < 2 && emptyHint !== undefined
+            ? emptyHint
+            : disabled
+              ? '这一组只有一条，排不了'
+              : '点开排这一组的先后，可拖、可输位次'
+        }
         disabled={disabled || rows.length < 2}
         onClick={() => setOpen(true)}
       >

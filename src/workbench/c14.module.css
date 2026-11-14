@@ -3981,6 +3981,14 @@
   min-width: 0;
 }
 
+/* 空组：卡还在（刚建的那个就在这儿），只是里面一条参数都没有 */
+.pGroupEmpty {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
 /* 画布在右侧的组件（以后真有的话）：两栏换个方向，分隔线跟着换边 */
 .pGroupSplit[data-side='right'] .pGroupAside {
   order: 2;

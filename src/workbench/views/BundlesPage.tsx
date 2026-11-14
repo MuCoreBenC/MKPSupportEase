@@ -251,16 +251,24 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
   const create = () => {
     if (!newId.trim() || !newMachine) return
     const id = newId.trim()
-    void run(
-      () =>
-        wb.addBundle(
-          id,
-          newMachine,
-          newDisplay.trim() || expectedBundleDisplay(id),
-          newRefs,
-        ),
-      `已新建套餐 ${id}（${newRefs.length} 份文件）`,
-    )
+    const count = newRefs.length
+    const display = newDisplay.trim() || expectedBundleDisplay(id)
+    /*
+     * 选新套餐与换清单要在同一帧里落：清单先换、选择跟着换，回落那个 effect
+     * 才不会拿旧清单把它顶回第一份（「复制」那条也是同一种手势）。
+     */
+    void (async () => {
+      try {
+        const next = await wb.addBundle(id, newMachine, display, newRefs)
+        setFilter('')
+        setList(next)
+        setSel(id)
+        toasts.push(`已新建套餐 ${id}（${count} 份文件）`)
+        onBookRefresh()
+      } catch (e) {
+        say(e)
+      }
+    })()
     setCreating(false)
     setNewRefs([])
     setNewId('')

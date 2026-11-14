@@ -1903,13 +1903,6 @@ text_zh_tw = "分組 {id} 沒有 name"
 text_ja = "グループ {id} に name がありません"
 params = ["id"]
 
-["ui.presetdata.assets.187"]
-text = "分组 {id} 一个成员都没有"
-text_en = "Group {id} has no members"
-text_zh_tw = "分組 {id} 一個成員都沒有"
-text_ja = "グループ {id} にメンバーが 1 つもありません"
-params = ["id"]
-
 ["ui.presetdata.assets.188"]
 text = "分组 {id} 的成员 {mid} 不是一条资产"
 text_en = "Member {mid} of group {id} is not an asset"
@@ -3046,11 +3039,11 @@ text_ja = "グループ「{label}」はこのページの端にあるため、�
 params = ["label"]
 
 ["ui.presetdata.registry.354"]
-text = "分组「{label}」里还有 {n} 条参数，不能删 —— 先把它们搬到别的分组"
-text_en = "Group “{label}” still holds {n} parameter(s) and cannot be deleted — move them to another group first"
-text_zh_tw = "分組「{label}」裡還有 {n} 條參數，不能刪 —— 先把它們搬到別的分組"
-text_ja = "グループ「{label}」にはまだ {n} 件のパラメータがあるため削除できません。先に別のグループへ移動してください"
-params = ["label", "n"]
+text = "「{label}」就是这一页的「未归类」，组里的参数没有第二个去处"
+text_en = "“{label}” is this page’s “Uncategorised” group; its parameters have nowhere else to go"
+text_zh_tw = "「{label}」就是這一頁的「未歸類」，組裡的參數沒有第二個去處"
+text_ja = "「{label}」はこのページの「未分類」グループで、この中のパラメーターには移す先がありません"
+params = ["label"]
 
 ["ui.presetdata.registry.355"]
 text = "「{label}」是功能卡（组件 / 条件分组），不是参数分组，不能删"
@@ -3085,6 +3078,27 @@ text_en = "The ordering list does not match the parameters of section {section}"
 text_zh_tw = "排序清單與分組 {section} 的參數對不上"
 text_ja = "並び順のリストがグループ {section} のパラメーターと一致しません"
 params = ["section"]
+
+["ui.presetdata.registry.360"]
+text = "页签「{label}」已经在这一排的边上，挪不动了"
+text_en = "Tab “{label}” is already at the edge of the row and cannot move further"
+text_zh_tw = "頁籤「{label}」已經在這一排的邊上，挪不動了"
+text_ja = "タブ「{label}」はこの並びの端にあるため、これ以上移動できません"
+params = ["label"]
+
+["ui.presetdata.registry.361"]
+text = "页签「{label}」里还有 {n} 条参数，先把它们搬到别的页签再删"
+text_en = "Tab “{label}” still holds {n} parameters; move them to another tab first"
+text_zh_tw = "頁籤「{label}」裡還有 {n} 條參數，先把它們搬到別的頁籤再刪"
+text_ja = "タブ「{label}」にはまだ {n} 件のパラメーターがあります。先に別のタブへ移してください"
+params = ["label", "n"]
+
+["ui.presetdata.registry.362"]
+text = "页签「{label}」里有功能卡（组件 / 条件分组），不能整页删掉"
+text_en = "Tab “{label}” holds feature cards (component / conditional groups) and cannot be deleted as a whole"
+text_zh_tw = "頁籤「{label}」裡有功能卡（組件 / 條件分組），不能整頁刪掉"
+text_ja = "タブ「{label}」には機能カード（コンポーネント / 条件グループ）があるため、タブごと削除できません"
+params = ["label"]
 
 ["ui.runtime.app_state.345"]
 text = "读不到应用状态"

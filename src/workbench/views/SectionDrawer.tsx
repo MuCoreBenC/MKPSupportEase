@@ -173,13 +173,15 @@ export default function SectionDrawer({
   const at = here === null ? -1 : sibs.findIndex((x) => x.id === here.id)
 
   /*
-   * 「这一组现在能不能删」。三个条件与后端 `remove_section` 那三道门一一对应 ——
-   * 这里只负责**要不要把按钮画出来**，拒的理由仍由后端给（它读到的是同一份数据）。
+   * 「这一组现在能不能删」。判据只认注册表那一份（`SectionTarget`），**不数这一屏
+   * 画出来的行**：`rows` 跟着页签 / 搜索变，切个领域就会让有参数的组长出垃圾桶。
    *
-   * 没参数才叫空：`rows` 是这一组的参数清单（页面派生来的），空 + 注册表里查得到
-   * （组件卡在注册表里查不到，天然被 `here !== null` 挡掉）。
+   * 组里的参数不用搬空 —— 后端 `remove_section` 会先把它们落到这一页末尾的
+   * 「未归类」；整块组件卡与条件分组仍然拒收（那两道门在后端，这里只藏按钮）。
    */
-  const canRemove = here !== null && rows.length === 0
+  const canRemove = here !== null && here.component === null && !here.standalone
+  /** 这一组名下真正有多少条参数（注册表口径，与页面上画了几行无关） */
+  const members = params.filter((p) => p.sectionId === (mark ?? '')).length
 
   /*
    * 删除**先问一句**（作者 2026-11-02：「我要模态框」）。
@@ -250,7 +252,7 @@ export default function SectionDrawer({
               <button
                 type="button"
                 className={s.trash}
-                title="删掉这个空分组（进草稿；右上角「保存」才落盘）"
+                title="删掉这一组；组里的参数会回到「未归类」"
                 aria-label="删除分组"
                 onClick={() => setAsking(true)}
               >
@@ -368,7 +370,11 @@ export default function SectionDrawer({
       <ModalC14
         open={asking && canRemove && onRemove !== undefined}
         title="删除这个分组？"
-        subtitle="只删这一条分组声明；它名下没有任何参数（有参数的组这里删不了）。"
+        subtitle={
+          members === 0
+            ? '这一组没有参数，删掉只是少一条声明'
+            : `${members} 条参数会搬到这一页末尾的「未归类」`
+        }
         size="sm"
         onClose={() => setAsking(false)}
         /*
@@ -376,7 +382,7 @@ export default function SectionDrawer({
          * 一条竖窄条（作者截图里「这一笔也只进 / 草稿 —— 右上 / 角「保存」才 /
          * 落盘」四行高、按钮还斜着排）。`footLead` 自己吃掉左侧余量。
          */
-        footLead="这一笔也只进草稿 —— 右上角「保存」才落盘，「放弃」就退回来"
+        footLead="只进草稿：右上角「保存」才落盘，「放弃」就退回来"
         footer={
           <>
             <button
@@ -408,7 +414,7 @@ export default function SectionDrawer({
           <dt>位置</dt>
           <dd>{here === null ? '（注册表里查不到）' : `${here.tabLabel} · 第 ${at + 1} / ${sibs.length} 组`}</dd>
           <dt>参数</dt>
-          <dd>0 条（空的才删得掉）</dd>
+          <dd>{members === 0 ? '0 条' : `${members} 条 → 「未归类」`}</dd>
         </dl>
       </ModalC14>
     </>

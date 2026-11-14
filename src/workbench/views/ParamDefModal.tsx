@@ -757,12 +757,11 @@ export default function ParamDefModal({
   /**
    * 换分组：顺序跟着落到目标组末尾（与后端「不给顺序就放末尾」同一条口径）。
    *
-   * 改选了别的组 ⇒ 草稿里那个新分组**作废**（下拉里随之消失）：那一行写着「待保存」，
-   * 留着却不会落盘才是撒谎。
+   * 改选了别的组时，草稿里那个新分组**留着但标「不保存」**（见 `payloadOf`：只有
+   * 选中的那一份才进载荷）。整个抹掉的话，人只是点错一行、想选回来，那个组就没了。
    */
   const onSection = (id: string) =>
     edit('sectionId', (d) => {
-      if (d.newSection !== null && d.newSection.id !== id) d.newSection = null
       d.sectionId = id
       /* 落到目标组末尾这件事由后端算（`payloadOf` 不带 order），这里不排一遍 */
     })
@@ -801,15 +800,19 @@ export default function ParamDefModal({
   /**
    * 组间换位（面板里那两颗 ↑↓）。
    *
-   * 这一框里只挪**草稿那份候选清单的次序**（`sectionOrder`）—— 它决定保存后
+   * 这一框里只挪**草稿那份候选清单的次序**（`sectionOrder`）：它决定保存后
    * 「所属分组」里读到的先后。真要把一组的次序写进注册表，用参数台卡片抽屉里的
-   * 那颗：那里是一条独立命令、一次写完两份文件，撤销栈也认得出它在改什么。
+   * 那颗（独立一条命令、一次写完两份文件，撤销栈认得出它在改什么）。
    *
-   * 还只在草稿里的新分组没有盘上的位置可挪（它排在它那个页签的末尾）。
+   * 次序表空着时先按面板现在的次序**种满**再挪 —— 只种不挪的话，第一次点箭头
+   * 等于什么都没发生；草稿里的新组也在这一表里，所以 ↑↓ 对它同样有效。
    */
   const onMoveSection = (id: string, dir: -1 | 1) =>
     edit('section-move', (d) => {
-      if (d.newSection !== null && d.newSection.id === id) return
+      if (d.sectionOrder.length === 0) {
+        d.sectionOrder = sectionGroups.flatMap((g) => g.sections.map((x) => x.id))
+      }
+      if (!d.sectionOrder.includes(id)) d.sectionOrder.push(id)
       d.sectionOrder = moveInList(d.sectionOrder, id, dir)
     })
 
@@ -1511,8 +1514,13 @@ export default function ParamDefModal({
                 onRename={onRenameSection}
                 onMove={onMoveSection}
                 onAdd={onAddSection}
-                isPending={(id) => draft.newSection !== null && draft.newSection.id === id}
-                hint="新分组跟着这次保存一起落盘 —— 取消保存的话它不会留下。"
+                isPending={(id) =>
+                  draft.newSection !== null && draft.newSection.id === id && draft.sectionId === id
+                }
+                isDropped={(id) =>
+                  draft.newSection !== null && draft.newSection.id === id && draft.sectionId !== id
+                }
+                hint="新分组跟着这次保存一起落盘；不保存就什么都不留。"
               />
             </PickerModal>
           </div>
@@ -1533,6 +1541,7 @@ export default function ParamDefModal({
               sectionLabel={hereSection?.label ?? draft.sectionId}
               rows={sectionRows}
               currentKey={param.key}
+              emptyHint={herePending ? '保存后才能排这一组' : undefined}
               onApplied={onOrderApplied}
             />
           </label>

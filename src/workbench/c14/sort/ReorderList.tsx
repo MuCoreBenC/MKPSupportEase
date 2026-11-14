@@ -92,6 +92,13 @@ export default function ReorderList({
    * 只把 transform 直接写到那一行 DOM 上；落点下标变了才 setState 让别的行让位。
    */
   const dragLive = useRef<DragLive | null>(null)
+  /**
+   * 按在了这一行的空处：抬起时还没真拖过，就算一次「选这一行」。
+   *
+   * 只把动作认在名字那颗按钮上时，行的空白、序号、手柄按下去都不响应 ——
+   * 看上去就是"点了没反应"（`onPick` 的调用方都是"整行 = 选它"的语义）。
+   */
+  const pickFrom = useRef<{ key: string } | null>(null)
 
   /* 卸载时把落地动画与整页禁选都收干净，别留定时器去改已经卸载的 DOM */
   useEffect(() => () => {
@@ -138,13 +145,15 @@ export default function ReorderList({
     else if (y > r.bottom - 24) el.scrollTop += 10
   }
 
-  const startDrag = (e: ReactPointerEvent<HTMLDivElement>, i: number) => {
+  const startDrag = (e: ReactPointerEvent<HTMLDivElement>, i: number, key: string) => {
     /*
      * 数字框 / ↑↓ 自己都有各自的活：按 closest 认整颗控件，图标里的 svg/path 一起算。
      * 只比 tagName 会漏掉点在图标上的那一半 —— 整行一旦接管指针，setPointerCapture
      * 会把 click 的目标挪到行上，按钮就永远收不到。
+     * 手柄是拖的手把（`data-no-pick`），按它不算"选这一行"。
      */
-    if ((e.target as Element).closest('input, button') !== null) return
+    if ((e.target as Element).closest('input, button, [data-no-pick]') !== null) return
+    pickFrom.current = onPick === undefined ? null : { key }
     /* 别把文字拖选出来：preventDefault + 清选区 + 拖动期间整页禁选 */
     e.preventDefault()
     window.getSelection()?.removeAllRanges()
@@ -191,8 +200,14 @@ export default function ReorderList({
     if (live === null) return
     dragLive.current = null
     document.body.style.userSelect = ''
-    /* 没真拖过：一次点击，什么都不做 */
-    if (!live.started) return
+    /* 没真拖过：一次点击 —— 整行就是"选它" */
+    if (!live.started) {
+      const hit = pickFrom.current
+      pickFrom.current = null
+      if (hit !== null && onPick !== undefined) onPick(hit.key)
+      return
+    }
+    pickFrom.current = null
 
     /* 浮起行从手指位置滑到落点占位；滑到位之前一行 DOM 都不重排 */
     const dy = (live.over - live.from) * rowHeight
@@ -230,6 +245,12 @@ export default function ReorderList({
     landTimer.current = window.setTimeout(finish, LANDING_MS)
   }
 
+  /** 手势被系统收走（切窗口、来电）不算点击 */
+  const cancelDrag = () => {
+    pickFrom.current = null
+    endDrag()
+  }
+
   return (
     <div
       className={s.list}
@@ -259,10 +280,10 @@ export default function ReorderList({
             /* 拖动 + 落地时只留「浮起的那条」和「落点占位」两块绿 */
             data-self={key === currentKey && visual === null ? 'true' : undefined}
             /* 整行可拖（手柄只是给眼睛看的落点），数字框与箭头除外 */
-            onPointerDown={(e) => startDrag(e, i)}
+            onPointerDown={(e) => startDrag(e, i, key)}
             onPointerMove={moveDrag}
             onPointerUp={endDrag}
-            onPointerCancel={endDrag}
+            onPointerCancel={cancelDrag}
             /* 浮起行由 JS 直接写 transform，别让 React 的 style 覆盖它 */
             style={floating ? undefined : { transform: shiftOf(i) === 0 ? undefined : `translateY(${shiftOf(i)}px)` }}
             onKeyDown={(e) => {
@@ -342,7 +363,7 @@ export default function ReorderList({
                 <path d="m4 6 4 4 4-4" />
               </svg>
             </button>
-            <span className={s.handle} aria-hidden>
+            <span className={s.handle} data-no-pick aria-hidden>
               <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden>
                 <circle cx="6" cy="4" r="1.1" />
                 <circle cx="10" cy="4" r="1.1" />

@@ -30,3 +30,15 @@ export function nextSectionId(known: { id: string }[]): string {
     if (!used.has(id)) return id
   }
 }
+
+/** 新页签的 id 前缀：与 `custom_` 分开，是因为页签与分组各占一个命名空间 */
+export const NEW_TAB_PREFIX = 'custom_tab_'
+
+/** 下一个可用的新页签 id（跳过已占的） */
+export function nextTabId(known: { id: string }[]): string {
+  const used = new Set(known.map((x) => x.id))
+  for (let n = 1; ; n += 1) {
+    const id = `${NEW_TAB_PREFIX}${n}`
+    if (!used.has(id)) return id
+  }
+}

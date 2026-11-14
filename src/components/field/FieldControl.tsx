@@ -51,6 +51,15 @@ interface Props {
   /** 数字控件：点框内任何一处都进编辑态（透传给 `NumberField`，见它那里的说明） */
   focusOnBoxClick?: boolean
   /**
+   * 数字控件：「0 = 自动」的字段（注册表 `zeroMeansAuto`）值为 0 时，框里显示这串字
+   * 而不是 `0.00`（不带单位 —— 单位仍是框里那一格）。见 `NumberField` 的 Props。
+   */
+  autoText?: string
+  /** 数字控件：自动态下的那个数（步进从它起步，见 `NumberField` 的 Props） */
+  autoValue?: number
+  /** 数字控件：自动态下框的 tooltip（说明这串数是从哪来的、怎么退回来） */
+  autoTip?: string
+  /**
    * `gcode` 交给宿主画。
    *
    * 多行 G-code 既塞不进一个格子，也塞不进一行 —— 参数页给的是整块编辑器，
@@ -71,6 +80,9 @@ export default function FieldControl({
   onInvalidTyping,
   resetSignal,
   focusOnBoxClick = false,
+  autoText,
+  autoValue,
+  autoTip,
   renderBlock,
 }: Props): ReactNode {
   const cell = form === 'cell'
@@ -140,6 +152,9 @@ export default function FieldControl({
           resetSignal={resetSignal}
           size={cell ? 'sm' : 'md'}
           focusOnBoxClick={focusOnBoxClick}
+          autoText={autoText}
+          autoValue={autoValue}
+          autoTip={autoTip}
           onChange={(n) => onChange(rawOfNum(n, field.step))}
         />
       )

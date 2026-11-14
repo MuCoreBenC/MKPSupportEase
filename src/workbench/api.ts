@@ -432,6 +432,19 @@ export interface SectionMetaEdit {
 }
 
 /**
+ * `registry::TabMetaEdit` —— 页签自己那一笔（`wb_set_tab_meta`）。
+ *
+ * 与分组的 `SectionMetaEdit` 平行但**不同层**：页签的次序在 `[[tabs]]` 的数组里，
+ * 分组的次序在 `[[tabs.sections]]` 的数组里。
+ */
+export interface TabMetaEdit {
+  /** 新名字（`null` = 不动）。只写中文那一册 */
+  label: string | null
+  /** 往哪边挪一格（`null` = 不动） */
+  move: 'up' | 'down' | null
+}
+
+/**
  * `registry::GroupMembersEdit` —— 一次**成员编辑**的载荷。
  *
  * 只交最终成员序列与一个名字：改名、归类、移出由后端一次算差集写完，
@@ -2953,11 +2966,24 @@ export const wb = {
   setSectionMeta: (sectionId: string, edit: SectionMetaEdit) =>
     invoke<RegistryView>('wb_set_section_meta', { sectionId, edit }),
   /**
-   * **删掉一个空分组**。后端把三道门（还有参数 / 是组件卡 / 带条件）挡完才动手，
-   * 只删没有参数归它的组；同样是编辑事务里的一笔 —— 进草稿，等右上角「保存」。
+   * **删掉一个分组**。组里的参数不会被删：后端先落到同一页签末尾的「未归类」再删组，
+   * 组件卡与条件分组仍然拒收。同样是编辑事务里的一笔 —— 进草稿，等右上角「保存」。
    */
   removeSection: (sectionId: string) =>
     invoke<RegistryView>('wb_remove_section', { sectionId }),
+  /**
+   * **新建一个页签**。两份 TOML 各加一段 `[[tabs]]`，顺手在那下面建一个空分组
+   * （否则点进去是一屏空白，参数没处放）。同样只进草稿，等右上角「保存」。
+   */
+  addTab: (tabId: string, label: string) =>
+    invoke<RegistryView>('wb_add_tab', { tabId, label }),
+  /** 页签自己的那一笔（改名 / 上下移一格） */
+  setTabMeta: (tabId: string, edit: TabMetaEdit) =>
+    invoke<RegistryView>('wb_set_tab_meta', { tabId, edit }),
+  /**
+   * **删掉一个空页签**。带参数或带功能卡的拒收 —— 参数没有第二个去处，只能先搬走。
+   */
+  removeTab: (tabId: string) => invoke<RegistryView>('wb_remove_tab', { tabId }),
   matrix: (cols: ColRef[], tab: string | null, query: string, baseMachineId?: string | null) =>
     invoke<Matrix>('wb_matrix', { cols, tab, query, baseMachineId: baseMachineId ?? null }),
   trash: () => invoke<TrashEntry[]>('wb_trash'),
