@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react'
+import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 
 import type { SortRow } from './types'
 import s from './ReorderList.module.css'
@@ -29,6 +29,12 @@ export interface ReorderListProps {
   onSetPosition?: (key: string, n: number) => void
   /** 行高（px）；CSS 读同一个变量，改这里两边一起变 */
   rowHeight?: number
+  /** 行尾额外的动作（删除草稿项之类）；按钮自己要阻断 pointerdown */
+  actions?: (key: string, index: number) => ReactNode
+  /** 给了就把名字变成可点的选择按钮，currentKey 那一行是选中态 */
+  onPick?: (key: string) => void
+  /** 嵌进别的滚动容器时关掉自己的滚动与限高 */
+  embedded?: boolean
   /** 列表的无障碍名字 */
   label?: string
 }
@@ -66,6 +72,9 @@ export default function ReorderList({
   currentKey,
   onMove,
   onSetPosition,
+  onPick,
+  actions,
+  embedded = false,
   rowHeight = DEFAULT_ROW,
   label = '排序列表',
 }: ReorderListProps) {
@@ -227,6 +236,7 @@ export default function ReorderList({
       ref={listRef}
       role="list"
       aria-label={label}
+      data-embedded={embedded ? 'true' : undefined}
       style={{ '--sort-row-h': `${rowHeight}px` } as CSSProperties}
     >
       {/*
@@ -292,7 +302,20 @@ export default function ReorderList({
             ) : (
               <span className={s.posPreview} aria-hidden>{i + 1}</span>
             )}
-            <span className={s.label}>{row.label}</span>
+            {onPick !== undefined ? (
+              <button
+                type="button"
+                className={s.pick}
+                aria-label={`选择 ${row.label}`}
+                aria-pressed={key === currentKey}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={() => onPick(key)}
+              >
+                {row.label}
+              </button>
+            ) : (
+              <span className={s.label}>{row.label}</span>
+            )}
             {row.by !== undefined && <span className={s.by}>{row.by}</span>}
             <span className={s.spacer} />
             <button
@@ -329,6 +352,7 @@ export default function ReorderList({
                 <circle cx="10" cy="12" r="1.1" />
               </svg>
             </span>
+            {actions?.(key, i)}
           </div>
         )
       })}

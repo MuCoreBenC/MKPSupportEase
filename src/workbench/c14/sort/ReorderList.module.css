@@ -14,6 +14,12 @@
   overflow: auto;
 }
 
+/* 嵌进别的滚动容器：父级是唯一滚动条，别在这里再开一层 */
+.list[data-embedded='true'] {
+  max-height: none;
+  overflow: visible;
+}
+
 /*
  * 落点占位是一整格背景色，不是一条横线。其余行已经 translateY 让位，
  * 让位空出来的是 over × 行高 那一格，用一块实底绿铺满它，松手行吸附进去。
@@ -136,6 +142,29 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 可选的目标分组选择：不另起一套列表，只把名字变成可点的按钮 */
+.pick {
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.pick:hover {
+  color: var(--text-1);
+}
+
+.pick[aria-pressed='true'] {
+  font-weight: 600;
 }
 
 .by {

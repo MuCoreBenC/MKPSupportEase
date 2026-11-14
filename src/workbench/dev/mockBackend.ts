@@ -316,6 +316,9 @@ const TABS = [
 /** 分组自己的名字（**不含页签**）—— 与真后端 `row.sectionLabel` 同口径 */
 const SECTION_LABEL = new Map(TABS.flatMap((t) => t.sections.map((s) => [s.id, s.label])))
 
+/** 整块组件卡：真机认 `layout.component`，桩里只有这一张。重排时它留在原槽位 */
+const COMPONENT_CARDS = new Set(['tower_position'])
+
 /*
  * 「放弃 = 影子树整个拉回磁盘原状」在演示桩里的对应物（2026-11-01）。
  *
@@ -1775,7 +1778,7 @@ function buildRegistry(): Json {
         tabId: t.id,
         tabLabel: t.label,
         /* 桩里只有塔位那一组是真的组件卡（真数据里它带 component = 'tower-map'） */
-        component: sec.id === 'tower_position' ? 'tower-map' : null,
+        component: COMPONENT_CARDS.has(sec.id) ? 'tower-map' : null,
         standalone: false,
       })),
     ),
@@ -1814,6 +1817,9 @@ export function installMockBackend() {
         return Promise.resolve(buildBook())
       case 'wb_registry':
         return Promise.resolve(buildRegistry())
+      /* 工作台 ui.log 搬运：演示桩不写文件，收下就行 */
+      case 'log_ui_events':
+        return Promise.resolve(null)
       case 'wb_desk':
         return Promise.resolve(buildDesk(machineId, (args?.uid as string | null) ?? null, (args?.tab as string | null) ?? null, (args?.query as string) ?? ''))
       case 'wb_matrix':
@@ -2075,7 +2081,7 @@ export function installMockBackend() {
           sectionId?: string
           keys?: string[]
           newSections?: { id: string; tabId: string; label: string }[]
-          moves?: { sectionId: string; steps: number }[]
+          sectionOrder?: string[]
         } | undefined
         /* 新建分组先落地：目标 sectionId 可能正指向其中一个 */
         for (const ns of e?.newSections ?? []) {
@@ -2144,21 +2150,28 @@ export function installMockBackend() {
           const p = PARAMS.find((x) => x.key === k)
           if (p !== undefined) p.order = i + 1
         })
-        /* 分组换位：一次一格，与真机 set_section_meta 的方向语义同一套 */
-        for (const m of e?.moves ?? []) {
-          const t = TABS.find((x) => x.sections.some((s) => s.id === m.sectionId))
-          if (t === undefined) continue
-          let at = t.sections.findIndex((s) => s.id === m.sectionId)
-          const n = Math.min(Math.abs(m.steps), t.sections.length)
-          for (let k = 0; k < n; k += 1) {
-            const to = at + Math.sign(m.steps)
-            if (to < 0 || to >= t.sections.length) break
-            const [moved] = t.sections.splice(at, 1)
-            if (moved === undefined) break
-            t.sections.splice(to, 0, moved)
-            at = to
+        /* 分组最终次序：忽略查不到的 id、缺的按原序补齐，组件卡留原槽位，与真机同一套规范化 */
+        const order = e?.sectionOrder ?? []
+        if (order.length > 0) {
+          const t = TABS.find((x) => x.sections.some((s) => s.id === sectionId))
+          if (t !== undefined) {
+            const cur = t.sections.map((s) => s.id)
+            const sortable = cur.filter((id) => !COMPONENT_CARDS.has(id))
+            const known = new Set(sortable)
+            const norm = order.filter((id, i) => known.has(id) && order.indexOf(id) === i)
+            for (const id of sortable) if (!norm.includes(id)) norm.push(id)
+            let slot = 0
+            const target = cur.map((id) =>
+              COMPONENT_CARDS.has(id) ? id : (norm[slot++] ?? id),
+            )
+            const byId = new Map(t.sections.map((s) => [s.id, s]))
+            t.sections.length = 0
+            for (const id of target) {
+              const sec = byId.get(id)
+              if (sec !== undefined) t.sections.push(sec)
+            }
+            t.sections.forEach((sec, i) => { sec.order = i + 1 })
           }
-          t.sections.forEach((sec, i) => { sec.order = i + 1 })
         }
         return Promise.resolve(buildRegistry())
       }

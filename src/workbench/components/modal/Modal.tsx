@@ -34,6 +34,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { modalShortcutGate, modalStack } from './shortcutGate'
 import s from './Modal.module.css'
+import { track } from '../../../app/log/track'
 
 export interface ModalProps {
   open: boolean
@@ -61,6 +62,8 @@ export interface ModalProps {
    * 不给自由数值 —— 四档已经够，给了数值各处就会长出十种宽度。
    */
   size?: 'sm' | 'md' | 'lg' | 'xl'
+  /** 两列各自滚动的框：关掉外壳 body 的滚动，别跟列内滚动抢 */
+  bodyScroll?: boolean
   /**
    * 点遮罩关不关。**默认不关**（作者 2026-10-15：「所有页面的模态框都不应该点击背景就关掉，
    * 可以用 esc」）—— 遮罩是背景，不是取消键。关有两条明路：**Esc** 与页眉那颗关闭。
@@ -93,6 +96,7 @@ export default function Modal({
   footer,
   headerExtra,
   size = 'md',
+  bodyScroll = true,
   closeOnScrim = true,
   host = null,
   footLead,
@@ -109,6 +113,15 @@ export default function Modal({
 
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+
+  /* 与客户端同一处收口：开哪扇框、关哪扇框进 ui.log */
+  const titleRef = useRef(title)
+  titleRef.current = title
+  useEffect(() => {
+    if (!open) return
+    track('modal.open', titleRef.current)
+    return () => track('modal.close', titleRef.current)
+  }, [open])
 
   /* 快捷键闸 + 栈序号：开一票、关一票 —— 外壳的 Cmd+Z / Cmd+S 在 blocking() 时装没听见 */
   useEffect(() => {
@@ -208,7 +221,7 @@ export default function Modal({
           </button>
         </header>
 
-        <div className={s.body}>{children}</div>
+        <div className={`${s.body} ${bodyScroll === false ? s.bodyNoScroll : ''}`}>{children}</div>
 
         {/*
          * `footLead`：footer 里"说明那一句"该占的位置。

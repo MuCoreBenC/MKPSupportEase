@@ -17,6 +17,7 @@ import './workbench.css'
 import './c14tokens.css'
 import { WorkbenchApp } from './App'
 import { initTheme } from './theme'
+import { installUiTracking } from '../app/log/track'
 
 /*
  * 测试桩：**只有显式要求才装**（`?mock=1`），这是 2026-10-02 定的口径。
@@ -51,6 +52,8 @@ if (!host) {
  * 解析那一句不在这儿重写 —— 取 `src/app/state/theme` 里那唯一一份（见 `./theme` 头注）。
  */
 initTheme()
+/* 与客户端同一份 ui.log：工作台也把「点了什么」记进去 */
+installUiTracking()
 
 /* 全局 error / unhandledrejection 不再接管 #workbench-root：
    ResizeObserver 的良性回路通知（loop completed with undelivered notifications）

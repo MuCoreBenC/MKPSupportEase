@@ -82,36 +82,65 @@ export default async function (t, page, url) {
   t.check('选中页签后有编辑入口', (await pen.count()) > 0)
   const dlg3 = await openTabMembers(page)
   t.check('页签编辑框开着', await dlg3.isVisible())
-  t.check('页签层有归到这一组', (await dlg3.getByRole('radiogroup', { name: '归到这一组' }).count()) > 0)
-  const radios = dlg3.getByRole('radio')
-  const radios0 = await radios.allInnerTexts()
-  t.check('目标分组至少一组', radios0.length > 0)
+  t.check('分组是序号列表', (await dlg3.getByRole('list', { name: '分组次序' }).count()) > 0)
+  const picks = dlg3.getByRole('button', { name: /^选择 / })
+  const picks0 = await picks.allInnerTexts()
+  t.check('目标分组至少一组', picks0.length > 0)
   t.check('没改动时确认是灰的', await dlg3.getByRole('button', { name: '确认', exact: true }).isDisabled())
 
-  /* ⑦ 新增分组：名字回车进框内草稿，确认前不落盘 */
+  /* ⑦ 两列各自滚动、顶部固定区不跟着滚 */
+  const leftScroll = dlg3.locator('[data-scroll="left"]')
+  const rightScroll = dlg3.locator('[data-scroll="right"]')
+  t.check('左右各一个滚动区', (await leftScroll.count()) === 1 && (await rightScroll.count()) === 1)
+  const searchFixed = dlg3.getByRole('searchbox', { name: '搜索参数' })
+  const y0 = (await searchFixed.boundingBox())?.y ?? 0
+  const leftTop = await leftScroll.evaluate((el) => {
+    el.scrollTop = 60
+    return el.scrollTop
+  })
+  const rightTop = await rightScroll.evaluate((el) => el.scrollTop)
+  const y1 = (await searchFixed.boundingBox())?.y ?? 0
+  t.check('左右滚动互不联动', leftTop > 0 && rightTop === 0, `${leftTop}/${rightTop}`)
+  t.check('搜索框不跟着滚', Math.abs(y1 - y0) < 1)
+
+  /* ⑧ 新增名字：失焦不提交也不丢，点旁边确认才进草稿 */
   await dlg3.getByRole('button', { name: '新增分组' }).click()
-  await dlg3.getByRole('textbox', { name: '新分组名字' }).fill('临时分组')
-  await dlg3.getByRole('textbox', { name: '新分组名字' }).press('Enter')
+  const nameInput = dlg3.getByRole('textbox', { name: '新分组名字' })
+  await nameInput.fill('临时分组')
+  await dlg3.getByText('分组', { exact: true }).first().click()
   await page.waitForTimeout(120)
-  t.check('新增分组进了框', (await radios.count()) === radios0.length + 1)
+  t.check('失焦不提交', (await picks.count()) === picks0.length)
+  t.check('失焦不丢输入', (await nameInput.inputValue()) === '临时分组')
+  await dlg3.getByRole('button', { name: '确认新增分组' }).click()
+  await page.waitForTimeout(120)
+  t.check('点确认才进草稿', (await picks.count()) === picks0.length + 1)
   t.check('新组标着待新建', (await dlg3.getByText('待新建').count()) === 1)
 
-  /* ⑧ 改变位置：新组上移一格 */
-  await dlg3.getByRole('button', { name: '临时分组 上移' }).click()
+  /* ⑨ 草稿新组可删除，也能重新加回来 */
+  await dlg3.getByRole('button', { name: '删除 临时分组' }).click()
   await page.waitForTimeout(120)
-  const radios1 = await radios.allInnerTexts()
-  t.check('上移真的换了位', radios1[radios1.length - 2] === '临时分组', radios1.join('/'))
+  t.check('草稿新组可删除', (await picks.count()) === picks0.length)
+  await dlg3.getByRole('button', { name: '新增分组' }).click()
+  await dlg3.getByRole('textbox', { name: '新分组名字' }).fill('临时分组')
+  await dlg3.getByRole('button', { name: '确认新增分组' }).click()
+  await page.waitForTimeout(120)
+
+  /* ⑩ 改变位置：列表的上移一格 */
+  await dlg3.getByRole('button', { name: '临时分组 上移一位' }).click()
+  await page.waitForTimeout(200)
+  const picks1 = await picks.allInnerTexts()
+  t.check('上移真的换了位', picks1[picks1.length - 2] === '临时分组', picks1.join('/'))
   t.check('有改动时确认可点', !(await dlg3.getByRole('button', { name: '确认', exact: true }).isDisabled()))
   await t.shot(page, '页签成员框 · 新增与换位')
   await dlg3.getByRole('button', { name: '确认', exact: true }).click()
   await page.waitForTimeout(500)
   t.check('确认后页签框关掉', (await dlg3.count()) === 0)
 
-  /* ⑨ 重开：新组与位置都在，确认只是一笔应用 */
+  /* ⑪ 重开：新组与位置都在，确认只是一笔应用 */
   const dlg4 = await openTabMembers(page)
-  const radios2 = await dlg4.getByRole('radio').allInnerTexts()
-  t.check('重开新组还在', radios2.includes('临时分组'))
-  t.check('重开位置没变', radios2[radios2.length - 2] === '临时分组', radios2.join('/'))
+  const picks2 = await dlg4.getByRole('button', { name: /^选择 / }).allInnerTexts()
+  t.check('重开新组还在', picks2.includes('临时分组'))
+  t.check('重开位置没变', picks2[picks2.length - 2] === '临时分组', picks2.join('/'))
   await t.shot(page, '页签成员框 · 重开')
   await dlg4.getByRole('button', { name: '取消', exact: true }).click()
   await page.waitForTimeout(150)

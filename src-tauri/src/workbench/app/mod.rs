@@ -2066,7 +2066,19 @@ pub fn wb_set_section_order(
 /// 差集、搬运、兜底组与顺序值都由后端算，一次写盘、一条撤销。
 #[tauri::command(async)]
 pub fn wb_edit_group(edit: GroupMembersEdit) -> Result<RegistryView, AppError> {
-    traced("wb_edit_group", |_| {
+    traced("wb_edit_group", |trace_id| {
+        /* 只进 ui.log：按请求号能看出这一笔要动什么，不记名字与参数值 */
+        tracing::info!(
+            target: "ui",
+            trace_id = %trace_id,
+            req = %current_req().unwrap_or_default(),
+            scope = ?edit.scope,
+            section = %edit.section_id,
+            members = edit.keys.len(),
+            new_sections = edit.new_sections.len(),
+            section_order = edit.section_order.len(),
+            "wb_edit_group 入参"
+        );
         with_struct_ctx(
             "",
             |_| {

@@ -69,6 +69,7 @@ import SettingsPage from './views/SettingsPage'
 import DevPage from './views/DevPage'
 import s from './c14.module.css'
 import { pageActions } from './pageActions'
+import { setUiPage, track } from '../app/log/track'
 
 /**
  * 一级导航。前五页是 C14 定稿的顺序 —— C14 把矩阵并进了参数台的对照模式
@@ -312,6 +313,8 @@ export function WorkbenchApp() {
    * 点按钮切页浏览器会自己 blur，但 `goto` / 快捷键切页不会，所以这里统一补一下。
    */
   useEffect(() => {
+    setUiPage(page)
+    track('tab', { to: page })
     const el = document.activeElement
     if (el instanceof HTMLElement) el.blur()
   }, [page])

@@ -1,12 +1,12 @@
 /*
- * 成员编辑框的草稿数学：加入 / 取消 / 移出 / 恢复 / 候选过滤。
+ * 成员编辑框的草稿数学：加入 / 取消 / 移出 / 最终分组次序 / 候选过滤。
  * 只测纯状态转移 —— 框里的改动在确认之前不碰 DOM，也不发 IPC。
  */
 
 import { describe, expect, it } from 'vitest'
 
 import {
-  applyMoves,
+  moveInOrder,
   removeMember,
   sameKeys,
   toggleMember,
@@ -50,19 +50,14 @@ describe('成员草稿', () => {
     expect(sameKeys(initial, ['a', 'b'])).toBe(true)
   })
 
-  it('换位净位移摊回显示顺序，到头就停', () => {
-    const rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }]
-    expect(applyMoves(rows, [{ sectionId: 'c', steps: -2 }]).map((r) => r.id)).toEqual([
-      'c', 'a', 'b',
-    ])
-    expect(applyMoves(rows, [{ sectionId: 'a', steps: 9 }]).map((r) => r.id)).toEqual([
-      'b', 'c', 'a',
-    ])
-    expect(applyMoves(rows, [{ sectionId: 'a', steps: -1 }]).map((r) => r.id)).toEqual([
-      'a', 'b', 'c',
-    ])
-    expect(applyMoves(rows, []).map((r) => r.id)).toEqual(['a', 'b', 'c'])
-    expect(rows.map((r) => r.id)).toEqual(['a', 'b', 'c'])
+  it('分组最终次序：移到目标位，越界与同位置原样退回', () => {
+    const order = ['a', 'b', 'c']
+    expect(moveInOrder(order, 2, 0)).toEqual(['c', 'a', 'b'])
+    expect(moveInOrder(order, 0, 2)).toEqual(['b', 'c', 'a'])
+    expect(moveInOrder(order, 1, 1)).toBe(order)
+    expect(moveInOrder(order, -1, 0)).toBe(order)
+    expect(moveInOrder(order, 0, 9)).toBe(order)
+    expect(order).toEqual(['a', 'b', 'c'])
   })
 
   it('组件卡与整块卡不进候选', () => {

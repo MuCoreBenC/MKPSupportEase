@@ -14,7 +14,9 @@
  * 判据很具体：**这个文件里不该出现任何 `if` 判状态词、不该拼中文句子**。
  * 需要一句话的时候，那句话应该已经在返回值里了（`reason` / `explain` / `need`）。
  */
-import { invoke } from '@tauri-apps/api/core'
+import { invoke as tauriInvoke } from '@tauri-apps/api/core'
+
+import { track } from '../app/log/track'
 
 /* 主题档位的字面量与客户端是同一份契约（三个值的 id 由 Rust 那边的 ThemePref 钉着） */
 import type { ThemePref } from '../api/contract'
@@ -43,6 +45,24 @@ export interface AppError {
 /** Tauri 把 `Err(AppError)` 原样序列化过来，所以 catch 到的就是它 */
 export function isAppError(e: unknown): e is AppError {
   return typeof e === 'object' && e !== null && 'code' in e && 'message' in e
+}
+
+/* 命令成败进 ui.log：只记命令名与错误码，不记参数（参数里可能有名字 / 路径）。
+   高频轮询与日志搬运自己不记，省得成功刷屏。 */
+const SILENT_OK = new Set([
+  'log_ui_events', 'wb_txn_state', 'wb_book', 'wb_desk', 'wb_ui', 'wb_app_version',
+])
+
+async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    const out = await tauriInvoke<T>(command, args)
+    if (!SILENT_OK.has(command)) track('api.ok', command)
+    return out
+  } catch (e) {
+    const app = isAppError(e) ? e : null
+    track('api.fail', `${command} ${app?.code ?? 'UNKNOWN'} ${app?.traceId ?? ''}`.trim())
+    throw e
+  }
 }
 
 /* ---------- 枚举。与 Rust 的变体一一对应 ---------- */
@@ -429,15 +449,8 @@ export interface GroupMembersEdit {
   keys: string[]
   /** 这一笔顺手新建的分组（幂等） */
   newSections?: NewSection[]
-  /** 分组在自己页签里挪几格 */
-  moves?: SectionMoveStep[]
-}
-
-/** `registry::SectionMoveStep` —— 分组在自己页签里挪几格 */
-export interface SectionMoveStep {
-  sectionId: string
-  /** 正 = 往后，负 = 往前 */
-  steps: number
+  /** 该页签里分组的最终次序；界面给全量 id，后端规范化后重排 */
+  sectionOrder?: string[]
 }
 
 /* ---------- 矩阵 ---------- */

@@ -616,14 +616,6 @@ pub enum GroupScope {
     Tab,
 }
 
-/// 一次分组换位：正 = 往后挪，负 = 往前挪（格数由界面给，后端一格一格走）。
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SectionMoveStep {
-    pub section_id: String,
-    pub steps: i32,
-}
-
 /// 一次「成员编辑」的载荷 —— `wb_edit_group`。
 ///
 /// 只交**最终成员序列**和一个名字：改名、归类、移出由后端一次算差集写完。
@@ -645,9 +637,9 @@ pub struct GroupMembersEdit {
     /// 这一笔顺手新建的分组（幂等：撤销 / 重放时按「确保它在」处理）
     #[serde(default)]
     pub new_sections: Vec<NewSection>,
-    /// 分组在自己页签里挪几格
+    /// 该页签里分组的最终次序（界面给全量 id，后端规范化后重排）
     #[serde(default)]
-    pub moves: Vec<SectionMoveStep>,
+    pub section_order: Vec<String>,
 }
 
 /// 一次「参数定义」编辑的载荷 —— `wb_set_param_meta` 整包提交（模态框一次
@@ -3199,22 +3191,95 @@ impl ParamRegistry {
             self.layout_reorder_section(fid)?;
         }
 
-        /* 分组换位：位置是数据，交给 set_section_meta 那份唯一实现，一次一格 */
-        for step in &edit.moves {
-            if step.steps == 0 {
-                continue;
+        /* 分组只按界面的最终次序重排一次，不收「挪几格」 */
+        if !edit.section_order.is_empty() {
+            self.reorder_sections(&tab_id, &edit.section_order)?;
+        }
+        Ok(())
+    }
+
+    /// 把一个页签里可排序的分组重排成 `want` 给的最终次序。
+    ///
+    /// `want` 不是位移：未知 id 忽略、缺的按原序补齐，组件卡与整块卡留在原槽位。
+    /// 相邻换位复用 `set_section_meta`，两份文件与内存始终同一份次序；
+    /// 每一步都在合法范围内，不会因边界把整笔事务打回。
+    fn reorder_sections(&mut self, tab_id: &str, want: &[String]) -> Result<(), AppError> {
+        let ti = self
+            .tabs
+            .iter()
+            .position(|t| t.id == tab_id)
+            .ok_or_else(|| {
+                AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.349",
+                    &[("tab", tab_id)],
+                ))
+            })?;
+        let current: Vec<String> = self.tabs[ti]
+            .sections
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
+        let card_ids: BTreeSet<String> = self
+            .layout
+            .iter()
+            .find(|t| t.id == tab_id)
+            .map(|t| {
+                t.sections
+                    .iter()
+                    .filter(|s| s.component.is_some() || s.layout.as_deref() == Some("component"))
+                    .map(|s| s.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let sortable: Vec<&str> = current
+            .iter()
+            .filter(|id| !card_ids.contains(id.as_str()))
+            .map(String::as_str)
+            .collect();
+
+        /* 规范化：只认这一页签里真实存在的可排序组，去重、缺的按原序补到末尾 */
+        let mut norm: Vec<String> = Vec::new();
+        let mut seen: BTreeSet<String> = BTreeSet::new();
+        for id in want {
+            if sortable.contains(&id.as_str()) && seen.insert(id.clone()) {
+                norm.push(id.clone());
             }
-            let dir = if step.steps > 0 {
-                SectionMove::Down
-            } else {
-                SectionMove::Up
-            };
-            for _ in 0..step.steps.unsigned_abs().min(64) {
+        }
+        for id in &sortable {
+            if seen.insert((*id).to_owned()) {
+                norm.push((*id).to_owned());
+            }
+        }
+
+        /* 组件卡不参与重排：它留在原来的槽位，可排序槽位依次填 norm */
+        let mut slots = norm.into_iter();
+        let target: Vec<String> = current
+            .iter()
+            .map(|id| {
+                if card_ids.contains(id.as_str()) {
+                    id.clone()
+                } else {
+                    slots.next().unwrap_or_else(|| id.clone())
+                }
+            })
+            .collect();
+
+        /* 选择排序式相邻换位：每一步 at > i，不会触到 set_section_meta 的边界 */
+        for (i, want_id) in target.iter().enumerate() {
+            loop {
+                let at = self.tabs[ti]
+                    .sections
+                    .iter()
+                    .position(|s| &s.id == want_id)
+                    .unwrap_or(i);
+                if at <= i {
+                    break;
+                }
                 self.set_section_meta(
-                    &step.section_id,
+                    want_id,
                     SectionMetaEdit {
                         label: None,
-                        move_dir: Some(dir),
+                        move_dir: Some(SectionMove::Up),
                         new_section: None,
                     },
                 )?;
@@ -5522,7 +5587,7 @@ order = 2.0
             section_id: target.clone(),
             keys: want.clone(),
             new_sections: Vec::new(),
-            moves: Vec::new(),
+            section_order: Vec::new(),
         })
         .expect("一次写得完");
         r.write_back().expect("落盘");
@@ -5592,7 +5657,7 @@ order = 2.0
                 section_id: card,
                 keys: Vec::new(),
                 new_sections: Vec::new(),
-                moves: Vec::new(),
+                section_order: Vec::new(),
             });
             assert!(e.is_err(), "组件卡不能当归类目标");
         }
@@ -5626,7 +5691,7 @@ order = 2.0
             section_id: section,
             keys,
             new_sections: Vec::new(),
-            moves: Vec::new(),
+            section_order: Vec::new(),
         })
         .expect("页签改名写得完");
         r.write_back().expect("落盘");
@@ -5672,6 +5737,19 @@ order = 2.0
             .map(|p| p.key.clone())
             .collect();
         let fresh_id = "custom_qa_1".to_owned();
+        let before: Vec<String> = r
+            .tabs()
+            .iter()
+            .find(|t| t.id == tab_id)
+            .expect("页签还在")
+            .sections
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
+        let mut order = before;
+        order.push(fresh_id.clone());
+        let last = order.len() - 1;
+        order.swap(last - 1, last);
         r.set_group_members(GroupMembersEdit {
             scope: GroupScope::Tab,
             id: tab_id.clone(),
@@ -5683,10 +5761,7 @@ order = 2.0
                 tab_id: tab_id.clone(),
                 label: "新分组".to_owned(),
             }],
-            moves: vec![SectionMoveStep {
-                section_id: fresh_id,
-                steps: -1,
-            }],
+            section_order: order,
         })
         .expect("新建与换位写得完");
         r.write_back().expect("落盘");
@@ -5706,6 +5781,75 @@ order = 2.0
             .position(|l| l == "新分组")
             .expect("新分组要在注册表里");
         assert_eq!(at, labels.len() - 2, "上移一格后该在倒数第二位");
+    }
+
+    /// 最终次序里有查不到的 id、或整笔不带次序，都不该把这一笔打回。
+    #[test]
+    fn a_group_order_tolerates_unknown_ids_and_empty_sequence() {
+        let Some((tmp, mut r)) = copy_of_real() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let tab_id = r
+            .tabs()
+            .first()
+            .map(|t| t.id.clone())
+            .expect("至少一个页签");
+        let section = r
+            .layout()
+            .iter()
+            .find(|t| t.id == tab_id)
+            .and_then(|t| {
+                t.sections
+                    .iter()
+                    .find(|s| s.component.is_none() && s.layout.as_deref() != Some("component"))
+            })
+            .map(|s| s.id.clone())
+            .expect("这个页签下得有普通组");
+        let keys: Vec<String> = r
+            .params()
+            .iter()
+            .filter(|p| p.layout.section_id == section)
+            .map(|p| p.key.clone())
+            .collect();
+        r.set_group_members(GroupMembersEdit {
+            scope: GroupScope::Tab,
+            id: tab_id.clone(),
+            label: None,
+            section_id: section.clone(),
+            keys,
+            new_sections: Vec::new(),
+            section_order: vec!["查不到的组".to_owned(), section.clone()],
+        })
+        .expect("未知 id 不该让整笔失败");
+        r.write_back().expect("落盘");
+        let again = ParamRegistry::load_from(tmp.path()).expect("改完还得读得通");
+        assert!(again
+            .tabs()
+            .iter()
+            .find(|t| t.id == tab_id)
+            .expect("页签还在")
+            .sections
+            .iter()
+            .any(|s| s.id == section));
+
+        let mut r2 = again;
+        let keys2: Vec<String> = r2
+            .params()
+            .iter()
+            .filter(|p| p.layout.section_id == section)
+            .map(|p| p.key.clone())
+            .collect();
+        r2.set_group_members(GroupMembersEdit {
+            scope: GroupScope::Tab,
+            id: tab_id,
+            label: None,
+            section_id: section,
+            keys: keys2,
+            new_sections: Vec::new(),
+            section_order: Vec::new(),
+        })
+        .expect("空序列只是不动");
     }
 
     /// **整组重排：一次写盘，落盘后 items 与 order 同向。**

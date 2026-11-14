@@ -1,20 +1,23 @@
 /*
  * 两列成员编辑框：分组抽屉与页签栏共用一件。
  *
- * 左列按原「页签 → 分组」铺开全部参数，可搜索可勾选；右列是这一组的最终成员
- * 与已移出的那些。框内草稿，确认才把最终成员序列交给 `onApply`，由调用方决定命令。
- *
- * 组件卡 / 整块卡不在候选里：客户端那边是固定长好的，工作台不把参数搬进搬出。
+ * 左列按原「页签 → 分组」铺开全部参数，右列是分组次序与这一组的成员。
+ * 分组次序复用 c14/sort/ReorderList（序号 / ↑↓ / 拖拽 / 位次同一套数学），
+ * 框内草稿直到底部「确认」才交给调用方，一次事务进影子树，保存才落盘。
  */
 
 import { useId, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 
 import type { GroupMembersEdit, ParamView, SectionTarget } from '../api'
 import { isAppError } from '../api'
 import ModalC14 from '../c14/ModalC14'
 import { toasts } from '../c14/toast'
+import ReorderList from '../c14/sort/ReorderList'
+import type { SortRow } from '../c14/sort/types'
+import { track } from '../../app/log/track'
 import { nextSectionId } from './sectionId'
-import { applyMoves, usableSections, useMembersDraft } from './useMembersDraft'
+import { usableSections, useMembersDraft } from './useMembersDraft'
 import s from './SectionMembersModal.module.css'
 
 /** 与后端 `ensure_section` 的 24 字上限同一把尺子 */
@@ -71,7 +74,25 @@ export default function SectionMembersModal({
         .map((p) => p.key),
     [params, defaultTarget],
   )
-  const draft = useMembersDraft({ label, keys: initialKeys, targetSection: defaultTarget })
+
+  /* 分组条管的是目标组所在那个页签；注册表里直接找，组件卡层也能开 */
+  const tabId = scope === 'tab'
+    ? id
+    : (sections.find((x) => x.id === id)?.tabId ?? targets[0]?.tabId ?? '')
+  const baseRows = useMemo(
+    () =>
+      sections
+        .filter((x) => x.tabId === tabId && x.component === null && !x.standalone)
+        .map((x) => ({ id: x.id, label: x.label })),
+    [sections, tabId],
+  )
+  const initialGroupOrder = useMemo(() => baseRows.map((x) => x.id), [baseRows])
+  const draft = useMembersDraft({
+    label,
+    keys: initialKeys,
+    targetSection: defaultTarget,
+    groupOrder: initialGroupOrder,
+  })
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState(false)
@@ -123,37 +144,69 @@ export default function SectionMembersModal({
     (n, g) => n + g.blocks.reduce((m, b) => m + b.params.length, 0),
     0,
   )
-  /* 分组条管的是目标组所在那个页签；分组层也能改兄弟组的位置、顺手建新组 */
-  const tabId = scope === 'tab' ? id : (targets[0]?.tabId ?? '')
   const rowsOf = (sectionId: string): string[] =>
     params
       .filter((p) => p.sectionId === sectionId)
       .sort(byOrder)
       .map((p) => p.key)
-  const baseRows = useMemo(
-    () =>
-      sections
-        .filter((x) => x.tabId === tabId && x.component === null && !x.standalone)
-        .map((x) => ({ id: x.id, label: x.label, isNew: false })),
-    [sections, tabId],
-  )
-  /* 待新建的排在末尾，换位后的显示顺序与后端一格一格走完的结果同一份。
-     确认落盘那一帧注册表里已经有它了，别再当「待新建」画第二遍 */
-  const groupRows = useMemo(() => {
+
+  /* 确认落盘那一帧注册表里已经有新组了，别再当「待新建」画第二遍 */
+  const groupRows: SortRow[] = useMemo(() => {
     const known = new Set(sections.map((x) => x.id))
-    const fresh = draft.newSections
-      .filter((ns) => !known.has(ns.id))
-      .map((ns) => ({ id: ns.id, label: ns.label, isNew: true }))
-    return applyMoves([...baseRows, ...fresh], draft.moves)
-  }, [baseRows, draft.newSections, draft.moves, sections])
+    return [
+      ...baseRows.map((x) => ({ key: x.id, label: x.label })),
+      ...draft.newSections
+        .filter((ns) => !known.has(ns.id))
+        .map((ns) => ({ key: ns.id, label: ns.label, by: '待新建' })),
+    ]
+  }, [baseRows, draft.newSections, sections])
+
   const submitAdd = () => {
     const name = newName.trim()
-    setAdding(false)
-    setNewName('')
     if (name === '' || tabId === '') return
     const used = [...sections, ...draft.newSections].map((x) => ({ id: x.id }))
     draft.addSection({ id: nextSectionId(used), tabId, label: name })
+    setAdding(false)
+    setNewName('')
+    track('members.add', 'group')
   }
+  const closeAdding = () => {
+    setAdding(false)
+    setNewName('')
+  }
+  const onGroupPick = (key: string) => {
+    if (key === draft.targetSection) return
+    draft.retarget(key, rowsOf(key))
+    track('members.retarget', 'group')
+  }
+  const onGroupMove = (from: number, to: number) => {
+    draft.moveGroup(from, to)
+    track('members.move-group', 'group')
+  }
+  const groupActions = (key: string): ReactNode => {
+    if (!draft.newSections.some((ns) => ns.id === key)) return null
+    const name = groupRows.find((r) => r.key === key)?.label ?? key
+    return (
+      <button
+        type="button"
+        className={s.mini}
+        aria-label={`删除 ${name}`}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => {
+          track('members.remove-new', 'group')
+          draft.removeNewSection(key)
+          if (draft.targetSection === key) {
+            const rest = draft.groupOrder.filter((x) => x !== key)
+            const next = rest[0] ?? ''
+            draft.retarget(next, rowsOf(next))
+          }
+        }}
+      >
+        删除
+      </button>
+    )
+  }
+
   const movedOut = draft.initialKeys.filter((k) => !draft.has(k))
   const name = draft.label.trim()
   const canConfirm = draft.dirty && name !== '' && draft.targetSection !== '' && !busy
@@ -169,14 +222,21 @@ export default function SectionMembersModal({
         sectionId: draft.targetSection,
         keys: draft.keys,
         newSections: draft.newSections,
-        moves: draft.moves.filter((m) => m.steps !== 0),
+        sectionOrder: draft.groupOrder,
       })
+      track('members.confirm', 'group')
       onClose()
     } catch (e) {
+      track('members.confirm.fail', isAppError(e) ? e.code : 'unknown')
       toasts.push(isAppError(e) ? e.message : String(e))
     } finally {
       setBusy(false)
     }
+  }
+
+  const cancel = () => {
+    track('members.cancel', 'group')
+    onClose()
   }
 
   return (
@@ -186,13 +246,17 @@ export default function SectionMembersModal({
       subtitle={`共 ${total} 条参数 · 名字与成员一起改`}
       size="lg"
       closeOnScrim={false}
-      onClose={onClose}
+      bodyScroll={false}
+      onClose={cancel}
       headerExtra={
         <button
           type="button"
           className={s.linkBtn}
           disabled={!draft.dirty}
-          onClick={draft.reset}
+          onClick={() => {
+            track('members.reset', 'group')
+            draft.reset()
+          }}
         >
           恢复
         </button>
@@ -200,7 +264,7 @@ export default function SectionMembersModal({
       footLead={<span className={s.footNote}>保存才生效</span>}
       footer={
         <>
-          <button type="button" className={s.btn} onClick={onClose}>
+          <button type="button" className={s.btn} onClick={cancel}>
             取消
           </button>
           <button
@@ -214,31 +278,32 @@ export default function SectionMembersModal({
         </>
       }
     >
-      <label className={s.nameRow} htmlFor={nameId}>
-        <span className={s.nameLabel}>名字</span>
-        <input
-          id={nameId}
-          className={s.nameInput}
-          value={draft.label}
-          maxLength={LABEL_MAX}
-          onChange={(e) => draft.setLabel(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-          }}
-        />
-      </label>
+      <div className={s.head}>
+        <label className={s.nameRow} htmlFor={nameId}>
+          <span className={s.nameLabel}>名字</span>
+          <input
+            id={nameId}
+            className={s.nameInput}
+            value={draft.label}
+            maxLength={LABEL_MAX}
+            onChange={(e) => draft.setLabel(e.target.value)}
+          />
+        </label>
+      </div>
 
       <div className={s.wrap}>
         <div className={s.left}>
-          <input
-            className={s.search}
-            type="search"
-            aria-label="搜索参数"
-            placeholder="搜索名字或键名"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-          <div className={s.scroll}>
+          <div className={s.fixed}>
+            <input
+              className={s.search}
+              type="search"
+              aria-label="搜索参数"
+              placeholder="搜索名字或键名"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className={s.scroll} data-scroll="left">
             {shown.map((g) => (
               <div key={g.tabId} className={s.group}>
                 <div className={s.groupHead}>{g.tabLabel}</div>
@@ -249,7 +314,6 @@ export default function SectionMembersModal({
                     </div>
                     {b.params.map((p) => {
                       const checked = draft.has(p.key)
-                      /* 本组已有且还在清单里：不必再勾；移出之后重新可勾 = 放回 */
                       const disabled = p.sectionId === draft.targetSection && checked
                       return (
                         <button
@@ -276,13 +340,14 @@ export default function SectionMembersModal({
         </div>
 
         <div className={s.right}>
-          <div className={s.groupBar}>
+          <div className={s.fixed}>
             <div className={s.groupBarHead}>
               <span>分组</span>
               <button
                 type="button"
                 className={s.addBtn}
                 aria-label="新增分组"
+                disabled={tabId === ''}
                 onClick={() => {
                   setAdding(true)
                   setNewName('')
@@ -292,67 +357,45 @@ export default function SectionMembersModal({
               </button>
             </div>
             {adding && (
-              <input
-                className={s.addInput}
-                aria-label="新分组名字"
-                value={newName}
-                maxLength={LABEL_MAX}
-                autoFocus
-                placeholder="分组名字"
-                onChange={(e) => setNewName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') submitAdd()
-                  else if (e.key === 'Escape') {
-                    setAdding(false)
-                    setNewName('')
-                  }
-                }}
-                onBlur={() => {
-                  setAdding(false)
-                  setNewName('')
-                }}
-              />
+              <div className={s.addRow}>
+                <input
+                  className={s.addInput}
+                  aria-label="新分组名字"
+                  value={newName}
+                  maxLength={LABEL_MAX}
+                  autoFocus
+                  placeholder="分组名字"
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') closeAdding()
+                  }}
+                />
+                <button
+                  type="button"
+                  className={s.addConfirm}
+                  aria-label="确认新增分组"
+                  onClick={submitAdd}
+                >
+                  确认
+                </button>
+                <button type="button" className={s.mini} aria-label="取消新增分组" onClick={closeAdding}>
+                  取消
+                </button>
+              </div>
             )}
-            <div className={s.targets} role="radiogroup" aria-label="归到这一组">
-              {groupRows.map((row, i) => (
-                <div key={row.id} data-section={row.id} className={s.targetItem}>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={draft.targetSection === row.id}
-                    className={`${s.target} ${draft.targetSection === row.id ? s.targetOn : ''}`}
-                    onClick={() => {
-                      if (row.id === draft.targetSection) return
-                      draft.retarget(row.id, rowsOf(row.id))
-                    }}
-                  >
-                    {row.label}
-                  </button>
-                  {row.isNew && <span className={s.tag}>待新建</span>}
-                  <button
-                    type="button"
-                    className={s.arrow}
-                    aria-label={`${row.label} 上移`}
-                    disabled={i === 0}
-                    onClick={() => draft.moveSection(row.id, -1)}
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    className={s.arrow}
-                    aria-label={`${row.label} 下移`}
-                    disabled={i === groupRows.length - 1}
-                    onClick={() => draft.moveSection(row.id, 1)}
-                  >
-                    ↓
-                  </button>
-                </div>
-              ))}
-            </div>
           </div>
-          <div className={s.rightHead}>这一组 · {draft.keys.length}</div>
-          <div className={s.scroll}>
+          <div className={s.scroll} data-scroll="right">
+            <ReorderList
+              rows={groupRows}
+              order={draft.groupOrder}
+              currentKey={draft.targetSection}
+              onMove={onGroupMove}
+              onPick={onGroupPick}
+              actions={groupActions}
+              embedded
+              label="分组次序"
+            />
+            <div className={s.rightHead}>这一组 · {draft.keys.length}</div>
             {draft.keys.map((k) => {
               const p = paramByKey.get(k)
               const fresh = !draft.initialKeys.includes(k)
