@@ -365,7 +365,7 @@ let mockFields: Array<{
 const SHADOW_MUTATORS = new Set([
   'wb_set_brand_field', 'wb_add_brand', 'wb_move_machine_to_brand',
   'wb_set_machine_dimensions', 'wb_set_section_meta', 'wb_set_param_meta', 'wb_remove_section',
-  'wb_set_section_order', 'wb_clear_stale_translations',
+  'wb_set_section_order', 'wb_edit_group', 'wb_clear_stale_translations',
   'wb_set_machine_zones', 'wb_set_bundle_refs', 'wb_add_bundle',
   'wb_rename_bundle', 'wb_copy_bundle', 'wb_assign_bundle_versions',
   'wb_remove_bundle', 'wb_set_calibration_identity', 'wb_set_asset_delivery',
@@ -2061,6 +2061,76 @@ export function installMockBackend() {
         Object.assign(target, e)
         /* 新分组是这一笔的目标：真机把参数搬进去，桩里也照办（`sectionId: null` 别盖上去） */
         if (fresh !== null) target.sectionId = fresh.id
+        return Promise.resolve(buildRegistry())
+      }
+      case 'wb_edit_group': {
+        /*
+         * 成员编辑的演示桩：与真机同一套「交最终成员序列、后端算差集」，
+         * 移出的落到同一页签下懒建的「未归类」组，没移出就不多添一张卡。
+         */
+        const e = args?.edit as {
+          scope?: 'section' | 'tab'
+          id?: string
+          label?: string | null
+          sectionId?: string
+          keys?: string[]
+        } | undefined
+        const sectionId = e?.sectionId ?? ''
+        const keys = e?.keys ?? []
+        const tab = TABS.find((t) => t.sections.some((s) => s.id === sectionId))
+        if (tab === undefined) {
+          return Promise.reject({ code: 'INVALID', message: `演示桩里没有分组 ${sectionId}`, traceId: 'mock' })
+        }
+        const seen = new Set<string>()
+        for (const k of keys) {
+          if (seen.has(k) || !PARAMS.some((p) => p.key === k)) {
+            return Promise.reject({ code: 'INVALID', message: `成员清单对不上：${k}`, traceId: 'mock' })
+          }
+          seen.add(k)
+        }
+        const want = new Set(keys)
+        const here = PARAMS.filter((p) => p.sectionId === sectionId).map((p) => p.key)
+        const joined = keys.filter((k) => !here.includes(k))
+        const left = here.filter((k) => !want.has(k))
+        const label = e?.label ?? null
+        if (label !== null && e?.scope === 'section') {
+          const sec = tab.sections.find((s) => s.id === sectionId)
+          if (sec !== undefined) sec.label = label
+          SECTION_LABEL.set(sectionId, label)
+        } else if (label !== null && e?.scope === 'tab') {
+          tab.label = label
+        }
+        let dest = sectionId
+        if (left.length > 0) {
+          dest = `uncategorized_${tab.id}`
+          if (!tab.sections.some((s) => s.id === dest)) {
+            tab.sections.push({ id: dest, label: '未归类', order: tab.sections.length + 1 })
+            SECTION_LABEL.set(dest, '未归类')
+          }
+        }
+        const maxOrder = (sid: string) =>
+          PARAMS.filter((p) => p.sectionId === sid).reduce((m, p) => Math.max(m, p.order), 0)
+        for (const k of joined) {
+          const p = PARAMS.find((x) => x.key === k)
+          if (p !== undefined) {
+            p.sectionId = sectionId
+            p.tabId = tab.id
+            p.order = maxOrder(sectionId) + 1
+          }
+        }
+        for (const k of left) {
+          const p = PARAMS.find((x) => x.key === k)
+          if (p !== undefined) {
+            p.sectionId = dest
+            p.tabId = tab.id
+            p.order = maxOrder(dest) + 1
+          }
+        }
+        /* 最终次序就是提交的那一串：位次按它重排 */
+        keys.forEach((k, i) => {
+          const p = PARAMS.find((x) => x.key === k)
+          if (p !== undefined) p.order = i + 1
+        })
         return Promise.resolve(buildRegistry())
       }
       case 'wb_set_section_order': {

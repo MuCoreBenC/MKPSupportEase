@@ -66,6 +66,7 @@ import {
   type ColRef,
   type Desk,
   type DeskGroup,
+  type GroupMembersEdit,
   type MachineList,
   type Matrix,
   type MetaApplied,
@@ -114,6 +115,7 @@ import ParamDetail, { StatusDot, type DetailLayer } from '../views/ParamDetail'
 import ComponentSlot from '../views/ComponentSlot'
 import { slotSideOf } from '../views/componentSide'
 import SectionDrawer from '../views/SectionDrawer'
+import SectionMembersModal from '../views/SectionMembersModal'
 import s from '../c14.module.css'
 
 /**
@@ -232,6 +234,8 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
   const [openedCards, setOpenedCards] = useState<string[]>([])
   /** 分组抽屉开着的是哪一组（`null` = 关着）。改名 / 换位 / 参数清单都在抽屉里 */
   const [drawerSection, setDrawerSection] = useState<string | null>(null)
+  /** 页签栏那支笔开的是哪一个页签（null = 关着） */
+  const [membersTab, setMembersTab] = useState<string | null>(null)
   /*
    * 抽屉里那颗「当前」标记住的是哪一组 —— **不一定是 `drawerSection`**。
    *
@@ -688,6 +692,42 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
     onEditApplied()
     toasts.push(`译文标记已清（保存才落盘）· ${key}`)
   }
+
+  /**
+   * 成员编辑框确认：一次应用进草稿，右上角「保存」才落盘。
+   * 与 `saveSection` 同一跳 —— 换注册表视图、重取桌面、刷「未保存改动」。
+   */
+  const applyGroupMembers = async (edit: GroupMembersEdit) => {
+    const next = await wb.editGroup(edit)
+    setRegistry(next)
+    setMetaTick((t) => t + 1)
+    onEditApplied()
+    const name =
+      edit.scope === 'section'
+        ? (next.sections.find((x) => x.id === edit.id)?.label ?? edit.id)
+        : (next.tabs.find((x) => x.id === edit.id)?.label ?? edit.id)
+    toasts.push(`成员已应用（保存才落盘）· ${name}`, { label: '撤销', run: onUndo })
+  }
+
+  /** 页签栏末尾那颗笔：编辑当前页签的名字与成员。两处页签栏共用这一段 */
+  const editTabId = tabSel
+  const tabEditButton =
+    editTabId !== null &&
+    registry !== null &&
+    registry.tabs.some((t) => t.id === editTabId) ? (
+      <button
+        type="button"
+        className={s.pTabEdit}
+        aria-label="编辑当前页签"
+        title="编辑这个页签的名字与成员"
+        onClick={() => setMembersTab(editTabId)}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+        </svg>
+      </button>
+    ) : null
 
   /**
    * 组内顺序排完了（排序模态框自己落盘）。与上一条同一跳：
@@ -1665,6 +1705,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                       {t.label} <em>{t.count}</em>
                     </button>
                   ))}
+                  {tabEditButton}
                 </div>
 
                 <div className={s.pScroll} ref={scrollRef}>
@@ -1789,6 +1830,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                       {t.label} <em>{t.count}</em>
                     </button>
                   ))}
+                  {tabEditButton}
                 </div>
 
                 <div className={s.pScroll} ref={scrollRef}>
@@ -2091,6 +2133,8 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
           markId={drawerAnchor}
           registry={registry}
           rows={drawerRows}
+          params={registry?.params ?? []}
+          onEditMembers={applyGroupMembers}
           /*
            * 「这一组现在页面上到底有没有东西」—— 作者 2026-11-01 的疑问是
            * 「主要页面看不到了，但抽屉能看到，所以他没有真的删掉？客户端会不会消费到一个空的」。
@@ -2156,6 +2200,18 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
         落盘成功把改前/改后整包交给外壳压撤销栈；回来的注册表直接顶掉旧的，
         三处派生数据靠 `metaTick` 重取。
       */}
+      {membersTab !== null && registry !== null && (
+        <SectionMembersModal
+          scope="tab"
+          id={membersTab}
+          label={registry.tabs.find((t) => t.id === membersTab)?.label ?? membersTab}
+          params={registry.params}
+          sections={registry.sections}
+          onApply={applyGroupMembers}
+          onClose={() => setMembersTab(null)}
+        />
+      )}
+
       {defEditKey !== null && defParam !== null && (
         <ParamDefModal
           paramKey={defEditKey}

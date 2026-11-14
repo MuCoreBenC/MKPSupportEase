@@ -868,6 +868,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 组内顺序（2026-11-14）：整组一次重排。与上一条分开 —— 那条改「是什么」，
         // 这条只改「按什么次序摆」，能挪别人的位置而不用重抄别人的定义
         app::wb_set_section_order,
+        app::wb_edit_group,
         // 分组本身（名字 / 上下位置，2026-11-01 作者：「这个标题这些能点击吧，
         // 点了就可以改名字……而且没办法去换它那个上下位置」）：
         // 名字写 `[[tabs.sections]].label`，位置 = 数组换位 + `order` 重排，

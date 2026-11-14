@@ -1,0 +1,328 @@
+/*
+ * 两列成员编辑框：左候选、右本组。两列各自滚动，一屏看更多。
+ * 颜色一律走工作台 C14 变量，不另立一套配色。
+ */
+
+.nameRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.nameLabel {
+  flex: none;
+  width: 32px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.nameInput {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-sunken-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  outline: none;
+}
+
+.nameInput:focus {
+  border-color: var(--accent);
+}
+
+.wrap {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 12px;
+  max-height: 56vh;
+  min-height: 260px;
+}
+
+.left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+  padding-right: 10px;
+  border-right: 1px solid var(--line);
+}
+
+.right {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.search {
+  flex: none;
+  height: 26px;
+  padding: 0 8px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-sunken-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  outline: none;
+}
+
+.search:focus {
+  border-color: var(--accent);
+}
+
+.scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.group {
+  margin-bottom: 8px;
+}
+
+.groupHead {
+  padding: 3px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  background: var(--surface-sunken-solid);
+  border-radius: var(--r-sm);
+}
+
+.sectionHead {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 6px 2px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+
+.count {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  height: 28px;
+  padding: 0 6px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.row:hover:not(:disabled) {
+  background: var(--hover-1);
+}
+
+/* 勾上的是通长绿带，不是圆角块 */
+.rowOn {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface-solid));
+}
+
+.row:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.check {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 11px;
+  color: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+}
+
+.rowOn .check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.by {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.targets {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.target {
+  padding: 3px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+  background: var(--surface-sunken-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.target:hover {
+  border-color: var(--line-strong);
+}
+
+.targetOn {
+  color: var(--surface-solid);
+  background: var(--wb-primary);
+  border-color: var(--wb-primary);
+}
+
+.rightHead {
+  flex: none;
+  padding: 3px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.member {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  height: 28px;
+  padding: 0 6px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  border-radius: 0;
+}
+
+.memberNew {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-solid));
+}
+
+.memberOut {
+  color: var(--text-3);
+}
+
+.tag {
+  flex: none;
+  font-size: var(--fs-label);
+  color: var(--accent);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.mini {
+  flex: none;
+  padding: 2px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+}
+
+.mini:hover {
+  color: var(--text-1);
+  background: var(--hover-1);
+  border-color: var(--line);
+}
+
+.movedHead {
+  margin-top: 8px;
+  padding: 4px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  background: var(--surface-sunken-solid);
+  border-radius: var(--r-sm);
+}
+
+.empty {
+  padding: 12px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.linkBtn {
+  padding: 4px 6px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+}
+
+.linkBtn:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--hover-1);
+}
+
+.linkBtn:disabled {
+  color: var(--text-3);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.footNote {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-right: 8px;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn {
+  flex: none;
+  padding: 5px 12px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  white-space: nowrap;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.btn:hover {
+  border-color: var(--line-strong);
+}
+
+.btnPrimary {
+  color: var(--surface-solid);
+  background: var(--wb-primary);
+  border-color: var(--wb-primary);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.55;
+}

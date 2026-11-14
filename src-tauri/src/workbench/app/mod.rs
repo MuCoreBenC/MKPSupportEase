@@ -319,7 +319,8 @@ use crate::workbench::domain::variants;
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::{Committed, Level};
 use crate::workbench::presets::registry::{
-    ParamDef, ParamMetaEdit, SectionMetaEdit, ShowWhen, TabMeta, UiComponent, ValueType,
+    GroupMembersEdit, ParamDef, ParamMetaEdit, SectionMetaEdit, ShowWhen, TabMeta, UiComponent,
+    ValueType,
 };
 use crate::workbench::presets::Presets;
 use crate::workbench::store::{Store, TrashEntry};
@@ -937,6 +938,7 @@ const COMMAND_LABELS: &[(&str, &str)] = &[
     ("wb_remove_group", "删除资产分组"),
     ("wb_set_param_meta", "改参数定义"),
     ("wb_set_section_order", "改组内顺序"),
+    ("wb_edit_group", "改分组成员"),
     ("wb_clear_stale_translations", "清译文标记"),
     ("wb_set_section_meta", "改分组名与位置"),
     ("wb_remove_section", "删除分组"),
@@ -2050,6 +2052,31 @@ pub fn wb_set_section_order(
             },
             |ctx| {
                 ctx.presets.registry.set_section_order(&section_id, &keys)?;
+                ctx.presets.registry.write_back()?;
+                ctx.reload_presets()?;
+                Ok(registry_view(&ctx.presets.registry))
+            },
+        )
+    })
+}
+
+/// **一次成员编辑**：改名 + 把别处参数归类进来 / 把本组参数移出去。
+///
+/// 与 [`wb_set_section_order`] 同一条路：前端只交最终成员序列与一个名字，
+/// 差集、搬运、兜底组与顺序值都由后端算，一次写盘、一条撤销。
+#[tauri::command(async)]
+pub fn wb_edit_group(edit: GroupMembersEdit) -> Result<RegistryView, AppError> {
+    traced("wb_edit_group", |_| {
+        with_struct_ctx(
+            "",
+            |_| {
+                vec![
+                    "registry/param_registry.toml".to_owned(),
+                    "layout_schema.toml".to_owned(),
+                ]
+            },
+            |ctx| {
+                ctx.presets.registry.set_group_members(edit)?;
                 ctx.presets.registry.write_back()?;
                 ctx.reload_presets()?;
                 Ok(registry_view(&ctx.presets.registry))

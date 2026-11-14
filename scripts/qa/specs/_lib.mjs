@@ -43,3 +43,22 @@ export const sortDialog = (page) => page.getByRole('dialog', { name: /^组内顺
 export async function sortRows(page) {
   return sortDialog(page).locator('[role="listitem"]').allInnerTexts()
 }
+
+/** 打开第一张分组卡的抽屉，再点标题那支笔 = 分组成员编辑框 */
+export async function openSectionMembers(page) {
+  await page.locator('[title^="打开分组抽屉"]').first().click()
+  const drawer = page.getByRole('dialog', { name: /^分组 / })
+  await drawer.waitFor({ timeout: 5000 })
+  await drawer.getByRole('button', { name: '编辑分组成员' }).click()
+  const dlg = page.getByRole('dialog', { name: /^编辑分组/ })
+  await dlg.waitFor({ timeout: 5000 })
+  return dlg
+}
+
+/** 点当前页签栏那支笔 = 页签成员编辑框 */
+export async function openTabMembers(page) {
+  await page.getByRole('button', { name: '编辑当前页签' }).click()
+  const dlg = page.getByRole('dialog', { name: /^编辑页签/ })
+  await dlg.waitFor({ timeout: 5000 })
+  return dlg
+}

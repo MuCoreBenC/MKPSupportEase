@@ -411,6 +411,24 @@ export interface SectionMetaEdit {
   newSection?: NewSection | null
 }
 
+/**
+ * `registry::GroupMembersEdit` —— 一次**成员编辑**的载荷。
+ *
+ * 只交最终成员序列与一个名字：改名、归类、移出由后端一次算差集写完，
+ * 不逐条重抄 `ParamMetaEdit` 整包定义，也是一次写盘一条撤销。
+ */
+export interface GroupMembersEdit {
+  /** 分组层 = section id；页签层 = tab id */
+  scope: 'section' | 'tab'
+  id: string
+  /** 新名字；null = 不动 */
+  label: string | null
+  /** 成员最终落到的分组 */
+  sectionId: string
+  /** 该组最终成员 key 序列；顺序值沿用这一组原有的槽位 */
+  keys: string[]
+}
+
 /* ---------- 矩阵 ---------- */
 
 /** `derive::ColRef` —— 前端勾了什么。**顺序无所谓**，后端按配方本重排 */
@@ -2889,6 +2907,12 @@ export const wb = {
    */
   setSectionOrder: (sectionId: string, keys: string[]) =>
     invoke<RegistryView>('wb_set_section_order', { sectionId, keys }),
+  /**
+   * **一次成员编辑**：改名 + 把别处参数归类进来 / 把本组参数移出去。
+   * 只交最终成员序列，差集与搬运由后端算；确认只进草稿，右上角「保存」才落盘。
+   */
+  editGroup: (edit: GroupMembersEdit) =>
+    invoke<RegistryView>('wb_edit_group', { edit }),
   /**
    * **清掉译文台账里的几格**（逃生通道，2026-11-02）。
    *

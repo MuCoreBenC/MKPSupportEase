@@ -3410,6 +3410,26 @@
   color: var(--wb-primary-deep);
 }
 
+/* 页签栏末尾那颗笔：开了成员编辑框，不算一个 tab */
+.pTabEdit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  margin-left: 4px;
+  padding: 0 8px;
+  color: var(--text-3);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.pTabEdit:hover {
+  color: var(--text-1);
+  border-color: var(--line-strong);
+}
+
 /* 可操作的小 chip（仅显示差异）：直角，不再是胶囊 */
 .pChip {
   display: inline-flex;
