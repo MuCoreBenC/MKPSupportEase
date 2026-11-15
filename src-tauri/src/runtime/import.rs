@@ -5,7 +5,7 @@
 //! 以后「设置 → 备份与恢复」的 ZIP / 备份包继续复用这套接收机制：
 //!
 //! ```text
-//! 外部文件 ──认领（导入器注册表）──▶ 落点检查（重名？）──▶ 复制进 presets-local/
+//! 外部文件 ──认领（导入器注册表）──▶ 落点检查（重名？）──▶ 复制进 presets-local/_local/
 //!                 │                        │
 //!             现在只有 Preset(.toml)      重名不覆盖 —— 名字由用户在界面上改
 //!             以后 ZIP / 备份包往这加     （不自动改名）
@@ -14,7 +14,7 @@
 //! # 边界（逐条定死）
 //!
 //! - **源文件只读**：不改、不删、不移；复制是"读出字节 → 原子写进用户根"；
-//! - **落点固定 `presets-local/`**，不给用户选目录（跨目录 = 文件夹管理，不在这层）；
+//! - **落点固定 `presets-local/_local/`**，不给用户选目录（跨目录 = 文件夹管理，不在这层）；
 //! - **内容按字节复制**：已有来源记录原样带过去，没有来源记录**允许导入、不编造来源**；
 //! - **不校验 TOML 内容**：能不能当 Preset 用是后面 Preset 语义入口的事 ——
 //!   导入只是"把外部文件纳入本地文件所有权范围"，**不是"安装 Preset"**；
@@ -37,7 +37,7 @@ use super::local::{check_local_prefix, normalize_new_name};
 /// 而"文件怎么进来、重名怎么办、边界在哪"这些**共用**本模块，不各写一套。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Importer {
-    /// MKP 预设（`.toml`）→ 复制进 `presets-local/`
+    /// MKP 预设（`.toml`）→ 复制进 `presets-local/_local/`
     Preset,
 }
 
@@ -72,7 +72,7 @@ fn base_name(source: &str) -> Option<String> {
 /// 落点检查的一档（`Ready` 之外都带一句原因，界面原话显示）
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StageState {
-    /// 可以导入（按源文件名落进 `presets-local/`）
+    /// 可以导入（按源文件名落进 `presets-local/_local/`）
     Ready,
     /// 落点已有同名（或这一批里前面已经占了这个名字）—— 界面进改名流程
     Collision,
@@ -145,8 +145,15 @@ pub fn stage(user_root: &Path, sources: &[String]) -> Vec<Staged> {
 }
 
 /// 落点已经有东西了吗（含"那儿是个越界的符号链接"—— 那也不能往里写）
+///
+/// 导入进来的文件没有来源分支，统一落 `presets-local/_local/`：它与各分支的文件夹
+/// 平级，所以在哪个分支下都能看见，也不会被某个分支的同名文件挡住。
 fn target_taken(user_root: &Path, file_name: &str) -> bool {
-    let rel = format!("{LOCAL_DIR}/{file_name}");
+    let rel = format!(
+        "{LOCAL_DIR}/{}/{}",
+        crate::runtime::branch_dir::UNFILED,
+        file_name
+    );
     match resolve_in(user_root, &rel) {
         Ok(path) => path.exists(),
         /* 落点解析不过（越过用户根）：按"那儿有东西、不能覆盖"处理 —— 改名流程会换个名字 */
@@ -166,7 +173,7 @@ pub struct ImportItem {
 pub struct ImportOutcome {
     pub source: String,
     pub ok: bool,
-    /// 成功 = 落进用户根之后的相对路径（`presets-local/…`）；失败 = 空串
+    /// 成功 = 落进用户根之后的相对路径（`presets-local/_local/…`）；失败 = 空串
     pub path: String,
     pub file_name: String,
     /// 失败原因（可直接显示）；成功 = 空串
@@ -176,7 +183,7 @@ pub struct ImportOutcome {
 /// **第二段：真的复制**。逐份独立：一份出问题不影响别的份。
 ///
 /// 源文件全程只读；写走全仓唯一那个出口（[`crate::fsx::atomic::atomic_write`]，
-/// 它会把 `presets-local/` 建出来）。
+/// 它会把 `presets-local/_local/` 建出来）。
 pub fn commit(user_root: &Path, items: &[ImportItem]) -> Vec<ImportOutcome> {
     items
         .iter()
@@ -217,7 +224,11 @@ fn commit_one(user_root: &Path, item: &ImportItem) -> ImportOutcome {
         },
         None => file_name.clone(),
     };
-    let rel = format!("{LOCAL_DIR}/{name}");
+    let rel = format!(
+        "{LOCAL_DIR}/{}/{}",
+        crate::runtime::branch_dir::UNFILED,
+        name
+    );
     if let Err(e) = check_local_prefix(&rel) {
         return fail(name, e.message);
     }
@@ -290,7 +301,7 @@ mod tests {
         let user = tempfile::tempdir().unwrap();
         let d1 = tempfile::tempdir().unwrap();
         let d2 = tempfile::tempdir().unwrap();
-        write(user.path(), "presets-local/已有.toml", VALID_TOML);
+        write(user.path(), "presets-local/_local/已有.toml", VALID_TOML);
         write(d1.path(), "新的.toml", VALID_TOML);
         write(d1.path(), "已有.toml", VALID_TOML);
         write(d2.path(), "新的.toml", VALID_TOML);
@@ -347,8 +358,8 @@ mod tests {
             }],
         );
         assert!(outcomes[0].ok, "{}", outcomes[0].message);
-        assert_eq!(outcomes[0].path, "presets-local/外部 A1.toml");
-        let target = user.path().join("presets-local/外部 A1.toml");
+        assert_eq!(outcomes[0].path, "presets-local/_local/外部 A1.toml");
+        let target = user.path().join("presets-local/_local/外部 A1.toml");
         assert_eq!(
             std::fs::read(&target).unwrap(),
             with_lineage.as_bytes(),
@@ -423,7 +434,7 @@ mod tests {
         let ext = tempfile::tempdir().unwrap();
         write(
             user.path(),
-            "presets-local/占位.toml",
+            "presets-local/_local/占位.toml",
             "[wiping]\nspeed = 80\n",
         );
         write(ext.path(), "占位.toml", VALID_TOML);
@@ -442,7 +453,7 @@ mod tests {
             outcomes[0].message
         );
         assert_eq!(
-            std::fs::read(user.path().join("presets-local/占位.toml")).unwrap(),
+            std::fs::read(user.path().join("presets-local/_local/占位.toml")).unwrap(),
             "[wiping]\nspeed = 80\n".as_bytes(),
             "被撞的那份一个字节没动"
         );
@@ -489,7 +500,7 @@ mod tests {
             }],
         );
         assert!(outcomes[0].ok, "{}", outcomes[0].message);
-        assert_eq!(outcomes[0].path, "presets-local/改名的.toml");
+        assert_eq!(outcomes[0].path, "presets-local/_local/改名的.toml");
     }
 
     /// **一个状态都不碰**：使用中指针与草稿都还指着原来那一份
@@ -497,12 +508,16 @@ mod tests {
     fn importing_touches_no_state() {
         let user = tempfile::tempdir().unwrap();
         let ext = tempfile::tempdir().unwrap();
-        write(user.path(), "presets-local/A1.toml", VALID_TOML);
+        write(user.path(), "presets-local/_local/A1.toml", VALID_TOML);
         write(ext.path(), "外部.toml", VALID_TOML);
-        let active =
-            super::super::app_state::set_active_local(user.path(), "presets-local/A1.toml", "sha")
-                .unwrap();
-        let subject = super::super::state::DraftSubject::local("A1.toml", "presets-local/A1.toml");
+        let active = super::super::app_state::set_active_local(
+            user.path(),
+            "presets-local/_local/A1.toml",
+            "sha",
+        )
+        .unwrap();
+        let subject =
+            super::super::state::DraftSubject::local("A1.toml", "presets-local/_local/A1.toml");
         super::super::app_state::set_draft(user.path(), &subject, "sha", "改到一半").unwrap();
 
         let outcomes = commit(
@@ -523,12 +538,12 @@ mod tests {
             .unwrap();
         assert_eq!(
             after_draft.path.as_deref(),
-            Some("presets-local/A1.toml"),
+            Some("presets-local/_local/A1.toml"),
             "草稿没被动"
         );
     }
 
-    /// 用户根里 `presets-local/` 还不存在（全新安装）：导入把它建出来
+    /// 用户根里 `presets-local/_local/` 还不存在（全新安装）：导入把它建出来
     #[test]
     fn importing_creates_the_mine_dir_when_missing() {
         let user = tempfile::tempdir().unwrap();
@@ -543,6 +558,9 @@ mod tests {
             }],
         );
         assert!(outcomes[0].ok, "{}", outcomes[0].message);
-        assert!(user.path().join("presets-local/头一份.toml").exists());
+        assert!(user
+            .path()
+            .join("presets-local/_local/头一份.toml")
+            .exists());
     }
 }

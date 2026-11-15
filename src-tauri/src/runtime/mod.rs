@@ -35,6 +35,9 @@ pub mod backup;
 /// **每份用户文件自己最初的样子**（按用户根相对路径镜像），服务"恢复默认"。云端原文
 /// 在 [`content`] 里按 SHA 存，两件事别混。见 [`baseline`] 的模块头。
 pub mod baseline;
+/// **分支隔离**：每个分支一个文件夹（`presets-local/<folder>/`），同名文件各归各支。
+/// 见 [`branch_dir`] 的模块头。
+pub mod branch_dir;
 pub mod catalog;
 pub mod content;
 pub mod delivery;

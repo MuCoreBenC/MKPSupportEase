@@ -504,7 +504,7 @@ pub struct FetchCloudDto {
 /// 后缀保持原样（后缀决定它是哪一类文件）；名字空间是 `presets-local/`
 /// 内一圈一圈往后找一个没人占的。上限之后照原名返回 —— 那时由写盘那一层的
 /// "落点已存在"闸去说话，不在这一层编故事。
-fn untaken_name(user_root: &Path, wanted: &str) -> String {
+fn untaken_name(user_root: &Path, subdir: Option<&str>, wanted: &str) -> String {
     let path = std::path::Path::new(wanted);
     let stem = path
         .file_stem()
@@ -516,7 +516,11 @@ fn untaken_name(user_root: &Path, wanted: &str) -> String {
     };
     for n in 2..=999u32 {
         let candidate = with(n);
-        let rel = format!("{}/{candidate}", crate::fsx::paths::LOCAL_DIR);
+        /* 撞名只在**同一个分支文件夹**里算：别的分支有同名文件不关这一支的事 */
+        let rel = match subdir {
+            Some(dir) => format!("{}/{dir}/{candidate}", crate::fsx::paths::LOCAL_DIR),
+            None => format!("{}/{candidate}", crate::fsx::paths::LOCAL_DIR),
+        };
         let taken = crate::fsx::paths::resolve_in(user_root, &rel)
             .map(|p| p.exists())
             .unwrap_or(true);
@@ -603,15 +607,28 @@ pub async fn fetch_cloud_preset(
                 published_at: catalog.published_at.as_deref(),
             };
             let source_sha = file.expected_sha();
+            /*
+             * 落哪个文件夹：显式下载只跟**当前分支**有关（分支隔离）。
+             * 自建源没有 ref ⇒ `None` ⇒ 保持平铺布局。
+             */
+            let branch_dir = identity
+                .as_ref()
+                .map(|id| runtime::branch_dir::folder_for(&root, id))
+                .transpose()?
+                .flatten();
 
             /* 云端原件是**内部**数据：它只用来落"本地那份"，绝不进用户世界 */
-            let rel = format!("{}/{}", crate::fsx::paths::LOCAL_DIR, file.file_name);
+            let rel = match &branch_dir {
+                Some(dir) => format!("{}/{dir}/{}", crate::fsx::paths::LOCAL_DIR, file.file_name),
+                None => format!("{}/{}", crate::fsx::paths::LOCAL_DIR, file.file_name),
+            };
             let target = crate::fsx::paths::resolve_in(&user, &rel)?;
             let created = !target.is_file();
             let (file_name_here, path_here, taken_by, suggested_name) = if created {
                 let text = runtime::delivery::cloud_text(&root, file)?;
-                runtime::local::save_cloud_as_new(
+                runtime::local::save_cloud_as_new_in(
                     &user,
+                    branch_dir.as_deref(),
                     file,
                     &text,
                     &file.file_name,
@@ -635,11 +652,21 @@ pub async fn fetch_cloud_preset(
                  * 用户已经点了"导入"：自动改一个**没被占的**名字落一份新的。
                  * 原来那份一个字节不动 —— 两份同名是不允许的，但两份内容并存是用户要的。
                  */
-                let name = untaken_name(&user, &file.file_name);
+                let name = untaken_name(&user, branch_dir.as_deref(), &file.file_name);
                 let text = runtime::delivery::cloud_text(&root, file)?;
                 let dir = crate::fsx::paths::LOCAL_DIR;
-                let rel = format!("{dir}/{name}");
-                runtime::local::save_cloud_as_new(&user, file, &text, &name, line.as_ref())?;
+                let rel = match &branch_dir {
+                    Some(sub) => format!("{dir}/{sub}/{name}"),
+                    None => format!("{dir}/{name}"),
+                };
+                runtime::local::save_cloud_as_new_in(
+                    &user,
+                    branch_dir.as_deref(),
+                    file,
+                    &text,
+                    &name,
+                    line.as_ref(),
+                )?;
                 /* 原文镜像同上一支 */
                 let _ = runtime::baseline::refresh_origin_copy(&root, &user, &rel);
                 /* 撞名另存也是从云端下载来的，照样记（用户看到的仍不是"拷贝"） */
@@ -658,7 +685,7 @@ pub async fn fetch_cloud_preset(
                     file.file_name.clone(),
                     rel.clone(),
                     Some(rel),
-                    Some(untaken_name(&user, &file.file_name)),
+                    Some(untaken_name(&user, branch_dir.as_deref(), &file.file_name)),
                 )
             };
             Ok(FetchCloudDto {

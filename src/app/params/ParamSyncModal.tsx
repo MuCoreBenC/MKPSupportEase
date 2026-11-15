@@ -9,7 +9,8 @@
  *
  * 云端持续发布新默认值，但它**不许直接顶掉本地参数**。于是每一版发布之后，
  * 云端改过的那几项先是**待处理**：我这里列出来，用户勾选（采用云端新值）；
- * **不勾 = 还没表态**，它继续待处理，下次还能再选。
+ * **不勾 = 保持原值**，同样是一次明确决定 —— 一次「应用」把这一版处理完，
+ * 行上不再挂「有新版本」。值仍在文件里，想改随时自己改。
  *
  * ★ **这一屏不再写盘**（2026-10-20 作者：「应该保存的时候才算真的用，跟编辑一样」）：
  *   点「应用」只是把勾上的项写进**草稿**（一次撤销能整批退回来）；真正的落盘在
@@ -96,8 +97,8 @@ interface Props {
    */
   draftOf?: (key: string) => 'adopt' | 'hold' | null
   /**
-   * 把这一批**勾选的**交回去（未勾的不送 = 还没表态，继续待处理）—— **只写进草稿**，
-   * 「保存」才落盘。空数组 = 一项都没勾。
+   * 把这一屏的决定交回去 —— **全部待处理项**：勾的 `adopt`、没勾的 `hold`。
+   * **只写进草稿**，「保存」才落盘。
    */
   onDecide: (decisions: ParamDecision[]) => void
   onClose: () => void
@@ -181,17 +182,6 @@ export default function ParamSyncModal({
   const chosen = pending.filter((e) => checked[e.key] === true).length
   const all = pending.length
   /*
-   * 这一趟「应用」会落几笔「保持原值」：**机器专属那几项没勾的**（默认保持）。
-   * 其余没勾的照旧不算 —— 它们还没表态，这一屏不该替用户拒绝。
-   */
-  const machineHolds = pending.filter(
-    (e) => checked[e.key] !== true && neverPreset(e.key),
-  ).length
-  /** 这一屏关掉之后仍会挂着「待处理」的项数（给按钮 tooltip 用） */
-  const stillPending = pending.filter(
-    (e) => checked[e.key] !== true && !neverPreset(e.key),
-  ).length
-  /*
    * **云端这一版的字节还没取回来**（从预设页「更新」顺势进来时常见）：
    * 那一瞬间 `pendingCount` 天然是 0（缺新值就不报待处理）——
    * 那不是"这一版没有要改值的参数"，不许拿它显示「应用这 0 项」。
@@ -227,27 +217,22 @@ export default function ParamSyncModal({
   }
 
   /*
-   * 交回去的是两批：
+   * 交回去的是**全部待处理项**：
    *
-   *   · **勾上的** ⇒ 采用；
-   *   · **机器专属那几项没勾** ⇒ 保持原值（它们的数是逐台标定出来的，云端换默认值
-   *     本来就不该动它 —— 所以这几项不再"没勾就一直挂着"，而是默认保持）。
+   *   · 勾上的 ⇒ 采用云端值；
+   *   · 没勾的 ⇒ 保持原值。
    *
-   * 其余没勾的（没冲突 / 有冲突那两组）**什么都不交** = 还没表态，继续待处理。
-   * 把那些也补成 `hold` 会让"勾 1 项"实际提交 1 adopt + N-1 hold，`remaining` 归零、
-   * 来源记录被推进，剩下那几项再也回不来。
-   * 行上显式点过的「保持原样」不靠这一屏补发 —— 它已经在 `syncDecisions` 里，
-   * 保存那一趟会带上（那是用户真做过的决定，与"没勾"不是一回事）。
+   * 「不勾」必须是一个决定。只交勾上的那几项，剩下的就还是"没表态"：来源记录不推进、
+   * 行上永远挂「有新版本」—— 用户点了应用却没结束，那一趟等于白做。
+   * 保持原值的项不会丢：值就在文件里，决定账也记着（「更多」里能查到）。
    */
   const confirm = () => {
-    onDecide([
-      ...pending
-        .filter((e) => checked[e.key] === true)
-        .map((e) => ({ paramKey: e.key, kind: 'adopt' as const })),
-      ...pending
-        .filter((e) => checked[e.key] !== true && neverPreset(e.key))
-        .map((e) => ({ paramKey: e.key, kind: 'hold' as const })),
-    ])
+    onDecide(
+      pending.map((e) => ({
+        paramKey: e.key,
+        kind: checked[e.key] === true ? ('adopt' as const) : ('hold' as const),
+      })),
+    )
     onClose()
   }
 
@@ -309,18 +294,12 @@ export default function ParamSyncModal({
               type="button"
               className={s.primary}
               disabled={fetching}
-              /* 没勾的那几项**不处理**：这里说清，别让人以为"点一下全处理了" */
-              title={
-                stillPending > 0
-                  ? tr('params.sync.applyRest', { count: stillPending })
-                  : undefined
-              }
               onClick={confirm}
             >
-              {/* 有几笔默认保持时，说"勾选的 N 项"就漏了它们 */}
-              {machineHolds > 0
-                ? tr('params.sync.applyN', { count: chosen + machineHolds })
-                : tr('params.sync.apply', { count: chosen })}
+              {/* 数字 = 本次**采用**的项数；没勾的按保持原值一并处理完 */}
+              {chosen > 0
+                ? tr('params.sync.apply', { count: chosen })
+                : tr('params.sync.holdAll')}
             </button>
           )}
         </>

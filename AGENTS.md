@@ -152,6 +152,19 @@ publishSerial  → 发布有没有往前走（单调，回滚也 +1）
 - 客户端产物在仓库根 `target/`，不是 `src-tauri/target/`（后者是死目录，别拿错）。
 - 工作台 dev 带 `--no-watch`：改 Rust 必须手动重启。
 
+## 6.6 状态行为先改表
+
+```text
+docs/PRESET-UPDATE-SPEC.md   「动作 × 决定 → 状态」的唯一规格
+```
+
+- 改徽章、按钮、判定档之前**先改表**；表里每一行都要能在
+  `src/app/presets/presetTree.test.ts` 或 `src-tauri/src/ipc/param_sync.rs` 的测试里找到。
+- 状态只有两个出口：后端 `runtime::local::based_on`、前端 `updateStatusOf`。
+  别处再判一套就算违约。
+- 「不勾 = 没表态」不成立：一次「应用」交回**全部**待处理项，没勾的是 `hold`（保持原值），
+  这一版就此结清，行上不许再挂「有新版本」。
+
 ## 7. 收工口径
 
 达成 / 未达成 · 台账几条 · 下一步。

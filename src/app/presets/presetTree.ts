@@ -632,6 +632,60 @@ export function identityRefOf(key: string | null | undefined): string | null {
   return ref !== '' && ref !== '-' ? ref : null
 }
 
+/**
+ * 这份用户文件**属于哪个来源分支**（ref）。`null` = 没有来源记录（导入 / 手拖）。
+ *
+ * 只用它分组与筛选：版本新旧仍然由 Rust 侧 `based_on` 回答，这里不重算任何判定。
+ */
+export function branchOf(
+  facts: { sourceRef?: string | null } | null | undefined,
+): string | null {
+  return identityRefOf(facts?.sourceRef ?? null)
+}
+
+/**
+ * 这份用户文件是不是**下载建的主份**。
+ *
+ * 云端那一行只认它：同一份云端可能被「另存为 / 复制」出好几份，副本各有各的
+ * 更新按钮，但不该把云端行拖成「有新版本」。没账的老文件（`null`）当主份 ——
+ * 把它们排除掉会让云端行显示「未下载」。
+ */
+export function isMainCopy(f: { provenanceKind?: string | null }): boolean {
+  const kind = f.provenanceKind
+  return kind === undefined || kind === null || kind === 'download'
+}
+
+/**
+ * 这一份（属于 `mine` 支）算不算"当前这一支的"。
+ *
+ * - 当前源没有 ref（自建源）⇒ 一律算（不隔离）
+ * - 这一份没有来源记录 ⇒ 算（导入 / 老副本，不属于任何分支）
+ * - 两边都有且不同 ⇒ **不算**（它在盘上照旧存在，只是不参与当前这一支的认领）
+ */
+export function branchMatches(mine: string | null, current: string | null): boolean {
+  return current === null || mine === null || mine === current
+}
+
+/**
+ * 本地表筛选：这一行在 `filter` 档下留不留。
+ *
+ * `hasSource` = 这份文件尾部**有没有来源记录**（`basedOnFacts.sourceRef` 非空）。
+ * 它和"分支名"是两件事：自建源（`http://127.0.0.1:8787` 那种）记着来源、但**没有
+ * 分支概念**（ref 是 `-`）—— 那种文件属于"当前源"，不是「没有来源」。
+ * 只有导入 / 手拖进来、压根没有来源记录的，才进「没有来源」那一档。
+ */
+export function branchKept(
+  mine: string | null | undefined,
+  hasSource: boolean,
+  filter: BranchFilter,
+  current: string | null,
+): boolean {
+  if (filter === 'all') return true
+  if (filter === 'unfiled') return !hasSource
+  /* 当前分支：没有来源记录的也留着 —— 在哪个分支下藏掉它都等于说"你那份不见了" */
+  return !hasSource || branchMatches(mine ?? null, current)
+}
+
 /** `github#owner/repo@main` → `GitHub · main`（有新版那一行显示"从哪来的新版"） */
 export function identityDisplayOf(tr: Tr, key: string | null | undefined): string | null {
   if (!key) return null
@@ -1821,6 +1875,13 @@ export interface PresetLocalRow extends PresetRowBase {
   basedOnFacts?: BasedOnFacts
   basedOn?: BasedOn
   /**
+   * 这份文件属于哪个来源分支（ref）；`null` = 没有来源记录（导入 / 手拖）。
+   *
+   * 分支之间靠**磁盘目录**隔离（各落各的文件夹），这一格只供筛选与"我这儿有没有
+   * 这一支的"使用 —— 不参与版本判定。
+   */
+  branch?: string | null
+  /**
    * 来源记录里记的来源原文（`delivery/mkp/presets/A1-standard.toml`）。没有来源记录是 `null`。
    * **老文件里可能记着旧形状（`mkp/presets/…`）** —— 那种认不出就是 `unknown`，
    * 不回填、不猜（文件本身照旧能读能改能应用）。
@@ -2017,7 +2078,17 @@ export interface PresetRowsInput {
    * **判据不读它**：那是 Rust 侧 `based_on` 的事。
    */
   sourceIdentity: string | null
+  /**
+   * 本地表按**来源分支**筛：`current` = 当前分支 + 没有来源（默认）；
+   * `all` = 全都列；`unfiled` = 只列没有来源的。
+   *
+   * 只有本机存在多个分支时才在界面上给这一档（见 `PagePresets` 的筛选排）。
+   */
+  branchFilter?: BranchFilter
 }
+
+/** 本地表的分支筛选档（见 `PresetRowsInput.branchFilter`） */
+export type BranchFilter = 'current' | 'all' | 'unfiled'
 
 /**
  * 目录里登记的一份交付预设，摊平成行要用的形状。
@@ -2552,6 +2623,7 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
         /* 来源记录：它当初基于云端哪一版、那一版现在还在不在（第七层） */
         basedOn: f.basedOn,
         basedOnFacts: f.basedOnFacts,
+        branch: branchOf(f.basedOnFacts),
         basedOnSource: f.basedOnLabel,
         basedOnCloud: source,
 
@@ -2777,9 +2849,27 @@ export function localRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
     })
 
   const all = [...assetRows, ...local, ...presetRows]
+  /*
+   * 本地表按**来源分支**筛（云端表不筛：它永远只有当前分支的目录）。
+   *
+   * `current` 把"没有来源"的那批一起留着 —— 导入 / 手拖进来的文件不属于任何分支，
+   * 在哪个分支下藏掉它都等于说"你那份不见了"。
+   */
+  const currentRef = identityRefOf(input.sourceIdentity)
+  const branchFilter = input.branchFilter ?? 'current'
+  const keepsBranch = (row: PresetLocalRow): boolean =>
+    /* 切片器那一档与来源分支无关 */
+    row.origin !== 'local' ||
+    branchKept(
+      row.branch,
+      row.basedOnFacts?.sourceRef != null,
+      branchFilter,
+      currentRef,
+    )
+  const kept = all.filter(keepsBranch)
   return {
-    rows: sortRows(all.filter((r) => fileMatchesQuery(r, query)), sort),
-    total: all.length,
+    rows: sortRows(kept.filter((r) => fileMatchesQuery(r, query)), sort),
+    total: kept.length,
   }
 }
 
@@ -2893,11 +2983,28 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
   const claims = new Map<string, { basedOn: BasedOn; facts: BasedOnFacts }>()
   if (kind === 'mkp') {
     const indexByPath = new Map(input.localIndex.map((e) => [e.path, e]))
+    /* 当前这一支的 ref；没有 ref（自建源）时不做隔离 */
+    const currentRef = identityRefOf(sourceIdentity)
     for (const f of input.local) {
       if (f.kind !== 'mkp_preset') continue
       const entry = indexByPath.get(f.path)
       /* 账本里没有它 → 不认领（复制 / 拖回 / 导入 / 恢复的那些都在这一档） */
       if (entry === undefined) continue
+      /*
+       * 云端行只认**下载建的主份**。
+       *
+       * 副本（`… copy 2.toml`）各自在本地表里显示自己的「有新版本」、各自点更新；
+       * 它们落后不该让云端那一行永远挂着更新按钮 —— 用户点一次更新只处理他那一次。
+       */
+      if (!isMainCopy(f)) continue
+      /*
+       * **分支隔离**：别的分支下载的那一份，不算"我这儿有这一支的"。
+       *
+       * 不隔离的话，A 分支留着的那份会把 B 分支的云端行压成「不同分支」——
+       * 用户不把它删掉就永远下不了 B 分支的一份，而删掉又意味着丢掉 A 分支那份。
+       * 来源分支明确不同才算；没有记录的老副本照旧认领（与以前一致）。
+       */
+      if (!branchMatches(branchOf(f.basedOnFacts), currentRef)) continue
       /*
        * 认领者里**只要有一份不是 current**，这一行就还有「更新」要做
        * （更新是"把云端新版处理到本地这份上"，陈旧的认领者需要它）——

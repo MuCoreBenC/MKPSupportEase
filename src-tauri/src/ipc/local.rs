@@ -1269,9 +1269,24 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
                     .map(|f| f.path)
                     .unwrap_or_else(|| draft.source_file_name.clone());
 
+                /*
+                 * 这一份是从**当前源**派生的 ⇒ 落进当前分支的文件夹。
+                 * 自建源没有 ref ⇒ `None` ⇒ 保持平铺。
+                 */
+                let identity = runtime::app_state::preset_source(&root)
+                    .ok()
+                    .flatten()
+                    .and_then(|s| runtime::source_identity::identity_of(&s));
+                let branch_dir = identity
+                    .as_ref()
+                    .map(|id| runtime::branch_dir::folder_for(&root, id))
+                    .transpose()?
+                    .flatten();
+
                 /* 另存本体在 `runtime::local`（纯函数、有判据盯着"云端原件一动不动"） */
-                let done = runtime::local::commit_draft(
+                let done = runtime::local::commit_draft_in(
                     &user_root,
+                    branch_dir.as_deref(),
                     &draft.source_file_name,
                     &based_on,
                     &draft.text,
@@ -1285,10 +1300,6 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
                  * 那正是把用户往旧源上带的那个「有新版」。
                  * 记不上不影响保存（附加信息，与出处账同一条口径）。
                  */
-                let identity = runtime::app_state::preset_source(&root)
-                    .ok()
-                    .flatten()
-                    .and_then(|s| runtime::source_identity::identity_of(&s));
                 /*
                  * 来路账：这一份是"在哪个源、哪一代目录下"从云端落成的。
                  * 已经有账（先前下载过、这是编辑保存）⇒ 保留原 kind / 母本，

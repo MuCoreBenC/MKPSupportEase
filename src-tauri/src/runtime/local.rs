@@ -817,8 +817,22 @@ pub fn commit_draft(
     based_on: &str,
     text: &str,
 ) -> Result<Committed, AppError> {
+    commit_draft_in(user_root, None, source_file_name, based_on, text)
+}
+
+/// 同 [`commit_draft`]，但可以落进**当前分支的文件夹**（从云端另存的那一份跟着这一支走）。
+pub fn commit_draft_in(
+    user_root: &Path,
+    subdir: Option<&str>,
+    source_file_name: &str,
+    based_on: &str,
+    text: &str,
+) -> Result<Committed, AppError> {
     let file_name = edited_name(source_file_name);
-    let rel = format!("{LOCAL_DIR}/{file_name}");
+    let rel = match subdir.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(dir) => format!("{LOCAL_DIR}/{dir}/{file_name}"),
+        None => format!("{LOCAL_DIR}/{file_name}"),
+    };
     /* 名字是从目录里的文件名派生的，但仍然过一遍防穿越闸 */
     let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
     let replaced = target.exists();
@@ -1387,6 +1401,21 @@ pub fn save_cloud_as_new(
     new_name: &str,
     line: Option<&CatalogLine>,
 ) -> Result<FileIdentity, AppError> {
+    save_cloud_as_new_in(user_root, None, file, cloud_text, new_name, line)
+}
+
+/// 同 [`save_cloud_as_new`]，但可以落到**分支文件夹**里（`presets-local/<subdir>/`）。
+///
+/// 分支隔离靠目录：不同分支的同名文件各占一格，谁也不会把对方顶成"已经有一份"。
+/// `None` = 这个源没有分支概念（或这是导入的无来源文件），仍落平铺。
+pub fn save_cloud_as_new_in(
+    user_root: &Path,
+    subdir: Option<&str>,
+    file: &CatalogFile,
+    cloud_text: &str,
+    new_name: &str,
+    line: Option<&CatalogLine>,
+) -> Result<FileIdentity, AppError> {
     if file.kind != PRESET {
         return Err(AppError::invalid_argument(messages::text(
             "ui.runtime.local.411",
@@ -1395,7 +1424,10 @@ pub fn save_cloud_as_new(
     }
     /* 这一路的名字一般是调用方照云端原名起的，与改名 / 复制同一套门槛（能修的修好） */
     let (name, adjusted) = normalize_new_name(&file.file_name, new_name)?;
-    let rel = format!("{LOCAL_DIR}/{name}");
+    let rel = match subdir.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(dir) => format!("{LOCAL_DIR}/{dir}/{name}"),
+        None => format!("{LOCAL_DIR}/{name}"),
+    };
     let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
     if target.exists() {
         return Err(AppError::invalid_argument(messages::text(
@@ -3113,6 +3145,50 @@ mod tests {
             .unwrap();
         assert_eq!(done.file_name, "..外面.toml", "剔掉那两个分隔符");
         assert!(done.adjusted);
+    }
+
+    /// **分支隔离**：落子目录时文件真的在 `presets-local/<分支>/` 里；
+    /// 两个分支的同名文件互不冲突（各自一份，谁也没盖掉谁）
+    #[test]
+    fn saving_official_as_new_can_land_in_a_branch_folder() {
+        let user = tempfile::tempdir().unwrap();
+        let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
+
+        let main = save_cloud_as_new_in(
+            user.path(),
+            Some("main"),
+            &file,
+            "涂胶宽度 = 1.0\n",
+            "A1-standard.toml",
+            None,
+        )
+        .unwrap();
+        assert_eq!(main.path, "presets-local/main/A1-standard.toml");
+        assert!(user.path().join(&main.path).is_file());
+
+        /* 另一支放同名的那一份：不该被判成"已经有这份" */
+        let delivery = save_cloud_as_new_in(
+            user.path(),
+            Some("delivery"),
+            &file,
+            "涂胶宽度 = 1.0\n",
+            "A1-standard.toml",
+            None,
+        )
+        .unwrap();
+        assert_eq!(delivery.path, "presets-local/delivery/A1-standard.toml");
+        assert!(user.path().join(&delivery.path).is_file());
+
+        /* 同一支里再放一份同名 ⇒ 拒（分支内部的撞名规矩不变） */
+        assert!(save_cloud_as_new_in(
+            user.path(),
+            Some("main"),
+            &file,
+            "涂胶宽度 = 1.0\n",
+            "A1-standard.toml",
+            None,
+        )
+        .is_err());
     }
 
     /// 只有 MKP 预设能另存成本地这份：切片器 profile（json）那类拒

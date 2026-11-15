@@ -3205,6 +3205,12 @@ text_zh_tw = "讀不到這份備份：{v1}"
 text_ja = "このバックアップを読み取れません：{v1}"
 params = ["v1"]
 
+["ui.runtime.branch_dir.1"]
+text = "记不下这个分支的文件夹"
+text_en = "Cannot record the folder for this branch"
+text_zh_tw = "記不下這個分支的資料夾"
+text_ja = "このブランチのフォルダーを記録できません"
+
 ["ui.runtime.backup.360"]
 text = "这不是一份 SupportEase 备份（里面没有说明书）"
 text_en = "This is not a SupportEase backup (it has no manifest)"

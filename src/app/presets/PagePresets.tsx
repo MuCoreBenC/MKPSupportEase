@@ -220,7 +220,7 @@ import CompareModal from './CompareModal'
 import PlacementsModal from './PlacementsModal'
 import TextDiffModal from './TextDiffModal'
 import PresetScopeBar from './PresetScopeBar'
-import PresetStatusPill, { PresetSlicerPill } from './PresetStatusPill'
+import PresetStatusPill, { PresetBranchFilter, PresetSlicerPill } from './PresetStatusPill'
 import PresetTable from './PresetTable'
 import {
   ARCHIVE_DRAWER,
@@ -241,6 +241,7 @@ import {
   defaultNameOf,
   duplicateNameOf,
   isDetachedCopy,
+  isMainCopy,
   localUnreadableWhy,
   localCountOfAxis,
   treeCountOfAxis,
@@ -1614,6 +1615,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     page.setKind('mkp')
     page.setScope('local')
     data.pickMachine('')
+    /* 在用的那份可能来自别的分支 —— 不放开分支筛选就找不到它 */
+    page.setBranchFilter('all')
     window.setTimeout(() => {
       const row = rootRef.current?.querySelector('tr[data-live="true"]') as HTMLElement | null
       if (row !== null) flashRow(row)
@@ -1652,6 +1655,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     if (target.kind !== null) page.setKind(target.kind)
     data.pickMachine('')
     page.setQuery('')
+    /* 目标行可能在另一个分支下 —— 同上，放开分支筛选才送得到 */
+    page.setBranchFilter('all')
     /* `expandedKey` **一个字都不动** —— 见上面那段：只滚 + 闪，不动他手上那张卡 */
     window.setTimeout(() => {
       const row = rootRef.current?.querySelector(
@@ -1927,6 +1932,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           const entry = indexByPath.get(f.path)
           return (
             f.kind === 'mkp_preset' &&
+            /* 只动**下载建的主份**：副本各有各的更新，不被这一下波及 */
+            isMainCopy(f) &&
             entry !== undefined &&
             entry.cloudSource === fileName &&
             f.basedOn !== 'current'
@@ -4187,6 +4194,20 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   machineId={data.machineId}
                   onPick={pickMachine}
                 />
+                {/*
+                 * **分支筛选**：只在本地表、且本机出现过两个以上分支时出现。
+                 *
+                 * 和机型筛选**同一颗件、同一张弹层**（`PresetBranchFilter`），只是
+                 * 默认档是「当前分支」—— 别的分支那几份仍在盘上，切到「全部来源」才看得见。
+                 * 只有一个分支的用户完全看不到这一格。
+                 */}
+                {page.scope === 'local' && page.branches.length >= 2 ? (
+                  <PresetBranchFilter
+                    current={page.currentBranch}
+                    value={page.branchFilter}
+                    onPick={page.setBranchFilter}
+                  />
+                ) : null}
                 {metaNode}
               </span>
             </>

@@ -517,6 +517,22 @@ fn roll_origins(
 ///
 /// `decisions` 为空 = 「应用 0 项」：值一个不动，骨架与来源记录照样推进 —— 于是云端
 /// 只改了注释 / 时间戳那种换版也会被消化掉，「有新版」不再一直挂着。
+/// 这一批决定之后**还剩几项没表态**。
+///
+/// 判据只有一条：这一项在这次交上来的决定里**有没有** —— `adopt` 与 `hold` 都算表态
+/// （保持原值也是一个决定），只有"什么都没交"才是没表态。
+///
+/// 它决定来源记录推不推进：归零 ⇒ 追加一条履历（行上不再挂「有新版本」）。
+fn remaining_after(
+    entries: &[ParamSyncEntryDto],
+    decided: &BTreeMap<&str, ParamDecisionKind>,
+) -> usize {
+    entries
+        .iter()
+        .filter(|e| e.pending && !decided.contains_key(e.key.as_str()))
+        .count()
+}
+
 fn apply_at(
     root: &std::path::Path,
     user: &std::path::Path,
@@ -620,11 +636,7 @@ fn apply_at(
      *   反过来，`remaining > 0`（部分更新）时来源记录原样保留 —— 序号也**不前进**，
      *   于是它仍然显示「有新版」。那是对的：这一趟确实没接受完。
      */
-    let remaining = before
-        .entries
-        .iter()
-        .filter(|e| e.pending && !kinds.contains_key(e.key.as_str()))
-        .count();
+    let remaining = remaining_after(&before.entries, &kinds);
     /* 更新后账上要写"对应哪一版"——先用云端文件名，别等 cloud_path 被 move 走 */
     let cloud_file = cloud_path
         .rsplit('/')
@@ -1836,6 +1848,67 @@ mod tests {
             after.text,
             runtime::provenance::strip_for_compare(&w.local_text()),
             "草稿正文要跟着新文件走"
+        );
+    }
+
+    /// **全不勾 = 全保持原值**：值一个都不改，但这一版算处理完 ——
+    /// 履历推进到云端这一版，`based_on` 从 `outdated` 回到 `current`。
+    ///
+    /// 这一条钉的是"点了应用却没结束"那个 bug：只交勾上的项，剩下的算没表态，
+    /// 来源记录不推进，行上永远挂「有新版本」。
+    #[test]
+    fn holding_everything_settles_the_update() {
+        let w = World::new();
+
+        let sync = sync_at(&w.root, &w.user, LOCAL, false).unwrap();
+        let pending: Vec<ParamSyncEntryDto> =
+            sync.entries.iter().filter(|e| e.pending).cloned().collect();
+        assert!(!pending.is_empty(), "夹具该有一项待处理");
+
+        let decisions: Vec<ParamDecisionDto> = pending
+            .iter()
+            .map(|e| ParamDecisionDto {
+                param_key: e.key.clone(),
+                kind: "hold".to_owned(),
+            })
+            .collect();
+        apply_at(&w.root, &w.user, LOCAL, &decisions).unwrap();
+
+        /* 处理完就不该再有待处理项（这一版结清） */
+        let after = sync_at(&w.root, &w.user, LOCAL, false).unwrap();
+        assert!(
+            after.entries.iter().all(|e| !e.pending),
+            "全交 hold 之后这一版应当结清"
+        );
+
+        /* 值仍是本地那个（-5），云端那个没顶上来 */
+        let text = w.local_text();
+        assert!(text.contains("-5"), "保持原值：本地值不许被云端顶掉");
+
+        /* 履历推进到云端这一版（摘要对得上），"有新版本"的根就此断掉 */
+        let source = runtime::provenance::parse(&text);
+        let latest = source
+            .as_ref()
+            .and_then(|p| p.latest_version())
+            .expect("处理完这一版要追加履历");
+        assert_eq!(
+            latest.sha256.as_deref().map(str::to_ascii_lowercase),
+            Some(w.current_sha.to_ascii_lowercase()),
+            "履历记的必须是云端这一版"
+        );
+
+        /* 判定不再说「有新版本」（夹具目录没有 publishSerial，细致档位由别的用例覆盖） */
+        let catalog = runtime::load_released_catalog(&w.root).unwrap();
+        let ledger = runtime::source_ledger::provenance_of(&w.root, LOCAL);
+        let judge = runtime::local::Judge {
+            catalog: &catalog,
+            cloud: None,
+        };
+        let v = runtime::local::based_on(&judge, source.as_ref(), ledger.as_ref());
+        assert_ne!(
+            v.based_on,
+            runtime::local::BasedOn::Outdated,
+            "处理完这一版就不该再报有新版本"
         );
     }
 

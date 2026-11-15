@@ -92,15 +92,18 @@ import type { DeliveryPresetSource } from './presetTree'
 import {
   applySlicerFilters,
   archivedIds,
+  branchOf,
   buildPresetTree,
   catalogKindToFileKind,
   cloudRows,
+  identityRefOf,
   localRows,
   machineNode,
   machinesInScope,
   slicerFilterValues,
 } from './presetTree'
 import type {
+  BranchFilter,
   PresetCloudRow,
   PresetKindAxis,
   PresetLocalRow,
@@ -1589,6 +1592,17 @@ export interface PresetPage {
   query: string
   setQuery: (next: string) => void
   searching: boolean
+  /**
+   * 本地表的**分支筛选**（当前分支 / 全部 / 没有来源）。
+   *
+   * `branches.length < 2` 时页面不渲染这个下拉 —— 只有一个分支的用户看不到它。
+   */
+  branchFilter: BranchFilter
+  setBranchFilter: (next: BranchFilter) => void
+  /** 本机出现过的来源分支（含当前这一支），已排序 */
+  branches: string[]
+  /** 当前源的分支；自建源没有 ref ⇒ `null` */
+  currentBranch: string | null
 
   /**
    * 切片器的喷嘴 / 层高筛选。MKP 没有这两个字段 ——
@@ -1645,6 +1659,14 @@ export function usePresetPage(data: PresetData): PresetPage {
   const deferredQuery = useDeferredValue(query)
   const [kind, setKind] = useSessionState<PresetKindAxis>('presets.kind', 'mkp')
   const [scope, setScope] = useSessionState<PresetScopeAxis>('presets.scope', 'local')
+  /*
+   * 本地表按**来源分支**筛。默认「当前分支 + 没有来源」—— 只有一个分支时这个下拉
+   * 根本不出现，普通用户看不到分支这回事。
+   */
+  const [branchFilter, setBranchFilter] = useSessionState<BranchFilter>(
+    'presets.branch',
+    'current',
+  )
   /* 切片器的喷嘴 / 层高筛选。空串 = 「全部」。落会话：切页对一眼回来不该复位 */
   const [nozzle, setNozzle] = useSessionState('presets.nozzle', '')
   const [layer, setLayer] = useSessionState('presets.layer', '')
@@ -1736,6 +1758,22 @@ export function usePresetPage(data: PresetData): PresetPage {
     [data.machineId, data.tree],
   )
 
+  /*
+   * **本机出现过的来源分支**（含当前这一支）—— 只决定"要不要给下拉"。
+   *
+   * 只有一个分支时不出现任何分支控件：普通用户不该知道分支是什么。
+   */
+  const branchInfo = useMemo(() => {
+    const seen = new Set<string>()
+    for (const f of data.local) {
+      const ref = branchOf(f.basedOnFacts)
+      if (ref !== null) seen.add(ref)
+    }
+    const current = identityRefOf(data.sourceIdentity)
+    if (current !== null) seen.add(current)
+    return { branches: [...seen].sort((a, b) => a.localeCompare(b)), current }
+  }, [data.local, data.sourceIdentity])
+
   /* 两张表的输入是同一份 —— 拼一次，两个纯函数各取所需 */
   const input = useMemo(
     (): PresetRowsInput => ({
@@ -1763,9 +1801,10 @@ export function usePresetPage(data: PresetData): PresetPage {
       catalogSerial: data.delivery.catalogSerial,
       sourceIdentity: data.sourceIdentity,
       remarks: data.remarks,
+      branchFilter,
     }),
     /* `data` 一个就够（`data.xxx` 都在它下面 —— 单列出来 eslint 会报"多余"） */
-    [data, copiedSet, kind, localSet, machines, pinned, deferredQuery, sort],
+    [data, copiedSet, kind, localSet, machines, pinned, deferredQuery, sort, branchFilter],
   )
 
   /*
@@ -1883,6 +1922,11 @@ export function usePresetPage(data: PresetData): PresetPage {
     query,
     setQuery,
     searching: query.trim() !== '',
+    /* 分支筛选：只有一个分支时页面不渲染它（`branches.length` 由页面判断） */
+    branchFilter,
+    setBranchFilter,
+    branches: branchInfo.branches,
+    currentBranch: branchInfo.current,
     slicerFilters: {
       nozzles: slicerValues.nozzles,
       allLayers: slicerValues.layers,

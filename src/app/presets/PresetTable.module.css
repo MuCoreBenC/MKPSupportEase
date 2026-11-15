@@ -270,8 +270,14 @@
 /* 事实列（机型 / 版本 / 喷嘴 / 层高 / 时间）表头居中；名称列唯一左对齐 */
 .head th.thMachine,
 .head th.thVersion,
+/*
+ * 数字列与时间列：表头与格子**同一个对齐**（`.stat` 是居中的）。
+ * 云端档用的是另一档列宽（`.thTimeCloud`），漏了它就会出现"表头靠左、日期居中"
+ * 那种错位 —— 只改宽度不改对齐，必然对不上。
+ */
 .head th.thNum,
-.head th.thTime {
+.head th.thTime,
+.head th.thTimeCloud {
   text-align: center;
 }
 
