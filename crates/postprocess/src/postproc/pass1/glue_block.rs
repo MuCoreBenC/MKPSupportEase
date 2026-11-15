@@ -143,7 +143,7 @@ fn glue_nozzle_z(ir_data: &Ir, layer_z: f64, kind: PenZ) -> f64 {
 /// 要么按涂胶线原样发出 —— 两者都会让笔在落笔高度飞过一段距离。
 /// 这里按「连续空走」整段抬着走完，返回第一条未消费的下标。
 /* 8 个入参全是从调用点现拿的事实（层高 / 两个高度 / 笔在不在上面），
-   不值得为它造一个只在这个文件里用一次的包装结构。 */
+不值得为它造一个只在这个文件里用一次的包装结构。 */
 #[allow(clippy::too_many_arguments)]
 fn emit_jump_run(
     sink: &mut LineSink,
