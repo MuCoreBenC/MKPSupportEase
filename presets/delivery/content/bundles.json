@@ -18,7 +18,7 @@
         "a1-fast",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-11-12"
+      "updatedAt": "2026-11-14"
     },
     {
       "id": "A1_FAST261111",
@@ -28,7 +28,7 @@
         "a1-fastv3.3",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-11-12"
+      "updatedAt": "2026-11-14"
     },
     {
       "id": "A1_MINI_STANDARD",
@@ -48,7 +48,7 @@
         "a1_mini-fast",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-11-12"
+      "updatedAt": "2026-11-14"
     },
     {
       "id": "A1_MINI_FAST261111",
@@ -58,7 +58,7 @@
         "a1_mini-fastv3.3",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-11-12"
+      "updatedAt": "2026-11-14"
     },
     {
       "id": "P1S_default",
