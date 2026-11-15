@@ -3582,4 +3582,12 @@ export const wb = {
    * 不提交 Git。交付集合没收敛 / 目录不是当前代时后端**整笔拒绝**，一个字节都不写。
    */
   updatePublishCredentials: () => invoke<CredentialUpdate>('wb_update_publish_credentials'),
+
+  /**
+   * 写系统剪贴板：与客户端同一条 Rust 命令（`copy_text`）。
+   *
+   * ★ 不用 `navigator.clipboard`：它要看用户手势，先 await 过 IPC 的按钮会被拒
+   *   （见 `ipc::copy_text` 的头注）。
+   */
+  copyText: (text: string) => invoke<void>('copy_text', { text }),
 }

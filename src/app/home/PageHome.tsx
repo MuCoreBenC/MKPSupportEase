@@ -1101,15 +1101,20 @@ export default function PageHome({ density }: PageHomeProps) {
           noteCopyProblem(cmd.reason ?? msg('home.script.notReady'))
           return
         }
-        void navigator.clipboard.writeText(cmd.command).then(
+        void api.copyText(cmd.command).then(
           () => {
             setScriptCopied(true)
             if (scriptTimer.current !== null) window.clearTimeout(scriptTimer.current)
             scriptTimer.current = window.setTimeout(() => setScriptCopied(false), 1500)
           },
-          (e: unknown) => {
+          () => {
             setScriptCopied(false)
-            notify({ kind: 'bad', title: errorText(e), ttl: 6000 })
+            notify({
+              kind: 'bad',
+              title: msg('copyScript.failed.title'),
+              text: msg('copyScript.failed.text'),
+              ttl: 6000,
+            })
           },
         )
       },

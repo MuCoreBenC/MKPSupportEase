@@ -4308,6 +4308,16 @@ export interface MkpApi {
    */
   openUrl(url: string): Promise<void>
 
+  /**
+   * **把一段文本写进系统剪贴板** —— 界面所有「复制」的落地。
+   *
+   * ★ 不走 `navigator.clipboard`：macOS 的 WebView 只在**用户手势还活着**的上下文里
+   *   放行写入。「使用之后自动复制后处理脚本」那条链是从 AppState 广播里起的，
+   *   手里没有手势 ⇒ 必被拒，而拒的时候抛的是 WebKit 的一串英文原话。
+   *   写剪贴板是系统的事，由 Rust 那一侧做（`ipc::copy_text`）。
+   */
+  copyText(text: string): Promise<void>
+
   /* ---------- baseline + 对比台（2026-10-08） ---------- */
 
   /**

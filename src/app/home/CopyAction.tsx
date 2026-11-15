@@ -15,7 +15,7 @@
 
 import { t as i18nT, useT } from '../../i18n'
 import { useEffect, useRef, useState } from 'react'
-import { errorText } from '../../api'
+import { api, errorText } from '../../api'
 import type { PostProcessCommand } from '../../api'
 import s from './CopyAction.module.css'
 
@@ -67,7 +67,14 @@ export default function CopyAction({ label, load, onNote }: CopyActionProps) {
         onNote(cmd.reason ?? i18nT('copyScript.notReady'))
         return
       }
-      await navigator.clipboard.writeText(cmd.command)
+      /* 写剪贴板走 Rust（`api.copyText`）：webview 那套要看用户手势，见 `ipc::copy_text` */
+      try {
+        await api.copyText(cmd.command)
+      } catch {
+        setCopied(false)
+        onNote(i18nT('copyScript.failed.text'))
+        return
+      }
       setCopied(true)
       if (timer.current !== null) window.clearTimeout(timer.current)
       timer.current = window.setTimeout(() => setCopied(false), 1500)

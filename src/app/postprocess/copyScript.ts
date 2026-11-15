@@ -32,6 +32,10 @@
  * 前后端分离：前端只认 `src/api/contract.ts` 那一份契约，`src/api/` 里不许 fetch；
  * 网络只住 Rust 的 `runtime/net.rs`。所以"命令长什么样"**只能是后端答的**，
  * 这个文件负责的是"什么时候要、要到了怎么进剪贴板、然后怎么告诉用户"。
+ *
+ * 剪贴板本身也走 Rust（`api.copyText` → `ipc::copy_text`）：webview 的
+ * `navigator.clipboard` 要看用户手势，而「使用之后自动复制」那条链是从 AppState
+ * 广播里起的、手里没有手势 —— 判据与话术见那条命令的头注。
  */
 
 import { msg } from '../../i18n'
@@ -135,9 +139,16 @@ export async function copyPostProcessScript(t: CopyScriptTarget): Promise<boolea
   }
 
   try {
-    await navigator.clipboard.writeText(cmd.command)
-  } catch (err: unknown) {
-    notify({ kind: 'bad', title: msg('copyScript.failed.title'), text: errorText(err), ttl: COPY_TTL_MS })
+    /* 写剪贴板是 Rust 的事（`api.copyText`）：webview 那套要看用户手势，
+       「使用之后自动复制」这条链手里没有手势，必被拒 */
+    await api.copyText(cmd.command)
+  } catch {
+    notify({
+      kind: 'bad',
+      title: msg('copyScript.failed.title'),
+      text: msg('copyScript.failed.text'),
+      ttl: COPY_TTL_MS,
+    })
     return false
   }
 

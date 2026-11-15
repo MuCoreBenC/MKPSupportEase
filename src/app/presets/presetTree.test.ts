@@ -4,6 +4,7 @@ import {
   branchKept,
   branchMatches,
   branchOf,
+  familyLayoutOf,
   isMainCopy,
   updateStatusOf,
 } from './presetTree'
@@ -118,5 +119,72 @@ describe('主份与副本', () => {
   it('没有来路账的老文件当主份（否则云端会显示"未下载"）', () => {
     expect(isMainCopy({ provenanceKind: null })).toBe(true)
     expect(isMainCopy({})).toBe(true)
+  })
+})
+
+/*
+ * 族视图（A）：母本在前、副本缩进。
+ *
+ * 判据只认 `originPath` —— 副本改名（`夜班.toml`）也还得挂在 `A1.toml` 下面；
+ * 这是 `copyRankOf` 那套按名字猜做不到的。
+ */
+describe('族视图（A）', () => {
+  const row = (fileName: string, origin: string | null = null, pinned = false) => ({
+    rowKey: `local::${fileName}`,
+    fileName,
+    path: fileName,
+    pinned,
+    originPath: origin,
+    originName: origin,
+  })
+
+  it('改过名的副本照样挂在母本下面，块首有分隔、末行收口', () => {
+    const out = familyLayoutOf([row('A1.toml'), row('夜班.toml', 'A1.toml')])
+    expect(out.map((x) => [x.row.fileName, x.meta?.depth, x.meta?.tagName])).toEqual([
+      ['A1.toml', 0, null],
+      ['夜班.toml', 1, null],
+    ])
+    expect(out[0].meta?.start).toBe(true)
+    expect(out[0].meta?.last).toBe(false)
+    expect(out[1].meta?.last).toBe(true)
+  })
+
+  it('母本不在可见行里：副本自己当块首，并挂母本签', () => {
+    const out = familyLayoutOf([row('客户演示版.toml', 'A1.toml')])
+    expect(out[0].meta?.lead).toBe(true)
+    expect(out[0].meta?.tagName).toBe('A1')
+  })
+
+  it('置顶的副本脱开母本单独成块；母本留在原处', () => {
+    /* 输入序 = 排好序的（置顶的在最前） */
+    const out = familyLayoutOf([row('夜班.toml', 'A1.toml', true), row('A1.toml')])
+    expect(out.map((x) => x.row.fileName)).toEqual(['夜班.toml', 'A1.toml'])
+    expect(out[0].meta?.tagName).toBe('A1')
+    expect(out[0].meta?.start).toBe(false)
+    expect(out[1].meta?.start).toBe(false)
+  })
+
+  it('母本也置顶时，置顶的副本仍跟着母本（不拆成两块）', () => {
+    const out = familyLayoutOf([row('A1.toml', null, true), row('夜班.toml', 'A1.toml', true)])
+    expect(out.map((x) => x.row.fileName)).toEqual(['A1.toml', '夜班.toml'])
+    expect(out[1].meta?.depth).toBe(1)
+  })
+
+  it('副本的副本只缩进一级，名字不带母本名时挂签；老 copy 名不挂', () => {
+    const out = familyLayoutOf([
+      row('A1.toml'),
+      row('A1 copy.toml', 'A1.toml'),
+      row('我的夜班.toml', 'A1 copy.toml'),
+      row('A1 copy copy.toml', 'A1 copy.toml'),
+    ])
+    const mine = out.find((x) => x.row.fileName === '我的夜班.toml')
+    const old = out.find((x) => x.row.fileName === 'A1 copy copy.toml')
+    expect(mine?.meta?.depth).toBe(2)
+    expect(mine?.meta?.tagName).toBe('A1 copy')
+    /* 每根枝自己收口：老 copy 是 A1 copy 的最后一个孩子 */
+    expect(mine?.meta?.last).toBe(false)
+    expect(old?.meta?.depth).toBe(2)
+    expect(old?.meta?.tagName).toBeNull()
+    expect(old?.meta?.last).toBe(true)
   })
 })

@@ -229,7 +229,7 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
         version.trim() === '' ? null : version.trim(),
         notes.trim(),
       )
-      await navigator.clipboard.writeText(text)
+      await wb.copyText(text)
       toasts.push('发布提示词已复制 —— 贴给 AI 即可（任务书里带着版本号、更新说明与发版纪律）')
     } catch (e) {
       fail(e)

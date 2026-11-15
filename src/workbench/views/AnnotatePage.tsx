@@ -369,24 +369,11 @@ function parseMarks(text: string): Mark[] {
   })
 }
 
+/** 写剪贴板走 Rust（`wb.copyText` → `ipc::copy_text`）：webview 那套要看用户手势 */
 async function copyText(text: string): Promise<boolean> {
   try {
-    await navigator.clipboard.writeText(text)
+    await wb.copyText(text)
     return true
-  } catch {
-    /* 老 WebView / 非安全上下文：回落到 execCommand */
-  }
-  try {
-    const ta = document.createElement('textarea')
-    ta.value = text
-    ta.style.position = 'fixed'
-    ta.style.top = '0'
-    ta.style.opacity = '0'
-    document.body.appendChild(ta)
-    ta.select()
-    const ok = document.execCommand('copy')
-    ta.remove()
-    return ok
   } catch {
     return false
   }

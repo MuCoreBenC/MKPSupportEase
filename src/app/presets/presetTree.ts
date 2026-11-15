@@ -2440,6 +2440,166 @@ function sortRows<R extends PresetRowBase>(rows: R[], sort: PresetSort): R[] {
 }
 
 /**
+ * **族视图（A）**：把本地文件按**来路账的母本路径**排成「母本在前、副本缩进」。
+ *
+ * 与 `copyRankOf` 的区别：那一套是**按名字猜**（` copy N`），用户把副本改名之后
+ * 就认不出是一家的了；这里只认 `originPath`，名字改成什么都不断亲。
+ *
+ * 规则：
+ *   · 母本在**当前可见行**里 ⇒ 副本按**真实层数**缩进（depth 1、2、3……）；
+ *     `depth >= 2` 的（副本的副本）在名字没带母本名时再挂一枚母本签。
+ *   · 母本不在可见行里（被机型 / 分支 / 搜索筛掉，或盘上已经没了）⇒ 副本自己
+ *     当块首，挂母本签。**不在这里判"母本在不在盘上"** —— 这一层只有筛后的行。
+ *   · 置顶的副本**脱离母本**当块首（自己的子树跟着走）；母本还钉着的话就不脱。
+ *   · 置顶的块永远排最前（`sortRows` 已经排好输入序，这里只按输入序铺块）。
+ *
+ * 只在「名称 / 族优先」那一档用；别的排序档是平的，不画轨。
+ */
+export interface FamilyMeta {
+  /** 这一行是一个块的块首（母本、被钉走的副本、母本不可见的副本） */
+  lead: boolean
+  /** 0 = 块首；1 起 = 第几层副本（界面按层缩进，最多画到第 8 层） */
+  depth: number
+  /** 同一母本下最后一个孩子（族轨在这一行收口） */
+  last: boolean
+  /** 块里有副本（块首上画一条分隔线用） */
+  start: boolean
+  /** 挂在名字后面的母本签；`null` = 不挂 */
+  tagName: string | null
+}
+
+export interface FamilyLayoutRow<T> {
+  row: T
+  meta: FamilyMeta | null
+}
+
+/** 族视图只用到这几格；`PresetTableRow` 结构上满足它（云端行没有 originPath） */
+export interface FamilyInputRow {
+  rowKey: string
+  fileName: string
+  path: string
+  pinned: boolean
+  originPath?: string | null
+  originName?: string | null
+}
+
+const stemOfFileName = (fileName: string): string => {
+  const i = fileName.lastIndexOf('.')
+  return i > 0 ? fileName.slice(0, i) : fileName
+}
+
+export function familyLayoutOf<T extends FamilyInputRow>(
+  rows: readonly T[],
+): FamilyLayoutRow<T>[] {
+  const index = new Map<string, number>()
+  rows.forEach((row, i) => index.set(row.rowKey, i))
+  const byPath = new Map<string, T>()
+  for (const row of rows) byPath.set(row.path, row)
+
+  const motherOf = (row: T): T | null => {
+    const origin = row.originPath
+    if (origin === null || origin === undefined || origin === '') return null
+    return byPath.get(origin) ?? null
+  }
+  const hasPinnedAncestor = (row: T): boolean => {
+    let cur = motherOf(row)
+    let guard = 0
+    while (cur !== null && guard < 40) {
+      if (cur.pinned) return true
+      cur = motherOf(cur)
+      guard += 1
+    }
+    return false
+  }
+
+  /*
+   * 块首：
+   *   ① 没有母本（原件 / 导入 / 母本不在可见行里）；
+   *   ② 置顶的副本，且上面没有也置顶的母本。
+   * 其余有母本可见的行都是孩子。
+   */
+  const leadKeys = new Set<string>()
+  for (const row of rows) {
+    if (row.originPath === null || row.originPath === undefined || row.originPath === '') {
+      leadKeys.add(row.rowKey)
+      continue
+    }
+    if (motherOf(row) === null) {
+      leadKeys.add(row.rowKey)
+      continue
+    }
+    if (row.pinned && !hasPinnedAncestor(row)) leadKeys.add(row.rowKey)
+  }
+
+  const children = new Map<string, T[]>()
+  for (const row of rows) {
+    if (leadKeys.has(row.rowKey)) continue
+    const mother = motherOf(row)
+    if (mother === null) continue
+    const list = children.get(mother.rowKey) ?? []
+    list.push(row)
+    children.set(mother.rowKey, list)
+  }
+  for (const list of children.values()) {
+    list.sort((a, b) => (index.get(a.rowKey) ?? 0) - (index.get(b.rowKey) ?? 0))
+  }
+
+  const emitted = new Set<string>()
+  const out: FamilyLayoutRow<T>[] = []
+
+  for (const root of rows) {
+    if (emitted.has(root.rowKey)) continue
+    if (!leadKeys.has(root.rowKey)) continue
+
+    const block: { row: T; depth: number; lastSibling: boolean }[] = []
+    const walk = (row: T, depth: number, lastSibling: boolean): void => {
+      if (emitted.has(row.rowKey)) return
+      emitted.add(row.rowKey)
+      block.push({ row, depth, lastSibling })
+      const kids = children.get(row.rowKey) ?? []
+      kids.forEach((child, i) => walk(child, depth + 1, i === kids.length - 1))
+    }
+    walk(root, 0, false)
+
+    block.forEach((item, i) => {
+      const isLead = i === 0
+      const mother = motherOf(item.row)
+      let tagName: string | null = null
+      if (isLead) {
+        /* 块首还带着母本（被钉走 / 母本不在这一档）⇒ 必须说清是谁的副本 */
+        const motherName = mother?.fileName ?? item.row.originName ?? null
+        if (motherName !== null && motherName !== '') tagName = stemOfFileName(motherName)
+      } else if (item.depth >= 2 && mother !== null) {
+        const motherStem = stemOfFileName(mother.fileName)
+        /* 名字本来就带母本名（老的 `xxx copy 2`）⇒ 不再挂冗余的签 */
+        if (!stemOfFileName(item.row.fileName).startsWith(motherStem)) tagName = motherStem
+      }
+      out.push({
+        row: item.row,
+        meta: {
+          lead: isLead,
+          depth: item.depth,
+          /* 每根枝自己收口：副本的副本不是"整块最后一行"也要把轨收掉 */
+          last: item.lastSibling,
+          start: isLead && block.length > 1,
+          tagName,
+        },
+      })
+    })
+  }
+
+  /* 环 / 认不出母本的兜底：宁可平着列，也不能把行丢了 */
+  for (const row of rows) {
+    if (emitted.has(row.rowKey)) continue
+    out.push({
+      row,
+      meta: { lead: true, depth: 0, last: false, start: false, tagName: null },
+    })
+  }
+  return out
+}
+
+/**
  * 机型 id → 显示名。
  *
  * 两张表的「机型」那一列都查它。`machines` 是当前这一档的机型（选了一台就一台，

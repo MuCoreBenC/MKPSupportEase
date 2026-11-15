@@ -1739,15 +1739,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /**
    * **复制链接**（2026-10-09 接通）：交付预设下载链接由后端按**当前数据源**算 ——
    * 与下载管道同一个寻址出口，复制到的链接就是下载时取的那个地址。
-   * 拿到就进剪贴板；没配数据源 / 算不出来照实说，不编一个假 URL。
+   * 拿到就进剪贴板（`api.copyText` → Rust 那一侧写）；没配数据源 / 算不出来照实说，
+   * 不编一个假 URL。
    */
   const copyLink = (row: PresetTableRow) => {
     api.getFileUrl(row.fileName).then(
       (url) => {
-        void navigator.clipboard.writeText(url).then(
+        void api.copyText(url).then(
           () => setNote({ text: msg('presets.page.link.copied', { name: row.fileName }), bad: false }),
-          (e: unknown) =>
-            setNote({ text: msg('presets.page.link.clipFailed', { detail: errorText(e) }), bad: true }),
+          () => setNote({ text: msg('presets.page.link.clipFailed'), bad: true }),
         )
       },
       (e: unknown) => setNote({ text: msg('presets.page.link.fetchFailed', { detail: errorText(e) }), bad: true }),
@@ -4307,6 +4307,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   setKeepOpenPath(null)
                   setExpandedKey((k) => (k === rowKey ? null : rowKey))
                 }}
+                /* 行首图钉与右键「置顶」同一个出口 —— 提示条、落库都在 `togglePin` 里 */
+                onPin={togglePin}
                 /*
                  * 操作列常驻：本地表那一颗按钮的字随类型变（应用 / 复制），云端表是下载。
                  * 右键菜单**照旧全在**，操作列只是把最常用的那一个摆到明面上。

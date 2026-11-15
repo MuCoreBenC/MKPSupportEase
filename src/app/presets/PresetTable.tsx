@@ -155,6 +155,7 @@ import {
   cloudClaimBadge,
   CLOUD_STATE_TEXT,
   DASH_,
+  familyLayoutOf,
   LOCAL_DRAWER,
   LOCAL_UNREADABLE_TEXT,
   localUnreadableWhy,
@@ -177,6 +178,7 @@ import {
   versionsText,
 } from './presetTree'
 import type {
+  FamilyMeta,
   LocateTarget,
   PresetCloudRow,
   PresetKindAxis,
@@ -326,25 +328,23 @@ function BusySpin() {
 }
 
 /**
- * **一枚能点着排序的表头**（2026-10-16 作者：「表头加上排序吧……只用很小的图标，不占位置的」）。
+ * **一枚能点着排序的表头**（2026-10-16 起；2026-11-15 作者：「带箭头的都没居中，
+ * 我也希望加上箭头」）。
  *
- * # "不占位置"是怎么做到的
+ * # 布局
  *
- * `table-layout: fixed`，列宽由那几条 `clamp()` 定死、内容不参与算宽 ⇒
- * 箭头内联跟在文字后面也**不撑宽任何一列**，点一下排序不会让列变宽或变窄。
+ * - 居中列（机型 / 版本 / 时间）走**三格网格**：左 10px 空格、中间文字、右 10px 箭头。
+ *   左右对称，文字真的落在列中线上；箭头锁在右缘，不再把文字挤偏。
+ * - 名称列左对齐，走 flex，箭头仍跟在文字后面。
+ * - `table-layout: fixed`：列宽由 th 的 clamp() 定死，箭头不撑列。
  *
  * # 什么时候显示
  *
- * - **正在排的那一列**：箭头常驻、颜色是 `--text-2`（看得见"现在是按它排的"）；
- * - **其余列**：默认不画，鼠标移到这一格才淡淡地露出来（提示"这列也能排"）。
- *   ⇒ 六列同时挂箭头会很吵，也把"当前按哪列排"这件事讲没了。
+ * 箭头**默认就露**（35%）；当前列实心；悬停提亮。六列都能排，得看得见。
+ * 名称列默认「族优先」那一档没有方向，箭头整个藏起来（点一下才是 a-z）。
  *
- * ★ 箭头**内联跟在文字后面**（2026-10-16 作者：「紧跟着文字」）。`table-layout: fixed`
- *   下列宽由 th 的 clamp() 定死，内容不参与算宽 ⇒ 进流也不撑列，"不占位置"仍成立。
- *   布局走普通流 + text-align（不走 flex —— th 的 justify-content 是 normal，
- *   flex 会把居中列的表头顶到左边）。降序时 CSS 把箭头转 180°，
- *   不为"下"再造一枚图标：它是同一颗箭头换个向，不是两个相反的语义
- *   （`pin` / `pinOff` 那种才需要两枚）。
+ * 降序时 CSS 把箭头转 180°，不为"下"再造一枚图标：它是同一颗箭头换个向，
+ * 不是两个相反的语义（`pin` / `pinOff` 那种才需要两枚）。
  */
 function SortTh({
   label,
@@ -434,6 +434,11 @@ interface Props {
    */
   expandedKey: string | null
   onToggleExpand: (rowKey: string) => void
+  /**
+   * 行首那颗图钉：置顶 / 取消置顶。与右键菜单里那一项**同一个出口**（页面层
+   * `togglePin`），表这边只管转发。
+   */
+  onPin: (row: PresetTableRow) => void
   /**
    * 正在做动作的那几行（rowKey 集合）。只禁那几颗按钮，不锁整张表。
    *
@@ -572,6 +577,7 @@ export default function PresetTable({
   /** 展开详情的那一行(rowKey)。状态在页面层(右键菜单也要能展开它) */
   expandedKey,
   onToggleExpand,
+  onPin,
   onLocate,
   sort,
   onSort,
@@ -604,6 +610,22 @@ export default function PresetTable({
   const allChosen =
     select !== null && selectable.length > 0 && selectable.every((r) => select.keys.has(r.rowKey))
   const someChosen = select !== null && selectable.some((r) => select.keys.has(r.rowKey))
+
+  /*
+   * **图钉**：多选模式不加（最左是复选框，再塞一颗图钉会把两套钩子挤在一起）；
+   * 其余两张表都加 —— 置顶的底色已经撤了，不给图钉的话切片器那张表就看不见置顶了。
+   *
+   * **族视图（A）只在 MKP 本地表的「名称 / 族优先」那一档铺**：
+   *   · 切片器那张表还是不分组（它还没有这套来路账的读法）；
+   *   · 按机型 / 时间 / a-z 排的时候是平表（列排序说一列的事，族轨说另一件事）。
+   * 布点用的是**来路账**（`originPath`），不是文件名里的 ` copy`。
+   */
+  const showPins = select === null
+  const familyView =
+    showPins && mkp && scope === 'local' && sort.key === 'name' && sort.dir === 'family'
+  const displayRows: { row: PresetTableRow; meta: FamilyMeta | null }[] = familyView
+    ? familyLayoutOf(rows)
+    : rows.map((row) => ({ row, meta: null }))
 
   /*
    * 展开卡底部那两条编辑带（备注 / 归属）的开关 —— 2026-10-10 第八轮。
@@ -719,7 +741,11 @@ export default function PresetTable({
        * 附带好处：滚动容器里只剩一个孩子，`glideIntoView` 的「定位」动画又能用了
        * （有 sticky 时被 `hasSticky` 守卫挡掉，只能瞬跳）。
        */}
-      <table className={`${s.table} ${s.headTable}`} data-selecting={select !== null}>
+      <table
+        className={`${s.table} ${s.headTable}`}
+        data-selecting={select !== null}
+        data-pins={showPins ? 'true' : 'false'}
+      >
         <colgroup>
           {select !== null && <col className={s.thCheck} />}
           <col />
@@ -821,7 +847,7 @@ export default function PresetTable({
           scrollMemo.current[scope] = e.currentTarget.scrollTop
         }}
       >
-        <table className={s.table} data-selecting={select !== null}>
+        <table className={s.table} data-selecting={select !== null} data-pins={showPins ? 'true' : 'false'}>
         <colgroup>
           {select !== null && <col className={s.thCheck} />}
           <col />
@@ -839,7 +865,7 @@ export default function PresetTable({
         </colgroup>
 
           <tbody>
-            {rows.map((row) => {
+            {displayRows.map(({ row, meta }) => {
               const version = versionsText(tr, row.versions)
               /*
                * 机型识别色（2026-10-08 起、a03「色彩收敛」收掉）：`A1` 与 `A1 mini` 只差
@@ -1003,8 +1029,15 @@ export default function PresetTable({
                 <tr
                   className={rowHot ? `${s.row} ${s.rowOpen}` : s.row}
                   data-live={inUse}
-                  /* 置顶只有一层**很浅的底**（2026-10-10：不要字、不要图钉，见 CSS 那一段） */
+                  /* 置顶只用行首那颗图钉说（作者 2026-11-15：不要整行底色） */
                   data-pinned={row.pinned}
+                  /* 族视图：缩进 / 族尾收口 / 块首分隔线（只有「名称 / 族优先」那一档有） */
+                  data-family-child={meta !== null && meta.depth > 0 ? 'true' : undefined}
+                  data-family-depth={
+                    meta !== null && meta.depth > 0 ? String(Math.min(meta.depth, 8)) : undefined
+                  }
+                  data-family-last={meta !== null && meta.depth > 0 && meta.last ? 'true' : undefined}
+                  data-family-start={meta !== null && meta.start ? 'true' : undefined}
                   data-active={row.rowKey === activeKey}
                   /* 多选：勾上的那一行整行落一层淡绿（`--accent-soft`），一眼数得清选了几份 */
                   data-selected={picked}
@@ -1042,6 +1075,38 @@ export default function PresetTable({
                   )}
                   <td className={s.name}>
                     {/*
+                     * 名称这一格包一层：图钉、名字、备注都在这层里。图钉不占流
+                     * （绝对定位在左槽），名字与备注由这一层的左内衬对齐；没有备注
+                     * 就不渲染那一行，名字自己垂直居中 —— 不留空行。族视图的缩进
+                     * 也落在这层（见 CSS `.nameWrap`）。
+                     */}
+                    <span className={s.nameWrap}>
+                    {/*
+                     * **置顶图钉**（2026-11-15，作者：「置顶是变背景颜色……还是要改成图标吧」）：
+                     * 只在 MKP 档、不在多选时出现；点它走页面层同一个 `togglePin`。
+                     * 钉住的副本会脱开母本当块首（见 `familyLayoutOf`），所以这枚钉子
+                     * 不是纯装饰 —— 它决定族视图里这一行走不走。
+                     */}
+                    {showPins && (
+                      <button
+                        type="button"
+                        className={s.pinBtn}
+                        data-pinned={row.pinned}
+                        data-tip={
+                          tr(row.pinned ? 'presets.page.menu.unpin' : 'presets.page.menu.pin')
+                        }
+                        aria-label={tr(
+                          row.pinned ? 'presets.page.menu.unpin' : 'presets.page.menu.pin',
+                        )}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onPin(row)
+                        }}
+                      >
+                        <Icon name="pin" size={14} />
+                      </button>
+                    )}
+                    {/*
                      * 行里的文件名**常显**（第十轮撤回了第七轮那条「展开时隐去」——
                      * 作者：「我希望那个列表的那个文字不要消失」）。卡片头上那一份
                      * 照旧（他要卡片显示名字）：两边都读得到，不再隐来隐去。
@@ -1050,6 +1115,19 @@ export default function PresetTable({
                       <span className={s.nameText} data-tip={row.fileName}>
                         {row.fileName}
                       </span>
+                      {/*
+                       * **母本签**：只有「块首还带着母本」（副本被钉走 / 母本不在这一档）
+                       * 或「副本的副本」才挂。名字改成什么都不影响 —— 这枚签认的是
+                       * 来路账里的 `originName`，不是文件名里的 ` copy`。
+                       */}
+                      {meta?.tagName !== null && meta?.tagName !== undefined && (
+                        <span
+                          className={s.familyTag}
+                          data-tip={row.origin === 'local' ? (row.originName ?? undefined) : undefined}
+                        >
+                          {`↳ ${meta.tagName}`}
+                        </span>
+                      )}
                       {/*
                         **参数改了还没保存**（2026-10-10）：一枚小圆点，不是徽章 ——
                         作者：「不想用徽章……徽章太多、太占位置」。全文在 `title` 里。
@@ -1160,12 +1238,10 @@ export default function PresetTable({
                         </span>
                       )}
                     </span>
-                    {/* 第二行等宽小字：**备注** —— 没有就空着、**不占位**：
-                        没备注时文件名自己垂直居中；有备注时两行整块居中
-                        （名字上移、备注在下面）。磁盘位置在 title 里，不丢。
-                        第十轮起展开时也常显（同上一格，撤回「隐去」）。 */}
-                    <span className={s.path}>
-                      {row.subtitle}
+                    {/* 第二行等宽小字：**备注** —— 没有就**整行不渲染**（不是留一条空行）：
+                        没备注时名字自己垂直居中；有备注时两行整块居中。
+                        磁盘位置在 title 里，不丢。第十轮起展开时也常显。 */}
+                    {row.subtitle !== '' && <span className={s.path}>{row.subtitle}</span>}
                     </span>
                   </td>
 

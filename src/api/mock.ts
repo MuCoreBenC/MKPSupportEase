@@ -3649,6 +3649,15 @@ export const mockApi: MkpApi = {
     // 演示里不真的开浏览器；真机走 opener 插件
     mockUpdate.lastOpened = url
   },
+
+  /*
+   * 写剪贴板（2026-11-15）：真机上是 Rust 那条 `copy_text`（系统剪贴板）。
+   * 浏览器预览里没有它，退回浏览器自己的 clipboard —— 拿不到就照实失败，
+   * 不假装抄到了。
+   */
+  async copyText(text: string) {
+    await navigator.clipboard.writeText(text)
+  },
 }
 
 /** 演示用的更新会话（内存态，与其它 mock 同一套口径） */

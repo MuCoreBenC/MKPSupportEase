@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+import { api } from '../../api'
 import { useT } from '../../i18n'
 import s from './TraceTag.module.css'
 
@@ -22,7 +23,7 @@ export default function TraceTag({ traceId }: TraceTagProps) {
   if (!traceId || traceId === '-') return null
 
   const copy = () => {
-    navigator.clipboard?.writeText(traceId).then(
+    void api.copyText(traceId).then(
       () => {
         setCopied(true)
         window.setTimeout(() => setCopied(false), 1200)

@@ -449,6 +449,9 @@ export const bridgeApi: MkpApi = {
   cancelUpdate: () => call('cancelUpdate', 'cancel_update'),
   installUpdate: () => call('installUpdate', 'install_update'),
   openUrl: (url) => call('openUrl', 'open_url', { url }),
+  /* 写剪贴板（2026-11-15）：界面所有「复制」走这一条 —— webview 那套要看用户手势，
+     状态事件推出来的那一趟必被拒，见 `ipc::copy_text` 的头注 */
+  copyText: (text) => call('copyText', 'copy_text', { text }),
 
   /* ——— 切片器目录（放进去才生效）+ 复制云端链接（2026-10-09 接通）——— */
   copyToSlicer: (fileName, slicer, account) =>

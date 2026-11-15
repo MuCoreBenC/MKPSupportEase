@@ -224,7 +224,7 @@ export default function SettingsPage({ boot }: Props) {
     const token = revealed[platform]
     if (token === undefined) return
     try {
-      await navigator.clipboard.writeText(token)
+      await wb.copyText(token)
       setAcctNote({ text: `已复制 ${PLATFORM_LABEL[platform]} Token`, bad: false })
     } catch {
       setAcctNote({ text: '剪贴板不可用，请手选复制。', bad: true })

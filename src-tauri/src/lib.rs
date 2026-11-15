@@ -478,6 +478,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::open_automation_settings,
         // 「复制后处理脚本」那一整条命令：两段真值（本程序自己 + 预设真实落点）现拼
         ipc::get_post_process_command,
+        // 写系统剪贴板：前端所有「复制」的落地（webview 那套要看用户手势，状态事件里必被拒）
+        ipc::copy_text,
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
@@ -686,6 +688,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::open_automation_settings,
         // 「复制后处理脚本」那一整条命令：两段真值（本程序自己 + 预设真实落点）现拼
         ipc::get_post_process_command,
+        // 写系统剪贴板：前端所有「复制」的落地（webview 那套要看用户手势，状态事件里必被拒）
+        ipc::copy_text,
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
