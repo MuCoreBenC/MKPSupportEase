@@ -1,7 +1,7 @@
 {
   "catalogSchema": 1,
-  "revision": "39d09d8bf227207c",
-  "publishedAt": "2026-11-15T04:11:12Z",
+  "revision": "5880e1ce142d948b",
+  "publishedAt": "2026-11-15T12:27:05Z",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -3844,19 +3844,19 @@
         "serialization": null
       },
       {
-        "key": "wiping.ironing_e_sum_threshold",
-        "configKey": "IroningESumThreshold",
-        "tomlKey": "ironing_e_sum_threshold",
-        "jsonKey": "ironing_e_sum_threshold",
-        "label": "熨烫挤出阈值",
-        "labelEn": "Ironing extrusion threshold",
-        "labelJa": "アイロニング押し出ししきい値",
-        "labelTw": "熨燙擠出閾值",
-        "desc": "熨烫挤出超过这个量就移除（自动模式）。",
-        "descEn": "Removes the ironing area once its extrusion passes this amount (auto mode).",
-        "descJa": "アイロンの押し出し量がこれを超えたら外します（自動モード）。",
-        "descTw": "熨燙擠出超過這個量就移除（自動模式）。",
-        "tomlComment": "熨烫E总和阈值 范围:0~100",
+        "key": "wiping.ironing_e_sum_limit",
+        "configKey": "IroningESumLimit",
+        "tomlKey": "ironing_e_sum_limit",
+        "jsonKey": "ironing_e_sum_limit",
+        "label": "熨烫挤出上限",
+        "labelEn": "Ironing extrusion limit",
+        "labelJa": "アイロニング押し出し上限",
+        "labelTw": "熨燙擠出上限",
+        "desc": "一块熨烫挤出超过这个量就不熨烫。",
+        "descEn": "Skips an ironing patch once its extrusion passes this amount.",
+        "descJa": "アイロン一塊の押し出しがこれを超えたら熨燙しません。",
+        "descTw": "一塊熨燙擠出超過這個量就不熨燙。",
+        "tomlComment": "熨烫挤出上限(mm) 范围:0~100",
         "valueType": "float",
         "uiComponent": "number",
         "defaultValue": 7.9,
@@ -3969,19 +3969,19 @@
         "serialization": null
       },
       {
-        "key": "wiping.ironing_suppress_expand",
-        "configKey": "IroningSuppressExpand",
-        "tomlKey": "ironing_suppress_expand",
-        "jsonKey": "ironing_suppress_expand",
-        "label": "熨烫抑制扩展范围",
-        "labelEn": "Ironing suppression expansion",
-        "labelJa": "アイロニング抑制の拡張範囲",
-        "labelTw": "熨燙抑制擴展範圍",
-        "desc": "熨烫区向内收多少不涂胶，0 关闭。",
-        "descEn": "How far the ironing area pulls inward without glue; 0 turns it off.",
-        "descJa": "アイロン領域を内側にどれだけ縮めて塗らないか。0 で無効。",
-        "descTw": "熨燙區向內收多少不塗膠，0 關閉。",
-        "tomlComment": "熨烫抑制扩展(mm) 范围:0~20",
+        "key": "wiping.ironing_keepout",
+        "configKey": "IroningKeepout",
+        "tomlKey": "ironing_keepout",
+        "jsonKey": "ironing_keepout",
+        "label": "熨烫周边留白",
+        "labelEn": "Ironing keepout",
+        "labelJa": "アイロン周辺の余白",
+        "labelTw": "熨燙周邊留白",
+        "desc": "熨烫面旁边的支撑面不涂胶，0 关闭。",
+        "descEn": "Support surface next to ironing is left without glue; 0 turns it off.",
+        "descJa": "アイロン面の周りのサポート面には塗布しません。0 で無効。",
+        "descTw": "熨燙面旁邊的支撐面不塗膠，0 關閉。",
+        "tomlComment": "熨烫周边留白(mm) 范围:0~20",
         "valueType": "float",
         "uiComponent": "number",
         "defaultValue": 0.0,
@@ -4010,19 +4010,19 @@
         "serialization": null
       },
       {
-        "key": "wiping.ironing_suppress_expand_mode",
-        "configKey": "IroningSuppressExpandMode",
-        "tomlKey": "ironing_suppress_expand_mode",
-        "jsonKey": "ironing_suppress_expand_mode",
-        "label": "熨烫抑制扩展模式",
-        "labelEn": "Ironing suppression mode",
-        "labelJa": "アイロニング抑制の拡張モード",
-        "labelTw": "熨燙抑制擴展模式",
-        "desc": "包围盒：沿 XY 均匀外扩；质心：从中心向外扩。",
-        "descEn": "Bounding box expands evenly along XY; centroid expands outward from the center.",
-        "descJa": "バウンディングボックスは XY 方向に均等に広げ、重心は中心から外へ広げます。",
-        "descTw": "包圍盒：沿 XY 均勻外擴；質心：從中心向外擴。",
-        "tomlComment": "熨烫抑制扩展模式(bbox/centroid)",
+        "key": "wiping.ironing_keepout_mode",
+        "configKey": "IroningKeepoutMode",
+        "tomlKey": "ironing_keepout_mode",
+        "jsonKey": "ironing_keepout_mode",
+        "label": "留白方式",
+        "labelEn": "Keepout mode",
+        "labelJa": "余白の取り方",
+        "labelTw": "留白方式",
+        "desc": "包围盒：沿 XY 均匀外扩；质心：换成以中心为心的方框。",
+        "descEn": "Bounding box grows evenly along XY; centroid swaps in a box centred on it.",
+        "descJa": "バウンディングボックスは XY 方向に均等に広げ、重心は中心の箱に置き換えます。",
+        "descTw": "包圍盒：沿 XY 均勻外擴；質心：換成以中心為心的方框。",
+        "tomlComment": "熨烫周边留白方式(bbox/centroid)",
         "valueType": "string",
         "uiComponent": "select",
         "defaultValue": "bbox",
@@ -4036,30 +4036,71 @@
         "max": null,
         "step": null,
         "unit": null,
-        "parentKey": "wiping.ironing_suppress_expand",
+        "parentKey": "wiping.ironing_keepout",
         "showWhen": {
-          "key": "wiping.ironing_suppress_expand",
+          "key": "wiping.ironing_keepout",
           "op": "gt",
           "value": "0"
         },
         "choices": [
           {
-            "label": "包围盒外扩",
+            "label": "整块外扩",
             "labelEn": "Bounding box",
             "labelJa": "バウンディングボックス",
-            "labelTw": "包圍盒外擴",
+            "labelTw": "整塊外擴",
             "value": "bbox",
             "deprecated": false
           },
           {
-            "label": "质心半径外扩",
-            "labelEn": "Centroid radius",
-            "labelJa": "重心半径",
-            "labelTw": "重心半徑外擴",
+            "label": "按中心取框",
+            "labelEn": "Centroid box",
+            "labelJa": "重心の箱",
+            "labelTw": "按中心取框",
             "value": "centroid",
             "deprecated": false
           }
         ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_inset",
+        "configKey": "GlueInset",
+        "tomlKey": "glue_inset",
+        "jsonKey": "glue_inset",
+        "label": "涂胶内缩",
+        "labelEn": "Glue inset",
+        "labelJa": "塗布の内側オフセット",
+        "labelTw": "塗膠內縮",
+        "desc": "涂胶面四周向内收这么多，0 关闭。",
+        "descEn": "Shrinks the glue area inward from its outline; 0 turns it off.",
+        "descJa": "塗布面を外周から内側へこの分だけ縮めます。0 で無効。",
+        "descTw": "塗膠面四周向內收這麼多，0 關閉。",
+        "tomlComment": "涂胶面内缩(mm) 范围:0~20",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 6.0,
+          "sectionId": "glue_ironing"
+        },
+        "min": 0.0,
+        "max": 20.0,
+        "step": 0.5,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
@@ -6419,8 +6460,8 @@
                 "paramKey": "wiping.ironing_mode"
               },
               {
-                "id": "item_wiping_ironing_e_sum_threshold",
-                "paramKey": "wiping.ironing_e_sum_threshold"
+                "id": "item_wiping_ironing_e_sum_limit",
+                "paramKey": "wiping.ironing_e_sum_limit"
               },
               {
                 "id": "item_wiping_use_ironing_path",
@@ -6431,12 +6472,16 @@
                 "paramKey": "wiping.ironing_coverage_threshold"
               },
               {
-                "id": "item_wiping_ironing_suppress_expand",
-                "paramKey": "wiping.ironing_suppress_expand"
+                "id": "item_wiping_ironing_keepout",
+                "paramKey": "wiping.ironing_keepout"
               },
               {
-                "id": "item_wiping_ironing_suppress_expand_mode",
-                "paramKey": "wiping.ironing_suppress_expand_mode"
+                "id": "item_wiping_ironing_keepout_mode",
+                "paramKey": "wiping.ironing_keepout_mode"
+              },
+              {
+                "id": "item_wiping_glue_inset",
+                "paramKey": "wiping.glue_inset"
               },
               {
                 "id": "item_wiping_min_support_interface_enabled",
@@ -6790,8 +6835,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "f2e9bf553be927d3d1240ef3b99f8510209ed60f9505ec5580ffe96e15aa77a4",
-      "size": 5260
+      "sha256": "c767f6aafa78639deae78ad1f734cefe4f980a035debf4ae124faee14b74d8b5",
+      "size": 5292
     },
     {
       "kind": "mkp_preset",
@@ -6799,8 +6844,8 @@
       "path": "delivery/mkp/presets/A1-fast260326.toml",
       "machineId": "A1",
       "versionId": "FAST260326",
-      "sha256": "952daf8e2017d696cc43d6f697886bc0e2e9767e47fccd97ce25a70e712e6bd3",
-      "size": 5265
+      "sha256": "2a918a0056e5e7628ea93326a04100087693d020132d973700dd92ca65bc0fcc",
+      "size": 5297
     },
     {
       "kind": "mkp_preset",
@@ -6808,8 +6853,8 @@
       "path": "delivery/mkp/presets/A1-fast261111.toml",
       "machineId": "A1",
       "versionId": "FAST261111",
-      "sha256": "a72627d4e306eccbbfa3b89ce90730f42447afe004529780c63083656bdb4033",
-      "size": 5265
+      "sha256": "a89e0aee17bf0dc4d7fd0fabdb8c0d1707ee5f9dd8ff344eac781d30a6cc5747",
+      "size": 5297
     },
     {
       "kind": "mkp_preset",
@@ -6817,8 +6862,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "6cb489d936fa780140212bedd3b75bfe238ed33110964cd09f1acd9fdfb4a35e",
-      "size": 5268
+      "sha256": "dd5bb0a60b76f9a3fec4793bf161cde17ffefeadf4792e01212a229feffa50a7",
+      "size": 5300
     },
     {
       "kind": "mkp_preset",
@@ -6826,8 +6871,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast260326.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST260326",
-      "sha256": "71000e5a32f03ec17b403e54bbcb6e166a053b6879a23d7a984a42b8f1840465",
-      "size": 5268
+      "sha256": "13c6dc0efbf3521bb8e72b29dbc10dac4073fe018aba4a52c6529e5ae3a52390",
+      "size": 5300
     },
     {
       "kind": "mkp_preset",
@@ -6835,8 +6880,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast261111.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST261111",
-      "sha256": "f650b1d3b378e72c154e547b7e8405ea53d97c5d8544ba4eeb40bb35b9dfc74b",
-      "size": 5268
+      "sha256": "c47bf5813cb337723603b80e71d8335862e90ad16b5dc03126f67799c9754fbc",
+      "size": 5300
     },
     {
       "kind": "mkp_preset",
@@ -6844,8 +6889,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "7586ff0c26314b887fe5ecd255838fce4eadd8af834b572db36566fc8c00cce2",
-      "size": 5409
+      "sha256": "c301b2f4d630a3c1f052848b3d246d9cf0d8c08e697ba4bd87ac8fdac0f4049a",
+      "size": 5441
     },
     {
       "kind": "mkp_preset",
@@ -6853,8 +6898,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "1f260ce133103c50a5c66e47a767c1f599cad814df9c54d4615509e018618a84",
-      "size": 5409
+      "sha256": "25b83fab71333e87995fcd920ba37cbdbadb063c656745918794ef04750ab7e8",
+      "size": 5441
     },
     {
       "kind": "icon",
@@ -7013,5 +7058,5 @@
   "structureSignature": "2242174c52e8a9b6",
   "minClientVersion": "0.0.6",
   "catalogId": "support-ease",
-  "publishSerial": 18
+  "publishSerial": 19
 }
