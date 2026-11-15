@@ -18,6 +18,7 @@
 mod classifier;
 mod delete_wipe;
 mod glue_block;
+mod inset;
 mod metadata;
 mod model_iface;
 mod scan;
@@ -217,7 +218,6 @@ pub fn first_pass(
     let mut has_ironing_feature = false;
     let mut has_ironing_data = false;
     let mut in_support_ironing_section = false;
-    let mut e_sum: f64;
     let mut this_layer_too_low = false;
     let mut valid_count = 0i64;
     let mut invalid_count = 0i64;
@@ -274,6 +274,58 @@ pub fn first_pass(
             }
         }
         0
+    }
+
+    /// 一段熨烫的挤出总量：从 `start` 之后扫到 `IRONING_EXTRUSIONS_END`（或下一处
+    /// 非 Support ironing 的 `FEATURE:`），累加带 XY 的 `G1` 行的 |E|。
+    ///
+    /// 与 `FEATURE: Support ironing` 分支里的同口径扫描共用，避免两处算法漂移。
+    fn sum_ironing_segment_e_sum(content: &[String], start: usize) -> f64 {
+        let mut e_sum = 0.0;
+        for temp_line in content.iter().skip(start + 1) {
+            let temp_line = temp_line.trim();
+            if temp_line.contains("IRONING_EXTRUSIONS_END") {
+                break;
+            }
+            if has_slicer_comment_prefix(temp_line, "FEATURE:")
+                && !has_slicer_comment_prefix(temp_line, "FEATURE: Support ironing")
+            {
+                break;
+            }
+            if (temp_line.contains("G1 X") || temp_line.contains("G1 Y"))
+                && temp_line.contains('E')
+            {
+                if let Some(e_idx) = temp_line.find('E') {
+                    if e_idx + 1 < temp_line.len() {
+                        let e_char = temp_line.as_bytes()[e_idx + 1];
+                        let e_num_str = if e_char.is_ascii_digit() {
+                            temp_line[e_idx + 1..].to_string()
+                        } else if e_char == b'.' {
+                            format!("0{}", &temp_line[e_idx + 1..])
+                        } else {
+                            String::new()
+                        };
+                        if !e_num_str.is_empty() {
+                            let nums = num_strip(&e_num_str);
+                            if let Some(&n) = nums.first() {
+                                e_sum += n.abs();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        math_round(e_sum, 3)
+    }
+
+    /// 这一段熨烫要不要移除：`off` 恒移除；`auto` 按这一段自己的挤出总量判；
+    /// `on` 恒保留。
+    fn should_remove_ironing_segment(ir: &Ir, content: &[String], start: usize) -> bool {
+        match ir.ironing.mode.as_str() {
+            "off" => true,
+            "auto" => sum_ironing_segment_e_sum(content, start) > ir.ironing.e_sum_threshold,
+            _ => false,
+        }
     }
 
     for i in 0..content_len {
@@ -708,56 +760,11 @@ pub fn first_pass(
             start_idx_ironing = i;
             start_pos_cmd_ironing = find_prev_position_cmd(content, i);
             last_xy_command_fe_flag = false;
-            e_sum = 0.0;
-            for temp_line in content.iter().skip(i + 1) {
-                if has_slicer_comment_prefix(temp_line, "FEATURE:")
-                    && !has_slicer_comment_prefix(temp_line, "FEATURE: Ironing")
-                {
-                    break;
-                }
-                if (temp_line.contains("G1 X") || temp_line.contains("G1 Y"))
-                    && temp_line.contains('E')
-                {
-                    if let Some(e_idx) = temp_line.find('E') {
-                        if e_idx + 1 < temp_line.len() {
-                            let e_char = temp_line.as_bytes()[e_idx + 1];
-                            let e_num_str = if e_char.is_ascii_digit() {
-                                temp_line[e_idx + 1..].to_string()
-                            } else if e_char == b'.' {
-                                format!("0{}", &temp_line[e_idx + 1..])
-                            } else {
-                                String::new()
-                            };
-                            if !e_num_str.is_empty() {
-                                let nums = num_strip(&e_num_str);
-                                if let Some(&n) = nums.first() {
-                                    e_sum += n.abs();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            e_sum = math_round(e_sum, 3);
-            if ir_data.ironing.mode != "off" && e_sum < 0.1 {
-                this_layer_too_low = true;
-            }
-            if this_layer_too_low && e_sum > 0.15 {
-                this_layer_too_low = false;
-            }
-            if ir_data.ironing.mode == "off" {
-                ironing_removal_flag = true;
-                sink.push_str(&format!(
-                    "G1 E-{}",
-                    format_e(ir_data.machine.retract_length)
-                ));
-            } else if ir_data.ironing.mode == "auto" && e_sum > ir_data.ironing.e_sum_threshold {
-                ironing_removal_flag = true;
-                sink.push_str(&format!(
-                    "G1 E-{}",
-                    format_e(ir_data.machine.retract_length)
-                ));
-            }
+            ironing_removal_flag = true;
+            sink.push_str(&format!(
+                "G1 E-{}",
+                format_e(ir_data.machine.retract_length)
+            ));
         }
 
         // M1031 S1 ;IRONING_EXTRUSIONS_START：前瞻 1-5 行确认是否支撑面熨平
@@ -774,10 +781,10 @@ pub fn first_pass(
                     break;
                 }
             }
-            if !is_support_ironing && in_support_ironing_section && ir_data.ironing.mode == "off" {
+            if !is_support_ironing && in_support_ironing_section && ir_data.ironing.mode != "on" {
                 is_support_ironing = true;
             }
-            if is_support_ironing && ir_data.ironing.mode == "off" {
+            if is_support_ironing && should_remove_ironing_segment(ir_data, content, i) {
                 drop_pending_after_last_wipe_end(&mut pending_lines);
                 ironing_removal_flag = true;
                 // 跳过当前 M1031 S1 行（不进 pendingLines；Go 的 continue 同时
@@ -825,42 +832,16 @@ pub fn first_pass(
                 start_pos_cmd_ironing = find_prev_position_cmd(content, i);
                 last_xy_command_fe_flag = false;
             }
-            e_sum = 0.0;
-            for temp_line in content.iter().skip(i + 1) {
-                if has_slicer_comment_prefix(temp_line, "FEATURE:")
-                    && !has_slicer_comment_prefix(temp_line, "FEATURE: Support ironing")
-                {
-                    break;
+            // 挤出过低就改走支撑面路径的防呆只在「开启」下保留：
+            // 「自动」完全由用户设的挤出上限决定，两套判据不许同时说话。
+            if ir_data.ironing.mode == "on" {
+                let e_sum = sum_ironing_segment_e_sum(content, i);
+                if e_sum < 0.1 {
+                    this_layer_too_low = true;
                 }
-                if (temp_line.contains("G1 X") || temp_line.contains("G1 Y"))
-                    && temp_line.contains('E')
-                {
-                    if let Some(e_idx) = temp_line.find('E') {
-                        if e_idx + 1 < temp_line.len() {
-                            let e_char = temp_line.as_bytes()[e_idx + 1];
-                            let e_num_str = if e_char.is_ascii_digit() {
-                                temp_line[e_idx + 1..].to_string()
-                            } else if e_char == b'.' {
-                                format!("0{}", &temp_line[e_idx + 1..])
-                            } else {
-                                String::new()
-                            };
-                            if !e_num_str.is_empty() {
-                                let nums = num_strip(&e_num_str);
-                                if let Some(&n) = nums.first() {
-                                    e_sum += n.abs();
-                                }
-                            }
-                        }
-                    }
+                if this_layer_too_low && e_sum > 0.15 {
+                    this_layer_too_low = false;
                 }
-            }
-            e_sum = math_round(e_sum, 3);
-            if e_sum < 0.1 {
-                this_layer_too_low = true;
-            }
-            if this_layer_too_low && e_sum > 0.15 {
-                this_layer_too_low = false;
             }
         }
 
@@ -1152,6 +1133,15 @@ pub fn first_pass(
             copy_flag_moisture = false;
             copy_flag_fallback = false;
 
+            // 涂胶面内缩：只裁「本层要发射的这一份」，不写回 `iface` ——
+            // 有些层没有新的支撑面数据会沿用上一层的 iface，写回会一层层叠加收缩。
+            let inseted: Option<Vec<String>> = if ir_data.glue.inset > 0.0 && !iface.is_empty() {
+                Some(inset::apply(&iface, ir_data.glue.inset))
+            } else {
+                None
+            };
+            let layer_iface: &[String] = inseted.as_deref().unwrap_or(&iface);
+
             // 底面涂胶：主涂胶前深拷贝 iface（write_glue_lines 会改输入）
             let mut bottom_glue_iface_copy: Option<Vec<String>> = None;
             if ir_data.state.glue_bottom_enabled && last_layer_height > 0.0 {
@@ -1161,14 +1151,14 @@ pub fn first_pass(
                         .support_layer_z_set
                         .contains_key(&layer_key(last_layer_height - layer_thickness));
                 if !skip {
-                    bottom_glue_iface_copy = Some(iface.clone());
+                    bottom_glue_iface_copy = Some(layer_iface.to_vec());
                 }
             }
 
             // 主涂胶
             emit_glue_block(
                 &mut sink,
-                &iface,
+                layer_iface,
                 ir_data,
                 current_layer_height,
                 last_layer_height,

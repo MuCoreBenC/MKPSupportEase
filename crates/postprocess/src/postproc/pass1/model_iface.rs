@@ -212,7 +212,7 @@ fn merge_group_segments(segs: Vec<Vec<String>>) -> Vec<String> {
 }
 
 /// `groupConsecutiveSegments`（model_z_map.go:186）：IoU>0 或间距<2 的相邻段合并。
-fn group_consecutive_segments(segments: Vec<Vec<String>>) -> Vec<Vec<String>> {
+pub(crate) fn group_consecutive_segments(segments: Vec<Vec<String>>) -> Vec<Vec<String>> {
     if segments.is_empty() {
         return Vec::new();
     }

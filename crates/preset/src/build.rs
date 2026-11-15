@@ -213,14 +213,11 @@ pub fn build(
     if ir.ironing.coverage_threshold > 0.0 && ir.ironing.coverage_threshold <= 1.0 {
         ir.ironing.coverage_threshold *= 100.0;
     }
-    ir.ironing.suppress_expand = cfg.wiping.ironing_suppress_expand;
+    ir.ironing.suppress_expand = cfg.wiping.ironing_keepout;
     ir.ironing.suppress_expand_mode =
-        normalize_ironing_suppress_expand_mode(&cfg.wiping.ironing_suppress_expand_mode)
-            .to_string();
-    ir.ironing.e_sum_threshold = cfg.wiping.ironing_e_sum_threshold;
-    if ir.ironing.e_sum_threshold == 0.0 {
-        ir.ironing.e_sum_threshold = reg_float(&defaults, "IroningESumThreshold", 7.9);
-    }
+        normalize_ironing_keepout_mode(&cfg.wiping.ironing_keepout_mode).to_string();
+    // 缺键已在 serde 侧回落默认值，这里原样传：填 0 就是 0（任何挤出都算超过上限）。
+    ir.ironing.e_sum_threshold = cfg.wiping.ironing_e_sum_limit;
     ir.ironing.extrude_ratio = 0.0;
 
     // ---- Outer structure SSOT ----
@@ -247,6 +244,7 @@ pub fn build(
 
     // ---- Glue ----
     ir.glue.z_offset = cfg.toolhead.glue_z_offset;
+    ir.glue.inset = cfg.wiping.glue_inset;
     ir.glue.sparse_ratio = cfg.wiping.glue_sparse_ratio;
     ir.glue.pass_count = cfg.wiping.glue_pass_count;
     if ir.glue.pass_count == 0 {
@@ -655,10 +653,10 @@ fn validate_ranges(ir: &Ir, registry: Option<&Registry>) -> Result<(), PostprocE
     }
     let float_checks: Vec<FloatCheck> = vec![
         FloatCheck {
-            name: "IroningESumThreshold",
+            name: "IroningESumLimit",
             val: ir.ironing.e_sum_threshold,
-            config_key: "IroningESumThreshold",
-            hard_min: 0.1,
+            config_key: "IroningESumLimit",
+            hard_min: 0.0,
             hard_max: 100.0,
         },
         FloatCheck {
@@ -669,9 +667,16 @@ fn validate_ranges(ir: &Ir, registry: Option<&Registry>) -> Result<(), PostprocE
             hard_max: 100.0,
         },
         FloatCheck {
-            name: "IroningSuppressExpand",
+            name: "IroningKeepout",
             val: ir.ironing.suppress_expand,
-            config_key: "IroningSuppressExpand",
+            config_key: "IroningKeepout",
+            hard_min: 0.0,
+            hard_max: 20.0,
+        },
+        FloatCheck {
+            name: "GlueInset",
+            val: ir.glue.inset,
+            config_key: "GlueInset",
             hard_min: 0.0,
             hard_max: 20.0,
         },
@@ -1028,7 +1033,7 @@ pub(crate) fn normalize_disk_stagger_swing_mode(v: &str) -> &str {
     if v.is_empty() { "spiral" } else { v }
 }
 
-pub(crate) fn normalize_ironing_suppress_expand_mode(v: &str) -> &str {
+pub(crate) fn normalize_ironing_keepout_mode(v: &str) -> &str {
     if v.is_empty() { "bbox" } else { v }
 }
 
@@ -1108,7 +1113,8 @@ mod tests {
         assert!((ir.tower.first_layer_flow - 1.0).abs() < f64::EPSILON);
         assert!((ir.disk.stagger_angle - 5.0).abs() < f64::EPSILON);
         assert!((ir.disk.stagger_max_angle - 45.0).abs() < f64::EPSILON);
-        assert!((ir.ironing.e_sum_threshold - 7.9).abs() < f64::EPSILON);
+        // 这一项不参与零值兜底：0 就是「任何挤出都算超上限」，缺键才回落 7.9。
+        assert_eq!(ir.ironing.e_sum_threshold, 0.0);
         assert!((ir.sheath.base_expand - 5.0).abs() < f64::EPSILON);
         assert!((ir.sheath.wall_width - 0.8).abs() < f64::EPSILON);
         assert_eq!(ir.glue.pass_count, 1);
@@ -1120,6 +1126,23 @@ mod tests {
             (ir.glue.z_lift_height - 5.0).abs() < f64::EPSILON,
             "B 类零值兜底 clamp 0→5"
         );
+    }
+
+    #[test]
+    fn glue_inset_reaches_ir() {
+        let cfg: TomlConfig = toml::from_str("[wiping]\nglue_inset = 5\n").unwrap();
+        let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
+        assert!((ir.glue.inset - 5.0).abs() < f64::EPSILON);
+    }
+
+    /// 缺键回落注册表默认值，填 0 就是 0：两者不许再被同一段兜底揉在一起。
+    #[test]
+    fn e_sum_limit_distinguishes_missing_from_zero() {
+        let missing: TomlConfig = toml::from_str("[toolhead]\n[wiping]\n\n").unwrap();
+        assert!((missing.wiping.ironing_e_sum_limit - 7.9).abs() < f64::EPSILON);
+
+        let zero: TomlConfig = toml::from_str("[wiping]\nironing_e_sum_limit = 0\n").unwrap();
+        assert_eq!(zero.wiping.ironing_e_sum_limit, 0.0);
     }
 
     /// tower_wipe_speed 兼容迁移（int/float 双形态 → SheathSpeed/RibSpeedValue/RibMode）。

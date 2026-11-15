@@ -2329,19 +2329,19 @@ machineMaxVariants = {  }
 pinned = false
 
 [[params]]
-key = "wiping.ironing_e_sum_threshold"
-configKey = "IroningESumThreshold"
-tomlKey = "ironing_e_sum_threshold"
-jsonKey = "ironing_e_sum_threshold"
-label = "熨烫挤出阈值"
-labelEn = "Ironing extrusion threshold"
-labelJa = "アイロニング押し出ししきい値"
-labelTw = "熨燙擠出閾值"
-desc = "熨烫挤出超过这个量就移除（自动模式）。"
-descEn = "Removes the ironing area once its extrusion passes this amount (auto mode)."
-descJa = "アイロンの押し出し量がこれを超えたら外します（自動モード）。"
-descTw = "熨燙擠出超過這個量就移除（自動模式）。"
-tomlComment = "熨烫E总和阈值 范围:0~100"
+key = "wiping.ironing_e_sum_limit"
+configKey = "IroningESumLimit"
+tomlKey = "ironing_e_sum_limit"
+jsonKey = "ironing_e_sum_limit"
+label = "熨烫挤出上限"
+labelEn = "Ironing extrusion limit"
+labelJa = "アイロニング押し出し上限"
+labelTw = "熨燙擠出上限"
+desc = "一块熨烫挤出超过这个量就不熨烫。"
+descEn = "Skips an ironing patch once its extrusion passes this amount."
+descJa = "アイロン一塊の押し出しがこれを超えたら熨燙しません。"
+descTw = "一塊熨燙擠出超過這個量就不熨燙。"
+tomlComment = "熨烫挤出上限(mm) 范围:0~100"
 valueType = "float"
 uiComponent = "number"
 defaultValue = 7.9
@@ -2405,19 +2405,19 @@ P2S = 'auto'
 "P1S:LITE" = false
 
 [[params]]
-key = "wiping.ironing_suppress_expand"
-configKey = "IroningSuppressExpand"
-tomlKey = "ironing_suppress_expand"
-jsonKey = "ironing_suppress_expand"
-label = "熨烫抑制扩展范围"
-labelEn = "Ironing suppression expansion"
-labelJa = "アイロニング抑制の拡張範囲"
-labelTw = "熨燙抑制擴展範圍"
-desc = "熨烫区向内收多少不涂胶，0 关闭。"
-descEn = "How far the ironing area pulls inward without glue; 0 turns it off."
-descJa = "アイロン領域を内側にどれだけ縮めて塗らないか。0 で無効。"
-descTw = "熨燙區向內收多少不塗膠，0 關閉。"
-tomlComment = "熨烫抑制扩展(mm) 范围:0~20"
+key = "wiping.ironing_keepout"
+configKey = "IroningKeepout"
+tomlKey = "ironing_keepout"
+jsonKey = "ironing_keepout"
+label = "熨烫周边留白"
+labelEn = "Ironing keepout"
+labelJa = "アイロン周辺の余白"
+labelTw = "熨燙周邊留白"
+desc = "熨烫面旁边的支撑面不涂胶，0 关闭。"
+descEn = "Support surface next to ironing is left without glue; 0 turns it off."
+descJa = "アイロン面の周りのサポート面には塗布しません。0 で無効。"
+descTw = "熨燙面旁邊的支撐面不塗膠，0 關閉。"
+tomlComment = "熨烫周边留白(mm) 范围:0~20"
 valueType = "float"
 uiComponent = "number"
 defaultValue = 0.0
@@ -2435,28 +2435,58 @@ machineMaxVariants = {  }
 pinned = false
 
 [[params]]
-key = "wiping.ironing_suppress_expand_mode"
-configKey = "IroningSuppressExpandMode"
-tomlKey = "ironing_suppress_expand_mode"
-jsonKey = "ironing_suppress_expand_mode"
-label = "熨烫抑制扩展模式"
-labelEn = "Ironing suppression mode"
-labelJa = "アイロニング抑制の拡張モード"
-labelTw = "熨燙抑制擴展模式"
-desc = "包围盒：沿 XY 均匀外扩；质心：从中心向外扩。"
-descEn = "Bounding box expands evenly along XY; centroid expands outward from the center."
-descJa = "バウンディングボックスは XY 方向に均等に広げ、重心は中心から外へ広げます。"
-descTw = "包圍盒：沿 XY 均勻外擴；質心：從中心向外擴。"
-tomlComment = "熨烫抑制扩展模式(bbox/centroid)"
+key = "wiping.ironing_keepout_mode"
+configKey = "IroningKeepoutMode"
+tomlKey = "ironing_keepout_mode"
+jsonKey = "ironing_keepout_mode"
+label = "留白方式"
+labelEn = "Keepout mode"
+labelJa = "余白の取り方"
+labelTw = "留白方式"
+desc = "包围盒：沿 XY 均匀外扩；质心：换成以中心为心的方框。"
+descEn = "Bounding box grows evenly along XY; centroid swaps in a box centred on it."
+descJa = "バウンディングボックスは XY 方向に均等に広げ、重心は中心の箱に置き換えます。"
+descTw = "包圍盒：沿 XY 均勻外擴；質心：換成以中心為心的方框。"
+tomlComment = "熨烫周边留白方式(bbox/centroid)"
 valueType = "string"
 uiComponent = "select"
 defaultValue = "bbox"
 scope = "universal"
 section = "wiping"
 layout = { "order" = 5.0, "sectionId" = "glue_ironing" }
-parentKey = "wiping.ironing_suppress_expand"
-showWhen = { "key" = "wiping.ironing_suppress_expand", "op" = "gt", "value" = "0" }
-choices = [{ "label" = "包围盒外扩", "labelEn" = "Bounding box", "labelJa" = "バウンディングボックス", "labelTw" = "包圍盒外擴", "value" = "bbox", "deprecated" = false }, { "label" = "质心半径外扩", "labelEn" = "Centroid radius", "labelJa" = "重心半径", "labelTw" = "重心半徑外擴", "value" = "centroid", "deprecated" = false }]
+parentKey = "wiping.ironing_keepout"
+showWhen = { "key" = "wiping.ironing_keepout", "op" = "gt", "value" = "0" }
+choices = [{ "label" = "整块外扩", "labelEn" = "Bounding box", "labelJa" = "バウンディングボックス", "labelTw" = "整塊外擴", "value" = "bbox", "deprecated" = false }, { "label" = "按中心取框", "labelEn" = "Centroid box", "labelJa" = "重心の箱", "labelTw" = "按中心取框", "value" = "centroid", "deprecated" = false }]
+deprecated = false
+machineMinVariants = {  }
+machineMaxVariants = {  }
+pinned = false
+
+[[params]]
+key = "wiping.glue_inset"
+configKey = "GlueInset"
+tomlKey = "glue_inset"
+jsonKey = "glue_inset"
+label = "涂胶内缩"
+labelEn = "Glue inset"
+labelJa = "塗布の内側オフセット"
+labelTw = "塗膠內縮"
+desc = "涂胶面四周向内收这么多，0 关闭。"
+descEn = "Shrinks the glue area inward from its outline; 0 turns it off."
+descJa = "塗布面を外周から内側へこの分だけ縮めます。0 で無効。"
+descTw = "塗膠面四周向內收這麼多，0 關閉。"
+tomlComment = "涂胶面内缩(mm) 范围:0~20"
+valueType = "float"
+uiComponent = "number"
+defaultValue = 0.0
+scope = "universal"
+section = "wiping"
+layout = { "order" = 6.0, "sectionId" = "glue_ironing" }
+min = 0.0
+max = 20.0
+step = 0.5
+unit = "mm"
+choices = []
 deprecated = false
 machineMinVariants = {  }
 machineMaxVariants = {  }

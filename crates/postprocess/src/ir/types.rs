@@ -180,6 +180,9 @@ fn default_swap_hop_height() -> f64 {
 #[serde(rename_all = "PascalCase")]
 pub struct GlueIr {
     pub z_offset: f64,
+    /// 涂胶面向内收缩的量（mm）。`0` = 不内缩；见 `postproc::pass1::inset`。
+    #[serde(default)]
+    pub inset: f64,
     pub sparse_ratio: f64,
     pub pass_count: i64,
     pub z_lift_height: f64,

@@ -191,8 +191,8 @@ id = 'item_wiping_ironing_mode'
 paramKey = 'wiping.ironing_mode'
 
 [[tabs.sections.items]]
-id = 'item_wiping_ironing_e_sum_threshold'
-paramKey = 'wiping.ironing_e_sum_threshold'
+id = 'item_wiping_ironing_e_sum_limit'
+paramKey = 'wiping.ironing_e_sum_limit'
 
 [[tabs.sections.items]]
 id = 'item_wiping_use_ironing_path'
@@ -203,12 +203,16 @@ id = 'item_wiping_ironing_coverage_threshold'
 paramKey = 'wiping.ironing_coverage_threshold'
 
 [[tabs.sections.items]]
-id = 'item_wiping_ironing_suppress_expand'
-paramKey = 'wiping.ironing_suppress_expand'
+id = 'item_wiping_ironing_keepout'
+paramKey = 'wiping.ironing_keepout'
 
 [[tabs.sections.items]]
-id = 'item_wiping_ironing_suppress_expand_mode'
-paramKey = 'wiping.ironing_suppress_expand_mode'
+id = 'item_wiping_ironing_keepout_mode'
+paramKey = 'wiping.ironing_keepout_mode'
+
+[[tabs.sections.items]]
+id = 'item_wiping_glue_inset'
+paramKey = 'wiping.glue_inset'
 
 [[tabs.sections.items]]
 id = 'item_wiping_min_support_interface_enabled'

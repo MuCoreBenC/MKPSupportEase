@@ -1,6 +1,6 @@
 # machine: A1_MINI
 # variant: fast261111
-# generated_at: 2026-11-13T23:05:56+08:00
+# generated_at: 2026-11-15T20:23:30+08:00
 
 [toolhead]
 # 落笔 G-code
@@ -57,6 +57,7 @@ disk_stagger_mode = "off" # 圆盘错开模式(off/on/auto)
 disk_stagger_swing_mode = "spiral" # 圆盘摆动模式(spiral/oscillate)
 fan_speed = 255 # 风扇速度 范围:0~255
 fast_tower_mode = "fast" # 擦料塔模式
+glue_inset = 0 # 涂胶面内缩(mm) 范围:0~20
 glue_inter_model_lift_height = 2 # 模型间/段间跳转Z抬升高度(mm) 范围:2~5
 glue_pass_count = 1 # 涂胶次数 范围:1~10
 glue_sparse_ratio = 50 # 涂胶稀疏比(%)
@@ -75,10 +76,10 @@ glue_z_lift_height = 5 # 涂胶Z抬升高度(mm) 范围:5~10
 glue_z_lift_height_first_layers = 6 # 前3层抬升高度(mm) 范围:6~10
 have_wiping_components = "tower" # 使用擦嘴塔而非擦嘴组件
 ironing_coverage_threshold = 10 # 熨烫覆盖率阈值(%) 范围:0~100
-ironing_e_sum_threshold = 7.9 # 熨烫E总和阈值 范围:0~100
+ironing_e_sum_limit = 7.9 # 熨烫挤出上限(mm) 范围:0~100
+ironing_keepout = 0 # 熨烫周边留白(mm) 范围:0~20
+ironing_keepout_mode = "bbox" # 熨烫周边留白方式(bbox/centroid)
 ironing_mode = "auto" # 熨烫模式: off=始终移除, on=始终保留, auto=自动判断
-ironing_suppress_expand = 0 # 熨烫抑制扩展(mm) 范围:0~20
-ironing_suppress_expand_mode = "bbox" # 熨烫抑制扩展模式(bbox/centroid)
 min_support_interface_enabled = true # 最小支撑涂胶面过滤
 nozzle_cooling_flag = false # 涂胶期间是否降温
 outer_structure = "rib" # 外围结构(none/rib)
