@@ -345,6 +345,35 @@ pub struct GlueFacts {
     pub prime_total_length: f64,
 }
 
+/// 熨烫组（`detail.ironing`）—— **判据的事后事实**，不参与任何判定（2026-11-15）。
+///
+/// 为什么要有：作者实测一张看着远超「熨烫挤出上限」的熨烫面没被删掉，把上限改成 0.10
+/// 才消失。追查的结论是 —— 判据原先按切片器打的**一小块**（一对
+/// `M1031 S1 … IRONING_EXTRUSIONS_END`）各自合计，而一张面会被切成几十块，谁都没超。
+/// 现在判据把相邻的块**连成一整段（一张面）**再合计，这一组记的就是那个整段。
+///
+/// ★ 口径与别组一致：**只加不改**。老记录没有这一格 ⇒ 前端整组不摆；
+/// `max_e_sum` / `min_coverage` 为 `None` 落 `null`（"没有面" / "没有配对"），
+/// 与"0"是两件事。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IroningFacts {
+    /// 见到几段连续熨烫（= 几张面；任何模式都记）。
+    pub blocks: u32,
+    /// 被判掉、没进产物的段数。
+    pub removed: u32,
+    /// 所有段里最大的挤出合计（mm，耗材长度）；一段都没有 ⇒ `null`。
+    pub max_e_sum: Option<f64>,
+    /// 这一层最终用熨烫路径的层数（含与支撑面按区域混合）。
+    pub layers_ironing: u32,
+    /// 这一层整层用支撑面路径的层数。
+    pub layers_moisture: u32,
+    /// 这一层回退到支撑体（`iface_fallback`）的层数。
+    pub layers_fallback: u32,
+    /// 参与过配对的覆盖率里最小的那个（%）；一次都没配对 ⇒ `null`。
+    pub min_coverage: Option<f64>,
+}
+
 /// 擦料塔组（`detail.tower`）。
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -461,6 +490,10 @@ pub struct Detail {
     /// （页面口径：后端没给就不摆，不编占位值）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub glue: Option<GlueFacts>,
+    /// 熨烫组（`detail.ironing`）：判据的事后事实。与 `glue` 同一条 ——
+    /// 失败 / 取消没有 pass1 统计 ⇒ 整组不写。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ironing: Option<IroningFacts>,
     /// 擦料塔组（`detail.tower`）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tower: Option<TowerFacts>,
@@ -780,6 +813,23 @@ impl ReportFacts<'_> {
             glue_z_offset: ir.glue.z_offset,
             prime_trigger_layers: ir.prime.trigger_layers,
             prime_total_length: stats.prime_total_length,
+        }
+    }
+
+    /// 熨烫组（判据的事后事实）。
+    ///
+    /// `stats` 与 [`Self::glue`] 同一个理由由调用方递进来：失败那趟没有 pass1 统计，
+    /// 那种记录压根不该调用这个函数。
+    pub fn ironing(&self, stats: &postprocess::postproc::pass1::ProcessStats) -> IroningFacts {
+        let f = &stats.ironing;
+        IroningFacts {
+            blocks: f.blocks,
+            removed: f.removed,
+            max_e_sum: f.max_e_sum,
+            layers_ironing: f.layers_ironing,
+            layers_moisture: f.layers_moisture,
+            layers_fallback: f.layers_fallback,
+            min_coverage: f.min_coverage,
         }
     }
 
@@ -1926,6 +1976,7 @@ mod tests {
                 print_time_status: None,
                 estimated_print_seconds: Some(2530.5),
                 glue: Some(facts.glue(&s.stats)),
+                ironing: Some(facts.ironing(&s.stats)),
                 tower: Some(facts.tower()),
                 slicer: Some(facts.slicer()),
                 calibration: None,
@@ -1973,6 +2024,41 @@ mod tests {
         );
         assert!(v["detail"]["tower"]["towerLayers"].is_number());
         assert!(v["detail"]["slicer"]["nozzleDiameter"].is_number());
+    }
+
+    /// 熨烫组按**契约键名**落盘 —— 前端 `ReportIroningFacts` 读的就是这几个名字。
+    #[test]
+    fn ironing_facts_serialize_with_the_contract_keys() {
+        let v = serde_json::to_value(IroningFacts {
+            blocks: 68,
+            removed: 0,
+            max_e_sum: Some(0.34),
+            layers_ironing: 12,
+            layers_moisture: 3,
+            layers_fallback: 1,
+            min_coverage: Some(8.5),
+        })
+        .unwrap();
+        assert_eq!(v["blocks"], 68);
+        assert_eq!(v["removed"], 0);
+        assert_eq!(v["maxESum"], 0.34);
+        assert_eq!(v["layersIroning"], 12);
+        assert_eq!(v["layersMoisture"], 3);
+        assert_eq!(v["layersFallback"], 1);
+        assert_eq!(v["minCoverage"], 8.5);
+        /* 「一块熨烫都没有」落 null，不是 0 —— 与「这一块是 0」分开 */
+        let empty = serde_json::to_value(IroningFacts {
+            blocks: 0,
+            removed: 0,
+            max_e_sum: None,
+            layers_ironing: 0,
+            layers_moisture: 0,
+            layers_fallback: 0,
+            min_coverage: None,
+        })
+        .unwrap();
+        assert!(empty["maxESum"].is_null());
+        assert!(empty["minCoverage"].is_null());
     }
 
     /// 时刻格式化：三个口径（日期目录 / 文件名 / 人看）互不串味。
@@ -2032,6 +2118,7 @@ mod tests {
                 print_time_status: None,
                 estimated_print_seconds: None,
                 glue: None,
+                ironing: None,
                 tower: None,
                 slicer: None,
                 calibration: None,

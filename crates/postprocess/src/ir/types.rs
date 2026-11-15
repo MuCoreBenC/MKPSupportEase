@@ -180,9 +180,18 @@ fn default_swap_hop_height() -> f64 {
 #[serde(rename_all = "PascalCase")]
 pub struct GlueIr {
     pub z_offset: f64,
-    /// 涂胶面向内收缩的量（mm）。`0` = 不内缩；见 `postproc::pass1::inset`。
+    /// **边缘带**的宽度：占这张涂胶面**短边**的百分比。`0` = 关。
+    ///
+    /// 用百分比而不是 mm：一张 20mm 的小面和一张 200mm 的大面不该用同一个绝对带宽
+    /// （1mm 会把小面吃掉，在大面上又几乎看不见）。
     #[serde(default)]
-    pub inset: f64,
+    pub edge_percent: f64,
+    /// 边缘带上那条涂胶段的**落笔抬高**（mm）。`0` = 关（不抬）。
+    ///
+    /// 作用不是"少涂"，而是让笔在贴近边界时离面更高 —— XY/Z 校准有偏差时，
+    /// 笔跑出支撑面再回来不会刮到模型。见 `postproc::pass1::edge_band`。
+    #[serde(default)]
+    pub edge_lift: f64,
     pub sparse_ratio: f64,
     pub pass_count: i64,
     pub z_lift_height: f64,

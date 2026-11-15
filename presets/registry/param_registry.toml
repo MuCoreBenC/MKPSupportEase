@@ -2463,25 +2463,55 @@ machineMaxVariants = {  }
 pinned = false
 
 [[params]]
-key = "wiping.glue_inset"
-configKey = "GlueInset"
-tomlKey = "glue_inset"
-jsonKey = "glue_inset"
-label = "涂胶内缩"
-labelEn = "Glue inset"
-labelJa = "塗布の内側オフセット"
-labelTw = "塗膠內縮"
-desc = "涂胶面四周向内收这么多，0 关闭。"
-descEn = "Shrinks the glue area inward from its outline; 0 turns it off."
-descJa = "塗布面を外周から内側へこの分だけ縮めます。0 で無効。"
-descTw = "塗膠面四周向內收這麼多，0 關閉。"
-tomlComment = "涂胶面内缩(mm) 范围:0~20"
+key = "wiping.glue_edge_percent"
+configKey = "GlueEdgePercent"
+tomlKey = "glue_edge_percent"
+jsonKey = "glue_edge_percent"
+label = "涂胶边缘带"
+labelEn = "Glue edge band"
+labelJa = "塗布エッジ帯"
+labelTw = "塗膠邊緣帶"
+desc = "贴边那几段的宽度，按这块涂胶面短边的百分比算，0 关闭。"
+descEn = "Width of the edge band as a share of the glue face's short side; 0 turns it off."
+descJa = "塗布面の短辺に対するエッジ帯の割合。0 で無効。"
+descTw = "貼邊那幾段的寬度，按這塊塗膠面短邊的百分比算，0 關閉。"
+tomlComment = "涂胶边缘带(%) 范围:0~100"
 valueType = "float"
 uiComponent = "number"
 defaultValue = 0.0
 scope = "universal"
 section = "wiping"
 layout = { "order" = 6.0, "sectionId" = "glue_ironing" }
+min = 0.0
+max = 100.0
+step = 1.0
+unit = "%"
+choices = [{ "label" = "5%", "labelEn" = "5%", "labelJa" = "5%", "labelTw" = "5%", "value" = 5.0, "deprecated" = false }, { "label" = "10%", "labelEn" = "10%", "labelJa" = "10%", "labelTw" = "10%", "value" = 10.0, "deprecated" = false }, { "label" = "20%", "labelEn" = "20%", "labelJa" = "20%", "labelTw" = "20%", "value" = 20.0, "deprecated" = false }]
+deprecated = false
+machineMinVariants = {  }
+machineMaxVariants = {  }
+pinned = false
+
+[[params]]
+key = "wiping.glue_edge_lift"
+configKey = "GlueEdgeLift"
+tomlKey = "glue_edge_lift"
+jsonKey = "glue_edge_lift"
+label = "边缘抬起高度"
+labelEn = "Edge lift height"
+labelJa = "エッジ持ち上げ高さ"
+labelTw = "邊緣抬起高度"
+desc = "边缘带那几段照涂，落笔高度再多抬这么多，0 关闭。"
+descEn = "Glue still goes down on the edge band, with the nozzle this much higher; 0 turns it off."
+descJa = "エッジ帯も塗布しますが、その分ノズルを高くします。0 で無効。"
+descTw = "邊緣帶那幾段照塗，落筆高度再多抬這麼多，0 關閉。"
+tomlComment = "涂胶边缘抬升(mm) 范围:0~20"
+valueType = "float"
+uiComponent = "number"
+defaultValue = 0.0
+scope = "universal"
+section = "wiping"
+layout = { "order" = 6.5, "sectionId" = "glue_ironing" }
 min = 0.0
 max = 20.0
 step = 0.5

@@ -19,6 +19,12 @@ pub const MARKER_FILAMENT_END: &str = "; filament end gcode";
 pub const MARKER_MORE_EXTRUSION: &str = ";MoreExtrusion";
 pub const MARKER_RISING_NOZZLE: &str = ";Rising Nozzle a little";
 pub const MARKER_MICRO_LIFT: &str = ";MICRO_LIFT";
+/// **边缘带**（2026-11-16）：从这里起到 `MARKER_EDGE_NORMAL` 的涂胶段，落笔高度抬到
+/// 「正常落笔 + `Glue.EdgeLift`」。由 `pass1::edge_band` 插在涂胶路径里，发射端
+/// （`glue_block::write_glue_lines`）认它 —— 路径本身一段不删。
+pub const MARKER_EDGE_RAISE: &str = ";EDGE_RAISE";
+/// 边缘带到此为止：之后的涂胶段回正常落笔高度。
+pub const MARKER_EDGE_NORMAL: &str = ";EDGE_NORMAL";
 
 /// MKP 注释统一前缀（含尾随空格）。操作类型常量见下方。
 pub const MKP_PREFIX: &str = ";MKP ";

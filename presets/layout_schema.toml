@@ -211,8 +211,12 @@ id = 'item_wiping_ironing_keepout_mode'
 paramKey = 'wiping.ironing_keepout_mode'
 
 [[tabs.sections.items]]
-id = 'item_wiping_glue_inset'
-paramKey = 'wiping.glue_inset'
+id = 'item_wiping_glue_edge_percent'
+paramKey = 'wiping.glue_edge_percent'
+
+[[tabs.sections.items]]
+id = 'item_wiping_glue_edge_lift'
+paramKey = 'wiping.glue_edge_lift'
 
 [[tabs.sections.items]]
 id = 'item_wiping_min_support_interface_enabled'

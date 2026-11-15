@@ -109,6 +109,7 @@ import type {
   ReportPipelineStep,
   ReportExportPlan,
   ReportGlueFacts,
+  ReportIroningFacts,
   ReportCalibrationFacts,
   ReportDebugFacts,
   ReportSlicerFacts,
@@ -405,6 +406,14 @@ const GROUP_SHAPES: Record<string, ReactNode> = {
     </>
   ),
   glue: <path d="M12 3.5c3.5 4 6 7.2 6 10a6 6 0 0 1-12 0c0-2.8 2.5-6 6-10z" />,
+  /* 熨烫＝熨斗侧影：底板一条线、机身从左往右抬、上面一道把手 */
+  ironing: (
+    <>
+      <path d="M3.5 17.5h17" />
+      <path d="M5.5 17.5v-3.2c0-3.1 2.2-5.3 5.5-5.8l6.3-.8c2.1-.3 3.7 1.2 3.7 3.3v6.5" />
+      <path d="M9.5 8.4V6.9c0-.9.7-1.6 1.6-1.6h3.2" />
+    </>
+  ),
   /* 调试＝准星：对的是「工具头有没有走到那个位置」，不是印出来的东西 */
   debug: (
     <>
@@ -716,6 +725,59 @@ function glueGroup(tr: Tr, glue: ReportGlueFacts): Group | null {
     .filter((x): x is string => x !== null)
     .join(' · ')
   return { id: 'glue', title: tr('report.glue.title'), sum, cells }
+}
+
+/**
+ * 熨烫组（键与 `detail.ironing` 同名）—— 判据的**事后事实**。
+ *
+ * 这一组回答的是「这一盘熨烫到底判了什么」：按切片器打的小块（`M1031 S1 …`）各判各的，
+ * 一张大面会被切成几十块 —— 所以「块数」与「最大一块」必须并排看，只看其中之一会误判。
+ *
+ * ★ 上限不另存一份：借切片工艺组已经摊开的 `ironingThreshold`（同一件事只说一处）。
+ * ★ 一整盘都没有熨烫、也没走过支撑面 / 支撑体 ⇒ 整组不摆（一排 0 是噪音）。
+ */
+function ironingGroup(
+  tr: Tr,
+  f: ReportIroningFacts,
+  threshold: number | undefined,
+): Group | null {
+  const nothing =
+    (f.blocks ?? 0) === 0 &&
+    (f.layersIroning ?? 0) === 0 &&
+    (f.layersMoisture ?? 0) === 0 &&
+    (f.layersFallback ?? 0) === 0
+  if (nothing) return null
+  const blocks = (v: number | undefined): string =>
+    v === undefined ? '—' : tr('report.ironing.unit.blocks', { n: fmtNum(v) })
+  const layers = (v: number | undefined): string =>
+    v === undefined ? '—' : tr('report.ironing.unit.layers', { n: fmtNum(v) })
+  const maxE =
+    f.maxESum === undefined || f.maxESum === null
+      ? '—'
+      : threshold === undefined
+        ? `${fmtNum(f.maxESum)} mm`
+        : `${fmtNum(f.maxESum)} mm · ${tr('report.slicer.threshold', { v: fmtNum(threshold) })}`
+  const cells: [string, string][] = [
+    [tr('report.ironing.blocks'), blocks(f.blocks)],
+    [tr('report.ironing.removed'), blocks(f.removed)],
+    [tr('report.ironing.maxE'), maxE],
+    [tr('report.ironing.layersIroning'), layers(f.layersIroning)],
+    [tr('report.ironing.layersMoisture'), layers(f.layersMoisture)],
+    [tr('report.ironing.layersFallback'), layers(f.layersFallback)],
+    [
+      tr('report.ironing.minCoverage'),
+      f.minCoverage === undefined || f.minCoverage === null
+        ? '—'
+        : `${fmtNum(f.minCoverage)} %`,
+    ],
+  ]
+  const sum = [
+    f.blocks === undefined ? null : tr('report.ironing.unit.blocks', { n: fmtNum(f.blocks) }),
+    f.removed === undefined ? null : tr('report.ironing.sumRemoved', { n: fmtNum(f.removed) }),
+  ]
+    .filter((x): x is string => x !== null)
+    .join(' · ')
+  return { id: 'ironing', title: tr('report.ironing.title'), sum, cells }
 }
 
 /** 擦料塔组（键与 `detail.tower` 同名） */
@@ -1049,6 +1111,11 @@ function buildGroups(
   /* 涂胶 / 擦料塔 / 切片工艺：旧记录没有这些分包 ⇒ 整组不摆（不编占位值） */
   if (detail.glue !== undefined && detail.glue !== null) {
     const g = glueGroup(tr, detail.glue)
+    if (g !== null) groups.push(g)
+  }
+  /* 熨烫：判据的事后事实（块 / 判掉 / 最大一块 / 路径层数）。上限借切片工艺组那一格 */
+  if (detail.ironing !== undefined && detail.ironing !== null) {
+    const g = ironingGroup(tr, detail.ironing, detail.slicer?.ironingThreshold)
     if (g !== null) groups.push(g)
   }
   if (detail.tower !== undefined && detail.tower !== null) {

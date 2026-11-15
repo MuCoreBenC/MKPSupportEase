@@ -244,7 +244,8 @@ pub fn build(
 
     // ---- Glue ----
     ir.glue.z_offset = cfg.toolhead.glue_z_offset;
-    ir.glue.inset = cfg.wiping.glue_inset;
+    ir.glue.edge_percent = cfg.wiping.glue_edge_percent;
+    ir.glue.edge_lift = cfg.wiping.glue_edge_lift;
     ir.glue.sparse_ratio = cfg.wiping.glue_sparse_ratio;
     ir.glue.pass_count = cfg.wiping.glue_pass_count;
     if ir.glue.pass_count == 0 {
@@ -674,9 +675,16 @@ fn validate_ranges(ir: &Ir, registry: Option<&Registry>) -> Result<(), PostprocE
             hard_max: 20.0,
         },
         FloatCheck {
-            name: "GlueInset",
-            val: ir.glue.inset,
-            config_key: "GlueInset",
+            name: "GlueEdgePercent",
+            val: ir.glue.edge_percent,
+            config_key: "GlueEdgePercent",
+            hard_min: 0.0,
+            hard_max: 100.0,
+        },
+        FloatCheck {
+            name: "GlueEdgeLift",
+            val: ir.glue.edge_lift,
+            config_key: "GlueEdgeLift",
             hard_min: 0.0,
             hard_max: 20.0,
         },
@@ -1129,10 +1137,21 @@ mod tests {
     }
 
     #[test]
-    fn glue_inset_reaches_ir() {
+    fn glue_edge_band_reaches_ir() {
+        let cfg: TomlConfig =
+            toml::from_str("[wiping]\nglue_edge_percent = 10\nglue_edge_lift = 1.5\n").unwrap();
+        let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
+        assert!((ir.glue.edge_percent - 10.0).abs() < f64::EPSILON);
+        assert!((ir.glue.edge_lift - 1.5).abs() < f64::EPSILON);
+    }
+
+    /// 老预设文件里还带着已退役的 `glue_inset`：读得进来、**不再影响任何 IR 值**。
+    #[test]
+    fn retired_glue_inset_is_accepted_but_ignored() {
         let cfg: TomlConfig = toml::from_str("[wiping]\nglue_inset = 5\n").unwrap();
         let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
-        assert!((ir.glue.inset - 5.0).abs() < f64::EPSILON);
+        assert!((ir.glue.edge_percent).abs() < f64::EPSILON);
+        assert!((ir.glue.edge_lift).abs() < f64::EPSILON);
     }
 
     /// 缺键回落注册表默认值，填 0 就是 0：两者不许再被同一段兜底揉在一起。

@@ -260,6 +260,33 @@ export interface ReportGlueFacts {
   primeTotalLength?: number
 }
 
+/**
+ * 熨烫组（`detail.ironing`，2026-11-15）—— **判据的事后事实**，不是参数。
+ *
+ * 为什么要有：一张看着远超「熨烫挤出上限」的熨烫面没被删掉，把上限改成 0.10 才消失。
+ * 切片器把同一张面拆成几十个 `M1031` 块，判据现在把它们**连成一整段（一张面）**再合计
+ * —— 这一组把那场判断如实摊出来（几张面 / 删了几张 / 最大一张多大 / 各路径的层数 /
+ * 最小覆盖率）。
+ *
+ * ★ 与判据同一份真值：前端**不重算**、也不拿这里的数与阈值比出结论（比法在内核）。
+ */
+export interface ReportIroningFacts {
+  /** 见到几段连续熨烫（= 几张面） */
+  blocks?: number
+  /** 被判掉、没进产物的段数 */
+  removed?: number
+  /** 所有段里最大的挤出合计（mm，耗材长度）；`null` = 一段都没有 */
+  maxESum?: number | null
+  /** 这一层最终用熨烫路径的层数（含与支撑面按区域混合） */
+  layersIroning?: number
+  /** 这一层整层用支撑面路径的层数 */
+  layersMoisture?: number
+  /** 这一层回退到支撑体（`iface_fallback`）的层数 */
+  layersFallback?: number
+  /** 参与过配对的覆盖率里最小的那个（%）；`null` = 一次都没配对 */
+  minCoverage?: number | null
+}
+
 /** 擦料塔组（`detail.tower`） */
 export interface ReportTowerFacts {
   towerLayers?: number
@@ -449,6 +476,8 @@ export interface ReportDetail {
   estimatedPrintSeconds?: number | null
   /** 涂胶组（旧记录 / 失败记录没有 ⇒ `null`，整组不摆） */
   glue?: ReportGlueFacts | null
+  /** 熨烫组（判据的事后事实；旧记录 / 失败记录没有 ⇒ `null`，整组不摆） */
+  ironing?: ReportIroningFacts | null
   /** 擦料塔组 */
   tower?: ReportTowerFacts | null
   /** 切片工艺组 */

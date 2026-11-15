@@ -1604,6 +1604,7 @@ fn archive_success(
         },
         estimated_print_seconds: done.print_time.as_ref().map(|pt| pt.total_seconds),
         glue: Some(facts.glue(&done.stats.pass1)),
+        ironing: Some(facts.ironing(&done.stats.pass1)),
         tower: Some(facts.tower()),
         slicer: Some(facts.slicer()),
         // 证据链：**成功那一趟也写**（原来这些值在 `resolve_profile` 之后就被消费掉了，
@@ -1878,6 +1879,7 @@ fn archive_failure(
             // 失败 / 取消没有 IR 终态 ⇒ 这两组整组不写（页面口径：没给就不摆）。
             // ★ 它们要的是**跑完才有的数**（涂胶总长 / 塔层数），失败那趟本来就没有。
             glue: None,
+            ironing: None,
             tower: None,
             /*
              * 切片这一组**照写**（2026-11-04）：耗材 / 喷嘴 / 层高 / 切片软件 / 熨烫 /

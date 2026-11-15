@@ -142,6 +142,9 @@ fn glue_nozzle_z(ir_data: &Ir, layer_z: f64, kind: PenZ) -> f64 {
 /// 旧实现只把标记后**紧邻的一条**交出去，后面的空走要么被 `delete_wipe` 丢弃、
 /// 要么按涂胶线原样发出 —— 两者都会让笔在落笔高度飞过一段距离。
 /// 这里按「连续空走」整段抬着走完，返回第一条未消费的下标。
+/* 8 个入参全是从调用点现拿的事实（层高 / 两个高度 / 笔在不在上面），
+   不值得为它造一个只在这个文件里用一次的包装结构。 */
+#[allow(clippy::too_many_arguments)]
 fn emit_jump_run(
     sink: &mut LineSink,
     lines: &[String],
@@ -150,6 +153,9 @@ fn emit_jump_run(
     current_layer_height: f64,
     last_layer_height: f64,
     already_up: bool,
+    /* 落在「正常落笔高度」之上的额外高度（mm）。边缘带那一段用 `Glue.EdgeLift`：
+    笔在贴近边界时离面更高，XY/Z 有偏差也不会刮到模型。 */
+    extra_land_lift: f64,
 ) -> Result<(usize, f64, f64, f64), PostprocError> {
     let lift_height = ir_data.glue.inter_model_lift_height;
     let mut cur_z = glue_nozzle_z(ir_data, current_layer_height, PenZ::Hop);
@@ -241,7 +247,7 @@ fn emit_jump_run(
         return Ok((i, last.0, last.1, cur_z));
     }
 
-    let landed_z = glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed);
+    let landed_z = glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed) + extra_land_lift;
     sink.push_str(&format!("G1 Z{}", format_z(landed_z)));
     sink.push_str(&format!(
         "G1 F{}",
@@ -341,7 +347,9 @@ fn write_glue_lines(
     skip_leading: usize,
 ) -> Result<(), PostprocError> {
     use crate::gcode::MARKER_MICRO_LIFT;
-    use crate::gcode::{MARKER_ZJUMP_INTERNAL, MARKER_ZJUMP_START};
+    use crate::gcode::{
+        MARKER_EDGE_NORMAL, MARKER_EDGE_RAISE, MARKER_ZJUMP_INTERNAL, MARKER_ZJUMP_START,
+    };
 
     if ir_data.machine.nozzle_diameter <= 0.3 && ir_data.glue.sparse_ratio > 0.0 {
         let mut move_indices: Vec<usize> = Vec::new();
@@ -441,8 +449,22 @@ fn write_glue_lines(
      * 仍然跳过抬升，直接把那段空走放到贴面高度飞（实测 R2 从 24 反弹到 113）。
      */
     let land_z = glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed);
+    /*
+     * 边缘带：「贴边那一段」的落笔高度 = 正常落笔 + `Glue.EdgeLift`。
+     * 标记由 `pass1::edge_band` 插在路径里（`;EDGE_RAISE` / `;EDGE_NORMAL`），一段不删。
+     */
+    let edge_lift = ir_data.glue.edge_lift.max(0.0);
+    let raised_z = land_z + edge_lift;
+    /* 下一次落笔多抬多少：抬着落 vs 正常落 */
+    let edge_land_lift = |raise: bool| if raise { edge_lift } else { 0.0 };
+    /* 下一次落笔要不要抬（跨过一次跳转也保持，标记插在跳转之前） */
+    let mut pending_raise = false;
+    /* 现在笔停在哪一档（只有笔落着的时候才有意义） */
+    let mut cur_raised = false;
     let mut pen_z = start_z;
-    let pen_is_up = |z: f64| z > land_z + 1e-6;
+    /* 「抬着」的判据要把边缘带那一档也算成"落着"：
+    否则从边缘带跳出去时不会抬到平飞高度，会贴着面飞 */
+    let pen_is_up = |z: f64| z > land_z + edge_lift + 1e-6;
 
     /*
      * 段尾的多余空走：最后一条涂胶行之后的空走没有任何用处（收笔由 `;Glueing Finished`
@@ -458,6 +480,28 @@ fn write_glue_lines(
         let il = lines[idx].trim().to_string();
         // 只丢「段尾的空走」，其余（`M204` 之类的状态行）照旧发出去
         if last_glue.is_some_and(|i| idx > i) && is_travel_line(&il) {
+            idx += 1;
+            continue;
+        }
+        /* 边缘带：只改落笔高度、**不删路径**（标记由 `edge_band` 插在路径里）。
+        笔落着就当场改高度；笔抬着则由下面这次落笔读 `pending_raise` 决定落多高。 */
+        if il.contains(MARKER_EDGE_RAISE) {
+            pending_raise = true;
+            if !pen_is_up(pen_z) && !cur_raised {
+                sink.push_str(&format!("G1 Z{}", format_z(raised_z)));
+                pen_z = raised_z;
+                cur_raised = true;
+            }
+            idx += 1;
+            continue;
+        }
+        if il.contains(MARKER_EDGE_NORMAL) {
+            pending_raise = false;
+            if !pen_is_up(pen_z) && cur_raised {
+                sink.push_str(&format!("G1 Z{}", format_z(land_z)));
+                pen_z = land_z;
+                cur_raised = false;
+            }
             idx += 1;
             continue;
         }
@@ -487,11 +531,14 @@ fn write_glue_lines(
                 current_layer_height,
                 last_layer_height,
                 pen_is_up(pen_z),
+                edge_land_lift(pending_raise),
             )?;
             prev_x = lx;
             prev_y = ly;
             if !z_after.is_nan() {
                 pen_z = z_after;
+                /* 这次落了：把「现在停在哪个档」记成落笔时用的那一档 */
+                cur_raised = pending_raise;
             }
             idx = next;
             continue;
@@ -526,11 +573,14 @@ fn write_glue_lines(
                 current_layer_height,
                 last_layer_height,
                 pen_is_up(pen_z),
+                edge_land_lift(pending_raise),
             )?;
             prev_x = lx;
             prev_y = ly;
             if !z_after.is_nan() {
                 pen_z = z_after;
+                /* 这次落了：把「现在停在哪个档」记成落笔时用的那一档 */
+                cur_raised = pending_raise;
             }
             idx = next;
             continue;
@@ -561,11 +611,14 @@ fn write_glue_lines(
                 current_layer_height,
                 last_layer_height,
                 pen_is_up(pen_z),
+                edge_land_lift(pending_raise),
             )?;
             prev_x = lx;
             prev_y = ly;
             if !z_after.is_nan() {
                 pen_z = z_after;
+                /* 这次落了：把「现在停在哪个档」记成落笔时用的那一档 */
+                cur_raised = pending_raise;
             }
             idx = next;
             continue;
@@ -589,11 +642,14 @@ fn write_glue_lines(
                 current_layer_height,
                 last_layer_height,
                 pen_is_up(pen_z),
+                edge_land_lift(pending_raise),
             )?;
             prev_x = lx;
             prev_y = ly;
             if !z_after.is_nan() {
                 pen_z = z_after;
+                /* 这次落了：把「现在停在哪个档」记成落笔时用的那一档 */
+                cur_raised = pending_raise;
             }
             idx = next;
             continue;
@@ -604,15 +660,14 @@ fn write_glue_lines(
             emitted_move = true;
             // 抬着走过来、终于遇到涂胶行 ⇒ 先落再涂
             if pen_is_up(pen_z) && il.contains(" E") {
-                sink.push_str(&format!(
-                    "G1 Z{}",
-                    format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
-                ));
+                let target = if pending_raise { raised_z } else { land_z };
+                sink.push_str(&format!("G1 Z{}", format_z(target)));
                 sink.push_str(&format!(
                     "G1 F{}",
                     format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
                 ));
-                pen_z = land_z;
+                pen_z = target;
+                cur_raised = pending_raise;
             }
             let mut glue_line = il.clone();
             if glue_line.contains(" E") {
