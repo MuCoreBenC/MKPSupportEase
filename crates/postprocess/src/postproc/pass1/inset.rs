@@ -82,10 +82,10 @@ pub(crate) fn apply(iface: &[String], inset: f64) -> Vec<String> {
             continue;
         }
         let whole = pieces.len() == 1
-            && (pieces[0].0 .0 - mv.from.0).abs() < 1e-9
-            && (pieces[0].0 .1 - mv.from.1).abs() < 1e-9
-            && (pieces[0].1 .0 - mv.to.0).abs() < 1e-9
-            && (pieces[0].1 .1 - mv.to.1).abs() < 1e-9;
+            && (pieces[0].0.0 - mv.from.0).abs() < 1e-9
+            && (pieces[0].0.1 - mv.from.1).abs() < 1e-9
+            && (pieces[0].1.0 - mv.to.0).abs() < 1e-9
+            && (pieces[0].1.1 - mv.to.1).abs() < 1e-9;
         if whole {
             if need_jump && !out.is_empty() {
                 out.push(MARKER_ZJUMP_START.to_string());
@@ -171,11 +171,7 @@ fn lerp(a: (f64, f64), b: (f64, f64), t: f64) -> (f64, f64) {
 }
 
 /// 一条移动里落在保留区的子段（可能 0 段，也可能被内部空洞切成多段）。
-fn clip_segment(
-    a: (f64, f64),
-    b: (f64, f64),
-    keep: impl Fn((f64, f64)) -> bool,
-) -> Vec<Piece> {
+fn clip_segment(a: (f64, f64), b: (f64, f64), keep: impl Fn((f64, f64)) -> bool) -> Vec<Piece> {
     let len = ((b.0 - a.0).powi(2) + (b.1 - a.1).powi(2)).sqrt();
     let steps = ((len / 0.1).ceil() as usize).clamp(1, 4000);
     let mut pieces = Vec::new();
@@ -233,12 +229,7 @@ fn bisect_between(
 /// 生成一条涂胶移动。E 按裁剪比例给，最低留一个非零值让发射端认得出这是涂胶移动。
 fn g1_move(p: (f64, f64), e: f64) -> String {
     let e = if e.abs() < 1e-6 { 1e-5 } else { e };
-    format!(
-        "G1 X{} Y{} E{:.5}",
-        format_float(p.0),
-        format_float(p.1),
-        e
-    )
+    format!("G1 X{} Y{} E{:.5}", format_float(p.0), format_float(p.1), e)
 }
 
 #[cfg(test)]
@@ -274,9 +265,13 @@ mod tests {
         let input = square();
         let out = apply(&input, 5.0);
         assert!(out.len() < input.len(), "内缩后路径应更短");
-        assert!(!out.iter().any(|l| l.contains("Y100.0")), "最外一行应被裁掉");
         assert!(
-            out.iter().any(|l| l.contains("Y110.0") || l.contains("Y111.0")),
+            !out.iter().any(|l| l.contains("Y100.0")),
+            "最外一行应被裁掉"
+        );
+        assert!(
+            out.iter()
+                .any(|l| l.contains("Y110.0") || l.contains("Y111.0")),
             "中心区域应保留"
         );
         // 左右两侧也各收 5mm：裁完不该还有 X100 / X120

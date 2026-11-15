@@ -292,8 +292,7 @@ pub fn first_pass(
             {
                 break;
             }
-            if (temp_line.contains("G1 X") || temp_line.contains("G1 Y"))
-                && temp_line.contains('E')
+            if (temp_line.contains("G1 X") || temp_line.contains("G1 Y")) && temp_line.contains('E')
             {
                 if let Some(e_idx) = temp_line.find('E') {
                     if e_idx + 1 < temp_line.len() {
