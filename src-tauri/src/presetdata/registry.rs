@@ -22,9 +22,10 @@
 //!
 //! # 排序以 `layout.order` 为准，不用 `items[].id`
 //!
-//! `item.id` 形如 `item_0_0_1`，末位数字**不是顺序**：`space_offset` 的实际序列是
-//! `item_0_0_1`(offset.x) → `item_0_0_0`(offset.y) → `item_0_0_2`(offset.z)。
-//! 拿它当顺序会把 X 和 Y 调个头，而且调错了界面上看不出来。
+//! `item.id` 由参数键派生（`toolhead.pen_mount_x` → `item_toolhead_pen_mount_x`），
+//! 同名才会追加 `_2`、`_3`；加载时要求全局唯一。它**不表达顺序**：`space_offset` 里
+//! `item_toolhead_space_offset_y` 排在 `..._x` 前面，拿它当顺序会把 X 和 Y 调个头，
+//! 而且调错了界面上看不出来。
 //!
 //! # 27 个 section 里只有 16 个装参数
 //!
@@ -1010,7 +1011,7 @@ impl ParamRegistry {
         Ok(out)
     }
 
-    /// 数据本身没有这道门禁，所以在这里立四条。
+    /// 数据本身没有这道门禁，所以在这里立六条。
     ///
     /// 它们不成立时的后果都是**静默的**：矩阵少几行、或多出永远为空的分类、或把 X 和 Y
     /// 调个头 —— 没有一条会自己报错。所以判据必须在加载时就拦住，而不是等界面看起来怪。
@@ -1038,6 +1039,9 @@ impl ParamRegistry {
                 }
             }
         }
+
+        // ⑥ item id 全局唯一
+        ensure_unique_item_ids(&self.layout)?;
 
         // ① params[].key 与 layout 的 paramKey 严格双射
         let param_keys: BTreeSet<&str> = self.params.iter().map(|p| p.key.as_str()).collect();
@@ -2202,8 +2206,8 @@ impl ParamRegistry {
          * `param_registry.toml` 这边只说「我在哪个 section」（`[params.layout]`），
          * 真正决定界面上摆在哪的是 `layout_schema.toml` 的 `tabs[].sections[].items[]`。
          * `check_consistency` 第②③条会双侧核对 —— 漏改一边，整份数据下次加载就起不来。
-         * 所以这里先在**不改任何东西**的前提下把要改的全算好：目标组合不合法、
-         * 新 item id 撞名，都在这一步就拒掉。
+         * 所以这里先在**不改任何东西**的前提下把要改的全算好：目标组合不合法就在
+         * 这一步拒掉。
          */
         /*
          * 新分组（分组下拉里那个「＋」）先建出来，后面就只剩「搬组」一条路 ——
@@ -4253,8 +4257,35 @@ fn layout_section_mut<'a>(
     None
 }
 
-/// 布局文件里全局唯一的 item id。命名只要求唯一 —— 真数据里 `item_5_3_3` 那种
-/// 序号并不是由 section 下标严格算出来的（`machine_specific` 又从 `_0` 起）
+/// **`item.id` 全局唯一**（格式上写着唯一，就不该让重号从数据里漏进来）。
+///
+/// 它不参与任何判定：顺序看 `layout.order`，身份看 `paramKey`。重号不会当场弄坏界面，
+/// 只会让后来把它当身份用的代码悄悄认错人 —— 所以在加载时拦住。
+fn ensure_unique_item_ids(layout: &[LayoutTab]) -> Result<(), AppError> {
+    let mut seen: BTreeMap<&str, &str> = BTreeMap::new();
+    for t in layout {
+        for s in &t.sections {
+            for it in &s.items {
+                if let Some(prev) = seen.insert(it.id.as_str(), it.param_key.as_str()) {
+                    return Err(AppError::corrupted(messages::text(
+                        "ui.presetdata.registry.363",
+                        &[("v1", &it.id.to_string())],
+                    ))
+                    .with_detail(format!(
+                        "先指向 {prev}，又指向 {} —— item id 是唯一标识，不能重号",
+                        it.param_key
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 布局文件里全局唯一的 item id：由参数键派生，重名才追加序号。
+///
+/// 名字与 `paramKey` 一一对应，所以"这条 id 指哪个参数"看一眼就知道；
+/// 参数键在注册表里本身唯一，序号只在同键重复出现时才用得上。
 fn next_layout_item_id(doc: &DocumentMut, key: &str) -> String {
     let mut used: BTreeSet<&str> = BTreeSet::new();
     if let Some(tabs) = doc
@@ -4281,10 +4312,13 @@ fn next_layout_item_id(doc: &DocumentMut, key: &str) -> String {
             }
         }
     }
-    let base = key.replace('.', "_");
-    let mut n = 1;
+    let base = format!("item_{}", key.replace('.', "_"));
+    if !used.contains(base.as_str()) {
+        return base;
+    }
+    let mut n = 2;
     loop {
-        let cand = format!("item_{base}_{n}");
+        let cand = format!("{base}_{n}");
         if !used.contains(cand.as_str()) {
             return cand;
         }
@@ -5451,7 +5485,7 @@ order = 2.0
         assert_eq!(p.unit.as_deref(), Some("mm"));
         assert_eq!(p.min, Some(-50.0));
         assert_eq!(p.max, Some(0.0), "回抽只允许负值（正数没有物理意义）");
-        assert_eq!(p.layout.section_id, "motion");
+        assert_eq!(p.layout.section_id, "custom_gcode");
 
         // 四个子表各至少有一条真数据 —— 它们是最容易在换 loader 时静默丢掉的部分
         assert!(
@@ -8254,5 +8288,50 @@ order = 2.0
             !inserted.contains("[[params]]"),
             "插入段跨到了别的字段：{inserted:?}"
         );
+    }
+
+    /* ---------- item id 的唯一性（它是身份，不是顺序） ---------- */
+
+    /// 两条 `items[]` 挂同一个 id ⇒ 加载即拒。
+    ///
+    /// 真数据里 `item_4_0_6` 曾同时指向 `MKP_retract_at` 与 `pen_mount_wait_y`，
+    /// 而没有任何门禁报警 —— 这条把它钉住。
+    #[test]
+    fn duplicate_layout_item_ids_are_rejected() {
+        let layout: Vec<LayoutTab> = serde_json::from_value(serde_json::json!([{
+            "id": "gcode",
+            "sections": [{
+                "id": "custom_gcode",
+                "items": [
+                    { "id": "item_toolhead_MKP_retract_at", "paramKey": "toolhead.MKP_retract_at" },
+                    { "id": "item_toolhead_MKP_retract_at", "paramKey": "toolhead.pen_mount_wait_y" }
+                ]
+            }]
+        }]))
+        .expect("夹具读得通");
+
+        let err = ensure_unique_item_ids(&layout).expect_err("重号必须被拦住");
+        assert!(
+            format!("{err:?}").contains("item_toolhead_MKP_retract_at"),
+            "错误里要说清是哪个 id：{err:?}"
+        );
+    }
+
+    /// 同一份布局、id 各不相同 ⇒ 放行
+    #[test]
+    fn distinct_layout_item_ids_pass() {
+        let layout: Vec<LayoutTab> = serde_json::from_value(serde_json::json!([{
+            "id": "gcode",
+            "sections": [{
+                "id": "custom_gcode",
+                "items": [
+                    { "id": "item_toolhead_MKP_retract_at", "paramKey": "toolhead.MKP_retract_at" },
+                    { "id": "item_toolhead_pen_mount_wait_y", "paramKey": "toolhead.pen_mount_wait_y" }
+                ]
+            }]
+        }]))
+        .expect("夹具读得通");
+
+        ensure_unique_item_ids(&layout).expect("互不相同就该放行");
     }
 }

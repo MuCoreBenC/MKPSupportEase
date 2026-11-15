@@ -3100,6 +3100,13 @@ text_zh_tw = "頁籤「{label}」裡有功能卡（組件 / 條件分組），�
 text_ja = "タブ「{label}」には機能カード（コンポーネント / 条件グループ）があるため、タブごと削除できません"
 params = ["label"]
 
+["ui.presetdata.registry.363"]
+text = "item id {v1} 被声明了两次"
+text_en = "Item id {v1} is declared twice"
+text_zh_tw = "item id {v1} 被聲明了兩次"
+text_ja = "item id {v1} が 2 回宣言されています"
+params = ["v1"]
+
 ["ui.runtime.app_state.345"]
 text = "读不到应用状态"
 text_en = "Cannot read the application state"

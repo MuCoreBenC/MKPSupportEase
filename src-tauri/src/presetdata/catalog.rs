@@ -3358,6 +3358,17 @@ mod tests {
             .map(|v| v.id.clone())
             .expect("A1 该有一版三册名字都填过");
 
+        /* 真数据里这一版可能已经带着欠账（之前改过中文）—— 本条只看这一笔新增了什么 */
+        if let Some(v) = c
+            .machine_mut("A1")
+            .unwrap()
+            .versions
+            .iter_mut()
+            .find(|v| v.id == vid)
+        {
+            v.stale_translations.clear();
+        }
+
         /* ① 只改中文 → 三册全记上 */
         c.machine_mut("A1")
             .unwrap()
