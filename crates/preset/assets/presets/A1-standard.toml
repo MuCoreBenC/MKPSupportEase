@@ -1,6 +1,6 @@
 # machine: A1
 # variant: standard
-# generated_at: 2026-11-13T23:05:56+08:00
+# generated_at: 2026-11-15T11:37:38+08:00
 
 [toolhead]
 # 落笔 G-code
@@ -41,7 +41,7 @@ pen_mount_x = 267 # 落笔位 X
 pen_unmount_speed = 10000 # 收笔速度
 pen_unmount_wait_x = 256 # 收笔等待位 X
 pen_unmount_x = 271 # 收笔位 X
-prime_length = 100 # 预涂长度(mm) 范围:0~500
+prime_length = 50 # 预涂长度(mm) 范围:0~500
 speed_limit = 70 # 涂胶速度限制 (mm/s)
 
 [wiping]

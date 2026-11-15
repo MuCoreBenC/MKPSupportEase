@@ -14,7 +14,7 @@ import s from './ComponentSlot.module.css'
 
 export default function ComponentSlot({ component }: { component: string }) {
   return (
-    <div className={s.slot} title="客户端在这一侧画的是可交互画布；工作台不还原它，只占住位置">
+    <div className={s.slot} title="客户端这里是可交互画布，工作台只占位。">
       <span className={s.badge}>画布</span>
       <span className={s.name}>{component}</span>
     </div>

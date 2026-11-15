@@ -495,7 +495,7 @@ export default function PublishGateModal({
       review === null
         ? ''
         : review.checks === 'pending'
-          ? `CI 尚未完成 —— 确定继续合并 #${review.number} 吗？`
+          ? `CI 还没跑完，仍要合并 #${review.number}？`
           : review.checks === 'failed'
             ? `CI 已经失败 —— 确定继续合并 #${review.number} 吗？`
             : `确定以 squash 合并 #${review.number} 吗？`
@@ -507,9 +507,9 @@ export default function PublishGateModal({
         title="发布回执"
         subtitle={
           report.stage === 'blockedAudit'
-            ? '停在发布检查 —— 一个字节都没写'
+            ? '停在发布检查，没有写入。'
             : report.stage === 'noChange'
-              ? '没有要发的东西 —— 一个字节都没写，序号没推进'
+              ? '没有要发的东西，序号没推进。'
               : `本轮走到「${steps.filter((x) => x.state === 'done').length}/${steps.length}」步`
         }
         closeOnScrim={false}
@@ -540,7 +540,7 @@ export default function PublishGateModal({
                   type="button"
                   className={c.btn}
                   disabled={syncBusy || mergeBusy || refreshBusy}
-                  title="把 GitHub main 补推到 Gitee main（正常由 GitHub Actions 自动完成；这里只在需要立刻补一次时用）"
+                  title="立刻补推一次 Gitee。"
                   onClick={() => void doSyncMirror()}
                 >
                   {syncBusy ? '补同步中…' : '手动补同步'}
@@ -555,7 +555,7 @@ export default function PublishGateModal({
                 type="button"
                 className={c.btn}
                 disabled={busy || mergeBusy || refreshBusy || syncBusy}
-                title="内容不变，只把序号 +1（自测要用新号时点这里）"
+                title="内容不变，只把序号 +1。"
                 onClick={() => void publish({ republish: true })}
               >
                 {busy ? '发布中…' : '仍然发一版（序号 +1）'}
@@ -602,7 +602,7 @@ export default function PublishGateModal({
           {changes === null ? (
             <p className={s.blockLine}>
               {report.stage === 'blockedAudit'
-                ? '停在发布检查 —— 一个字节都没写，所以没有"改了什么"'
+                ? '停在发布检查，没有写入，也就没有变化清单。'
                 : report.stage === 'noChange'
                   ? '没有变化清单 —— 这一代与已发布的那一号逐字节相同'
                   : '这一轮没走到生成，拿不到变化清单'}
@@ -788,9 +788,9 @@ export default function PublishGateModal({
         <>
           <span className={s.footNote}>
             {audit === null
-              ? '闸还没跑完 —— 跑完才谈得上发不发'
+              ? '闸还在跑。'
               : audit.canPublish
-                ? '任何一项 Blocker 红了就不许往下走 —— 现在是全绿'
+                ? '有 Blocker 未过就不能发。'
                 : '有 Blocker 未通过：修完点「重新检查」'}
           </span>
           <span className={c.grow} />
@@ -804,7 +804,7 @@ export default function PublishGateModal({
             type="button"
             className={`${c.btn} ${c.btnPrimary}`}
             disabled={!audit?.canPublish || busy}
-            data-tip={audit?.canPublish ? undefined : '闸没全绿 —— 这颗按钮不亮'}
+            data-tip={audit?.canPublish ? undefined : '闸没全绿。'}
             onClick={() => void publish()}
           >
             {busy ? '发布中…' : '确认发布'}
@@ -836,7 +836,7 @@ export default function PublishGateModal({
              *   拿不到就明说拿不到，别让界面在那儿漏字。
              */}
             {!audit.catalogId || !(audit.publishSerial > 0) ? (
-              <>这一版是第几号读不出来（发布账本读不出来，或工作台后端版本旧 —— 见下面那几项）</>
+              <>读不到发布号。</>
             ) : audit.nothingToPublish === true ? (
               /*
                * ★ **没有要发的东西**（2026-10-29 作者：「我一点击它就要变成 2 了，那不是
@@ -849,8 +849,7 @@ export default function PublishGateModal({
                 <b>
                   {audit.identityNow ?? audit.catalogId} 第 {audit.serialNow ?? '—'} 号
                 </b>{' '}
-                逐字节相同 —— <b>没有要发的东西</b>：点「确认发布」不会推进序号、不写一个字节、
-                也不提交（序号只在内容真的变了时才往前走）
+                逐字节相同，<b>没有要发的东西</b>，序号不会推进。
               </>
             ) : (
               <>
@@ -860,7 +859,7 @@ export default function PublishGateModal({
                 </b>
                 {/* 目录现在有没有身份：老目录是"无 → 有"，读的人要能看出这是一次换代 */}
                 {!audit.identityNow || !(audit.serialNow != null && audit.serialNow > 0) ? (
-                  <>（目录现在还没有发布身份，这次是第一次给它盖章）</>
+                  <>第一次发布，会给目录盖上发布号。</>
                 ) : (
                   <>
                     （目录现在是 {audit.identityNow} 第 {audit.serialNow} 号）
@@ -904,7 +903,7 @@ export default function PublishGateModal({
                 <span className={`${s.st} ${STATUS_CLASS[i.status]}`}>
                   {STATUS_TEXT[i.status]}
                   {i.severity === 'blocker' && i.status === 'fail' && (
-                    <span className={s.sev} title="Blocker：红了就不许发布">
+                    <span className={s.sev} title="Blocker 不过就不许发。">
                       拦发布
                     </span>
                   )}

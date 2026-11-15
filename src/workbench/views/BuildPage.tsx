@@ -606,8 +606,8 @@ export default function BuildPage({
       void reloadDeliveries()
       toasts.push(
         r.written
-          ? `已更新发布凭据：${r.changed} 条登记按盘上真字节重算（共 ${r.entries} 条）`
-          : '发布凭据本来就是最新的，一个字节都没写',
+          ? `已更新 ${r.changed} 条登记（共 ${r.entries} 条）`
+          : '发布凭据已是最新。',
       )
     } catch (e) {
       toasts.push(
@@ -679,7 +679,7 @@ export default function BuildPage({
   const syncBaseline = async () => {
     try {
       const n = await wb.syncBaseline()
-      toasts.push(n > 0 ? `已同步 ${n} 份基线（内容相同的自动跳过）` : '基线本来就一致，没有要写的')
+      toasts.push(n > 0 ? `已同步 ${n} 份基线` : '基线已一致。')
       setBaseline(await wb.baselineDiff())
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
@@ -690,7 +690,7 @@ export default function BuildPage({
   const cleanStrays = async () => {
     try {
       const n = await wb.cleanDistStrays()
-      toasts.push(n > 0 ? `已把 ${n} 个残留移入回收站 —— 重新发布即可补齐` : '没有残留')
+      toasts.push(n > 0 ? `${n} 个残留已移入回收站，重新发布会补回。` : '没有残留')
       setStrays(await wb.distStrays())
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
@@ -708,8 +708,8 @@ export default function BuildPage({
       const r = await wb.regenEmbeddedCatalog()
       toasts.push(
         r.changed
-          ? `内嵌目录已重算（${r.files} 份文件 · revision ${r.revision}）—— 重新编译客户端后才随包生效`
-          : '内嵌目录本来就是最新的，一个字节都没写',
+          ? `内嵌目录已重算，重新编译后生效。`
+          : '内嵌目录已是最新。',
       )
       onReportRefresh()
     } catch (e) {
@@ -736,7 +736,7 @@ export default function BuildPage({
     'embedded.catalog_stale': {
       label: '重新生成',
       busyLabel: '重算中…',
-      tip: '按当前 presets/ 重算 src-tauri/src/runtime/catalog.generated.json（内容一样就不写）；重新编译客户端后才随安装包生效',
+      tip: '按当前 presets/ 重算，重新编译后生效。',
       run: () => void regenEmbeddedCatalog(),
     },
   }
@@ -843,7 +843,7 @@ export default function BuildPage({
               type="button"
               className={`${s.btn} ${s.btnSm}`}
               onClick={() => setGenHistoryOpen(true)}
-              title="历次生成的回执：每一步做了什么、写了哪些文件、失败在哪（住应用数据目录，只留最近 50 份）"
+              title="每次生成做了什么、写了哪些文件、失败在哪。"
             >
               生成记录
             </button>
@@ -852,7 +852,7 @@ export default function BuildPage({
               className={`${s.btn} ${s.btnSm}`}
               disabled={deliveries === null}
               onClick={() => void openDeliveryList()}
-              title="看每一份文件的逐行 diff：MKP 预设 / 目录与清单 / 发布定稿"
+              title="看每份文件的逐行差异。"
             >
               交付明细
             </button>
@@ -866,10 +866,10 @@ export default function BuildPage({
                 disabled={blocked || unsaved}
                 data-tip={
                   unsaved
-                    ? '有改动还没保存 —— 先保存或放弃，再生成'
+                    ? '先保存或放弃，再生成。'
                     : blocked
                       ? words.disabled.buildBlocked
-                      : `按当前源处理 ${deliveryPending} 份差异产物，先预演、确认后才写盘`
+                      : `处理 ${deliveryPending} 份差异产物，先预演再写盘。`
                 }
                 onClick={() => void openGenerate(generateTargets)}
               >
@@ -895,7 +895,7 @@ export default function BuildPage({
                           ? `${s.linkBtn} ${s.linkWarn}`
                           : s.linkBtn
                       }
-                      title="打开「交付定稿」：逐条凭据检查 + 定稿会把 manifest 改成什么（只读）"
+                      title="看凭据检查与定稿后的 manifest。"
                       onClick={() => void openFinalize()}
                     >
                       {deliveries.manifestStale
@@ -913,7 +913,7 @@ export default function BuildPage({
             </div>
             {dirty && (
               <div className={s.warn} style={{ marginTop: 8 }}>
-                <div className={s.warnDetail}>有改动还没保存 —— 生成前会先保存。</div>
+                <div className={s.warnDetail}>有未保存改动，生成前会先保存。</div>
               </div>
             )}
             {deliveryError !== null && (
@@ -981,8 +981,8 @@ export default function BuildPage({
                                     disabled={blocked || unsaved}
                                     title={
                                       uid === undefined
-                                        ? '按当前源重算目录与清单（生成事务会一起核对预设）'
-                                        : '只重新生成这一份预设，先预演、确认后才写盘'
+                                        ? '重算目录与清单。'
+                                        : '只重新生成这一份，先预演再写盘。'
                                     }
                                     onClick={() => void openGenerate(regenerateTargetsOf(f.rel))}
                                   >
@@ -1006,13 +1006,13 @@ export default function BuildPage({
         <div className={s.card}>
           <div className={s.cardHead}>
             <h2>② 交付预设</h2>
-            <span className={s.cardNote}>提交到远端仓库，合并后客户端可取</span>
+            <span className={s.cardNote}>合并后客户端才能取到。</span>
           </div>
           <div className={s.cardBody}>
             {blocked && (
               <div className={s.warn} style={{ marginTop: 0 }}>
                 <div className={s.warnTitle}>有 {report?.blocks} 条阻断，不许发布</div>
-                <div className={s.warnDetail}>左栏里标「阻断」的就是 —— 处理完这一步才会亮。</div>
+                <div className={s.warnDetail}>处理完标「阻断」的项才会亮。</div>
               </div>
             )}
             <div className={s.bar} style={{ marginTop: blocked ? 12 : 0 }}>
@@ -1025,7 +1025,7 @@ export default function BuildPage({
                 <button
                   type="button"
                   className={`${s.btn} ${s.btnSm}`}
-                  title="看上一次发布的回执：走到哪一步、PR 多少号、合没合"
+                  title="上次发布走到哪一步、PR 合没合。"
                   onClick={() => {
                     setGateReport(lastPublish)
                     setGateOpen(true)
@@ -1051,7 +1051,7 @@ export default function BuildPage({
                     ? '有改动还没保存 —— 先保存或放弃，再发布'
                     : blocked
                       ? words.disabled.publishBlocked
-                      : '先过发布闸：十五项逐项打勾，全绿才给发布'
+                      : '先过十五项发布闸。'
                 }
                 onClick={() => {
                   setGateReport(null)
@@ -1117,7 +1117,7 @@ export default function BuildPage({
         <div className={s.card}>
           <div className={s.cardHead}>
             <h2>软件版本</h2>
-            <span className={s.cardNote}>发布安装包（与发预设是两回事）</span>
+            <span className={s.cardNote}>发布安装包，与预设发布分开。</span>
           </div>
           <div className={s.cardBody}>
             <div className={s.bar}>
@@ -1130,7 +1130,7 @@ export default function BuildPage({
                 type="button"
                 className={`${s.btn} ${s.btnPrimary}`}
                 onClick={() => setReleaseGateOpen(true)}
-                title="先过一道闸（分支 / 工作区 / 版本号 / tag / 平台），全绿才发"
+                title="先过检查闸，全绿才发。"
               >
                 发布软件版本
               </button>
@@ -1201,7 +1201,7 @@ export default function BuildPage({
 
             <p className={s.note}>
               「已安装」读的是<b>本机</b> <span className={s.mono}>/Applications</span> 下那个{' '}
-              <span className={s.mono}>.app</span> 的 Info.plist —— 纯本地读取，不联网、不上传。
+              本机 Info.plist，只读本地。
               预设更新不需要新安装包；改了程序本身才发。发完记得合并 release.json 的 PR。
             </p>
 
@@ -1233,7 +1233,7 @@ export default function BuildPage({
               </button>
             </div>
             {releaseHistoryErr ? (
-              <div className={s.emptyHint}>读不到发布历史（后端刚才报错了）—— 点「刷新」再试</div>
+              <div className={s.emptyHint}>读不到发布历史，点「刷新」再试。</div>
             ) : releaseHistory === null ? (
               <div className={s.emptyHint}>正在读……</div>
             ) : releaseHistory.records.length === 0 ? (
@@ -1245,7 +1245,7 @@ export default function BuildPage({
                     <div className={s.vhead}>
                       <b className={s.mono}>{r.tag}</b>
                       {r.source !== undefined && (
-                        <span className={s.tag} title={r.source === 'cli' ? '命令行发布写的那本账' : '本工作台写的那本账'}>
+                        <span className={s.tag} title={r.source === 'cli' ? '命令行记录' : '工作台记录'}>
                           {r.source === 'cli' ? '命令行' : '工作台'}
                         </span>
                       )}
@@ -1281,7 +1281,7 @@ export default function BuildPage({
                   <>
                     <p className={s.note} style={{ marginTop: 0 }}>
                       当前开发 <span className={s.mono}>{ledger.developing}</span>
-                      {ledger.developingFrozen ? ' · 已冻结（有 tag）' : ' · 未冻结（还没有 tag）'} ·
+                      {ledger.developingFrozen ? ' · 已冻结' : ' · 未冻结'} ·
                       最新 tag <span className={s.mono}>{ledger.latestTag ?? '—'}</span> · 回执{' '}
                       {ledger.receipts} 条
                     </p>
@@ -1327,7 +1327,7 @@ export default function BuildPage({
                   {b.status === 'same' ? '一致' : b.status === 'changed' ? '已变更' : '基线缺失'}
                 </span>
                 <span className={s.grow} />
-                <span className={`${s.mono} ${s.rowMeta}`} title="产物内容哈希（前 16 位）">
+                <span className={`${s.mono} ${s.rowMeta}`} title="内容指纹前 16 位">
                   {b.productSha}
                 </span>
               </div>
@@ -1340,8 +1340,8 @@ export default function BuildPage({
                 disabled={!baseline || baselineDirty === 0}
                 data-tip={
                   baseline && baselineDirty === 0
-                    ? '九份产物与基线逐字节相同，没有要写的'
-                    : '只写上面标「已变更 / 基线缺失」的那几份'
+                    ? '九份产物与基线一致。'
+                    : '只写已变更或缺失的那几份。'
                 }
                 onClick={() => void syncBaseline()}
               >
@@ -1371,7 +1371,7 @@ export default function BuildPage({
               ))
             ) : (
               <div className={s.emptyHint}>
-                {strays ? '没有残留 —— 交付目录与本次交付集合一致' : '正在读……'}
+                {strays ? '没有残留。' : '正在读……'}
               </div>
             )}
             <div className={s.bar} style={{ marginTop: 12 }}>
@@ -1380,7 +1380,7 @@ export default function BuildPage({
                 type="button"
                 className={`${s.btn} ${s.btnSm}`}
                 disabled={!strays || strays.length === 0}
-                title="走 workbench/.trash/delivery/ 回收（保留相对路径，可还原），不直接删"
+                title="移到回收站，可还原。"
                 onClick={() => void cleanStrays()}
               >
                 清理残留
@@ -1418,7 +1418,7 @@ export default function BuildPage({
         <div id="t-store-dirs" className={s.card}>
           <div className={s.cardHead}>
             <h2>⑥ 子目录职责</h2>
-            <span className={s.cardNote}>workbench/ 的五个子目录，谁写谁读一句话说清</span>
+            <span className={s.cardNote}>五个子目录，谁写谁读。</span>
           </div>
           <div className={s.cardBody}>
             {boot.storeDirs.map((d) => (

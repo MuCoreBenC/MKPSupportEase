@@ -432,7 +432,7 @@ function errorOf(d: Draft): string | null {
     ['最大', d.max],
     ['步进', d.step],
   ] as const) {
-    if (t.trim() !== '' && !Number.isFinite(Number(t))) return `${name}值得是个数字`
+    if (t.trim() !== '' && !Number.isFinite(Number(t))) return `${name} 得是个数字`
   }
   const min = numOf(d.min)
   const max = numOf(d.max)
@@ -578,7 +578,7 @@ export default function ParamDefModal({
     setBusy(true)
     try {
       onStaleCleared(await wb.clearStaleTranslations(paramKey, [...staleList]), paramKey)
-      toasts.push(`已清掉 ${staleList.length} 个译文标记 —— 记得右上角「保存」才写文件`)
+      toasts.push(`已清掉 ${staleList.length} 个译文标记，保存后写入。`)
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
     } finally {
@@ -994,7 +994,7 @@ export default function ParamDefModal({
           className={s.txt}
           value={draft.defaultText}
           inputMode="decimal"
-          aria-label="出厂默认 (defaultValue)"
+          aria-label="出厂默认"
           onChange={(e) => edit('defaultText', (d) => (d.defaultText = e.target.value))}
         />
       )
@@ -1025,7 +1025,7 @@ export default function ParamDefModal({
       <input
         className={s.txt}
         value={draft.defaultText}
-        aria-label="出厂默认 (defaultValue)"
+        aria-label="出厂默认"
         onChange={(e) => edit('defaultText', (d) => (d.defaultText = e.target.value))}
       />
     )
@@ -1084,7 +1084,7 @@ export default function ParamDefModal({
         className={s.txt}
         value={draft.whenValue}
         inputMode={whenParam.valueType === 'float' || whenParam.valueType === 'int' ? 'decimal' : undefined}
-        aria-label="前置条件的值 (showWhen.value)"
+        aria-label="前置条件的值"
         onChange={(e) => edit('whenValue', (d) => (d.whenValue = e.target.value))}
       />
     )
@@ -1099,7 +1099,7 @@ export default function ParamDefModal({
        * 「确认」——把框里的改动收进草稿。所以副标题不再写"写回…才落盘"，
        * 按钮也不叫「确认保存」：它确实不保存。
        */
-      subtitle={`改的是 presets/registry/param_registry.toml 的 [[params]] —— 确认只进草稿，右上角「保存」才写文件；Cmd+Z 撤框里的改动；注册键 ${param.key}`}
+      subtitle="改定义，保存后写入。Cmd+Z 撤销框里的改动。"
       size="lg"
       closeOnScrim={false}
       onClose={onClose}
@@ -1149,7 +1149,7 @@ export default function ParamDefModal({
             <input
               className={s.txt}
               value={draft.label}
-              aria-label="名称 (label)"
+              aria-label="名称"
               onChange={(e) => edit('label', (d) => (d.label = e.target.value))}
             />
           </label>
@@ -1160,7 +1160,7 @@ export default function ParamDefModal({
             <input
               className={s.txt}
               value={draft.desc}
-              aria-label="说明 (desc)"
+              aria-label="说明"
               onChange={(e) => edit('desc', (d) => (d.desc = e.target.value))}
             />
           </label>
@@ -1197,7 +1197,7 @@ export default function ParamDefModal({
         */}
         {staleList.length > 0 && (
           <p className={s.staleNote}>
-            {`中文改过之后，这几格还是旧译：${staleList.join(' · ')} —— 重写它们（内容变了）再确认，标记就摘掉。`}
+            {`这几格还是旧译文，重写后点确认。`}
             {/*
               逃生通道（2026-11-02）：译文可能是从别的路写的（直接改文件、或按
               `scripts/stale-translations.mjs` 的清单整批改），那种"改"后端看不见，
@@ -1220,7 +1220,7 @@ export default function ParamDefModal({
                     <input
                       className={staleList.includes(f.labelKey) ? `${s.txt} ${s.txtStale}` : s.txt}
                       value={draft[f.labelKey]}
-                      aria-label={`${f.title} 名称 (${f.labelKey})`}
+                      aria-label={`${f.title} 名称`}
                       onChange={(e) => edit(f.labelKey, (d) => (d[f.labelKey] = e.target.value))}
                     />
                   </label>
@@ -1229,7 +1229,7 @@ export default function ParamDefModal({
                     <input
                       className={staleList.includes(f.descKey) ? `${s.txt} ${s.txtStale}` : s.txt}
                       value={draft[f.descKey]}
-                      aria-label={`${f.title} 说明 (${f.descKey})`}
+                      aria-label={`${f.title} 说明`}
                       onChange={(e) => edit(f.descKey, (d) => (d[f.descKey] = e.target.value))}
                     />
                   </label>
@@ -1250,7 +1250,7 @@ export default function ParamDefModal({
             <PickerModal
               label="值类型"
               title={`选择值类型 · ${param.label}`}
-              subtitle="改类型不会迁移已有的机型 / 版本取值"
+              subtitle="改类型不会搬已有的取值。"
               groups={[
                 {
                   title: null,
@@ -1272,7 +1272,7 @@ export default function ParamDefModal({
             <PickerModal
               label="控件"
               title={`选择控件 · ${param.label}`}
-              subtitle="候选跟着值类型与可选项走 —— 画不出真的组合不给选"
+              subtitle="只列能画出来的控件。"
               groups={[
                 {
                   title: null,
@@ -1292,7 +1292,7 @@ export default function ParamDefModal({
               className={s.txt}
               value={draft.unit}
               placeholder="空 = 无单位"
-              aria-label="单位 (unit)"
+              aria-label="单位"
               onChange={(e) => edit('unit', (d) => (d.unit = e.target.value))}
             />
           </label>
@@ -1305,7 +1305,7 @@ export default function ParamDefModal({
               value={draft.step}
               placeholder="空 = 不限"
               inputMode="decimal"
-              aria-label="步进 (step)"
+              aria-label="步进"
               onChange={(e) => edit('step', (d) => (d.step = e.target.value))}
             />
           </label>
@@ -1324,7 +1324,7 @@ export default function ParamDefModal({
               value={draft.min}
               placeholder="空 = 不限"
               inputMode="decimal"
-              aria-label="最小 (min)"
+              aria-label="最小"
               onChange={(e) => edit('min', (d) => (d.min = e.target.value))}
             />
           </label>
@@ -1337,7 +1337,7 @@ export default function ParamDefModal({
               value={draft.max}
               placeholder="空 = 不限"
               inputMode="decimal"
-              aria-label="最大 (max)"
+              aria-label="最大"
               onChange={(e) => edit('max', (d) => (d.max = e.target.value))}
             />
           </label>
@@ -1364,7 +1364,7 @@ export default function ParamDefModal({
               <input
                 className={s.txt}
                 value={c.value}
-                placeholder="值（原词）"
+                placeholder="原词"
                 aria-label={`第 ${i + 1} 条可选项的值`}
                 onChange={(e) =>
                   edit(`choice.value.${i}`, (d) => {
@@ -1423,7 +1423,7 @@ export default function ParamDefModal({
                 type="button"
                 className={s.choiceMachines}
                 aria-haspopup="dialog"
-                title="只在这些机型上弃用这一档（与全局那一勾叠加）"
+                title="这些机型上弃用这一档。"
                 onClick={() => setPick({ kind: 'choiceDep', index: i })}
               >
                 {c.deprecatedMachines.length === 0 ? '机型…' : `机型 ${c.deprecatedMachines.length}`}
@@ -1490,9 +1490,9 @@ export default function ParamDefModal({
               所属分组
             </span>
             <PickerModal
-              label="所属分组 (sectionId)"
+              label="所属分组"
               title={`选择所属分组 · ${param.label}`}
-              subtitle="搬到别的页签 = 两份文件一起改；新建的分组跟着这次保存落盘"
+              subtitle="换页签会同时改两份文件。"
               summary={
                 hereSection === null ? (
                   '选一个分组'
@@ -1520,7 +1520,7 @@ export default function ParamDefModal({
                 isDropped={(id) =>
                   draft.newSection !== null && draft.newSection.id === id && draft.sectionId !== id
                 }
-                hint="新分组跟着这次保存一起落盘；不保存就什么都不留。"
+                hint="新分组跟这次保存一起写入。"
               />
             </PickerModal>
           </div>
@@ -1552,7 +1552,7 @@ export default function ParamDefModal({
             <PickerModal
               label="属于"
               title={`选择「属于」· ${param.label}`}
-              subtitle="挂在哪个父参数下面（层级只有两级）"
+              subtitle="挂在哪个父参数下，只支持两层。"
               groups={parentGroups}
               value={draft.parentKey}
               summary={pickLabelOf(parentGroups, draft.parentKey)}
@@ -1567,7 +1567,7 @@ export default function ParamDefModal({
             <PickerModal
               label="前置条件"
               title={`选择「前置条件」· ${param.label}`}
-              subtitle="条件不成立时这一条只读；选「无条件」就是不挂条件"
+              subtitle="条件不成立时只读；不选就是无条件。"
               groups={whenGroups}
               value={draft.whenKey}
               summary={pickLabelOf(whenGroups, draft.whenKey)}
@@ -1617,8 +1617,8 @@ export default function ParamDefModal({
         {(herePending || hereSection === null) && (
           <p className={s.note}>
             {herePending && draft.newSection !== null
-              ? `这一组还没落盘：保存时一并建立，取消保存就不会留下。`
-              : '这一组在布局里找不到了 —— 保存前先在上面选一个分组。'}
+              ? '这一组还没保存，取消就没了。'
+              : '找不到这一组，保存前先选一个。'}
           </p>
         )}
       </div>
@@ -1651,7 +1651,7 @@ export default function ParamDefModal({
               type="button"
               className={s.pickerBtn}
               aria-haspopup="dialog"
-              title="点开挑机型 —— 可多选，按住拖过去整批勾上/摘掉"
+              title="点开挑机型，可多选、可拖动整批勾选。"
               onClick={() => setPick({ kind: 'filter' })}
             >
               <span className={s.pickerText}>{machineSummary(draft.machineFilter, machineList)}</span>
@@ -1668,12 +1668,12 @@ export default function ParamDefModal({
               type="button"
               className={s.pickerBtn}
               aria-haspopup="dialog"
-              title="只在这些机型上不许改（与「全局弃用」叠加：全局勾了就不用再挑）"
+              title="这些机型上不许改；全局已弃用就不用挑。"
               onClick={() => setPick({ kind: 'paramDep' })}
             >
               <span className={s.pickerText}>
                 {draft.deprecated
-                  ? '全局已弃用（这里只是留档）'
+                  ? '全局已弃用，这里只留档。'
                   : machineSummary(draft.deprecatedMachines, machineList)}
               </span>
               <span className={s.pickerCaret} aria-hidden>
@@ -1683,13 +1683,13 @@ export default function ParamDefModal({
               </span>
             </button>
           </label>
-          <label className={s.field} title="勾上 = 所有机型、所有版本都不许再改它">
+          <label className={s.field} title="所有机型、所有版本都不许再改。">
             <span className={s.fieldLabel}>全局弃用</span>
             <input
               className={s.check}
               type="checkbox"
               checked={draft.deprecated}
-              aria-label="全局弃用 (deprecated)"
+              aria-label="全局弃用"
               onChange={(e) => edit('deprecated', (d) => (d.deprecated = e.target.checked))}
             />
           </label>
@@ -1720,8 +1720,8 @@ export default function ParamDefModal({
         }
         subtitle={
           pick !== null && pick.kind === 'filter'
-            ? '点一下勾/摘；按住拖过去整批刷。一个都不选 = 全部机型'
-            : '点一下勾/摘；按住拖过去整批刷。一个都不选 = 不限机型'
+            ? '点选或拖选；都不选 = 全部机型。'
+            : '点选或拖选；都不选 = 不限机型。'
         }
         machines={machineList}
         selected={pickedMachines}
@@ -1737,7 +1737,7 @@ export default function ParamDefModal({
       <ModalC14
         open={confirmText !== null}
         title={`确认全局弃用 · ${param.label}`}
-        subtitle="这一步影响的是定义，不是某一台机型上的值 —— 确认后立即写回注册表"
+        subtitle="影响所有机型和版本，确认后写回。"
         size="md"
         closeOnScrim={false}
         onClose={() => setConfirmText(null)}

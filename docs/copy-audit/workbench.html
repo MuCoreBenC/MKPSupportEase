@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>工作台文案审查台 · MKP SupportEase</title>
+<!--
+  通用审查台 + 这一批的数据。
+  双击就能开（file:// 下 <script src> 可用，不用起服务）。
+
+  换一批文案审查：新建一个 data/*.js 定义 window.COPY_AUDIT_DATA，
+  抄这个文件换掉下面的数据脚本即可 —— kit/ 那一层不用动。
+-->
+<link rel="stylesheet" href="kit/audit.css">
+</head>
+<body>
+<!-- 数据：顺序 = 一类内容一个文件，拼起来就是界面顺序 -->
+<script src="data/workbench.js"></script>
+<script src="data/wb-shell.js"></script>
+<script src="data/wb-machines.js"></script>
+<script src="data/wb-params-page.js"></script>
+<script src="data/wb-registry-1.js"></script>
+<script src="data/wb-registry-2.js"></script>
+<script src="data/wb-bundles.js"></script>
+<script src="data/wb-assets.js"></script>
+<script src="data/wb-annotate.js"></script>
+<script src="data/wb-build.js"></script>
+<script src="data/wb-settings.js"></script>
+<script src="data/wb-kit.js"></script>
+<!-- 内核 -->
+<script src="kit/audit.js"></script>
+</body>
+</html>

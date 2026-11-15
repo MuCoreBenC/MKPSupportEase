@@ -144,9 +144,9 @@ export default function BatchEdit({ param, words, targets, onApply, onLocate, on
     targets.length === 0
       ? '先挑应用目标'
       : valueGroups.length >= 2
-        ? `各不相同（${targets.length} 列 · ${valueGroups.length} 种值）`
+        ? `${targets.length} 列取值不同`
         : valueGroups.length === 1 && (valueGroups[0]?.text ?? '') === ''
-          ? '（勾选的列当前没有值）'
+          ? '勾选的列没有值。'
           : undefined
 
   /* 换了参数、或者矩阵刷新出了新的共同值 → 用户手改的那份作废，回到预填 */
@@ -277,7 +277,7 @@ export default function BatchEdit({ param, words, targets, onApply, onLocate, on
     }
     setPreview(null)
     if (!patches.length) {
-      toasts.push('没有要写的列 —— 勾选的值都已经是这个值了')
+      toasts.push('没有要写的列，已经是这个值。')
       return
     }
     const pinned = patches.length - followed
@@ -615,10 +615,10 @@ export default function BatchEdit({ param, words, targets, onApply, onLocate, on
           disabled={attachable.length === 0}
           data-tip={
             pickedVersions === 0
-              ? '勾选的只有机型基线 —— 它是这条链的根，没有可挂回的'
+              ? '只有机型基线，没有可挂回的。'
               : attachable.length === 0
                 ? '勾选的版本列本来就在跟随各自的基线，没有可挂回的'
-                : '把勾选的版本列重新挂回各自的基线 —— 点开先看值会变成多少'
+                : '挂回各自的基线，先看值会变成多少。'
           }
           onClick={() => void askAttach()}
         >
@@ -629,7 +629,7 @@ export default function BatchEdit({ param, words, targets, onApply, onLocate, on
       {picked.length > 0 && attachable.length === 0 && (
         <p className={s.cardNote}>
           {pickedVersions === 0
-            ? `勾选的 ${picked.length} 列都是机型基线 —— 它是这条链的根，没有可改回跟随的。`
+            ? `勾选的 ${picked.length} 列都是机型基线，没有可改回跟随的。`
             : `勾选的 ${pickedVersions} 个版本都在跟随各自的基线 —— 没有可改回跟随的。`}
         </p>
       )}

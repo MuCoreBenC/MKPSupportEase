@@ -251,7 +251,7 @@ export default function SectionList({
                   {selectable && <span className={s.dot} aria-hidden />}
                   <span className={s.secLabel}>{sec.label}</span>
                   {sec.component !== null && (
-                    <span className={s.badge} title="这一组是整块组件卡（客户端那一页是画出来的），参数搬不进来">
+                    <span className={s.badge} title="这是整块组件卡，参数不能放进来。">
                       组件卡
                     </span>
                   )}

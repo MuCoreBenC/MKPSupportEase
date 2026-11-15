@@ -751,7 +751,7 @@ export default function AnnotatePage() {
         srcRef.current !== null &&
         groupKeyOf(next) !== groupKeyOf(srcRef.current)
       ) {
-        toasts.push('上一组还有改动没写进仓库 —— 切回去它还在（本机留着草稿）')
+        toasts.push('上一组还有改动没保存。')
       }
       /* 换图 ⇒ 上一张的**临时预览**作废（它是"上一张 + 上一版框"的照片） */
       if (previewUrlRef.current !== null) {
@@ -815,7 +815,7 @@ export default function AnnotatePage() {
           setConflict(local !== null && local.marks.length > 0 ? local : null)
         })
         .catch((e: unknown) => {
-          toasts.push(`读源稿没成功：${errText(e)}`)
+          toasts.push(`读不到源稿：${errText(e)}`)
           applySaved(local)
         })
     },
@@ -925,7 +925,7 @@ export default function AnnotatePage() {
       .then((shots) => {
         const mine = shots.find((s) => s.out.endsWith(renderedNameOf(src.path))) ?? shots[0]
         if (mine === undefined) {
-          toasts.push('预览没烘出来（原图可能不在）')
+          toasts.push('预览没生成，原图可能不在。')
           return
         }
         /* 上一次那张 blob 先撤掉（不然一直攒着） */
@@ -934,9 +934,9 @@ export default function AnnotatePage() {
         previewUrlRef.current = url
         setPreviewUrl(url)
         setView('client')
-        toasts.push('预览已生成（临时的，没写进仓库）—— 满意就点保存')
+        toasts.push('预览是临时的，满意就保存。')
       })
-      .catch((e: unknown) => toasts.push(`预览烘不出来：${errText(e)}`))
+      .catch((e: unknown) => toasts.push(`预览没生成：${errText(e)}`))
       .finally(() => setRendering(false))
   }, [assets, marks, src])
 
@@ -957,7 +957,7 @@ export default function AnnotatePage() {
     const key = groupKeyOf(src)
     if (sizeWarned.current.has(key)) return
     sizeWarned.current.add(key)
-    toasts.push(`这张是 ${src.w}×${src.h}，那份标注量在 ${saved.w}×${saved.h} 上 —— 尺寸不一样框会飘，得重量一次`)
+    toasts.push('尺寸与原图不同，框会偏，需要重新量。')
   }, [src, repo.doc])
 
   /* ---------- 尺寸与缩放 ---------- */
@@ -1044,7 +1044,7 @@ export default function AnnotatePage() {
     setMarks(base)
     setSel(null)
     clearStore(groupKeyOf(src))
-    toasts.push('已放弃这次改动（⌘Z 可以撤回这一步）')
+    toasts.push('已放弃，⌘Z 可撤回。')
   }, [commit, dirty, marks, repo.doc, src])
 
   /** 「放弃」这颗按钮的可用性：有改动、且这一份归仓库管（本地文件没有"退回基线"这回事） */
@@ -1068,16 +1068,16 @@ export default function AnnotatePage() {
     canDiscard,
     dirtyTitle:
       src !== null && src.key.startsWith('file:')
-        ? '本地文件不进仓库 —— 要带走就点「复制 TS」'
+        ? '本地文件不进仓库，用「复制 TS」带走。'
         : dirty
           ? `这一份源稿还有改动没写进仓库${repo.path === '' ? '' : `（${repo.path}）`}`
           : previewUrl !== null
-            ? '框和仓库里那份一样，但那张预览是临时的 —— 点保存才把成品图烧进仓库'
+            ? '框已一致，预览是临时的，保存后写入成品图。'
             : repo.path === ''
               ? '正在读源稿…'
-              : `这一份源稿和仓库里那份一致（${repo.path}）`,
-    saveTitle: '把这一份写进仓库（`presets/assets/…` 里那份 `.anno.json`）',
-    discardTitle: '放弃这次改动，退回打开时那份（这一步本身也能撤销）',
+              : `与仓库里那份一致（${repo.path}）`,
+    saveTitle: '写进仓库。',
+    discardTitle: '退回打开时的样子，可撤销。',
     save,
     discard,
   })
@@ -1384,11 +1384,11 @@ export default function AnnotatePage() {
       w: 0,
       h: 0,
     })
-    toasts.push(`打开本地图片：${f.name}（只在这台机器这一趟里）`)
+    toasts.push(`打开本地图片：${f.name}，仅本次有效。`)
   }
 
   const doCopy = (text: string, what: string) => {
-    void copyText(text).then((ok) => toasts.push(ok ? `已复制${what}` : '复制不了 —— 剪贴板被挡了，试试「导入…」那格旁边手选'))
+    void copyText(text).then((ok) => toasts.push(ok ? `已复制${what}` : '复制不了，用「导入…」手选。'))
   }
 
   const doImport = () => {
@@ -1401,7 +1401,7 @@ export default function AnnotatePage() {
       setImportText('')
       toasts.push(`读进来 ${list.length} 个框`)
     } catch (err) {
-      toasts.push(`这不是导出的那份：${String(err instanceof Error ? err.message : err)}`)
+      toasts.push(`不是导出的 JSON：${String(err instanceof Error ? err.message : err)}`)
     }
   }
 
@@ -1422,7 +1422,7 @@ export default function AnnotatePage() {
             组信息没丢；「一组 = 共用一份标注」那句挂在选项右侧的 `note` 上。 */}
         <span
           className={s.sel}
-          title="资产根里的图（台账登记过的都在）—— 同一组 = 共用一份标注，切过去框原样在"
+          title="同一组共用一份标注，切过去框还在。"
         >
           <SelectField
             label="图"
@@ -1469,7 +1469,7 @@ export default function AnnotatePage() {
           type="button"
           className={`${c.btn} ${c.btnSm} ${grid ? c.btnOn : ''}`}
           onClick={() => setGrid((v) => !v)}
-          title="每 50px 一条线（作者量坐标时用的就是这个栅格）"
+          title="每 50px 一条网格线。"
         >
           网格 50
         </button>
@@ -1477,7 +1477,7 @@ export default function AnnotatePage() {
           type="button"
           className={`${c.btn} ${c.btnSm} ${snap ? c.btnOn : ''}`}
           onClick={() => setSnap((v) => !v)}
-          title="拖的时候边角吸到 50 的整倍数；关着就是 1px 一格"
+          title="拖动吸附到 50 的倍数；关掉按 1px。"
         >
           吸附 50
         </button>
@@ -1489,12 +1489,12 @@ export default function AnnotatePage() {
         <div className={s.viewSeg} role="group" aria-label="视图">
           {(
             [
-              ['edit', '编辑', '可拖框、可改数：网格与手柄都在（再点一下 = 什么都不叠）'],
-              ['preview', '看效果', '藏起网格与手柄，只看框画上去什么效果（再点一下 = 什么都不叠）'],
+              ['edit', '编辑', '拖框、改数，显示网格与手柄。'],
+              ['preview', '看效果', '藏起网格与手柄，只看效果。'],
               [
                 'client',
                 '客户视角',
-                '客户端里那张成品图：框已经烧进像素、前端不再叠画（再点一下 = 什么都不叠）',
+                '客户端里的成品图，框已画进像素。',
               ],
             ] as const
           ).map(([k, label, tip]) => (
@@ -1522,7 +1522,7 @@ export default function AnnotatePage() {
           type="button"
           className={`${c.btn} ${c.btnSm} ${zoom === 'fit' ? c.btnOn : ''}`}
           onClick={() => setZoom('fit')}
-          title="把整张图缩到刚好放得下 —— 也是这一页打开时的默认视角"
+          title="缩放到适应窗口。"
         >
           适应
         </button>
@@ -1530,7 +1530,7 @@ export default function AnnotatePage() {
           type="button"
           className={`${c.btn} ${c.btnSm} ${zoom === 1 ? c.btnOn : ''}`}
           onClick={() => setZoom(1)}
-          title="图的原始像素尺寸（1 图像素 = 1 屏幕像素）"
+          title="按原始像素显示。"
         >
           100%
         </button>
@@ -1542,8 +1542,8 @@ export default function AnnotatePage() {
           disabled={src === null || src.w === 0 || src.key.startsWith('file:') || rendering}
           data-tip={
             src?.key.startsWith('file:')
-              ? '本地图片没有台账条目，烘不了成品图'
-              : '把当前这些框烘成一张成品图先看一眼（临时的，满意再点保存）'
+              ? '本地图片不能生成成品图。'
+              : '生成临时成品图，满意再保存。'
           }
           onClick={makePreview}
         >
@@ -1557,7 +1557,7 @@ export default function AnnotatePage() {
          */}
         <span className={`${s.readout} ${c.tnum}`}>
           {cursor === null || src === null
-            ? '把鼠标放图上看坐标'
+            ? '悬停看坐标。'
             : `x ${Math.round(cursor.x)} · y ${Math.round(cursor.y)} (${pct(cursor.x, src.w)}, ${pct(cursor.y, src.h)})`}
         </span>
       </div>
@@ -1793,14 +1793,14 @@ export default function AnnotatePage() {
               <>
                 {src.path}
                 {src.w > 0 && ` · ${src.w} × ${src.h}`}
-                {sibling !== null && ` · 同组还有：${sibling.path}（共用这份标注）`}
+                {sibling !== null && ` · 同组：${sibling.path}，共用标注。`}
                 {clientView
                   ? previewUrl !== null
-                    ? ' · 客户视角：这张是刚生成的预览（临时的 —— 满意就点保存）· 捏合缩放 / 两指拖动 / 中键拖动 / 双击复位'
-                    : ' · 客户视角：这张就是客户端看到的成品图（框已烧进像素）· 捏合缩放 / 两指拖动 / 中键拖动 / 双击复位'
+                    ? ' · 客户视角 · 临时预览；捏合缩放、双击复位。'
+                    : ' · 客户视角 · 成品图；捏合缩放、双击复位。'
                   : preview
                     ? ' · 看效果（网格与手柄都藏起来了）'
-                    : view === 'none' && ' · 什么都没叠：这张就是那张原图'}
+                    : view === 'none' && ' · 原图，没有任何叠加。'}
               </>
             )}
           </div>
@@ -1830,7 +1830,7 @@ export default function AnnotatePage() {
               <span>
                 {repo.doc === null
                   ? '本机还留着一份草稿，还没进仓库'
-                  : '本机那份草稿比仓库里那份新'}
+                  : '本机草稿比仓库新。'}
                 （{new Date(conflict.savedAt).toLocaleString()}）
               </span>
               <span className={s.conflictOps}>
@@ -1838,7 +1838,7 @@ export default function AnnotatePage() {
                   type="button"
                   className={`${c.btn} ${c.btnSm} ${diffOpen ? c.btnOn : ''}`}
                   onClick={() => setDiffOpen((v) => !v)}
-                  title="在图上把两版的框并排画出来，看清差在哪 —— 不猜，看准了再选"
+                  title="把两版框并排画出来比较。"
                 >
                   {diffOpen ? '收起对比' : '看看两份差在哪'}
                 </button>
@@ -1849,7 +1849,7 @@ export default function AnnotatePage() {
                     applySaved(conflict)
                     setConflict(null)
                     setDiffOpen(false)
-                    toasts.push('已换成你本机那份 —— 记得点「保存」')
+                    toasts.push('已换成本机那份，记得保存。')
                   }}
                 >
                   用本机那份
@@ -1888,7 +1888,7 @@ export default function AnnotatePage() {
           >
             {marks.length === 0 ? (
               <p className={s.empty}>
-                还没有框 —— <b>在图上按住拖一下</b>就画出来了（框里拖 = 挪，边上的方点 = 拉，
+                还没有框 —— <b>在图上拖一个框</b>就画出来了（框里拖 = 挪，边上的方点 = 拉，
                 方向键 = 微调，⌘Z = 撤销）
               </p>
             ) : (
@@ -1919,7 +1919,7 @@ export default function AnnotatePage() {
                     <button
                       type="button"
                       className={s.iconBtn}
-                      title="往上挪一位（编号跟着走）"
+                      title="上移一位，编号跟着变。"
                       disabled={i === 0}
                       onClick={(e) => {
                         e.stopPropagation()
@@ -1931,7 +1931,7 @@ export default function AnnotatePage() {
                     <button
                       type="button"
                       className={s.iconBtn}
-                      title="往下挪一位（编号跟着走）"
+                      title="下移一位，编号跟着变。"
                       disabled={i === marks.length - 1}
                       onClick={(e) => {
                         e.stopPropagation()
@@ -1970,7 +1970,7 @@ export default function AnnotatePage() {
 
           <div className={s.edit}>
             {selMark === null || selVal === null || src === null ? (
-              <p className={s.empty}>点一个框（图上或这张列表里）看它的坐标</p>
+              <p className={s.empty}>点一个框看坐标</p>
             ) : (
               <>
                 <div className={s.editHead}>
@@ -1990,7 +1990,7 @@ export default function AnnotatePage() {
                         className={`${c.inp} ${c.tnum} ${s.numInp}`}
                         type="number"
                         defaultValue={Math.round(selVal[k])}
-                        title="单位：图的原生像素（点进来光标在数字右侧，退格只改这个数字）"
+                        title="单位是原图像素。"
                         onKeyDown={onNumKeyDown}
                         onFocus={onNumFocus}
                         onBlur={(e) => {
@@ -2006,7 +2006,7 @@ export default function AnnotatePage() {
                   <input
                     className={c.inp}
                     value={selMark.note}
-                    placeholder="给这一步起个名（只写进导出那行注释）"
+                    placeholder="给这一步起名，只写进导出注释。"
                     /* 备注也是可编辑区：止住按键、别冒到页根；改动同样进撤销栈（第一次改前先压一格） */
                     onKeyDown={(e) => e.stopPropagation()}
                     onFocus={() => noteBaseRef.current = marks}
@@ -2039,7 +2039,7 @@ export default function AnnotatePage() {
                         type="number"
                         min={1}
                         defaultValue={selMark.style?.[key] ?? def}
-                        data-tip={`单位 px；缺省 ${def}（留空 = 用缺省）`}
+                        data-tip={`单位 px，留空用 ${def}。`}
                         onKeyDown={onNumKeyDown}
                         onFocus={onNumFocus}
                         onBlur={(e) => setStyle(selMark.id, key, e.target.value)}
@@ -2061,7 +2061,7 @@ export default function AnnotatePage() {
               className={s.ioHead}
               aria-expanded={ioOpen}
               onClick={() => setIoOpen((v) => !v)}
-              title="把框的坐标导出去（贴回客户端源码）／从 JSON 贴回来继续编 —— 平时用不到"
+              title="导出坐标，或从 JSON 贴回来。"
             >
               <Icon
                 name="chevronDown"
@@ -2112,13 +2112,13 @@ export default function AnnotatePage() {
                       <button type="button" className={`${c.btn} ${c.btnSm}`} onClick={doImport}>
                         读进去
                       </button>
-                      <span className={s.dim}>读进去会盖掉现在这几个框（可撤销）</span>
+                      <span className={s.dim}>导入会替换现有框，可撤销。</span>
                     </div>
                   </div>
                 )}
                 <div className={s.tips}>
                   <b>复制 TS</b> = 把这份标注贴回客户端源码 <code>openWithGuide.ts</code> 里的{' '}
-                  <code>marks</code>（<b>平时要的就是这一颗</b>）；<b>复制 JSON</b> 是它的原始数据、
+                  <code>marks</code>；<b>复制 JSON</b> 是它的原始数据、
                   <b>导入…</b> 把 JSON 贴回来接着编。坐标是<b>百分比</b>、浅 / 深两张图共用一份；
                   换图或重裁之后要重量（框跟的是图上的位置，图变了就飘）。
                 </div>

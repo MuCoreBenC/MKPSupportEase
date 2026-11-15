@@ -203,7 +203,7 @@ export default function CompareMatrix({
                     className={s.pPickDot}
                     data-on={sel === row.key}
                     aria-pressed={sel === row.key}
-                    data-tip={`选中 ${row.label} —— 右侧「批量修改」把这个值写到多个版本`}
+                    data-tip="选中后可批量写到多个版本。"
                     onClick={() => onPickBatch(row.key)}
                   />
                 )}

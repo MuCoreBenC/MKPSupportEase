@@ -715,7 +715,7 @@ export function WorkbenchApp() {
       const out = await wb.txnUndo(scopeOf())
       applyTxn(out.state)
       if (out.refused !== null) {
-        toasts.push(`没撤：那一笔是 ${ownersText(out.refused.owners)} 的改动`)
+        toasts.push(`没撤：这一笔属于 ${ownersText(out.refused.owners)}。`)
         return false
       }
       if (out.done === null) return false
@@ -757,7 +757,7 @@ export function WorkbenchApp() {
       const out = await wb.txnRedo(scopeOf())
       applyTxn(out.state)
       if (out.refused !== null) {
-        toasts.push(`没重做：那一笔是 ${ownersText(out.refused.owners)} 的改动`)
+        toasts.push(`没重做：这一笔属于 ${ownersText(out.refused.owners)}。`)
         return false
       }
       if (out.done === null) return false
@@ -809,7 +809,7 @@ export function WorkbenchApp() {
       applyTxn(await wb.txnState())
       setTick((n) => n + 1)
       refreshReport()
-      toasts.push('已保存 —— 改动已写进仓库文件')
+      toasts.push('已保存到仓库。')
       return true
     } catch (e) {
       fail(e)
@@ -939,7 +939,7 @@ export function WorkbenchApp() {
    */
   const saveWhy =
     pageSlot !== null
-      ? '这一份没有要写回去的改动（和仓库里那份一样）'
+      ? '没有要保存的改动。'
       : (words?.disabled.nothingToSave ?? '没有未保存的改动')
   useEffect(() => {
     if (!dirty) return
@@ -989,20 +989,21 @@ export function WorkbenchApp() {
       case 'machines':
         return `${book.badges.machines} 台机型 · ${book.badges.versions} 个版本`
       case 'params':
-        return '保存值由后端按三层算好 —— 徽章只在「现在」与它不同时出现'
+        /* 参数台不摆副标题：那排读数（N 参数 · M 可编辑）由页面自己说，见 ParamSheetPage */
+        return ''
       case 'bundles':
-        return '套餐 = 交付的真源（bundles.toml）—— 装什么、谁在用、改指向，都在这一页'
+        return '装了哪些文件、谁在用、怎么改指向。'
       case 'build':
         /* 三档的中文标签只有一个出口（后端词表）—— 这里不再写一遍 block→阻断 */
         return report && words
           ? `${words.severity.block.label} ${report.blocks} · ${words.severity.todo.label} ${report.todos} · ${words.severity.hint.label} ${report.hints}${report.hints > 0 && report.blocks === 0 && report.todos === 0 ? ' · 都过了' : ''}`
           : ''
       case 'assets':
-        return '资产域定义 + 引用反查 —— 交付身份改了先进草稿'
+        return '文件登记、被谁引用；改动先进草稿。'
       case 'annotate':
-        return '在图上拖框 —— 导出的就是 marks（百分比坐标，浅深两张图共用一份）'
+        return '在图上拖框，浅深两张共用一份标注。'
       case 'settings':
-        return '只读 —— 数据根与工作台子目录的职责'
+        return '数据根与各子目录的职责。'
       case 'dev':
         return '把平时看不见的那几屏按按钮演出来（不读 G-code、不落记录）'
     }
@@ -1154,9 +1155,7 @@ export function WorkbenchApp() {
           data-icon={navIcon}
           aria-expanded={!navIcon}
           data-tip={
-            navIcon
-              ? '展开侧边栏（窗口小也能展开）'
-              : '收起侧边栏 —— 只留图标（记着我这次的选择）'
+            navIcon ? '展开侧边栏。' : '收起侧边栏，只留图标。'
           }
           onClick={() => {
             if (navIcon) {
@@ -1210,7 +1209,7 @@ export function WorkbenchApp() {
               {bd.n > 0 && (
                 <span
                   className={`${s.navBadge} ${bd.block ? '' : s.navBadgeSoft}`}
-                  data-tip={bd.block ? '有阻断没处理完' : '有待处理的项，但不挡生成'}
+                  data-tip={bd.block ? '有阻断没处理完' : '有待办，不挡生成。'}
                 >
                   {bd.n}
                 </span>
@@ -1345,7 +1344,7 @@ export function WorkbenchApp() {
                         {bd.n > 0 && (
                           <span
                             className={`${s.navBadge} ${bd.block ? '' : s.navBadgeSoft}`}
-                            data-tip={bd.block ? '有阻断没处理完' : '有待处理的项，但不挡生成'}
+                            data-tip={bd.block ? '有阻断没处理完' : '有待办，不挡生成。'}
                           >
                             {bd.n}
                           </span>
@@ -1390,8 +1389,8 @@ export function WorkbenchApp() {
                           className={s.tag}
                           data-tip={
                             publishSerial.serial === null
-                              ? '这条发布线还没有正式发布过 —— 第一次发布会是第 1 号'
-                              : '已发出去的号取账本与交付目录的较大值；只在正式发布时推进'
+                              ? '还没发布过，第一次是第 1 号。'
+                              : '正式发布才推进这个号。'
                           }
                         >
                           {publishSerial.serial === null
@@ -1459,13 +1458,12 @@ export function WorkbenchApp() {
                           className={`${s.btn} ${s.btnSm}`}
                           data-tip={
                             dirty
-                              ? `看看这 ${book?.dirtyCount ?? 0} 处改动 —— 逐行 diff，看完在框里放弃或保存`
-                              : (words?.save.saved.explain ?? '草稿和磁盘那一份一致')
+                              ? `看这 ${book?.dirtyCount ?? 0} 处改动，在框里放弃或保存。`
+                              : (words?.save.saved.explain ?? '没有未保存的改动。')
                           }
                           onClick={() => setHistoryOpen(true)}
                         >
-                          {words ? words.save[dirty ? 'dirty' : 'saved'].label : '—'}
-                          {dirty ? `（${book?.dirtyCount ?? 0}）` : ''} · 查看改动
+                          查看改动
                         </button>
                       )}
                     </div>
@@ -1483,9 +1481,8 @@ export function WorkbenchApp() {
                     {boot.problem}
                     {boot.detail && <> —— <span className="wb-mono">{boot.detail}</span></>}
                     <br />
-                    确认仓库里的
                     <span className="wb-mono">presets/</span>
-                    已就位，然后点
+                    放回仓库后，点
                     <button
                       type="button"
                       className="wb-link"
@@ -1495,11 +1492,7 @@ export function WorkbenchApp() {
                     >
                       重新加载
                     </button>
-                    ，或去
-                    <button type="button" className="wb-link" onClick={() => setPage('settings')}>
-                      设置页
-                    </button>
-                    看数据根。
+                    。
                   </div>
                 )}
 
@@ -1511,8 +1504,7 @@ export function WorkbenchApp() {
                   <div className="wb-banner" data-tone="warn" style={{ margin: '0 12px' }}>
                     盘上的
                     <span className="wb-mono"> presets/ </span>
-                    在这个窗口外面改过了 —— 现在显示的仍是打开时读进来的那一份（参数名、可选项、
-                    分组都可能是旧的）。点
+                    改过了，这里还是旧数据。
                     <button
                       type="button"
                       className="wb-link"
@@ -1534,8 +1526,6 @@ export function WorkbenchApp() {
                     >
                       重新加载
                     </button>
-                    读进来，不用重启。{' '}
-                    <strong>有未保存的改动时会先问你一句</strong>，不会悄悄丢掉。
                   </div>
                 )}
 
@@ -1610,7 +1600,7 @@ export function WorkbenchApp() {
                 <button
                   type="button"
                   className={`${s.sbBtn} ${dirty ? s.sbBtnOn : ''}`}
-                  title="看看这几处都改了什么 —— 每一格从什么值改成什么值"
+                  title="看每一格从什么值改成什么值。"
                   onClick={() => setHistoryOpen(true)}
                 >
                   未保存改动（{book?.dirtyCount ?? 0}）
@@ -1631,10 +1621,7 @@ export function WorkbenchApp() {
                   <span className={`${s.sbBar} ${s.sbMinor}`}>|</span>
                   <span
                     className={`${s.sbSeg} ${s.sbMinor}`}
-                    data-tip={
-                      `日志里搜 ${txn.receipt.req} 就是这个动作的全部行` +
-                      `（${txn.receipt.command}${txn.receipt.ok ? '' : '，失败了'}）`
-                    }
+                    data-tip={`日志里搜 ${txn.receipt.req}，能找到这次操作。`}
                     style={{ fontFamily: 'ui-monospace, monospace', userSelect: 'text' }}
                   >
                     {txn.receipt.req}

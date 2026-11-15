@@ -503,7 +503,7 @@ export default function MachinesPage({
   /** 这个版本为什么现在不能生成；空串 = 能 */
   const genNote = (mid: string, vid: string): string => {
     const uid = nodeOf(mid, vid)?.uid
-    if (dirty) return '有未保存改动 —— 生成读的是已保存的那一份，先保存才能生成'
+    if (dirty) return '有未保存改动，先保存再生成。'
     if (uid === undefined) return ''
     const blocks = myBlocks(uid)
     if (blocks.length > 0) return `有 ${blocks.length} 条阻断没处理完：${blocks[0].title}`
@@ -522,8 +522,7 @@ export default function MachinesPage({
         // 生成完成 = 台账已是这一代（2026-10-06 状态机修正）。
         const file = rowOf(node.uid)?.mkpFile
         toasts.push(
-          `已生成 ${file ?? '预设'}：写出 ${rep.written.length} 份` +
-            (rep.unchanged.length > 0 ? `，${rep.unchanged.length} 份内容没变、跳过重写` : ''),
+          `已生成 ${file ?? '预设'}：写出 ${rep.written.length} 份`,
         )
       } catch (e) {
         toasts.push(isAppError(e) ? e.message : String(e))
@@ -637,8 +636,8 @@ export default function MachinesPage({
     return (
       <div className={s.detail}>
         <div className={s.empty}>
-          <h2>一台机型都没有了</h2>
-          <p>机型是一切的起点 —— 配方、套餐、切片器都挂在它下面。先建一台：</p>
+          <h2>还没有机型</h2>
+          <p>配方、套餐、切片器都挂在机型下面。</p>
           <button
             type="button"
             className={`${s.btn} ${s.btnPrimary}`}
@@ -950,7 +949,7 @@ export default function MachinesPage({
         hint:
           pickedNode.build === 'neverBuilt'
             ? '还没生成过，客户端现在下载不到这一版。'
-            : '配方改过了，磁盘上的产物还是上次生成那份。',
+            : '配方改过，还没重新生成。',
         run: () => void doBuild(m.id, picked.id),
       }
     if (!picked.recommendedBundle)
@@ -964,7 +963,7 @@ export default function MachinesPage({
       }
     return {
       label: '去检查与生成',
-      hint: '这一版该做的都做完了 —— 下一阶段是整个交付包的检查与生成。',
+      hint: '这一版做完了，下一步是整个交付包。',
       run: () => onGoto('build', { machineId: m.id, uid, key: null }),
     }
   })()
@@ -994,14 +993,14 @@ export default function MachinesPage({
           <input
             className={s.filter}
             value={filter}
-            placeholder="筛品牌 / 机型（id / 显示名）"
+            placeholder="筛机型或品牌"
             aria-label="筛选品牌与机型"
             onChange={(e) => setFilter(e.target.value)}
           />
           <button
             type="button"
             className={`${s.btn} ${s.btnSm}`}
-            title="新增一台机型 —— 建一个 presets/machines/ 下的新文件，三格都必填"
+            title="新建机型，三个字段都要填。"
             onClick={() => {
               setAddId('')
               // 机型的 brand 字段写着品牌的 **id**（不是显示名）—— 默认给第一家
@@ -1032,7 +1031,7 @@ export default function MachinesPage({
           <button
             type="button"
             className={`${s.btn} ${s.btnSm}`}
-            title="新建一个品牌 —— 往 presets/brands.toml 的 [[brands]] 里加一段（品牌图后配）"
+            title="新建品牌，品牌图可以后补。"
             onClick={() => {
               setNbId('')
               setNbName('')
@@ -1103,7 +1102,7 @@ export default function MachinesPage({
                           {/* id 也要露出来：复制出来的机型和原机同名，只看 display 分不清 */}
                           <span className={`${s.mono} ${s.rowMeta}`}>{x.id}</span>
                           <span className={s.rowMeta}>{x.versions.length} 版</span>
-                          {!x.hasDimensions && <span className={`${s.tag} ${s.tagGhost}`}>占位</span>}
+                          {!x.hasDimensions && <span className={`${s.tag} ${s.tagGhost}`}>用内置字标</span>}
                           {/* 停用的机型仍然列在这儿（还能把它打开），但一眼要看得出来 */}
                           {!x.enabled && <span className={`${s.tag} ${s.tagGhost}`}>已停用</span>}
                           {t > 0 && (
@@ -1203,7 +1202,7 @@ export default function MachinesPage({
                         key={mid}
                         type="button"
                         className={s.chip}
-                        title="去机型卡看它"
+                        title="看这台机型"
                         onClick={() => {
                           setMachineId(mid)
                           setBrandId(null)
@@ -1268,12 +1267,12 @@ export default function MachinesPage({
                   label={machineFieldLabels.brand}
                   options={brandOptions}
                   value={m.brand}
-                  emptyLabel={`选一个品牌…（空着会标「${fieldState.needsInput}」）`}
+                  emptyLabel="选一个品牌"
                   /* 品牌是一等条目了 —— 手打 id 只会打出悬空引用；新增品牌走左列那颗按钮 */
                   allowCustom={false}
                   onChange={(next) => {
                     if (!next.trim()) {
-                      toasts.push('品牌不许清空 —— 它是身份的一部分')
+                      toasts.push('品牌不能空着。')
                       return
                     }
                     void saveMachine('brand', next)
@@ -1283,7 +1282,7 @@ export default function MachinesPage({
                   <button
                     type="button"
                     className={`${s.btn} ${s.btnSm}`}
-                    title="去品牌卡看它（显示名与品牌图在那一张卡上改）"
+                    title="显示名与品牌图在品牌卡上改。"
                     onClick={() => setBrandId(brandOf(m.brand)!.id)}
                   >
                     看品牌
@@ -1342,7 +1341,7 @@ export default function MachinesPage({
                 ) : (
                   <span className={s.kvDim}>—</span>
                 )}
-                <span className={s.cardNote}>对照名来自数据文件，工作台不给编辑</span>
+                <span className={s.cardNote}>对照名来自数据文件，不能改。</span>
               </span>
 
               {/*
@@ -1362,8 +1361,8 @@ export default function MachinesPage({
                   />
                   <span>
                     {m.enabled
-                      ? '启用 —— 客户端能看到这台，后处理照常跑'
-                      : '已停用 —— 不进目录：客户端不显示这台，后处理也会拒绝'}
+                      ? '启用后客户端能看到这台。'
+                      : '停用后客户端看不到，后处理也会拒绝。'}
                   </span>
                 </label>
               </span>
@@ -1385,8 +1384,8 @@ export default function MachinesPage({
               disabled={!m.hasDimensions && m.dimensions === null}
               data-tip={
                 m.dimensions === null
-                  ? '这台还没有 [dimensions] —— 先建一份尺寸（床身那两格必填）'
-                  : '改这六组读数（床身 / 移动范围 / 边缘 / 涂胶 / 标定点 / 标志位）'
+                  ? '还没有尺寸，先建一份。'
+                  : '六组读数都能改。'
               }
               onClick={() => setDimsOpen(m.id)}
             >
@@ -1395,7 +1394,7 @@ export default function MachinesPage({
             <button
               type="button"
               className={`${s.btn} ${s.btnSm}`}
-              title="在床身图上画禁区（擦嘴 / 挡块那几块碰不得的区域）"
+              title="在床身图上画禁区。"
               onClick={() => setZoneOpen(m.id)}
             >
               编辑禁区{m.zoneCount > 0 ? `（${m.zoneCount}）` : ''}
@@ -1404,7 +1403,7 @@ export default function MachinesPage({
               <button
                 type="button"
                 className={`${s.btn} ${s.btnSm}`}
-                title="移动范围 / 边缘涂胶 / 标定点 / 标志位这四组读数，收着不占地方"
+                title="收起其余四组读数。"
                 onClick={() => setDimsAll((v) => !v)}
               >
                 {dimsAll ? '收起明细' : '全部明细'}
@@ -1520,7 +1519,7 @@ export default function MachinesPage({
         <div className={s.card}>
           <div className={s.cardHead}>
             <h2>版本 {m.versions.length}</h2>
-            <span className={s.cardNote}>点一行看详情，右键出菜单</span>
+            <span className={s.cardNote}>点一行看详情，右键更多。</span>
             <button
               type="button"
               className={`${s.btn} ${s.btnSm}`}
@@ -1558,13 +1557,13 @@ export default function MachinesPage({
                     data-tip={
                       v.recommendedBundle
                         ? `套餐 ${v.recommendedBundle}`
-                        : '没指套餐，生成时用机型默认'
+                        : '没指套餐，用机型默认。'
                     }
                   >
                     {v.recommendedBundle ?? placeholderText.noBundle}
                   </span>
                   {!v.hasRecipe && (
-                    <span className={s.todo} title="纯继承机型基线，还没有自己的参数正文（14.4）">
+                    <span className={s.todo} title="纯继承机型基线，没有自己的参数。">
                       参数源待补
                     </span>
                   )}
@@ -1584,7 +1583,7 @@ export default function MachinesPage({
             )}
             <p className={s.cardNoteDim}>
               新增与删除先进草稿，保存后才写进仓库
-              <HelpDot text="删之前会先问孤儿引用与归属资产；撤销能整条退回来。复制走两条命令：先版本定义，勾了才拷参数正文。" />
+              <HelpDot text="删除前会列出关联；撤销能整条退回。" />
             </p>
           </div>
         </div>
@@ -1644,7 +1643,7 @@ export default function MachinesPage({
                       onBlur={(e) => {
                         const next = e.target.value.trim()
                         if (next !== picked.name) {
-                          if (!next) toasts.push('版本名不许清空 —— 检查与生成页要靠它认版本')
+                          if (!next) toasts.push('版本名不能空，生成页靠它认版本。')
                           else void saveVersion(picked.id, 'name', next)
                         }
                       }}
@@ -1675,7 +1674,7 @@ export default function MachinesPage({
                         if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
                       }}
                     />
-                    <span className={s.cardNote}>改 id 会一起搬走这一版的参数与资产归属，保存后写入</span>
+                    <span className={s.cardNote}>改 id 会连参数与资产归属一起搬。</span>
                   </span>
 
                   <span className={s.kvKey}>标签</span>
@@ -1794,7 +1793,7 @@ export default function MachinesPage({
                         </span>
                       </>
                     ) : (
-                      <span className={s.todo} title="还没有自己的参数正文 —— 值全部继承机型基线">
+                      <span className={s.todo} title="没有自己的参数，全部继承机型基线。">
                         参数源待补
                       </span>
                     )}
@@ -1805,7 +1804,7 @@ export default function MachinesPage({
                     <button
                       type="button"
                       className={`${s.btn} ${s.btnSm}`}
-                      title="从另一版抄一份完整参数（独立快照，之后各改各的）"
+                      title="从另一版抄一份参数，之后各改各的。"
                       onClick={() => {
                         setRecipeTpl('')
                         setRecipePick(picked.id)
@@ -1817,7 +1816,7 @@ export default function MachinesPage({
                   <button
                     type="button"
                     className={`${s.btn} ${s.btnSm}`}
-                    title="参数在参数台专业地改 —— 跳过去并落在这一版"
+                    title="去参数台改这一版的参数。"
                     onClick={() => onGoto('params', { machineId: m.id, uid: pickedNode.uid, key: null })}
                   >
                     编辑参数
@@ -1841,7 +1840,7 @@ export default function MachinesPage({
                   <span className={s.kvKey}>产物名</span>
                   <span className={s.kvVal}>
                     <span className={s.mono}>{pickedRow?.mkpFile ?? '—'}</span>
-                    <span className={s.cardNote}>按「机型-版本」由命名规则算出，不手填（G-0）</span>
+                    <span className={s.cardNote}>按机型与版本自动命名。</span>
                   </span>
                 </div>
                 {(() => {
@@ -1863,7 +1862,7 @@ export default function MachinesPage({
                           <button
                             type="button"
                             className={`${s.btn} ${s.btnSm}`}
-                            title="先落盘，再生成 —— 顺序在这里是规定死的"
+                            title="先保存，再生成。"
                             onClick={() => void saveAndBuild(m.id, picked.id)}
                           >
                             保存并生成
@@ -1891,7 +1890,7 @@ export default function MachinesPage({
                         <button
                           type="button"
                           className={s.chip}
-                          title="去套餐页看它 —— 那一页是管理套餐内容的地方"
+                          title="去套餐页管内容。"
                           onClick={() => onGoto('bundles', { machineId: m.id, uid: null, key: picked.recommendedBundle })}
                         >
                           {picked.recommendedBundle}
@@ -1937,15 +1936,15 @@ export default function MachinesPage({
                       const b = bundles.bundles.find((x) => x.id === picked.recommendedBundle)
                       if (!b)
                         return (
-                          <span className={s.kvDim}>还没选套餐 —— 切片器和 MKP 都放在套餐里，先选一个</span>
+                          <span className={s.kvDim}>先选一个套餐，切片器与 MKP 都在里面。</span>
                         )
                       const mkp = b.assetRefs.filter((r) => !r.isBbs).length
                       const bbs = b.assetRefs.filter((r) => r.isBbs).length
                       return (
                         <span className={s.cardNote}>
                           {b.display || b.id} · MKP 预设 {mkp} · 切片器 {bbs}
-                          {b.assetRefs.some((r) => !r.resolvable) && ' · 有引用解析不到（检查页会报）'}
-                          {' —— 内容的增删在套餐页（P4）'}
+                          {b.assetRefs.some((r) => !r.resolvable) && ' · 有引用找不到。'}
+                          {' · 增删去套餐页。'}
                         </span>
                       )
                     })()}
@@ -2289,7 +2288,7 @@ export default function MachinesPage({
           <IdInput value={addId} label="机型 id" placeholder="A2L" onChange={setAddId} />
           {/* 拦着新建的理由当场写在输入框下面 —— 只放禁用按钮的悬停里，人只能猜 */}
           {addId.trim() !== '' && !idOk(addId) && (
-            <span className={s.inpHint}>id 只能用大写字母、数字和下划线，例如 A2L、A1_MINI</span>
+            <span className={s.inpHint}>只能用大写字母、数字和下划线，如 A2L。</span>
           )}
           {addIdTaken && <span className={s.inpHint}>id「{addId.trim()}」已经被占了 —— 换一个</span>}
           <span className={s.kvKey}>
@@ -2317,8 +2316,8 @@ export default function MachinesPage({
           />
         </label>
         <p className={s.cardNoteDim}>
-          <strong>红星只留给 id，橙星是「可以后补的必填」</strong> —— 这一步三格都得填
-          <HelpDot text="真后端逐格校验，空着建不出来。新建的机型还没有尺寸（占位机型），没版本、不参与交付 —— 检查与生成页会给一条说明而不是报错。同名文件已存在时不会被覆盖，后端会直接报错。" />
+          红星必填，橙星可以后补。
+          <HelpDot text="空着建不出来。新建的机型还要补尺寸和版本。" />
         </p>
       </ModalC14>
 
@@ -2385,12 +2384,12 @@ export default function MachinesPage({
           />
         </div>
         <p className={s.cardNoteDim}>
-          <strong>id 与版本名现在就得填。</strong>版本一建出来就直接参与生成
+          id 与名字现在就要填，建好就参与生成。
           <HelpDot
             text={
               avTpl
-                ? `照抄 ${avTpl.id} 的定义、套餐与参数，之后两边各改各的；id 与名字是新填的。`
-                : '新版本的标签、说明、套餐是空的，参数纯继承机型基线，卡片上标「参数源待补」。'
+                ? `照抄 ${avTpl.id} 的定义、套餐与参数，之后各改各的。`
+                : '新版本只有 id 与名字，参数继承基线。'
             }
           />
         </p>
@@ -2446,7 +2445,7 @@ export default function MachinesPage({
           <input type="checkbox" checked={withRecipe} onChange={(e) => setWithRecipe(e.target.checked)} />
           <span>
             <b>同时复制配方</b>
-            <HelpDot text="拷出来是独立快照 —— 之后改模板、改基线都传不到它身上。不勾就是一个纯继承基线的空壳版本（标「参数源待补」）。" />
+            <HelpDot text="勾了才是独立副本；不勾只有空壳，参数继承基线。" />
           </span>
         </label>
         <p className={s.cardNoteDim} style={{ margin: '6px 0 0' }}>
@@ -2504,7 +2503,7 @@ export default function MachinesPage({
         </label>
         <p className={s.cardNoteDim}>
           版本 id 不在这里改
-          <HelpDot text="id 是身份，改它等于删掉再加一个（后端还没有这一步）。其他语言的显示名/标签/描述在详情卡的「多语言」里编辑。套餐在 ④ 关联里改。" />
+          <HelpDot text="id 建好后不能改；多语言在详情卡改，套餐在 ④ 关联改。" />
         </p>
       </ModalC14>
 
@@ -2570,7 +2569,7 @@ export default function MachinesPage({
         })}
         <p className={s.cardNoteDim}>
           中文那一册在详情卡里改；这里空着就回落中文
-          <HelpDot text="改中文时，那三册如果没跟着改，会被记成「待重写」；改完这三册保存，标记就消。待办清单：npm run translations:todo。一次提交所有改动：一格失败就停，不会只成功一半。" />
+          <HelpDot text="中文改过、译文没跟上的，会标「待重写」。" />
         </p>
       </ModalC14>
 
@@ -2578,7 +2577,7 @@ export default function MachinesPage({
       <ModalC14
         open={del !== null}
         title={`删除版本 · ${del?.vid.split('/')[1] ?? ''}`}
-        subtitle="先查会连带清掉什么。确认后进草稿，保存才写进仓库"
+        subtitle="先列出会连带清掉什么，确认后进草稿。"
         size="md"
         onClose={() => setDel(null)}
         footer={
@@ -2610,7 +2609,7 @@ export default function MachinesPage({
           <>
             <p className={s.note} style={{ margin: 0 }}>
               要删掉 <b>{m.id}/{del.vid.split('/')[1]}</b>。
-              <strong>确认后进草稿，保存才写进仓库；删错了可以撤销。</strong>
+              确认后进草稿，可以撤销。
             </p>
             {del.orphans.length > 0 ? (
               <p className={s.note}>
@@ -2619,7 +2618,7 @@ export default function MachinesPage({
                 <code className={s.mono}>{del.orphans.join('、')}</code>
               </p>
             ) : (
-              <p className={s.note}>这一版没有钉过参数，值全部继承基底。</p>
+              <p className={s.note}>这一版没有自己的参数，全部继承基线。</p>
             )}
             {del.assets.length > 0 && (
               <p className={s.note}>
@@ -2686,7 +2685,7 @@ export default function MachinesPage({
             onChange={setRecipeTpl}
           />
         </div>
-        <p className={s.cardNoteDim}>抄的是模板的完整有效配方，之后两边各改各的。</p>
+        <p className={s.cardNoteDim}>抄模板当前的完整参数，之后各改各的。</p>
       </ModalC14>
 
       {/* 错误弹框：复制失败时把码、请求号与字段级原因一起摆出来 */}

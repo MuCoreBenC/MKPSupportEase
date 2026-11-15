@@ -252,7 +252,7 @@ export default function SectionDrawer({
               <button
                 type="button"
                 className={s.trash}
-                title="删掉这一组；组里的参数会回到「未归类」"
+                title="删除后，组里参数回到「未归类」。"
                 aria-label="删除分组"
                 onClick={() => setAsking(true)}
               >
@@ -290,10 +290,10 @@ export default function SectionDrawer({
                */
               <p className={s.empty}>
                 {pageTotal === 0
-                  ? '这一页还没有读到参数（正在加载，或者还没选机型与版本）。'
+                  ? '还没读到参数。'
                   : pageDrawn === 0
-                    ? `这一页现在一行都没画出来：${pageTotal} 条参数这会儿都被收起或被条件关着。`
-                    : '这一组眼下没有参数 —— 它在注册表里没有认领的条目（客户端也不会画它）。'}
+                    ? '这一页的参数都被条件关着。'
+                    : '这一组没有参数。'}
               </p>
             ) : (
               <ul className={s.rows}>
@@ -339,7 +339,7 @@ export default function SectionDrawer({
               onMove={(id, dir) => onApply(id, { label: null, move: dir < 0 ? 'up' : 'down' })}
               /* 「＋ 新增分组」：只进草稿，建完切到新组上（见参数台 `addSection`） */
               onAdd={onAddSection}
-              hint="位置只在自己的页签里挪：客户端按这一页的顺序排，卡片也跟着它。"
+              hint="只在这一页内调顺序，客户端照此排列。"
             />
           </section>
         </div>
@@ -372,8 +372,8 @@ export default function SectionDrawer({
         title="删除这个分组？"
         subtitle={
           members === 0
-            ? '这一组没有参数，删掉只是少一条声明'
-            : `${members} 条参数会搬到这一页末尾的「未归类」`
+            ? '这一组没有参数。'
+            : `${members} 条参数移到「未归类」。`
         }
         size="sm"
         onClose={() => setAsking(false)}
@@ -382,7 +382,7 @@ export default function SectionDrawer({
          * 一条竖窄条（作者截图里「这一笔也只进 / 草稿 —— 右上 / 角「保存」才 /
          * 落盘」四行高、按钮还斜着排）。`footLead` 自己吃掉左侧余量。
          */
-        footLead="只进草稿：右上角「保存」才落盘，「放弃」就退回来"
+        footLead="先进草稿，保存后写入。"
         footer={
           <>
             <button

@@ -461,7 +461,7 @@ export default function ParamDetail({
                   <button
                     type="button"
                     className={s.pRevert}
-                    data-tip={`回到保存值 ${rawOf(before)} —— 上次保存时这一层是多少。点了它就是「不跟随」（这一层自己钉住这个数）`}
+                    data-tip={`回到上次保存的 ${rawOf(before)}。`}
                     onClick={() =>
                       /* **总是写回那个值**：这颗叫「回到保存值」，点完就是那个数、且不跟随。
                          以前还看 `restPinned`，没钉着就发 null（= 挂回继承 = 跟随）——
@@ -479,8 +479,8 @@ export default function ParamDetail({
                     disabled={following}
                     data-tip={
                       following
-                        ? `已经在跟随 ${l.title} 的基底 —— 值就是基底那格（${followTo}），不用再点`
-                        : `回到跟随的值 —— 跟到${words.level.machine.label}基底现在的 ${followTo}（基底自己还没保存的改动也算）`
+                        ? `已在跟随基线，值是 ${followTo}。`
+                        : `交回基线：${followTo}。`
                     }
                     aria-label={`让 ${l.title} 跟随基底`}
                     onClick={() => write(null)}
@@ -492,7 +492,7 @@ export default function ParamDetail({
                     type="button"
                     className={s.pFollow}
                     data-kind="factory"
-                    data-tip={`恢复出厂默认 ${rawOf(param.defaultValue)} —— 删掉基底这一行，值回到注册表里的 defaultValue`}
+                    data-tip={`回到出厂默认 ${rawOf(param.defaultValue)}。`}
                     onClick={() => write(null)}
                   >
                     出厂 {rawOf(param.defaultValue)}
@@ -581,8 +581,8 @@ export default function ParamDetail({
           </div>
           <p className={s.cardNote}>
             {layers !== null
-              ? '每一行都能直接改；这里列的是对照里勾选的每一列（可跨机型）'
-              : <>每一行都能直接改；左侧选中的是 <b>{machineLabel(uid)}</b></>}
+              ? '每行都能改；这里是对照勾选的列，可跨机型。'
+              : <>每行都能改；左列是 <b>{machineLabel(uid)}</b> 基线。</>}
           </p>
         </section>
 
@@ -595,7 +595,7 @@ export default function ParamDetail({
               <button
                 type="button"
                 className={s.pDefEdit}
-                title="改名称、单位、值类型、范围、出厂默认、前置条件、弃用 —— 先进草稿，保存后写入"
+                title="改定义，保存后写入。"
                 onClick={onEditDef}
               >
                 编辑定义
@@ -734,7 +734,7 @@ export default function ParamDetail({
               currentKey={param.key}
               onApplied={onOrderApplied}
             />
-            <p className={s.pDesc}>同一分组里的先后 — 客户端那一列也照这个排。</p>
+            <p className={s.pDesc}>同一分组里的先后，客户端照此排列。</p>
           </section>
         )}
 

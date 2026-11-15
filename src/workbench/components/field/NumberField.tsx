@@ -257,6 +257,9 @@ export default function NumberField({
 
   const range =
     min !== undefined || max !== undefined ? `范围 ${min ?? '—'} ~ ${max ?? '—'}` : undefined
+  /* 超范围时那句不带「范围」二字：数字自己就是边界 */
+  const rangeNum =
+    min !== undefined || max !== undefined ? `${min ?? '—'}–${max ?? '—'}` : undefined
 
   const arrow = (dir: 1 | -1) => (
     <button
@@ -319,7 +322,7 @@ export default function NumberField({
         inputMode="decimal"
         aria-label={label}
         aria-invalid={bad || undefined}
-        data-tip={bad && range !== undefined ? `超出${range}` : range}
+        data-tip={bad && rangeNum !== undefined ? `超出 ${rangeNum}` : range}
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}
         onBlur={commitTyped}

@@ -396,7 +396,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
 
   if (!list || !machines) {
     if (pageErr) return <p className="wb-todo">{pageErr}</p>
-    return <p className="wb-todo">正在读套餐定义……</p>
+    return <p className="wb-todo">正在读套餐…</p>
   }
 
   const listed = list.bundles
@@ -409,7 +409,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
           <input
             className={s.filter}
             value={filter}
-            placeholder="筛套餐（id / 显示名）"
+            placeholder="筛套餐"
             aria-label="筛选套餐"
             onChange={(e) => setFilter(e.target.value)}
           />
@@ -451,7 +451,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
                 <span className={s.rowTop}>
                   <span className={s.rowName}>{b.display || b.id}</span>
                   {b.users.length > 1 ? (
-                    <span className={`${s.tag} ${s.tagDanger}`} title="好几个版本指着它">
+                    <span className={`${s.tag} ${s.tagDanger}`} title={`${b.users.length} 个版本在用`}>
                       {b.users.length} 个版本用它
                     </span>
                   ) : b.users.length === 1 ? (
@@ -460,7 +460,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
                     /* 没人用不是错误 —— 刚建好还没挂上去就是这样 */
                     <span
                       className={`${s.tag} ${s.tagGhost}`}
-                      title="没有版本指着它（大家都走机型默认）"
+                      title="没有版本用它，都走机型默认。"
                     >
                       没人用它
                     </span>
@@ -468,7 +468,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
                 </span>
                 <span className={s.rowBottom}>
                   <span className={`${s.mono} ${s.rowMeta}`}>{b.id}</span>
-                  <span className={s.rowMeta} title="这份套餐装了几份文件（MKP 预设 + 切片器）">
+                  <span className={s.rowMeta} title="装了几份文件。">
                     装了 {b.assetRefs.length} 个文件
                   </span>
                 </span>
@@ -525,8 +525,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
                 <div className={s.warn}>
                   <div className={s.warnTitle}>装了「仅归档」的文件</div>
                   <div className={s.warnDetail}>
-                    客户端看得到这个套餐却拿不到这份文件，而且<strong>不会报错</strong> ——
-                    只是少一个东西。去资产库把它的交付身份改回来。
+                    客户端看得到这个套餐却拿不到这份文件。去资产库把它的交付身份改回来。
                   </div>
                 </div>
               )}
@@ -534,7 +533,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
               <div className={s.group}>
                 <div className={s.groupHead}>
                   MKP 预设（{cur.assetRefs.filter((r) => r.kind === 'mkPreset').length}）
-                  <HelpDot text="资产库里的 MKP 预设类。文件在不在都能挂 —— 「有没有生成」是生成页的状态，不拦选用。" />
+                  <HelpDot text="MKP 预设都能挂，没生成也能选。" />
                 </div>
                 {cur.assetRefs
                   .filter((r) => r.kind === 'mkPreset')
@@ -650,7 +649,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
               <div className={s.group}>
                 <div className={s.groupHead}>
                   被哪些版本指向（{cur.users.length}）
-                  <HelpDot text="点 chip 跳到那个版本，点 × 取消它自己的指向（它会回到机型默认）。右键 chip 也是这两项。" />
+                  <HelpDot text="点 chip 去那个版本，点 × 取消它的指向。" />
                 </div>
                 <div className={s.chips}>
                   {cur.users.length ? (
@@ -704,7 +703,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
               <div className={s.group}>
                 <div className={s.groupHead}>
                   把版本指到这个套餐
-                  <HelpDot text="一个套餐可以被多个版本指（不限机型）；一个版本只指一个套餐 —— 一版一套。真源关系就是一版一套：改了指向之后那一版的生成与发布跟着走（后端判据，不在前端）。" />
+                  <HelpDot text="一个版本只用一个套餐；改指向后，这一版的生成与发布跟着走。" />
                 </div>
                 {assignPicks.length > 0 && (
                   <div className={s.chips}>
@@ -752,7 +751,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
                   >
                     确认指向
                   </button>
-                  <HelpDot text="「确认指向」先给你看影响预览（哪些版本会被改、原来指着谁），确认后进草稿，保存才写进仓库。" />
+                  <HelpDot text="确认前先列出会影响哪些版本。" />
                 </div>
               </div>
             </div>
@@ -818,7 +817,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
             <input
               className={s.filter}
               value={newId}
-              placeholder="如 A1_NEW（不许空白或 /）"
+              placeholder="如 A1_NEW，不能有空行或 /"
               aria-label="新套餐 id"
               onChange={(e) => setNewId(e.target.value)}
             />
@@ -838,7 +837,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
           <button type="button" className={s.btn} onClick={() => setNewResOpen(true)}>
             选内容…（{newRefs.length} 份）
           </button>
-          <HelpDot text="至少一条切片器预设 —— MKP 与 BBS 必须成套配发，缺了存不进去。内容以后也能改。" />
+          <HelpDot text="MKP 与 BBS 要成套，先加一条 BBS 预设。" />
         </div>
         <BundleResourcesModal
           open={newResOpen}
@@ -880,7 +879,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
           <label className={s.fieldCol}>
             <span className={s.fieldLabel}>
               套餐 id
-              <HelpDot text="改 id 会把机型文件里的 defaultBundle / recommendedBundle 一并重指（后端做）—— 它同时是 bundles.toml 里的键。" />
+              <HelpDot text="改 id 会同步改掉机型和版本里的引用。" />
             </span>
             <input
               className={`${s.filter} ${s.mono}`}
@@ -930,7 +929,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
           <label className={s.fieldCol}>
             <span className={s.fieldLabel}>
               新套餐 id
-              <HelpDot text="内容与归属照抄；复制出来的那份不被任何版本指着 —— 指向要人显式改。" />
+              <HelpDot text="内容照抄；副本不改任何版本的指向。" />
             </span>
             <input
               className={`${s.filter} ${s.mono}`}
@@ -965,7 +964,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
          */}
         <p className={s.cardNoteDim} style={{ marginTop: 0 }}>
           可以多选 —— <strong>一个套餐可以被多个版本指，一个版本只指一个套餐</strong>
-          <HelpDot text="不限机型：本机型的排前面只是方便，别家的也能选。" />
+          <HelpDot text="不限机型，本机型的排在前面。" />
         </p>
         <div className={s.pickTree}>
           {machines.machines.map((m) => (
@@ -1056,7 +1055,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
               )
               return noop.length > 0 ? `（其中 ${noop.length} 个已经指着它，不算改动）` : ''
             })()}
-            <HelpDot text="确认后进草稿，撤销能整条退回来。" />
+            <HelpDot text="确认后进草稿，可以撤销。" />
           </span>
         </div>
         <div className={s.chips} style={{ marginTop: 8 }}>
@@ -1075,7 +1074,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto, onBookRef
         subtitle={
           cur && (cur.users.length || cur.defaultFor.length)
             ? undefined
-            : '没人指着它 —— 删掉之后这份登记就没了（文件本体还在资产库）'
+            : '删除后这份套餐登记没了，文件还在资产库。'
         }
         size="md"
         onClose={() => setDeleting(false)}

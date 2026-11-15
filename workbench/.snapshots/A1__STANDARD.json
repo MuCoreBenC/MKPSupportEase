@@ -20,7 +20,7 @@
   "toolhead.pen_unmount_wait_x": 256.0,
   "toolhead.pen_unmount_wait_y": 0.0,
   "toolhead.pen_unmount_x": 271.0,
-  "toolhead.prime_length": 100.0,
+  "toolhead.prime_length": 50.0,
   "toolhead.speed_limit": 70.0,
   "wiping.bed_glue_preheat_temp": 50,
   "wiping.bed_glue_speed": 70.0,

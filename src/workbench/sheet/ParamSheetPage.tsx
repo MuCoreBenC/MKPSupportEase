@@ -1278,11 +1278,11 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       mode === 'single' ? (rowOf(shownDesk, key)?.cells[shownDesk?.cur ?? 0] ?? null) : null
     const followWhy =
       mode !== 'single'
-        ? '对照模式一次看多列，先切回单列再操作'
+        ? '切回单列再改。'
         : cell === null
-          ? '这一行还没有格子（矩阵还在拉）'
+          ? '这一行还没读到值。'
           : !cell.own
-            ? '这一层本来就没有自己的值 —— 它已经在跟随基线'
+            ? '这一层没有自己的值，跟着基线。'
             : !cell.editable
               ? cell.deprecated
                 ? '这一项在这台机型上已弃用'
@@ -1294,7 +1294,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
         label: '编辑定义…',
         icon: 'params',
         /* 与右栏那颗「编辑定义」同一条判据：拿不到 `ParamView` 就没得改 */
-        disabled: p === null ? '注册表里没有这一条（派生数据还没回来）' : undefined,
+        disabled: p === null ? '还没读到这条参数。' : undefined,
         onSelect: () => {
           setSel(key)
           setDefEditKey(key)
@@ -1312,7 +1312,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       },
       {
         id: 'focus',
-        label: '选中并跳到这一行',
+        label: '选中并滚到这一行',
         onSelect: () => {
           setSel(key)
           locateAnchor(`t-param-${key}`, { row: true })
@@ -1570,11 +1570,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
           className={`${s.pRailHandle} ${railPinned ? s.pRailHandleOn : ''}`}
           data-open={railOpen}
           aria-expanded={railOpen}
-          data-tip={
-            railPinned
-              ? '收起机型与版本（收起后鼠标扫过就能临时打开）'
-              : '钉住机型与版本（不点也行：鼠标扫过就浮出来）'
-          }
+          data-tip={railPinned ? '收起；鼠标扫过可临时打开。' : '钉住；鼠标扫过会自动浮出。'}
           /* 收起必须把「悬停浮出」一起关掉 —— 不然收起会当场换成浮出（C14 第十七轮） */
           onClick={() => {
             if (railPinned) {
@@ -1612,9 +1608,9 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
             {mode === 'single' && machine !== null && target !== null && desk !== null
               ? `${totalCount} 参数 · ${editableCount} 可编辑` +
                 (target !== BASE
-                  ? ` · 本版钉着 ${desk.cols[desk.cur]?.items ?? 0} 项`
+                  ? ` · 本版自定 ${desk.cols[desk.cur]?.items ?? 0} 项`
                   : '')
-              : '从左树选一个机型和版本 —— 参数都在它们身上'}
+              : '从左树选一个机型和版本。'}
           </span>
         </span>
         {focusUid !== null && (
@@ -1623,7 +1619,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
             <button
               type="button"
               className={`${s.btn} ${s.btnSm}`}
-              title="回到那个版本的工作台，接着做它的下一步"
+              title="回到那个版本的机型页。"
               onClick={() => onGoto('machines', { machineId: machineId ?? '', uid: focusUid, key: null })}
             >
               回到版本页
@@ -1891,7 +1887,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                     type="button"
                     className={`${s.pChip} ${diffOnly ? s.pChipOn : ''}`}
                     onClick={() => setDiffOnly(!diffOnly)}
-                    title="只留下这几列里值不一样的参数 —— 对照模式就是为了看这个"
+                    title="只看各列取值不同的参数。"
                   >
                     仅显示差异 <em>{shownMatrix.diffKeys.length}</em>
                   </button>
@@ -2396,7 +2392,7 @@ function GroupHead({
       <button
         type="button"
         className={s.pGroupName}
-        title="打开分组抽屉：改名、换位置、看这一组里都有什么"
+        title="改名、换位置、看组里的参数。"
         onClick={onOpen}
       >
         {group.label}
@@ -2432,7 +2428,7 @@ function CollapsedCard({
         <button
           type="button"
           className={`${s.btn} ${s.btnSm}`}
-          title="这几行现在都被条件关着 —— 摊开看它们（摊开了也还是改不动）"
+          title="条件不成立；摊开看，但仍改不动。"
           onClick={onOpen}
         >
           {words.relate.showAnyway}
@@ -2512,7 +2508,7 @@ function GroupCard({
             <button
               type="button"
               className={s.pFoldBtn}
-              title="这一卡现在一行都改不动 —— 收回去，要看了再摊开"
+              title="这一卡都改不动，收起。"
               onClick={onCollapse}
             >
               {words.relate.foldBack}

@@ -147,6 +147,8 @@
 
 - 本规范**不管布局**。控件太挤、层级不清、页脚枚举菜单这类问题，
   记进 `docs/copy-audit/` 对应页的「布局建议」栏，另行处理，不靠改字糊过去。
-- 参数名 / 参数说明是数据（`presets/registry/param_registry.toml`），不在这张表里。
+- 参数名 / 参数说明是数据（`presets/registry/param_registry.toml`）：写法照本规范，
+  但改在注册表里，审计入口是 `docs/copy-audit/workbench.html`。
 - 后端渲染的句子在 `crates/postprocess/messages.toml`，同样四语，同一套写法。
-- `src/workbench/**` 是开发台，不在本规范范围内。
+- `src/workbench/**`（工作台）也按本规范；它的文案硬编码在组件里，审查台同上是
+  `docs/copy-audit/workbench.html`。
