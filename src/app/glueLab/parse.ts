@@ -207,7 +207,7 @@ function finishBlock(
  *
  * 支撑拆成三档是作者要的（与切片器预览同一套区分）：**支撑**、**支撑面**
  * （`Support interface`，顶上那几层）、**熨烫面**（`Support ironing`，涂胶真正落上去的那一面）。
- * `other` 兜住认不出的 `; FEATURE:`。
+ * `travel` 是空走（不带 E 的移动），`other` 兜住认不出的 `; FEATURE:`。
  */
 export type PrintKind =
   | 'outer'
@@ -216,6 +216,7 @@ export type PrintKind =
   | 'support'
   | 'supportFace'
   | 'ironing'
+  | 'travel'
   | 'other'
 
 export const PRINT_KINDS: readonly PrintKind[] = [
@@ -225,6 +226,7 @@ export const PRINT_KINDS: readonly PrintKind[] = [
   'support',
   'supportFace',
   'ironing',
+  'travel',
   'other',
 ]
 
@@ -250,17 +252,25 @@ const KIND_OF: Record<string, PrintKind> = {
   'Support ironing': 'ironing',
 }
 
-export interface PrintModel {
+/** 产物里的一个模型（`; start printing object, unique label id: N`） */
+export interface PrintObject {
+  /** 那个 label id；`0` = 不在任何对象里的移动（起始擦料线这类） */
+  id: number
   /** 每类的线段顶点（`x,y,z` 三元组，两个端点一组），**按层升序排好** */
   kinds: Record<PrintKind, Float32Array>
-  /** 升序的层 Z（取自 `G1 Z`） */
-  layers: number[]
   /**
-   * 每类在每层的区间：`bounds[k][i] … bounds[k][i+1]`，单位是**段**。
-   * 长度恒为 `layers.length + 1` —— 于是"看到第 i 层"= `drawRange(0, bounds[i+1]*2)`，
-   * 不用重建几何。
+   * 每类在每层的区间：`bounds[k][i] … bounds[k][i+1]`，单位是**段**，长度恒为
+   * `layers.length + 1`（这一层这个对象没有东西时前后相等）。于是"看到第 i 层"
+   * = `drawRange(0, bounds[i+1]*2)`，不用重建几何。
    */
   bounds: Record<PrintKind, Uint32Array>
+}
+
+export interface PrintModel {
+  /** 升序的层 Z（取自 `G1 Z`），所有对象共用这一份下标 */
+  layers: number[]
+  /** 按出现顺序的模型；`id` 为 0 的那个只装不属于任何对象的移动 */
+  objects: PrintObject[]
   /** 认不出的 `; FEATURE:` 名字（界面提示用；空数组 = 全认识） */
   unknown: string[]
   zMin: number
@@ -274,22 +284,31 @@ const emptyBuckets = (): Record<PrintKind, number[]> => ({
   support: [],
   supportFace: [],
   ironing: [],
+  travel: [],
   other: [],
 })
 
+const OBJECT_START = '; start printing object'
+const OBJECT_STOP = '; stop printing object'
+const LABEL = /label id:\s*(\d+)/
+
 /**
- * 产物全文 → 打印本体（只取**带 E 的移动**：空走不画，那是行程不是模型）。
+ * 产物全文 → 打印本体。
  *
- * 涂胶块里的移动要跳过 —— 它们也带 E、也会被 `; FEATURE:` 打上 Support ironing，
- * 但那是 `parseBlocks` 的活，两边都画就重了。
+ * 三类移动分开：
+ *  - **带 E 的**按 `; FEATURE:` 分成墙 / 填充 / 支撑…，是模型本身；
+ *  - **不带 E 的**进 `travel`（空走），切片器预览里那层灰线；
+ *  - `;MKP_BEGIN … ;MKP_END` 之间的整段跳过 —— 那是涂胶与换笔，归 `parseBlocks`。
  *
  * 顶点按 Z 升序排好：图上那把层滑块靠 `drawRange` 切层，拖起来才是即时的。
  */
 export function parsePrint(text: string): PrintModel {
   const lines = text.split(/\r?\n/)
-  /** z(3 位小数) → 这一层各类的顶点 */
-  const byLayer = new Map<string, { z: number; bucket: Record<PrintKind, number[]> }>()
+  /** 对象 id → 层 key → 这一层各类的顶点 */
+  const byObject = new Map<number, Map<string, { z: number; bucket: Record<PrintKind, number[]> }>>()
   const unknown = new Set<string>()
+  const layerKeys = new Set<string>()
+  let objectId = 0
   let kind: PrintKind = 'other'
   let x = 0
   let y = 0
@@ -310,6 +329,15 @@ export function parsePrint(text: string): PrintModel {
       continue
     }
     if (inBlock) continue
+    if (t.startsWith(OBJECT_START)) {
+      const m = LABEL.exec(t)
+      objectId = m ? Number(m[1]) : 0
+      continue
+    }
+    if (t.startsWith(OBJECT_STOP)) {
+      objectId = 0
+      continue
+    }
     if (t.startsWith('; FEATURE:')) {
       const name = t.slice('; FEATURE:'.length).trim()
       const k = KIND_OF[name]
@@ -329,45 +357,98 @@ export function parsePrint(text: string): PrintModel {
     if (ny !== null) y = ny
     hasPos = true
 
-    /* 只画挤出的：`E` 在、且不是零（`E.3742` 这种省前导零的写法一并认） */
+    /* `E` 在且大于 0 才是挤出（`E.3742` 这种省前导零的写法一并认） */
     const em = /\bE(-?(?:\d+(?:\.\d*)?|\.\d+))/.exec(t)
-    if (em === null || Number(em[1]) <= 0) continue
+    const k: PrintKind = em !== null && Number(em[1]) > 0 ? kind : 'travel'
     const key = z.toFixed(3)
-    let slot = byLayer.get(key)
+    let layers = byObject.get(objectId)
+    if (layers === undefined) {
+      layers = new Map()
+      byObject.set(objectId, layers)
+    }
+    let slot = layers.get(key)
     if (slot === undefined) {
       slot = { z, bucket: emptyBuckets() }
-      byLayer.set(key, slot)
+      layers.set(key, slot)
     }
-    slot.bucket[kind].push(from.x, from.y, z, x, y, z)
-    if (z < zMin) zMin = z
-    if (z > zMax) zMax = z
+    slot.bucket[k].push(from.x, from.y, z, x, y, z)
+    if (k !== 'travel') {
+      layerKeys.add(key)
+      if (z < zMin) zMin = z
+      if (z > zMax) zMax = z
+    }
   }
 
-  const keys = [...byLayer.keys()].sort((a, b) => Number(a) - Number(b))
-  const kinds = {} as Record<PrintKind, Float32Array>
-  const bounds = {} as Record<PrintKind, Uint32Array>
-  for (const k of PRINT_KINDS) {
-    const flat: number[] = []
-    const edge = new Uint32Array(keys.length + 1)
-    let seg = 0
-    keys.forEach((key, i) => {
-      const arr = byLayer.get(key)?.bucket[k] ?? []
-      for (const v of arr) flat.push(v)
-      seg += arr.length / 6
-      edge[i + 1] = seg
-    })
-    kinds[k] = Float32Array.from(flat)
-    bounds[k] = edge
+  /*
+   * 层号只由**挤出**的移动决定。空走在抬笔高度（`Z10.8` 那种）也会形成一堆
+   * 不相干的 Z 值，算进层里会把滑块撑到一百多层，整摞的高度也全乱。
+   * 于是那些「只有空走」的 Z 直接丢掉：抬笔飞过去的那几段本来也不该按层看。
+   */
+  const keys = [...layerKeys].sort((a, b) => Number(a) - Number(b))
+  const objects: PrintObject[] = []
+  for (const [id, layers] of byObject) {
+    const kinds = {} as Record<PrintKind, Float32Array>
+    const bounds = {} as Record<PrintKind, Uint32Array>
+    for (const k of PRINT_KINDS) {
+      const flat: number[] = []
+      const edge = new Uint32Array(keys.length + 1)
+      let seg = 0
+      keys.forEach((key, i) => {
+        const arr = layers.get(key)?.bucket[k] ?? []
+        for (const v of arr) flat.push(v)
+        seg += arr.length / 6
+        edge[i + 1] = seg
+      })
+      kinds[k] = Float32Array.from(flat)
+      bounds[k] = edge
+    }
+    objects.push({ id, kinds, bounds })
   }
+  /* 真实的模型排在前面，`id 0`（不属于任何对象的移动）垫底 */
+  objects.sort((a, b) => (a.id === 0 ? 1 : 0) - (b.id === 0 ? 1 : 0) || a.id - b.id)
 
   return {
-    kinds,
     layers: keys.map(Number),
-    bounds,
+    objects,
     unknown: [...unknown],
     zMin: Number.isFinite(zMin) ? zMin : 0,
     zMax: Number.isFinite(zMax) ? zMax : 0,
   }
+}
+
+/* ---------------- 涂胶偏移 ---------------- */
+
+/** 涂胶路径相对产物里那条路径的平移量（mm） */
+export interface GlueShift {
+  dx: number
+  dy: number
+  dz: number
+}
+
+/**
+ * 把涂胶块整体平移。
+ *
+ * 产物里的涂胶坐标 = 目标坐标 + 实际生效的两笔偏移，所以「把偏移调成 0」在展示端
+ * 就是**减掉**它；一次平移落在这一处，2D 与 3D 都吃这份，免得两边各算一遍。
+ * `layerZ` 不动：它标的是「这一块属于哪一层」，跟笔尖高低无关。
+ */
+export function shiftBlocks(blocks: readonly LabBlock[], shift: GlueShift): LabBlock[] {
+  if (shift.dx === 0 && shift.dy === 0 && shift.dz === 0) return blocks.slice()
+  return blocks.map((b) => {
+    const moves = b.moves.map((m) => ({
+      ...m,
+      from: { x: m.from.x + shift.dx, y: m.from.y + shift.dy },
+      to: { x: m.to.x + shift.dx, y: m.to.y + shift.dy },
+      z: m.z + shift.dz,
+    }))
+    return {
+      ...b,
+      moves,
+      normalZ: b.normalZ === null ? null : b.normalZ + shift.dz,
+      raisedZ: b.raisedZ === null ? null : b.raisedZ + shift.dz,
+      bbox: landedBBox(moves),
+    }
+  })
 }
 
 /** 落笔移动的外接框（空走不算，它会把框撑到天上） */

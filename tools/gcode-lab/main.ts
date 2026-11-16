@@ -7,10 +7,15 @@
  * 顶栏滑杆只重算预测，不重解析文件。
  */
 
+import { unzipSync } from 'fflate'
+
+import { findMetaName, pairsWith } from '../../src/app/glueLab/files'
 import { EdgeField } from '../../src/app/glueLab/band'
 import type { EdgeRule } from '../../src/app/glueLab/band'
-import { countLevels, landedMoves, parseBlocks, parsePrint } from '../../src/app/glueLab/parse'
+import { countLevels, landedMoves, parseBlocks, parsePrint, shiftBlocks } from '../../src/app/glueLab/parse'
 import type { LabBlock, LabMove, PrintModel } from '../../src/app/glueLab/parse'
+import { ZERO_OFFSETS, metaPathOf, readGlueOffsets } from '../../src/app/glueLab/meta'
+import type { GlueOffsets } from '../../src/app/glueLab/meta'
 import { estimatePitch } from '../../src/app/glueLab/pitch'
 import type { PitchEstimate } from '../../src/app/glueLab/pitch'
 import { onThemeChange, palette } from './theme'
@@ -38,6 +43,12 @@ const state = {
   /** 每块有没有窄面（后台扫，见 `scanNarrow`） */
   narrow: new Map<number, boolean>(),
   print: null as PrintModel | null,
+  /** 产物原样的涂胶块（没做偏移平移） */
+  rawBlocks: [] as LabBlock[],
+  /** 这次运行实际生效的偏移（读不到 meta 时全是 0） */
+  actualOffsets: { ...ZERO_OFFSETS } as GlueOffsets,
+  /** 界面上填的偏移：与 `actualOffsets` 相等 = 照原样显示 */
+  offsets: { ...ZERO_OFFSETS } as GlueOffsets,
   /** 层滑块指向第几层（`state.print.layers` 的下标） */
   layerIndex: 0,
   layerMode: 'all' as 'all' | 'current',
@@ -67,6 +78,15 @@ const el = {
   layerOther: $('layer-other'),
   reset: $('reset'),
   explode: $('explode'),
+  real: $('real'),
+  object: $<HTMLSelectElement>('object'),
+  offset: $('offset'),
+  offNote: $('off-note'),
+  offX: $<HTMLInputElement>('off-x'),
+  offY: $<HTMLInputElement>('off-y'),
+  offTz: $<HTMLInputElement>('off-tz'),
+  offGz: $<HTMLInputElement>('off-gz'),
+  offZero: $('off-zero'),
   refit: $('refit'),
   ortho: $('ortho'),
   layermode: $('layermode'),
@@ -79,6 +99,9 @@ const el = {
   c2d: $<HTMLCanvasElement>('c2d'),
   c3d: $<HTMLCanvasElement>('c3d'),
   cz: $<HTMLCanvasElement>('cz'),
+  busy: $('busy'),
+  busyText: $('busy-text'),
+  stripTitle: $('strip-title'),
 }
 
 const view2d = new View2d(
@@ -96,6 +119,7 @@ const view2d = new View2d(
     state.selected = index
     view2d.select(index)
     renderDetail()
+    renderStrip()
   },
 )
 const view3d = new View3d(el.c3d)
@@ -104,10 +128,51 @@ viewCube.onPick = (dir) => view3d.setDirection(dir)
 
 const rule = (): EdgeRule => ({ lines: state.lines, pitchMm: state.pitch.mm })
 
+/** 底部台阶带：`renderStrip` 画一条就记一条，悬停 / 点击靠它反查移动 */
+let stripHits: { x0: number; x1: number; mi: number }[] = []
+const STRIP_GAP = 4
+
+/** 先拖进来的 meta：等同名 gcode；分两次拖时靠它配对 */
+let pendingMeta: { name: string; data: unknown } | null = null
+
 /* ---------------- 文件 ---------------- */
 
-function loadText(name: string, text: string): void {
-  const blocks = parseBlocks(text)
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)))
+}
+
+/**
+ * 大文件解析前先把模态挂上去。
+ *
+ * 直接同步 parse 的话，浏览器一帧都拿不到 —— 转圈根本来不及画出来。
+ * 让一帧再干活，至少用户看得见"在忙"；结束再让一帧，免得模态与结果同帧闪一下。
+ */
+async function loadText(name: string, text: string, meta?: unknown): Promise<void> {
+  const began = performance.now()
+  el.busyText.textContent = '解析中…'
+  el.busy.classList.remove('hidden')
+  await nextPaint()
+  try {
+    loadTextSync(name, text, meta)
+  } finally {
+    el.busyText.textContent = '完成'
+    await nextPaint()
+    /* 小文件解析不到一帧：让它至少挂 240ms，别闪一下就没了 */
+    const left = 240 - (performance.now() - began)
+    if (left > 0) await new Promise((resolve) => setTimeout(resolve, left))
+    el.busy.classList.add('hidden')
+  }
+}
+
+function loadTextSync(name: string, text: string, meta?: unknown): void {
+  state.rawBlocks = parseBlocks(text)
+  state.actualOffsets = (meta === undefined ? null : readGlueOffsets(meta)) ?? { ...ZERO_OFFSETS }
+  /* 一开始按「真实生效的那一套」显示：偏移与产物里的一模一样 */
+  state.offsets = { ...state.actualOffsets }
+  fillOffsetInputs()
+  el.offNote.textContent = meta === undefined ? '未读到 meta · 可再拖同名 meta' : '已读 meta'
+  el.offset.classList.remove('hidden')
+  const blocks = shiftBlocks(state.rawBlocks, offsetShift())
   state.fileName = name
   state.blocks = blocks
   state.index = 0
@@ -124,9 +189,20 @@ function loadText(name: string, text: string): void {
   state.print = print
   /* 认不出的 `; FEATURE:` 不给它单开一格，折进「其它」那张；一格都没有就不显示 */
   el.layerOther.classList.toggle('hidden', print.unknown.length === 0)
+  /* 对象下拉：全部 + 每个 `label id`；只有 0 号（不属于任何模型的移动）时不显示 */
+  const ids = print.objects.filter((o) => o.id !== 0)
+  el.object.innerHTML = '<option value="">全部模型</option>'
+  for (const obj of ids) {
+    const opt = document.createElement('option')
+    opt.value = String(obj.id)
+    opt.textContent = `#${obj.id}`
+    el.object.appendChild(opt)
+  }
+  el.object.disabled = ids.length < 2
+  view3d.setObjectFilter(null)
   view3d.setPrint(print)
   view3d.setBlocks(blocks, 0)
-  loadBlock(0, true)
+  loadBlock(0, { refit: true })
   el.side.classList.remove('hidden')
   /* 默认停在最顶层：一开始就是「全看」，往下拖才切 */
   const top = Math.max(0, print.layers.length - 1)
@@ -136,10 +212,12 @@ function loadText(name: string, text: string): void {
   scanNarrow()
 }
 
-function loadBlock(index: number, refit = false): void {
+function loadBlock(index: number, opts: { refit?: boolean; fromLayer?: boolean } = {}): void {
   const block = state.blocks[index]
   if (!block) return
   state.index = index
+  /* 从左边列表点进来的：层跟着这一块走；从层滑块来的就别再回写，否则会互相拽 */
+  if (opts.fromLayer !== true) syncLayerFromBlock(index)
   state.selected = null
   const landed = landedMoves(block)
   state.field = EdgeField.build(landed)
@@ -148,7 +226,7 @@ function loadBlock(index: number, refit = false): void {
     ? `${state.pitch.mm.toFixed(2)}mm 回落`
     : `${state.pitch.mm.toFixed(2)}mm 实测`
   el.lift.textContent = block.raisedZ === null ? '—' : `${block.liftMm.toFixed(2)}mm`
-  refreshRule(refit)
+  refreshRule(opts.refit === true)
   view3d.select(index)
   el.c2d.classList.remove('fade-in')
   void el.c2d.offsetWidth
@@ -320,6 +398,7 @@ function renderStrip(): void {
   if (!ctx) return
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.clearRect(0, 0, w, h)
+  stripHits = []
   if (!block) return
 
   const landed: number[] = []
@@ -332,7 +411,8 @@ function renderStrip(): void {
   const padR = 12
   const top = 14
   const bottom = h - 16
-  const bw = (w - padL - padR) / landed.length
+  const gaps = Math.max(0, block.segments.length - 1)
+  const bw = (w - padL - padR - gaps * STRIP_GAP) / landed.length
 
   /* 两条档位基线 */
   ctx.strokeStyle = palette().grid
@@ -344,22 +424,83 @@ function renderStrip(): void {
   }
   ctx.stroke()
 
+  /* 一段一块：浅底 + 细边 + 段号，移动之间不再糊成一条长带 */
+  block.segments.forEach((seg, si) => {
+    const idxs: number[] = []
+    for (let mi = seg.first; mi <= seg.last; mi += 1) {
+      if (block.moves[mi]?.level !== 'up') idxs.push(mi)
+    }
+    if (idxs.length === 0) return
+    const before = landed.indexOf(idxs[0] as number)
+    const x0 = padL + before * bw + si * STRIP_GAP
+    const x1 = x0 + idxs.length * bw
+    ctx.fillStyle = palette().bg2
+    ctx.globalAlpha = 0.5
+    ctx.fillRect(x0, top - 2, x1 - x0, bottom - top + 4)
+    ctx.globalAlpha = 1
+    ctx.strokeStyle = palette().line
+    ctx.strokeRect(Math.round(x0) + 0.5, Math.round(top - 2) + 0.5, Math.round(x1 - x0), bottom - top + 3)
+    if (x1 - x0 > 28) {
+      ctx.fillStyle = palette().dim
+      ctx.font = '9px ui-monospace, monospace'
+      ctx.fillText(`#${si + 1}`, x0 + 3, top - 5)
+    }
+  })
+
   landed.forEach((mi, k) => {
     const m = block.moves[mi]
     const raised = m.level === 'raised'
     const pred = state.predicted[mi] === 1
     const bad = pred !== raised
-    const x = padL + k * bw
+    const seg = block.segments.findIndex((v) => mi >= v.first && mi <= v.last)
+    const x = padL + k * bw + Math.max(0, seg) * STRIP_GAP
     const y = raised ? top : bottom - 10
     ctx.fillStyle = bad ? palette().red : raised ? palette().amber : palette().teal
     ctx.fillRect(x, y, Math.max(1, bw - 0.6), 10)
+    if (mi === state.selected) {
+      ctx.strokeStyle = palette().text
+      ctx.lineWidth = 1
+      ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.max(1, bw - 1), 9)
+    }
+    stripHits.push({ x0: x, x1: x + bw, mi })
   })
 
   ctx.fillStyle = palette().dim
   ctx.font = '10px ui-monospace, monospace'
   ctx.fillText('抬起', padL, top - 4)
   ctx.fillText('正常', padL, bottom + 12)
+  el.stripTitle.textContent = `落笔档（${block.segments.length} 段 · 按移动顺序）`
 }
+
+/** 底部台阶带：悬停读行号，点击选中那一条 */
+function stripHitAt(x: number): number | null {
+  const hit = stripHits.find((h) => x >= h.x0 && x < h.x1)
+  return hit ? hit.mi : null
+}
+
+el.cz.addEventListener('pointermove', (e) => {
+  const rect = el.cz.getBoundingClientRect()
+  const mi = stripHitAt(e.clientX - rect.left)
+  const m = mi === null ? null : (state.blocks[state.index]?.moves[mi] ?? null)
+  if (m === null) {
+    el.stripTitle.textContent = `落笔档（${state.blocks[state.index]?.segments.length ?? 0} 段 · 按移动顺序）`
+    return
+  }
+  const pred = mi !== null && state.predicted[mi] === 1
+  el.stripTitle.textContent = `行 ${m.line} · ${m.level === 'raised' ? '抬起' : '正常'} · 判定${pred ? '边缘' : '内侧'}`
+})
+
+el.cz.addEventListener('pointerleave', renderStrip)
+
+el.cz.addEventListener('click', (e) => {
+  const rect = el.cz.getBoundingClientRect()
+  const mi = stripHitAt(e.clientX - rect.left)
+  if (mi === null) return
+  state.selected = mi
+  view2d.select(mi)
+  renderDetail()
+  renderStrip()
+})
 
 /* ---------------- 事件 ---------------- */
 
@@ -369,18 +510,31 @@ el.lines.addEventListener('input', () => {
   refreshRule()
 })
 
-el.exag.addEventListener('input', () => {
-  const n = Number(el.exag.value)
-  el.exagVal.textContent = String(n)
+function setExag(n: number): void {
+  el.exag.value = String(Math.round(n))
+  el.exagVal.textContent = String(Math.round(n))
   view3d.setExaggeration(n)
+}
+
+el.exag.addEventListener('input', () => setExag(Number(el.exag.value)))
+
+/* 真实高度：Z 倍数回 1:1，抬 0.5mm 就画 0.5mm */
+el.real.addEventListener('click', () => {
+  setExag(1)
+  view3d.refit()
 })
 
-el.view.addEventListener('click', (e) => {
-  const btn = (e.target as HTMLElement).closest('button')
-  if (!btn) return
-  const next = btn.dataset.view === '3d' ? '3d' : '2d'
+/* 爆炸动画每帧把当前倍数报回来，顶栏必须跟着走 */
+view3d.onExaggeration = (z) => {
+  el.exag.value = String(Math.round(z))
+  el.exagVal.textContent = String(Math.round(z))
+}
+
+function applyView(next: '2d' | '3d'): void {
   state.view = next
-  el.view.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn))
+  el.view.querySelectorAll('button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.view === next)
+  })
   el.c2d.classList.toggle('hidden', next !== '2d')
   el.scale.classList.toggle('hidden', next !== '2d')
   el.layers.classList.toggle('hidden', next !== '3d')
@@ -397,6 +551,29 @@ el.view.addEventListener('click', (e) => {
     el.zoom.value = String(toSlider(view2d.scaleOf(), ZOOM_RANGE['2d']))
     el.zoomVal.textContent = ''
   }
+}
+
+el.view.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button')
+  if (!btn) return
+  const next = btn.dataset.view === '3d' ? '3d' : '2d'
+  if (next === state.view) return
+  if (next === '2d') {
+    /*
+     * 伪 2D：3D 先翻到与 2D 同朝向、同取景的顶视；末帧画完的那一帧直接切画布，
+     * 不淡入淡出 —— 2D 第一帧接的就是 3D 最后一帧。
+     */
+    view3d.flyToTop(view2d.viewOf(), () => applyView('2d'))
+    return
+  }
+  /* 从 2D 回 3D：先把 3D 摆出来，再带着渐显飞回进来前的机位 */
+  applyView('3d')
+  view3d.flyFromTop(() => {})
+})
+
+el.object.addEventListener('change', () => {
+  const v = el.object.value
+  view3d.setObjectFilter(v === '' ? null : Number(v))
 })
 
 /* 「视角」= 当前视图的还原：2D 回到铺满那一块，3D 回到默认机位 */
@@ -423,10 +600,147 @@ el.ortho.addEventListener('click', () => {
   el.ortho.textContent = view3d.isOrtho() ? '正交' : '透视'
 })
 
+/* ---- 涂胶偏移 ---- */
+
+function offsetShift(): { dx: number; dy: number; dz: number } {
+  return {
+    dx: state.offsets.x - state.actualOffsets.x,
+    dy: state.offsets.y - state.actualOffsets.y,
+    dz: 0,
+  }
+}
+
+/** 两个 Z 偏移各自与「实际」的差，加在一起交给 3D 抬高涂胶 */
+function glueZDelta(): number {
+  return (
+    state.offsets.toolZ -
+    state.actualOffsets.toolZ +
+    (state.offsets.glueZ - state.actualOffsets.glueZ)
+  )
+}
+
+function fillOffsetInputs(): void {
+  el.offX.value = String(round2(state.offsets.x))
+  el.offY.value = String(round2(state.offsets.y))
+  el.offTz.value = String(round2(state.offsets.toolZ))
+  el.offGz.value = String(round2(state.offsets.glueZ))
+}
+
+function round2(v: number): number {
+  return Math.round(v * 100) / 100
+}
+
+function readOffsetInputs(): void {
+  const num = (input: HTMLInputElement): number => {
+    const v = Number(input.value)
+    return Number.isFinite(v) ? v : 0
+  }
+  state.offsets = {
+    x: num(el.offX),
+    y: num(el.offY),
+    toolZ: num(el.offTz),
+    glueZ: num(el.offGz),
+  }
+}
+
+/** 偏移改了：块整体平移（2D/3D 都吃这一份），Z 那两笔交给 3D */
+function applyOffsets(): void {
+  state.blocks = shiftBlocks(state.rawBlocks, offsetShift())
+  view3d.setBlocks(state.blocks, state.index, false)
+  view3d.setGlueZShift(glueZDelta())
+  renderBlocks()
+  loadBlock(state.index, { fromLayer: true })
+}
+
+for (const input of [el.offX, el.offY, el.offTz, el.offGz]) {
+  input.addEventListener('input', () => {
+    readOffsetInputs()
+    applyOffsets()
+  })
+}
+
+el.offZero.addEventListener('click', () => {
+  state.offsets = { ...ZERO_OFFSETS }
+  fillOffsetInputs()
+  applyOffsets()
+})
+
+/* ---- 后到的 meta ---- */
+
+/** 分两次拖：gcode 已打开，后来补上同名 meta */
+function applyMeta(name: string, meta: unknown): void {
+  const offsets = readGlueOffsets(meta)
+  if (offsets === null) {
+    el.offNote.textContent = `${name} 里没有偏移`
+    return
+  }
+  state.actualOffsets = { ...offsets }
+  state.offsets = { ...offsets }
+  fillOffsetInputs()
+  el.offNote.textContent = '已读 meta'
+  applyOffsets()
+}
+
+/** 从 zip 里读 gcode 与配对的 meta；没有 gcode 就返回 null */
+async function readZip(file: File): Promise<{ name: string; text: string; meta?: unknown } | null> {
+  const entries = unzipSync(new Uint8Array(await file.arrayBuffer()))
+  const names = Object.keys(entries).filter((n) => !n.endsWith('/'))
+  const gcodeName = names.find((n) => /\.gcode$/i.test(n))
+  if (gcodeName === undefined) return null
+  const decoder = new TextDecoder()
+  const text = decoder.decode(entries[gcodeName])
+  const metaName = findMetaName(gcodeName, names)
+  let meta: unknown
+  if (metaName !== null) {
+    try {
+      meta = JSON.parse(decoder.decode(entries[metaName]))
+    } catch {
+      meta = undefined
+    }
+  }
+  return { name: gcodeName.split(/[\\/]/).pop() ?? gcodeName, text, meta }
+}
+
+async function readMeta(file: File): Promise<unknown> {
+  try {
+    return JSON.parse(await file.text()) as unknown
+  } catch {
+    return undefined
+  }
+}
+
 /* ---- 层滑块 ---- */
 
 function blockLayer(block: LabBlock): number {
   return block.layerZ ?? block.normalZ ?? 0
+}
+
+function updateLayerLabel(): void {
+  const layers = state.print?.layers ?? []
+  if (layers.length === 0) return
+  const i = Math.min(state.layerIndex, layers.length - 1)
+  const z = layers[i] as number
+  el.layerVal.textContent = `${i + 1}/${layers.length} Z${z.toFixed(2)}`
+}
+
+/**
+ * 选中某一块时把层跟着挪过去。
+ *
+ * 取「第一个 ≥ 这一块层高」的打印层：切面画的是「看到这一层为止」，
+ * 取下面那层会把这一块自己切没，于是看起来像两层混在一起。
+ */
+function syncLayerFromBlock(index: number): void {
+  const layers = state.print?.layers ?? []
+  const block = state.blocks[index]
+  if (layers.length === 0 || block === undefined) return
+  const z = blockLayer(block)
+  let i = layers.findIndex((v) => v >= z - 1e-9)
+  if (i < 0) i = layers.length - 1
+  if (i === state.layerIndex) return
+  state.layerIndex = i
+  el.layer.value = String(i)
+  updateLayerLabel()
+  view3d.setLayer(i, state.layerMode)
 }
 
 function setLayer(index: number): void {
@@ -434,19 +748,19 @@ function setLayer(index: number): void {
   if (layers.length === 0) return
   const i = Math.max(0, Math.min(index, layers.length - 1))
   state.layerIndex = i
-  const z = layers[i] as number
-  el.layerVal.textContent = `${i + 1}/${layers.length} Z${z.toFixed(2)}`
+  updateLayerLabel()
   view3d.setLayer(i, state.layerMode)
   /*
    * 涂胶块跟着层走：取**不高于这一层的最后一块**。
    * 不用「最近的一块」—— 那样在两条涂胶层之间来回拖会前后跳（作者报的「位置总在变化」），
    * 而且「这一层时的涂胶状态」本来就是最近一次涂过的那块。
    */
+  const z = layers[i] as number
   let best = 0
   state.blocks.forEach((block, k) => {
     if (blockLayer(block) <= z + 1e-9) best = k
   })
-  if (best !== state.index) loadBlock(best)
+  if (best !== state.index) loadBlock(best, { fromLayer: true })
 }
 
 el.layer.addEventListener('input', () => setLayer(Number(el.layer.value)))
@@ -576,10 +890,49 @@ window.addEventListener('dragover', (e) => {
 
 window.addEventListener('drop', async (e) => {
   e.preventDefault()
-  const file = e.dataTransfer?.files[0]
-  if (!file) return
-  const text = await file.text()
-  loadText(file.name, text)
+  const files = [...(e.dataTransfer?.files ?? [])]
+  if (files.length === 0) return
+
+  /* zip：gcode + meta 打在一个包里 */
+  const zip = files.find((f) => /\.zip$/i.test(f.name))
+  if (zip) {
+    const inside = await readZip(zip)
+    if (inside === null) {
+      el.offNote.textContent = 'zip 里没有 gcode'
+      return
+    }
+    await loadText(inside.name, inside.text, inside.meta)
+    return
+  }
+
+  const gcode = files.find((f) => /\.gcode$/i.test(f.name))
+  const metaFile = files.find((f) => /_meta\.json$/i.test(f.name))
+
+  /* 一次拖两份：按同名配对，别把别的模型的 meta 拿过来 */
+  if (gcode && metaFile) {
+    const meta = await readMeta(metaFile)
+    await loadText(gcode.name, await gcode.text(), meta)
+    return
+  }
+
+  /* 先拖 gcode：照常打开；后面再拖同名 meta 时只补偏移 */
+  if (gcode) {
+    const ready = pendingMeta && pairsWith(gcode.name, pendingMeta.name) ? pendingMeta.data : undefined
+    pendingMeta = null
+    await loadText(gcode.name, await gcode.text(), ready)
+    return
+  }
+
+  /* 先拖 meta：如果 gcode 已经开着就立刻补上，否则等下一份 gcode */
+  if (metaFile) {
+    const meta = await readMeta(metaFile)
+    if (state.fileName !== '' && pairsWith(state.fileName, metaFile.name)) {
+      applyMeta(metaFile.name, meta)
+      return
+    }
+    pendingMeta = { name: metaFile.name, data: meta }
+    el.offNote.textContent = '已收 meta · 再拖同名 gcode'
+  }
 })
 
 /* 拖进来之后遮罩要能再藏回去 */
@@ -591,11 +944,25 @@ el.drop.addEventListener('dragleave', () => {
  * `?gcode=<同源路径>`：上手时省掉一次拖文件。路径要能被 dev server 取到
  * （仓库根下的文件都行，比如先拷到 `.scratch/lab/`）。
  */
+/** 同目录下的元数据；没有就当没读到（404 不算错） */
+async function fetchMeta(path: string): Promise<unknown> {
+  try {
+    const r = await fetch(path)
+    if (!r.ok) return undefined
+    return (await r.json()) as unknown
+  } catch {
+    return undefined
+  }
+}
+
 const preset = new URLSearchParams(location.search).get('gcode')
 if (preset) {
   fetch(preset)
     .then((r) => (r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`))))
-    .then((text) => loadText(preset.split('/').pop() ?? preset, text))
+    .then(async (text) => {
+      const meta = await fetchMeta(metaPathOf(preset))
+      await loadText(preset.split('/').pop() ?? preset, text, meta)
+    })
     .catch((err: unknown) => {
       el.file.textContent = `读不到 ${preset}：${String(err)}`
     })

@@ -47,8 +47,15 @@ export class View2d {
   private w = 1
   private h = 1
   private selected: number | null = null
+  /* 鼠标单键拖动；触屏一律不用单指移动 —— 一指只点选 */
   private dragging = false
   private dragFrom = { x: 0, y: 0, cx: 0, cy: 0 }
+  /** 当前按在画布上的指针（client 坐标） */
+  private readonly pointers = new Map<number, { x: number; y: number }>()
+  /** 双指开始那一刻的状态 */
+  private pinch: { cx: number; cy: number; scale: number; wx: number; wy: number } | null = null
+  /** 双指操作之后，紧跟着的 click 不算点选 */
+  private suppressClick = false
   /** 比例尺读数（mm / 100px），由 `draw` 更新 */
   readonly onScale: (mmPer100px: number) => void
   readonly onPick: (index: number | null) => void
@@ -64,13 +71,12 @@ export class View2d {
     canvas.addEventListener('wheel', this.handleWheel, { passive: false })
     canvas.addEventListener('pointerdown', this.handleDown)
     canvas.addEventListener('pointermove', this.handleMove)
-    canvas.addEventListener('pointerup', () => {
-      this.dragging = false
-    })
-    canvas.addEventListener('pointerleave', () => {
-      this.dragging = false
-    })
+    canvas.addEventListener('pointerup', this.handleUp)
+    canvas.addEventListener('pointercancel', this.handleUp)
+    canvas.addEventListener('pointerleave', this.handleLeave)
     canvas.addEventListener('click', this.handleClick)
+    /* 触屏两指 / 鼠标右键都会发 contextmenu：在画布上吃掉，别弹浏览器菜单 */
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault())
   }
 
   resize(): void {
@@ -123,6 +129,19 @@ export class View2d {
     return this.scale
   }
 
+  /** 直接设整张视图（伪 2D 过渡收尾用，最后一帧要与 3D 顶视完全一致） */
+  setView(cx: number, cy: number, scale: number): void {
+    this.cx = cx
+    this.cy = cy
+    this.scale = Math.min(400, Math.max(0.4, scale))
+    this.draw()
+  }
+
+  /** 当前视图（3D 伪 2D 起步时照抄它） */
+  viewOf(): { cx: number; cy: number; scale: number; w: number; h: number } {
+    return { cx: this.cx, cy: this.cy, scale: this.scale, w: this.w, h: this.h }
+  }
+
   /** 只把这一块挪回画面正中：缩放不动（「居中」按钮的 2D 档） */
   recenter(): void {
     const bbox = this.data?.block.bbox
@@ -170,22 +189,93 @@ export class View2d {
   }
 
   private handleDown = (e: PointerEvent): void => {
-    this.dragging = true
-    this.dragFrom = { x: e.clientX, y: e.clientY, cx: this.cx, cy: this.cy }
+    this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY })
     this.canvas.setPointerCapture(e.pointerId)
+    if (this.pointers.size >= 2) {
+      /* 第二根手指落下：取消单指 pending，从头记一次双指 */
+      this.dragging = false
+      this.suppressClick = true
+      this.beginPinch()
+      return
+    }
+    if (e.pointerType === 'mouse') {
+      this.dragging = true
+      this.dragFrom = { x: e.clientX, y: e.clientY, cx: this.cx, cy: this.cy }
+    }
+  }
+
+  /** 记下双指开始时的中心 / 距离，以及中心压着的那个世界坐标 */
+  private beginPinch(): void {
+    const [a, b] = [...this.pointers.values()]
+    if (!a || !b) return
+    const rect = this.canvas.getBoundingClientRect()
+    const px = (a.x + b.x) / 2 - rect.left
+    const py = (a.y + b.y) / 2 - rect.top
+    const world = this.fromScreen(px, py)
+    this.pinch = { cx: this.cx, cy: this.cy, scale: this.scale, wx: world[0], wy: world[1] }
+    this.pinchDist0 = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y))
   }
 
   private handleMove = (e: PointerEvent): void => {
+    const p = this.pointers.get(e.pointerId)
+    if (p) {
+      p.x = e.clientX
+      p.y = e.clientY
+    }
+    if (this.pointers.size >= 2) {
+      this.movePinch()
+      return
+    }
     if (this.dragging) {
       this.cx = this.dragFrom.cx - (e.clientX - this.dragFrom.x) / this.scale
       this.cy = this.dragFrom.cy + (e.clientY - this.dragFrom.y) / this.scale
       this.draw()
-      return
     }
-    if (e.buttons !== 0) return
+  }
+
+  /**
+   * 双指：移动两指中心 = 平移，捏合 / 张开 = 以双指中心为锚点缩放。
+   *
+   * 用「开始时中心压着的那个世界点」做锚：缩放之后它仍在**当前**双指中心下面，
+   * 于是同时挪动和捏合也不会漂。
+   */
+  private movePinch(): void {
+    const start = this.pinch
+    const [a, b] = [...this.pointers.values()]
+    if (!start || !a || !b) return
+    const rect = this.canvas.getBoundingClientRect()
+    const px = (a.x + b.x) / 2 - rect.left
+    const py = (a.y + b.y) / 2 - rect.top
+    const dist = Math.hypot(a.x - b.x, a.y - b.y)
+    const factor = this.pinchDist0 > 1 ? dist / this.pinchDist0 : 1
+    this.scale = Math.min(400, Math.max(0.4, start.scale * factor))
+    this.cx = start.wx - (px - this.w / 2) / this.scale
+    this.cy = start.wy + (py - this.h / 2) / this.scale
+    this.draw()
+  }
+
+  /** 双指开始时的距离（`beginPinch` 里一并记） */
+  private pinchDist0 = 0
+
+  private handleUp = (e: PointerEvent): void => {
+    this.pointers.delete(e.pointerId)
+    if (this.pointers.size < 2) {
+      this.pinch = null
+      this.pinchDist0 = 0
+    }
+    if (this.pointers.size === 0) this.dragging = false
+  }
+
+  private handleLeave = (): void => {
+    /* 指针捕获期间 leave 不该打断手势；只有鼠标真的离开且没按键才收 */
+    if (this.pointers.size === 0) this.dragging = false
   }
 
   private handleClick = (e: MouseEvent): void => {
+    if (this.suppressClick) {
+      this.suppressClick = false
+      return
+    }
     const rect = this.canvas.getBoundingClientRect()
     this.onPick(this.pick(e.clientX - rect.left, e.clientY - rect.top))
   }

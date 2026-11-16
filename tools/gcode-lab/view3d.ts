@@ -53,6 +53,8 @@ const ORTHO_BASE = 100
 export type LayerMode = 'current' | 'all'
 
 const IDENTITY = new THREE.Quaternion()
+/** 爆炸把 Z 倍数拉到多少（作者要的「炸成 10~15」取中间） */
+const EXPLODE_Z = 12
 /** 视角立方体点一下之后转过去的时长（秒） */
 const SNAP_SECONDS = 0.3
 
@@ -70,7 +72,11 @@ export class View3d {
   private allLayer: THREE.LineSegments | null = null
   private curLayer: THREE.LineSegments | null = null
   private print: PrintModel | null = null
-  private readonly printLayers = new Map<PrintKind, THREE.LineSegments>()
+  /** `${对象 id}:${类别}` → 那一块线段；对象过滤只改可见性，不重建几何 */
+  private readonly printLayers = new Map<
+    string,
+    { layer: THREE.LineSegments; object: number; kind: PrintKind }
+  >()
   private blocks: LabBlock[] = []
   /** 每块累计的**段**数（与 `blocks` 同序，升序）；层滑块切涂胶栈用 */
   private blockEdges: number[] = [0]
@@ -94,28 +100,52 @@ export class View3d {
     'supportFace',
     'ironing',
   ])
+  /** 只看某一个模型（`null` = 全看） */
+  private objectFilter: number | null = null
+  /** 涂胶相对「这一层表面」的额外抬高（mm）：把两个 Z 偏移调成 0 之后的差值 */
+  private glueZShift = 0
   /** 每帧报一次视距（顶栏那把缩放滑杆要跟着滚轮走） */
   onFrame: ((distance: number) => void) | null = null
 
   /* ---- 爆炸图 ---- */
-  /** 顶点着色器里按「第几层」把这一层整体抬高多少（对象空间 mm，之后还要乘 Z 倍数） */
-  private readonly explodeUniform = { value: 0 }
-  /** 每层多抬多少（对象空间 mm），按模型高度与层数算 */
-  private explodeGap = 0
-  /** 炸开之后整体重心上移多少（世界 mm，已含 Z 倍数） */
-  private explodeRise = 0
-  /** 0 = 合起来，1 = 全炸开 */
-  private explodeT = 0
   private exploded = false
-  private explodeAnim: {
-    from: number
-    to: number
-    t: number
+  /** 炸开这一段的补间：Z 倍数从多少到多少 */
+  private explodeAnim: { from: number; to: number; t: number } | null = null
+  /** 炸开之前的倍数与机位（收回去时还原） */
+  private explodeHome: { z: number; dist: number; targetZ: number } | null = null
+  /** 爆炸过程中把当前 Z 倍数报给顶栏（滑杆与数字要同步） */
+  onExaggeration: ((z: number) => void) | null = null
+  /** 进 2D 之前那个机位，回来时还原 */
+  private homePose: {
+    target: THREE.Vector3
+    dir: THREE.Vector3
     dist: number
-    targetZ: number
+    up: THREE.Vector3
+    zoom: number
+    ortho: boolean
   } | null = null
-  /** 炸开之前的机位（收回去时还原它） */
-  private explodeHome: { dist: number; targetZ: number } | null = null
+  /**
+   * 伪 2D 运镜：除了方向与距离，还插值 up / target / 正交 zoom，
+   * 让最后一帧与 2D 的 `cx/cy/scale` 精确对上。
+   */
+  private flyAnim: {
+    from: THREE.Vector3
+    to: THREE.Vector3
+    upFrom: THREE.Vector3
+    upTo: THREE.Vector3
+    targetFrom: THREE.Vector3
+    targetTo: THREE.Vector3
+    distFrom: number
+    distTo: number
+    zoomFrom: number
+    zoomTo: number
+    /** 走 3D→2D 时把模型渐隐；回来时渐显 */
+    fade: 'out' | 'in'
+    t: number
+    done: () => void
+  } | null = null
+  /** 过渡期间 2D 只看当前那一块：3D 的当前块也要强制露出来 */
+  private pseudo = false
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas
@@ -158,11 +188,12 @@ export class View3d {
     this.bindNav()
   }
 
-  setBlocks(blocks: LabBlock[], index: number): void {
+  setBlocks(blocks: LabBlock[], index: number, reframe = true): void {
     this.blocks = blocks
     this.rebuildGlue()
     this.select(index)
     this.applyRanges()
+    if (!reframe) return
     this.framed = false
     if (this.visible) this.frame()
   }
@@ -170,7 +201,6 @@ export class View3d {
   /** 打印本体：每类一层，开关按类独立；层滑块靠 `bounds` 切 */
   setPrint(print: PrintModel): void {
     this.print = print
-    this.updateExplodeScale()
     this.rebuildPrint()
     this.applyRanges()
     this.framed = false
@@ -211,7 +241,6 @@ export class View3d {
   setExaggeration(n: number): void {
     this.exaggeration = n
     this.group.scale.set(1, 1, n)
-    this.updateExplodeScale()
   }
 
   /** 回到默认视角：朝向与位置都回默认 */
@@ -249,6 +278,105 @@ export class View3d {
   }
 
   /**
+   * 切 2D 之前的运镜。
+   *
+   * 方向翻到正上方 (+Z)，但 **up 翻到 +Y** —— 这样屏幕右 = 世界 +X、屏幕上 = 世界 +Y，
+   * 与 2D 的 `toScreen()` 同一朝向。之前 up 一直是 +Z，顶视时会绕着 Z 翻，方向就是反的。
+   *
+   * `view` 是 2D 当前的 `cx/cy/scale/w/h`：最后一帧的正交相机 target 与 zoom 由它反算，
+   * 于是 3D 末帧与 2D 首帧是同一张画面，不需要淡入淡出。
+   */
+  flyToTop(view: { cx: number; cy: number; scale: number; w: number; h: number }, done: () => void): void {
+    /*
+     * 先快照再切正交：`setOrtho(true)` 会把 ortho / zoom 改掉，
+     * 那时再记就记成「伪 2D 用的正交档」，回不去用户原本的透视机位。
+     */
+    const offset = this.cam.position.clone().sub(this.controls.target)
+    if (offset.lengthSq() < 1e-9) {
+      done()
+      return
+    }
+    const dir = offset.clone().normalize()
+    this.homePose = {
+      target: this.controls.target.clone(),
+      dir: dir.clone(),
+      dist: offset.length(),
+      up: this.cam.up.clone(),
+      zoom: this.cam.zoom,
+      ortho: this.ortho,
+    }
+    if (!this.ortho) this.setOrtho(true)
+    this.pseudo = true
+    this.syncVisibility()
+    const zoom = this.zoomForView(view)
+    this.flyAnim = {
+      from: dir,
+      to: new THREE.Vector3(0, 0, 1),
+      upFrom: this.cam.up.clone(),
+      upTo: new THREE.Vector3(0, 1, 0),
+      targetFrom: this.controls.target.clone(),
+      targetTo: new THREE.Vector3(view.cx, view.cy, 0),
+      distFrom: offset.length(),
+      distTo: 1000,
+      zoomFrom: this.camO.zoom,
+      zoomTo: zoom,
+      fade: 'out',
+      t: 0,
+      done,
+    }
+    this.controls.enabled = false
+  }
+
+  /** 2D 的 px/mm → 正交 zoom：`screen_px = world_mm × scale` */
+  private zoomForView(view: { scale: number; h: number }): number {
+    return (2 * ORTHO_BASE * Math.min(400, Math.max(0.4, view.scale))) / Math.max(1, view.h)
+  }
+
+  /** 从伪 2D 的顶视飞回进入 2D 前的机位，并把渐隐的东西带回来 */
+  flyFromTop(done: () => void): void {
+    const home = this.homePose
+    const offset = this.cam.position.clone().sub(this.controls.target)
+    if (home === null || offset.lengthSq() < 1e-9) {
+      done()
+      return
+    }
+    this.flyAnim = {
+      from: offset.clone().normalize(),
+      to: home.dir.clone(),
+      upFrom: this.cam.up.clone(),
+      upTo: home.up.clone(),
+      targetFrom: this.controls.target.clone(),
+      targetTo: home.target.clone(),
+      distFrom: offset.length(),
+      distTo: home.dist,
+      zoomFrom: this.camO.zoom,
+      zoomTo: home.ortho ? home.zoom : 1,
+      fade: 'in',
+      t: 0,
+      done,
+    }
+    this.controls.enabled = false
+  }
+
+  /** 记录每种线原本的不透明度，过渡时按比例渐隐，结束再原样恢复 */
+  private setFade(k: number): void {
+    const fade = (obj: THREE.Object3D | null): void => {
+      if (obj === null) return
+      const mat = (obj as THREE.Object3D & { material?: THREE.Material }).material as
+        | (THREE.Material & { opacity: number })
+        | undefined
+      if (!mat) return
+      const base = (obj.userData.baseOpacity as number | undefined) ?? mat.opacity
+      obj.userData.baseOpacity = base
+      mat.transparent = true
+      mat.opacity = base * k
+    }
+    fade(this.grid)
+    if (this.allLayer) fade(this.allLayer)
+    for (const { layer } of this.printLayers.values()) fade(layer)
+  }
+
+  /**
    * 爆炸图：每层沿 Z 抬高，同时把镜头往后拉、顺着往上抬。
    *
    * 「往上」是必须的：炸开之后整摞往上长，镜头不跟着抬就会有一半跑出画面；
@@ -256,34 +384,22 @@ export class View3d {
    */
   toggleExplode(): void {
     this.exploded = !this.exploded
-    /* 炸开之前的机位记下来：收回去时按它还原，不能停在拉远之后的距离上 */
-    if (this.exploded || this.explodeHome === null) {
-      this.explodeHome = { dist: this.distance(), targetZ: this.controls.target.z }
+    if (this.exploded) {
+      /* 先把模型摆回画面正中，再开始炸 —— 不然是从画面外飞进来的 */
+      this.refit()
+      this.explodeHome = {
+        z: this.exaggeration,
+        dist: this.distance(),
+        targetZ: this.controls.target.z,
+      }
     }
+    const home = this.explodeHome
     this.explodeAnim = {
-      from: this.explodeT,
-      to: this.exploded ? 1 : 0,
+      from: home?.z ?? this.exaggeration,
+      to: this.exploded ? EXPLODE_Z : (home?.z ?? this.exaggeration),
       t: 0,
-      dist: this.explodeHome.dist,
-      targetZ: this.explodeHome.targetZ,
     }
     this.controls.enabled = false
-  }
-
-  /** 按模型高度与层数定「每层抬多少」和「重心上移多少」 */
-  private updateExplodeScale(): void {
-    const p = this.print
-    const n = p?.layers.length ?? 0
-    if (p === null || n < 2) {
-      this.explodeGap = 0
-      this.explodeRise = 0
-      return
-    }
-    const height = Math.max(0.5, p.zMax - p.zMin)
-    /* 炸开后的总高度约为原来的两倍多：多出来的那部分平摊到层间隙上 */
-    this.explodeGap = (height * 1.4) / (n - 1)
-    this.explodeRise = (this.explodeGap * (n - 1) * this.exaggeration) / 2
-    this.explodeUniform.value = this.explodeGap * this.explodeT
   }
 
   /** 透视 / 正交。两台相机共用一份位姿，切过去画面大小不变 */
@@ -427,41 +543,6 @@ export class View3d {
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault())
   }
 
-  /**
-   * 让这一层的顶点按 `aLayer`（第几层）沿 Z 抬高 `uExplode`。
-   *
-   * 顶点是按层排好序的，所以爆炸只是着色器里加一次乘法 —— 拖滑块时不用重建几何。
-   * 注入点选 `begin_vertex`：`transformed` 刚拿到本地坐标，还没进模型矩阵（于是
-   * 组上的 Z 倍数照样会乘上去）。
-   */
-  private attachExplode(mat: THREE.Material): void {
-    mat.onBeforeCompile = (shader) => {
-      shader.uniforms.uExplode = this.explodeUniform
-      shader.vertexShader =
-        'attribute float aLayer;\nuniform float uExplode;\n' + shader.vertexShader
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        '#include <begin_vertex>\n  transformed.z += aLayer * uExplode;',
-      )
-    }
-  }
-
-  /** 这一块涂胶算第几层（离它最近的打印层） */
-  private layerIndexOf(z: number): number {
-    const p = this.print
-    if (p === null || p.layers.length === 0) return 0
-    let best = 0
-    let bestD = Infinity
-    for (let i = 0; i < p.layers.length; i += 1) {
-      const d = Math.abs((p.layers[i] as number) - z)
-      if (d < bestD) {
-        bestD = d
-        best = i
-      }
-    }
-    return best
-  }
-
   private buildGrid(): THREE.GridHelper {
     const p = palette()
     const color = hex(p.line, 0x232a33)
@@ -470,6 +551,7 @@ export class View3d {
     const mat = grid.material as THREE.Material
     mat.transparent = true
     mat.opacity = 0.6
+    grid.userData.baseOpacity = 0.6
     return grid
   }
 
@@ -486,15 +568,18 @@ export class View3d {
     const dim = new THREE.Color(hex(p.dim, 0x8b949e))
     const positions: number[] = []
     const colors: number[] = []
-    const layers: number[] = []
     for (const block of blocks) {
-      const base = blockLayerZ(block)
-      const li = this.layerIndexOf(base)
+      const anchor = blockLayerZ(block)
+      /*
+       * 落笔档最低的那个笔尖 Z 当基准，其余按**相对高度**画：
+       * 于是「抬 0.5」就真的是 0.5mm，而不是被压成一条线或放大成 10mm。
+       * 基准对齐到这一块自己的层高上 —— 涂胶本来就是落在那一层的表面上。
+       */
+      const base = block.normalZ ?? anchor
       for (const m of block.moves) {
         if (m.level === 'up') continue
-        const z = base + GLUE_LIFT_MM
+        const z = anchor + (m.z - base) + this.glueZShift + GLUE_LIFT_MM
         positions.push(m.from.x, m.from.y, z, m.to.x, m.to.y, z)
-        layers.push(li, li)
         const c = colored ? (m.level === 'raised' ? raised : normal) : dim
         colors.push(c.r, c.g, c.b, c.r, c.g, c.b)
       }
@@ -502,7 +587,6 @@ export class View3d {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
-    geo.setAttribute('aLayer', new THREE.Float32BufferAttribute(layers, 1))
     /* 涂胶是这个试验台的主角：关掉深度测试，被模型挡住时也画在最上面 */
     const mat = new THREE.LineBasicMaterial({
       vertexColors: true,
@@ -510,7 +594,6 @@ export class View3d {
       opacity,
       depthTest: !colored,
     })
-    this.attachExplode(mat)
     const layer = new THREE.LineSegments(geo, mat)
     if (colored) layer.renderOrder = 3
     return layer
@@ -524,6 +607,7 @@ export class View3d {
       this.allLayer = null
     }
     this.allLayer = this.buildGlue(this.blocks, false, 0.4)
+    this.allLayer.userData.baseOpacity = 0.4
     this.group.add(this.allLayer)
 
     this.blockEdges = [0]
@@ -537,7 +621,7 @@ export class View3d {
   /* ---- 打印本体 ---- */
 
   private rebuildPrint(): void {
-    for (const layer of this.printLayers.values()) {
+    for (const { layer } of this.printLayers.values()) {
       this.group.remove(layer)
       layer.geometry.dispose()
       ;(layer.material as THREE.Material).dispose()
@@ -553,29 +637,25 @@ export class View3d {
       support: { hex: hex(p.green, 0x3fb950), opacity: 0.45 },
       supportFace: { hex: hex(p.green, 0x3fb950), opacity: 0.85 },
       ironing: { hex: hex(p.violet, 0xa371f7), opacity: 0.9 },
+      travel: { hex: hex(p.dim, 0x8b949e), opacity: 0.14 },
       other: { hex: hex(p.dim, 0x8b949e), opacity: 0.3 },
     }
-    for (const [kind, data] of Object.entries(this.print.kinds) as [PrintKind, Float32Array][]) {
-      if (data.length === 0) continue
-      const geo = new THREE.BufferGeometry()
-      geo.setAttribute('position', new THREE.BufferAttribute(data, 3))
-      /* 每层的段数是已知的（`bounds` 是前缀和），按段数铺一遍层号 */
-      const edge = this.print.bounds[kind]
-      const layerIdx = new Float32Array(data.length / 3)
-      for (let i = 0; i < this.print.layers.length; i += 1) {
-        layerIdx.fill(i, (edge[i] as number) * 2, (edge[i + 1] as number) * 2)
+    for (const obj of this.print.objects) {
+      for (const [kind, data] of Object.entries(obj.kinds) as [PrintKind, Float32Array][]) {
+        if (data.length === 0) continue
+        const geo = new THREE.BufferGeometry()
+        geo.setAttribute('position', new THREE.BufferAttribute(data, 3))
+        const t = tone[kind]
+        const mat = new THREE.LineBasicMaterial({
+          color: t.hex,
+          transparent: true,
+          opacity: t.opacity,
+        })
+        const layer = new THREE.LineSegments(geo, mat)
+        layer.userData.baseOpacity = t.opacity
+        this.printLayers.set(`${obj.id}:${kind}`, { layer, object: obj.id, kind })
+        this.group.add(layer)
       }
-      geo.setAttribute('aLayer', new THREE.BufferAttribute(layerIdx, 1))
-      const t = tone[kind]
-      const mat = new THREE.LineBasicMaterial({
-        color: t.hex,
-        transparent: true,
-        opacity: t.opacity,
-      })
-      this.attachExplode(mat)
-      const layer = new THREE.LineSegments(geo, mat)
-      this.printLayers.set(kind, layer)
-      this.group.add(layer)
     }
   }
 
@@ -585,8 +665,10 @@ export class View3d {
   private applyRanges(): void {
     const p = this.print
     if (p !== null && p.layers.length > 0) {
-      for (const [kind, layer] of this.printLayers) {
-        const edge = p.bounds[kind]
+      for (const { layer, object, kind } of this.printLayers.values()) {
+        const obj = p.objects.find((o) => o.id === object)
+        if (obj === undefined) continue
+        const edge = obj.bounds[kind]
         const total = layer.geometry.getAttribute('position').count
         if (this.layerIndex < 0) {
           layer.geometry.setDrawRange(0, total)
@@ -621,9 +703,60 @@ export class View3d {
   private syncVisibility(): void {
     const glueOn = this.shown.has('glue')
     const onlyLayer = this.layerMode === 'current' && this.layerIndex >= 0
-    if (this.allLayer) this.allLayer.visible = glueOn && !onlyLayer
-    if (this.curLayer) this.curLayer.visible = glueOn
-    for (const [kind, layer] of this.printLayers) layer.visible = this.shown.has(kind)
+    const glueObjectOk = this.glueInFilter()
+    /* 只看某一个模型时，那一摞「所有层的涂胶」也收起来：它不属于任何一个模型 */
+    if (this.allLayer) this.allLayer.visible = glueOn && !onlyLayer && this.objectFilter === null
+    /* 当前那一块涂胶：对象过滤时按它的位置判 */
+    if (this.curLayer) this.curLayer.visible = (glueOn && glueObjectOk) || this.pseudo
+    for (const { layer, object, kind } of this.printLayers.values()) {
+      layer.visible = this.shown.has(kind) && (this.objectFilter === null || this.objectFilter === object)
+    }
+  }
+
+  /** 当前这一块涂胶在不在被选中的对象框里 */
+  private glueInFilter(): boolean {
+    if (this.objectFilter === null) return true
+    const block = this.blocks[this.index]
+    if (!block?.bbox) return false
+    const box = this.objectBox(this.objectFilter)
+    if (box === null) return true
+    const cx = (block.bbox.minX + block.bbox.maxX) / 2
+    const cy = (block.bbox.minY + block.bbox.maxY) / 2
+    return cx >= box.minX && cx <= box.maxX && cy >= box.minY && cy <= box.maxY
+  }
+
+  /** 某个对象的平面范围（取它所有线段的包围盒） */
+  private objectBox(id: number): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    const obj = this.print?.objects.find((o) => o.id === id)
+    if (obj === undefined) return null
+    let minX = Infinity
+    let minY = Infinity
+    let maxX = -Infinity
+    let maxY = -Infinity
+    for (const data of Object.values(obj.kinds) as Float32Array[]) {
+      for (let i = 0; i < data.length; i += 3) {
+        const x = data[i] as number
+        const y = data[i + 1] as number
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+      }
+    }
+    return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null
+  }
+
+  /** 涂胶相对层表面的额外抬高（mm）：用户把两个 Z 偏移调成 0 之后的差值 */
+  setGlueZShift(dz: number): void {
+    this.glueZShift = dz
+    this.rebuildGlue()
+    this.select(this.index)
+  }
+
+  /** 只显示某一个模型（`null` = 全看） */
+  setObjectFilter(id: number | null): void {
+    this.objectFilter = id
+    this.syncVisibility()
   }
 
   /* ---- 相机 ---- */
@@ -689,20 +822,65 @@ export class View3d {
     const dt = this.last === 0 ? 1 / 60 : Math.min(0.1, (now - this.last) / 1000)
     this.last = now
 
-    if (this.explodeAnim !== null) {
-      /* 爆炸这一段自己摆相机：镜头往后拉、跟着往上抬 */
-      const a = this.explodeAnim
-      a.t = Math.min(1, a.t + dt / 1.2)
+    let flyDone: (() => void) | null = null
+    if (this.flyAnim !== null) {
+      /*
+       * 环绕飞行：方向 / up / target / 正交 zoom 一起插值。
+       * 最后一帧由 `zoomForView` 精确对齐 2D，不靠“差不多装下”。
+       */
+      const a = this.flyAnim
+      a.t = Math.min(1, a.t + dt / 0.85)
       const k = 1 - (1 - a.t) ** 3
-      this.explodeT = a.from + (a.to - a.from) * k
-      this.explodeUniform.value = this.explodeGap * this.explodeT
+      const dir = a.from.clone()
+      if (a.from.dot(a.to) < -0.999) dir.x += 1e-3
+      const q = new THREE.Quaternion().setFromUnitVectors(dir.normalize(), a.to)
+      const cur = a.from.clone().applyQuaternion(IDENTITY.clone().slerp(q, k)).normalize()
+      this.controls.target.lerpVectors(a.targetFrom, a.targetTo, k)
+      const dist = a.distFrom + (a.distTo - a.distFrom) * k
+      this.cam.position.copy(this.controls.target).addScaledVector(cur, dist)
+      this.cam.up.copy(a.upFrom).lerp(a.upTo, k).normalize()
+      this.cam.lookAt(this.controls.target)
+      this.camO.zoom = a.zoomFrom + (a.zoomTo - a.zoomFrom) * k
+      this.camO.updateProjectionMatrix()
+      this.setFade(a.fade === 'out' ? 1 - k : k)
+      if (a.t >= 1) {
+        const home = this.homePose
+        if (a.fade === 'in') {
+          this.pseudo = false
+          this.syncVisibility()
+        }
+        if (a.fade === 'in' && home !== null && !home.ortho) {
+          /* 进 2D 前是透视：落回透视，别把人留在正交档 */
+          this.ortho = false
+          this.camP.position.copy(this.camO.position)
+          this.camP.quaternion.copy(this.camO.quaternion)
+          this.camP.up.copy(this.camO.up)
+          this.camP.zoom = 1
+          this.camP.updateProjectionMatrix()
+          this.controls.object = this.camP
+        }
+        this.flyAnim = null
+        this.controls.enabled = true
+        this.last = 0
+        flyDone = a.done
+      }
+    } else if (this.explodeAnim !== null) {
+      /* 爆炸 = 把 Z 倍数拉大，镜头每帧跟着重新装框；顶栏的滑杆由回调同步 */
+      const a = this.explodeAnim
       const dir = this.cam.position.clone().sub(this.controls.target)
       const len = dir.length()
-      if (len > 1e-9) {
-        dir.divideScalar(len)
-        this.controls.target.z = a.targetZ + this.explodeRise * this.explodeT
-        const want = a.dist * (1 + 0.85 * this.explodeT)
-        this.cam.position.copy(this.controls.target).addScaledVector(dir, want)
+      if (len > 1e-9) dir.divideScalar(len)
+      a.t = Math.min(1, a.t + dt / 1.4)
+      const k = 1 - (1 - a.t) ** 3
+      this.exaggeration = a.from + (a.to - a.from) * k
+      this.group.scale.set(1, 1, this.exaggeration)
+      this.onExaggeration?.(this.exaggeration)
+      const box = this.visibleBox()
+      if (!box.isEmpty() && len > 1e-9) {
+        const center = box.getCenter(new THREE.Vector3())
+        const radius = Math.max(1, box.getSize(new THREE.Vector3()).length() / 2)
+        this.controls.target.copy(center)
+        this.cam.position.copy(center).addScaledVector(dir, this.fitDistance(radius))
       }
       if (a.t >= 1) {
         this.explodeAnim = null
@@ -730,6 +908,8 @@ export class View3d {
 
     this.syncNear()
     this.renderer.render(this.scene, this.cam)
+    /* 先画完 3D 末帧再切画布：2D 首帧必须接在它后面，不能先隐藏 3D */
+    if (flyDone !== null) flyDone()
     this.onFrame?.(this.distance())
   }
 

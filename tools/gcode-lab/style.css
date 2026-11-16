@@ -103,9 +103,9 @@ code,
 .bar {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 14px;
   height: 56px;
-  padding: 0 16px;
+  padding: 0 12px;
   border-bottom: 1px solid var(--line);
   background: linear-gradient(180deg, var(--bar-top), var(--bg-1));
   flex: none;
@@ -136,13 +136,13 @@ code,
 .bar-mid {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 12px;
 }
 
 .bar-right {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 6px;
   margin-left: auto;
 }
 
@@ -217,7 +217,7 @@ input[type='range']:hover::-webkit-slider-thumb {
 }
 
 .btn {
-  padding: 4px 12px;
+  padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg);
@@ -239,6 +239,12 @@ input[type='range']:hover::-webkit-slider-thumb {
 .btn[aria-pressed='true'] {
   border-color: var(--teal);
   color: var(--teal);
+}
+
+select.btn {
+  padding-right: 4px;
+  color: var(--text);
+  max-width: 86px;
 }
 
 /* ---------------- 三栏 ---------------- */
@@ -352,6 +358,8 @@ input[type='range']:hover::-webkit-slider-thumb {
   width: 100%;
   height: 100%;
   display: block;
+  /* 触屏双指不要被浏览器接管（后退手势 / 右键菜单） */
+  touch-action: none;
 }
 
 .hidden {
@@ -443,6 +451,56 @@ input[type='range']:hover::-webkit-slider-thumb {
   position: absolute;
   width: 0;
   height: 0;
+}
+
+/* ---------------- 涂胶偏移 ---------------- */
+
+.offset {
+  position: absolute;
+  left: 10px;
+  bottom: 158px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-1);
+  font-size: 11px;
+}
+
+.offset-title {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 2px;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.offset label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+}
+
+.offset input {
+  width: 62px;
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.offset button {
+  grid-column: 1 / -1;
+  margin-top: 3px;
 }
 
 /* ---------------- 视角立方体 ---------------- */
@@ -648,6 +706,57 @@ input.vslider:disabled {
   display: block;
   width: 100%;
   height: 106px;
+}
+
+/* ---------------- 加载中 ---------------- */
+
+.busy {
+  position: fixed;
+  inset: 0;
+  z-index: 21;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.busy-card {
+  min-width: 220px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-1);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+}
+
+.busy-text {
+  margin-bottom: 12px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.busy-bar {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.busy-bar i {
+  display: block;
+  width: 36%;
+  height: 100%;
+  background: var(--teal);
+  animation: busy-slide 1s ease-in-out infinite;
+}
+
+@keyframes busy-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(280%); }
+}
+
+/* 底部台阶带：一段一块，选中那条描边 */
+.strip-canvas {
+  cursor: crosshair;
 }
 
 /* ---------------- 拖入遮罩 ---------------- */

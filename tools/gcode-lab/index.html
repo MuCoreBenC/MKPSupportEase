@@ -28,6 +28,12 @@
         <path d="M2.8 13.2 13.2 2.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
       </symbol>
     </svg>
+    <div id="busy" class="busy hidden">
+      <div class="busy-card">
+        <div id="busy-text" class="busy-text">解析中…</div>
+        <div class="busy-bar"><i></i></div>
+      </div>
+    </div>
     <div id="drop" class="drop">
       <div class="drop-card">
         <div class="drop-title">把产物 G-code 拖进来</div>
@@ -65,9 +71,11 @@
           <input id="exag" type="range" min="1" max="50" step="1" value="20" />
           <span id="exag-val" class="ctl-val">20</span>
         </label>
+        <select id="object" class="btn" title="只看其中一个模型"></select>
         <button id="layermode" type="button" class="btn" title="走线视图：只看当前层 / 看到当前层为止">全部层</button>
         <button id="ortho" type="button" class="btn" title="透视 / 正交切换">透视</button>
         <button id="refit" type="button" class="btn" title="只把模型摆回画面，不动当前朝向">居中</button>
+        <button id="real" type="button" class="btn" title="Z 倍数回到 1:1，抬多少就是多少毫米">真实</button>
         <button id="explode" type="button" class="btn" aria-pressed="false" title="每层沿 Z 炸开，镜头跟着拉远抬高">爆炸</button>
         <button id="reset" type="button" class="btn" title="回到默认视角（朝向与位置都复位）">视角</button>
       </div>
@@ -87,6 +95,17 @@
         <canvas id="c3d" class="layer hidden"></canvas>
         <div id="scale" class="scale">—</div>
         <div id="badge" class="badge hidden"></div>
+        <div id="offset" class="offset hidden">
+          <div class="offset-title">
+            <span>涂胶偏移</span>
+            <span id="off-note" class="muted">—</span>
+          </div>
+          <label>X <input id="off-x" type="number" step="0.05" value="0" /></label>
+          <label>Y <input id="off-y" type="number" step="0.05" value="0" /></label>
+          <label>笔 Z <input id="off-tz" type="number" step="0.05" value="0" /></label>
+          <label>胶 Z <input id="off-gz" type="number" step="0.05" value="0" /></label>
+          <button id="off-zero" type="button" class="btn">归零</button>
+        </div>
         <canvas id="cube" class="viewcube hidden"></canvas>
         <div id="layers" class="layers hidden">
           <span class="layers-title">显示</span>
@@ -107,6 +126,9 @@
           </button>
           <button type="button" class="eye" data-kind="supportFace" aria-pressed="true" title="支撑面">
             <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-on" /></svg><span>支撑面</span>
+          </button>
+          <button type="button" class="eye" data-kind="travel" aria-pressed="false" title="空走">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-off" /></svg><span>空走</span>
           </button>
           <button type="button" class="eye" data-kind="ironing" aria-pressed="true" title="熨烫">
             <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-on" /></svg><span>熨烫</span>
@@ -139,7 +161,7 @@
 
     <footer class="strip">
       <div class="strip-head">
-        <span>落笔档（按移动顺序）</span>
+        <span id="strip-title">落笔档（按移动顺序）</span>
         <span class="legend">
           <i class="sw sw-normal"></i>正常
           <i class="sw sw-raised"></i>抬起
