@@ -63,7 +63,11 @@ const SNAP_SECONDS = 0.3
  * 放在中段而不是最后一帧：那时相机还在远处、模型还没完全显出来，
  * 而且切的一瞬间会把透视 FOV 反算成与正交同画幅，看不出跳变。
  */
-const PERSPECTIVE_SWITCH_AT = 0.5
+const PERSPECTIVE_SWITCH_AT = 0.2
+/** 距离/画幅先调完的进度（切透视之后算起） */
+const FLY_DIST_END = 0.62
+/** 方向 / 目标点从这时才开始动，保证「先定视距，再移动」 */
+const FLY_MOVE_START = 0.58
 
 export class View3d {
   private readonly canvas: HTMLCanvasElement
@@ -899,37 +903,45 @@ export class View3d {
       const a = this.flyAnim
       a.t = Math.min(1, a.t + dt / 0.85)
       const k = 1 - (1 - a.t) ** 3
+      /* 切透视点的**线性时间**：k 是缓出值，不能直接拿来排阶段 */
+      const switchT = a.switchAt >= 0 ? 1 - Math.cbrt(1 - a.switchAt) : 0
+      const ease = (v: number): number => 1 - (1 - Math.min(1, Math.max(0, v))) ** 3
+      /*
+       * 先调距离 / 画幅，再转方向和目标点。
+       * 以前距离被挤在切透视之后与旋转一起做，视距特别大 / 小时就成了
+       * 「猛地冲一段再转」；现在两件事分开排，各自的时长都够用。
+       */
+      const kDist =
+        a.switchAt >= 0
+          ? ease((a.t - switchT) / (FLY_DIST_END - switchT))
+          : k
+      const kMove = a.switchAt >= 0 ? ease((a.t - FLY_MOVE_START) / (1 - FLY_MOVE_START)) : k
+
       const dir = a.from.clone()
       if (a.from.dot(a.to) < -0.999) dir.x += 1e-3
       const q = new THREE.Quaternion().setFromUnitVectors(dir.normalize(), a.to)
-      const cur = a.from.clone().applyQuaternion(IDENTITY.clone().slerp(q, k)).normalize()
-      this.controls.target.lerpVectors(a.targetFrom, a.targetTo, k)
+      const cur = a.from.clone().applyQuaternion(IDENTITY.clone().slerp(q, kMove)).normalize()
+      this.controls.target.lerpVectors(a.targetFrom, a.targetTo, kMove)
 
-      /* 切透视前距离先留在远处；切完再用剩下的进度收回到 home 视距 */
+      /* 切透视之前位姿与画幅都不动：切的那帧仍然严丝合缝 */
       const hold = a.switchAt >= 0 && !a.switched
-      const kDist =
-        a.switchAt < 0 || a.switchAt >= 1
-          ? k
-          : Math.min(1, Math.max(0, (k - a.switchAt) / (1 - a.switchAt)))
       const dist = hold ? a.distFrom : a.distFrom + (a.distTo - a.distFrom) * kDist
 
       if (a.switchAt >= 0 && !a.switched && k >= a.switchAt) {
-        /* 用切换那一刻的实际正交画幅，不用起始值：前面 zoom 已经在插值了 */
-        a.halfFrom = ORTHO_BASE / Math.max(1e-9, a.zoomFrom + (a.zoomTo - a.zoomFrom) * k)
         this.enterPerspective(a.halfFrom, dist)
         a.switched = true
       }
 
       const cam = this.cam
       cam.position.copy(this.controls.target).addScaledVector(cur, dist)
-      cam.up.copy(a.upFrom).lerp(a.upTo, k).normalize()
+      cam.up.copy(a.upFrom).lerp(a.upTo, kMove).normalize()
       cam.lookAt(this.controls.target)
       if (this.ortho) {
-        this.camO.zoom = a.zoomFrom + (a.zoomTo - a.zoomFrom) * k
+        this.camO.zoom = a.zoomFrom + (a.zoomTo - a.zoomFrom) * kDist
         this.camO.updateProjectionMatrix()
       } else {
         /* 保持画幅连续：half/dist 决定 FOV，终点正好回到 home.fov */
-        const half = a.halfFrom + (a.halfTo - a.halfFrom) * k
+        const half = a.halfFrom + (a.halfTo - a.halfFrom) * kDist
         const fov = (2 * Math.atan(half / Math.max(1e-9, dist)) * 180) / Math.PI
         this.camP.fov = Math.min(120, Math.max(1, fov))
         this.camP.updateProjectionMatrix()
