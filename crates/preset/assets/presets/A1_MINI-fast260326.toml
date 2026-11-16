@@ -1,6 +1,6 @@
 # machine: A1_MINI
 # variant: fast260326
-# generated_at: 2026-11-16T01:04:12+08:00
+# generated_at: 2026-11-16T10:49:34+08:00
 
 [toolhead]
 # 落笔 G-code
@@ -58,7 +58,7 @@ disk_stagger_swing_mode = "spiral" # 圆盘摆动模式(spiral/oscillate)
 fan_speed = 255 # 风扇速度 范围:0~255
 fast_tower_mode = "fast" # 擦料塔模式
 glue_edge_lift = 0 # 涂胶边缘抬升(mm) 范围:0~20
-glue_edge_percent = 0 # 涂胶边缘带(%) 范围:0~100
+glue_edge_lines = 0 # 边缘带条数 范围:0~6
 glue_inter_model_lift_height = 2 # 模型间/段间跳转Z抬升高度(mm) 范围:2~5
 glue_pass_count = 1 # 涂胶次数 范围:1~10
 glue_sparse_ratio = 50 # 涂胶稀疏比(%)

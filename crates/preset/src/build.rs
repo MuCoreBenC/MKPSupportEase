@@ -31,6 +31,11 @@ use postprocess::ir::num_strip;
 use postprocess::postproc::pen_template::{PenVars, render};
 use std::collections::HashMap;
 
+/// 旧口径（`glue_edge_percent`）开着、新键又没写时接过来的条数。
+///
+/// 0.8mm 左右（按 0.4 线距算），与作者当时用的 10% 在常见面上是同一个量级。
+const DEFAULT_EDGE_LINES: i64 = 2;
+
 /// 把「骨架 + 字段」渲染成最终 G-code。
 ///
 /// 结构不对（未知占位符、没闭合、行首不是 G/M/L）就是预设内容非法，硬错误 ——
@@ -244,7 +249,19 @@ pub fn build(
 
     // ---- Glue ----
     ir.glue.z_offset = cfg.toolhead.glue_z_offset;
-    ir.glue.edge_percent = cfg.wiping.glue_edge_percent;
+    /*
+     * 边缘带：新键是「靠外几条」，旧键是「占短边的百分比」，已退役。
+     *
+     * 旧键在用户手上那份预设里可能正开着（10%）—— 直接丢掉等于把人家的功能悄悄关掉，
+     * 所以「新键没写而旧键开着」时按默认条数接过来；两个都是 0 才算关。
+     */
+    ir.glue.edge_lines = if cfg.wiping.glue_edge_lines > 0 {
+        cfg.wiping.glue_edge_lines
+    } else if cfg.wiping.glue_edge_percent > 0.0 {
+        DEFAULT_EDGE_LINES
+    } else {
+        0
+    };
     ir.glue.edge_lift = cfg.wiping.glue_edge_lift;
     ir.glue.sparse_ratio = cfg.wiping.glue_sparse_ratio;
     ir.glue.pass_count = cfg.wiping.glue_pass_count;
@@ -675,13 +692,6 @@ fn validate_ranges(ir: &Ir, registry: Option<&Registry>) -> Result<(), PostprocE
             hard_max: 20.0,
         },
         FloatCheck {
-            name: "GlueEdgePercent",
-            val: ir.glue.edge_percent,
-            config_key: "GlueEdgePercent",
-            hard_min: 0.0,
-            hard_max: 100.0,
-        },
-        FloatCheck {
             name: "GlueEdgeLift",
             val: ir.glue.edge_lift,
             config_key: "GlueEdgeLift",
@@ -937,6 +947,13 @@ fn validate_ranges(ir: &Ir, registry: Option<&Registry>) -> Result<(), PostprocE
             hard_max: 10,
         },
         IntCheck {
+            name: "GlueEdgeLines",
+            val: ir.glue.edge_lines,
+            config_key: "GlueEdgeLines",
+            hard_min: 0,
+            hard_max: 6,
+        },
+        IntCheck {
             name: "UserDryTime",
             val: ir.wiping.user_dry_time,
             config_key: "UserDryTime",
@@ -1139,10 +1156,29 @@ mod tests {
     #[test]
     fn glue_edge_band_reaches_ir() {
         let cfg: TomlConfig =
-            toml::from_str("[wiping]\nglue_edge_percent = 10\nglue_edge_lift = 1.5\n").unwrap();
+            toml::from_str("[wiping]\nglue_edge_lines = 3\nglue_edge_lift = 1.5\n").unwrap();
         let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
-        assert!((ir.glue.edge_percent - 10.0).abs() < f64::EPSILON);
+        assert_eq!(ir.glue.edge_lines, 3);
         assert!((ir.glue.edge_lift - 1.5).abs() < f64::EPSILON);
+    }
+
+    /// 旧口径开着（10%）而新键没写：按默认条数接过来，不许把人家正开着的功能悄悄关掉。
+    #[test]
+    fn retired_percent_carries_over_to_default_lines() {
+        let cfg: TomlConfig =
+            toml::from_str("[wiping]\nglue_edge_percent = 10\nglue_edge_lift = 0.5\n").unwrap();
+        let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
+        assert_eq!(ir.glue.edge_lines, DEFAULT_EDGE_LINES);
+        assert!((ir.glue.edge_lift - 0.5).abs() < f64::EPSILON);
+    }
+
+    /// 两个都是 0（出厂那 9 份预设就是这样）：关。
+    #[test]
+    fn both_edge_keys_zero_stays_off() {
+        let cfg: TomlConfig =
+            toml::from_str("[wiping]\nglue_edge_percent = 0\nglue_edge_lift = 0\n").unwrap();
+        let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
+        assert_eq!(ir.glue.edge_lines, 0);
     }
 
     /// 老预设文件里还带着已退役的 `glue_inset`：读得进来、**不再影响任何 IR 值**。
@@ -1150,7 +1186,7 @@ mod tests {
     fn retired_glue_inset_is_accepted_but_ignored() {
         let cfg: TomlConfig = toml::from_str("[wiping]\nglue_inset = 5\n").unwrap();
         let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
-        assert!((ir.glue.edge_percent).abs() < f64::EPSILON);
+        assert_eq!(ir.glue.edge_lines, 0);
         assert!((ir.glue.edge_lift).abs() < f64::EPSILON);
     }
 

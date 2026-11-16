@@ -468,6 +468,20 @@ fn run(
         tower_ask,
         calibration: calib_mode,
     } = job;
+
+    /*
+     * 边缘带调试转储的落点（2026-11-16）：`MKP_EDGE_DEBUG=1` 时写到**这一趟产物旁边** ——
+     * 转储属于某一次运行，跟 `_meta.json` 住同一个目录才是"顺手就能找到"，
+     * 不该让人去桌面翻。`MKP_EDGE_DEBUG=<目录>` 仍然可以显式指定。
+     */
+    if std::env::var_os("MKP_EDGE_DEBUG").is_some() {
+        crate::postproc::pass1::set_edge_dump_root(
+            output_path
+                .as_ref()
+                .and_then(|p| p.parent())
+                .map(std::path::Path::to_path_buf),
+        );
+    }
     /// 步骤边界检查点：命中即中止，只返回、不写部分输出
     /// （原地模式的原文件因此保证不动）。
     fn checkpoint(cancel: &CancelToken) -> Result<(), PostprocError> {

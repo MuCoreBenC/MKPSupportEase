@@ -29,6 +29,14 @@ mod validity;
 pub use ironing_facts::IroningFacts;
 use ironing_facts::IroningLayerPath;
 
+/// 边缘带调试转储的落点（`MKP_EDGE_DEBUG=1` 时用）。
+///
+/// 管线自己会在每次运行开始时把它设成**产物所在目录**；钩子那条路是原地处理、
+/// 手里没有产物路径，所以在开跑前自己设成这一天的存档目录（见 `hook.rs`）。
+pub fn set_edge_dump_root(dir: Option<std::path::PathBuf>) {
+    edge_band::set_dump_root(dir);
+}
+
 pub(crate) use glue_block::{
     RetractAt, calc_glue_z, custom_unmount_gcode_has_extrude, mount_toolhead, restore_fan_state,
     retract_at, swap_retract, unmount_toolhead,
@@ -1264,7 +1272,7 @@ pub fn first_pass(
             } else {
                 Some(edge_band::apply(
                     &iface,
-                    ir_data.glue.edge_percent,
+                    ir_data.glue.edge_lines,
                     ir_data.glue.edge_lift,
                 ))
             };

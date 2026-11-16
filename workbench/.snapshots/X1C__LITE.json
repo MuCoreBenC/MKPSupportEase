@@ -34,7 +34,7 @@
   "wiping.fan_speed": 255.0,
   "wiping.fast_tower_mode": "fast",
   "wiping.glue_edge_lift": 0.0,
-  "wiping.glue_edge_percent": 0.0,
+  "wiping.glue_edge_lines": 0,
   "wiping.glue_inter_model_lift_height": 2.0,
   "wiping.glue_pass_count": 1,
   "wiping.glue_sparse_ratio": 50.0,

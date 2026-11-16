@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "b60f1eba2018c78c",
+  "revision": "bd21174ec3f17cdf",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -4071,22 +4071,22 @@
         "serialization": null
       },
       {
-        "key": "wiping.glue_edge_percent",
-        "configKey": "GlueEdgePercent",
-        "tomlKey": "glue_edge_percent",
-        "jsonKey": "glue_edge_percent",
-        "label": "涂胶边缘带",
-        "labelEn": "Glue edge band",
-        "labelJa": "塗布エッジ帯",
-        "labelTw": "塗膠邊緣帶",
-        "desc": "贴边那几段的宽度，按这块涂胶面短边的百分比算，0 关闭。",
-        "descEn": "Width of the edge band as a share of the glue face's short side; 0 turns it off.",
-        "descJa": "塗布面の短辺に対するエッジ帯の割合。0 で無効。",
-        "descTw": "貼邊那幾段的寬度，按這塊塗膠面短邊的百分比算，0 關閉。",
-        "tomlComment": "涂胶边缘带(%) 范围:0~100",
-        "valueType": "float",
+        "key": "wiping.glue_edge_lines",
+        "configKey": "GlueEdgeLines",
+        "tomlKey": "glue_edge_lines",
+        "jsonKey": "glue_edge_lines",
+        "label": "边缘带条数",
+        "labelEn": "Edge band lines",
+        "labelJa": "エッジ帯の本数",
+        "labelTw": "邊緣帶條數",
+        "desc": "贴边那几段抬笔，按最靠外的涂胶线条数算，0 关闭。",
+        "descEn": "Lift the pen on the outermost glue lines, counted in lines; 0 turns it off.",
+        "descJa": "最も外側の塗布线から数本ぶんペンを持ち上げます。0 で無効。",
+        "descTw": "貼邊那幾段抬筆，按最外側的塗膠線條數算，0 關閉。",
+        "tomlComment": "边缘带条数 范围:0~6",
+        "valueType": "int",
         "uiComponent": "number",
-        "defaultValue": 0.0,
+        "defaultValue": 0,
         "scope": "universal",
         "section": "wiping",
         "layout": {
@@ -4094,37 +4094,12 @@
           "sectionId": "glue_ironing"
         },
         "min": 0.0,
-        "max": 100.0,
+        "max": 6.0,
         "step": 1.0,
-        "unit": "%",
+        "unit": "条",
         "parentKey": null,
         "showWhen": null,
-        "choices": [
-          {
-            "label": "5%",
-            "labelEn": "5%",
-            "labelJa": "5%",
-            "labelTw": "5%",
-            "value": 5.0,
-            "deprecated": false
-          },
-          {
-            "label": "10%",
-            "labelEn": "10%",
-            "labelJa": "10%",
-            "labelTw": "10%",
-            "value": 10.0,
-            "deprecated": false
-          },
-          {
-            "label": "20%",
-            "labelEn": "20%",
-            "labelJa": "20%",
-            "labelTw": "20%",
-            "value": 20.0,
-            "deprecated": false
-          }
-        ],
+        "choices": [],
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
@@ -6545,8 +6520,8 @@
                 "paramKey": "wiping.ironing_keepout_mode"
               },
               {
-                "id": "item_wiping_glue_edge_percent",
-                "paramKey": "wiping.glue_edge_percent"
+                "id": "item_wiping_glue_edge_lines",
+                "paramKey": "wiping.glue_edge_lines"
               },
               {
                 "id": "item_wiping_glue_edge_lift",

@@ -130,10 +130,16 @@ pub struct WipingConfig {
     pub ironing_keepout: f64,
     #[serde(default, alias = "ironing_suppress_expand_mode")]
     pub ironing_keepout_mode: String,
-    /// **边缘带**宽度：占这张涂胶面短边的百分比。`0` = 关。
+    /// **边缘带**：这张涂胶面里最靠外的几条涂胶线。`0` = 关。
     ///
-    /// 2026-11-16 起替掉旧的 `glue_inset`（按整层外接矩形裁 mm）—— 那个判法在凹形、
-    /// 环、多岛上要么切错地方要么整层失效，作者判它不能用。
+    /// 带宽 = 条数 × 这一层实测的线距，最多半张面 —— 见 `postproc::pass1::edge_band`。
+    /// 换喷嘴 / 稀疏比就是换预设，各自给条数。
+    #[serde(default)]
+    pub glue_edge_lines: i64,
+    /// **已退役**：旧口径「占涂胶面短边的百分比」。
+    ///
+    /// 保留这一格只为**老预设文件读得进来**（`glue_edge_percent = 10` 不会变成未知键报错），
+    /// 它的值不再参与任何计算，也不会被写出。
     #[serde(default)]
     pub glue_edge_percent: f64,
     /// 边缘带上涂胶段的落笔抬高（mm）。`0` = 关。

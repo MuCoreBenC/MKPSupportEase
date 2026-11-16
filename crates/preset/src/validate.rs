@@ -136,7 +136,7 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
         "IroningCoverageThreshold" => ConfigVal::F64(w.ironing_coverage_threshold),
         "IroningKeepout" => ConfigVal::F64(w.ironing_keepout),
         "IroningKeepoutMode" => ConfigVal::Str(w.ironing_keepout_mode.clone()),
-        "GlueEdgePercent" => ConfigVal::F64(w.glue_edge_percent),
+        "GlueEdgeLines" => ConfigVal::I64(w.glue_edge_lines),
         "GlueEdgeLift" => ConfigVal::F64(w.glue_edge_lift),
         "PrimeTriggerLayers" => ConfigVal::I64(w.prime_trigger_layers),
         "PrimeEnabled" => ConfigVal::Bool(w.prime_enabled),

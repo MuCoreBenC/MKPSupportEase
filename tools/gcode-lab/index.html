@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>涂胶边缘带试验台</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div id="drop" class="drop">
+      <div class="drop-card">
+        <div class="drop-title">把产物 G-code 拖进来</div>
+        <div class="drop-hint">从「历史」目录拿一份 <code>.gcode</code>，整份拖到窗口里</div>
+      </div>
+    </div>
+
+    <header class="bar">
+      <div class="bar-left">
+        <span class="brand">边缘带试验台</span>
+        <span id="file" class="file">未打开文件</span>
+      </div>
+      <div class="bar-mid">
+        <label class="ctl">
+          <span class="ctl-label">外几条</span>
+          <input id="lines" type="range" min="0" max="6" step="1" value="2" />
+          <span id="lines-val" class="ctl-val">2</span>
+        </label>
+        <span class="ctl ctl-static">
+          <span class="ctl-label">线距</span>
+          <span id="pitch" class="ctl-val">—</span>
+        </span>
+        <span class="ctl ctl-static">
+          <span class="ctl-label">抬起</span>
+          <span id="lift" class="ctl-val">—</span>
+        </span>
+      </div>
+      <div class="bar-right">
+        <div class="seg" id="view">
+          <button data-view="2d" class="on">2D</button>
+          <button data-view="3d">3D</button>
+        </div>
+        <label class="ctl ctl-3d">
+          <span class="ctl-label">Z ×</span>
+          <input id="exag" type="range" min="1" max="50" step="1" value="20" />
+          <span id="exag-val" class="ctl-val">20</span>
+        </label>
+      </div>
+    </header>
+
+    <main class="grid">
+      <aside class="panel panel-blocks">
+        <div class="panel-head">
+          <span>涂胶块</span>
+          <span id="blocks-count" class="muted">0</span>
+        </div>
+        <div id="blocks" class="blocks"></div>
+      </aside>
+
+      <section class="stage">
+        <canvas id="c2d" class="layer"></canvas>
+        <canvas id="c3d" class="layer hidden"></canvas>
+        <div id="scale" class="scale">—</div>
+        <div id="badge" class="badge hidden"></div>
+      </section>
+
+      <aside class="panel panel-detail">
+        <div class="panel-head">
+          <span id="detail-title">逐条诊断</span>
+          <span id="detail-sub" class="muted"></span>
+        </div>
+        <div id="faces" class="faces"></div>
+        <div id="detail" class="detail"></div>
+      </aside>
+    </main>
+
+    <footer class="strip">
+      <div class="strip-head">
+        <span>落笔档（按移动顺序）</span>
+        <span class="legend">
+          <i class="sw sw-normal"></i>正常
+          <i class="sw sw-raised"></i>抬起
+          <i class="sw sw-bad"></i>与判定不一致
+        </span>
+      </div>
+      <canvas id="cz" class="strip-canvas"></canvas>
+    </footer>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

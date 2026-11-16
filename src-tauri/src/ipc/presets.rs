@@ -1595,9 +1595,9 @@ mod tests {
             ("nameEn", "Standard"),
             ("nameTw", "標準版"),
             ("nameJa", "スタンダード版"),
-            ("tagEn", "Recommended"),
-            ("tagTw", "推薦"),
-            ("tagJa", "おすすめ"),
+            ("tagEn", "Classic"),
+            ("tagTw", "經典"),
+            ("tagJa", "クラシック"),
         ] {
             assert_eq!(
                 std_v[key].as_str(),
@@ -1743,7 +1743,7 @@ mod tests {
 
         // —— 参数元信息：全部 96 条，含废弃 ——
         let meta = param_meta_dto(&catalog);
-        assert_eq!(meta.len(), 96, "实测 96 条字段定义，一条不少");
+        assert_eq!(meta.len(), 98, "实测 98 条字段定义，一条不少");
         let offset_x = meta
             .iter()
             .find(|p| p.key == "toolhead.offset.x")

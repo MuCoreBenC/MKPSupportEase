@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "ecd2e899bec98952",
+  "revision": "15808a0dbdd1db9f",
   "publishedAt": "2026-11-15T17:54:23Z",
   "brands": [
     {
@@ -4072,22 +4072,22 @@
         "serialization": null
       },
       {
-        "key": "wiping.glue_edge_percent",
-        "configKey": "GlueEdgePercent",
-        "tomlKey": "glue_edge_percent",
-        "jsonKey": "glue_edge_percent",
-        "label": "涂胶边缘带",
-        "labelEn": "Glue edge band",
-        "labelJa": "塗布エッジ帯",
-        "labelTw": "塗膠邊緣帶",
-        "desc": "贴边那几段的宽度，按这块涂胶面短边的百分比算，0 关闭。",
-        "descEn": "Width of the edge band as a share of the glue face's short side; 0 turns it off.",
-        "descJa": "塗布面の短辺に対するエッジ帯の割合。0 で無効。",
-        "descTw": "貼邊那幾段的寬度，按這塊塗膠面短邊的百分比算，0 關閉。",
-        "tomlComment": "涂胶边缘带(%) 范围:0~100",
-        "valueType": "float",
+        "key": "wiping.glue_edge_lines",
+        "configKey": "GlueEdgeLines",
+        "tomlKey": "glue_edge_lines",
+        "jsonKey": "glue_edge_lines",
+        "label": "边缘带条数",
+        "labelEn": "Edge band lines",
+        "labelJa": "エッジ帯の本数",
+        "labelTw": "邊緣帶條數",
+        "desc": "贴边那几段抬笔，按最靠外的涂胶线条数算，0 关闭。",
+        "descEn": "Lift the pen on the outermost glue lines, counted in lines; 0 turns it off.",
+        "descJa": "最も外側の塗布线から数本ぶんペンを持ち上げます。0 で無効。",
+        "descTw": "貼邊那幾段抬筆，按最外側的塗膠線條數算，0 關閉。",
+        "tomlComment": "边缘带条数 范围:0~6",
+        "valueType": "int",
         "uiComponent": "number",
-        "defaultValue": 0.0,
+        "defaultValue": 0,
         "scope": "universal",
         "section": "wiping",
         "layout": {
@@ -4095,37 +4095,12 @@
           "sectionId": "glue_ironing"
         },
         "min": 0.0,
-        "max": 100.0,
+        "max": 6.0,
         "step": 1.0,
-        "unit": "%",
+        "unit": "条",
         "parentKey": null,
         "showWhen": null,
-        "choices": [
-          {
-            "label": "5%",
-            "labelEn": "5%",
-            "labelJa": "5%",
-            "labelTw": "5%",
-            "value": 5.0,
-            "deprecated": false
-          },
-          {
-            "label": "10%",
-            "labelEn": "10%",
-            "labelJa": "10%",
-            "labelTw": "10%",
-            "value": 10.0,
-            "deprecated": false
-          },
-          {
-            "label": "20%",
-            "labelEn": "20%",
-            "labelJa": "20%",
-            "labelTw": "20%",
-            "value": 20.0,
-            "deprecated": false
-          }
-        ],
+        "choices": [],
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
@@ -6546,8 +6521,8 @@
                 "paramKey": "wiping.ironing_keepout_mode"
               },
               {
-                "id": "item_wiping_glue_edge_percent",
-                "paramKey": "wiping.glue_edge_percent"
+                "id": "item_wiping_glue_edge_lines",
+                "paramKey": "wiping.glue_edge_lines"
               },
               {
                 "id": "item_wiping_glue_edge_lift",
@@ -6905,8 +6880,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "bfa9440155a5bba59fbbecb54b941bc91feb63973219b8a0ff969731f62293de",
-      "size": 5355
+      "sha256": "de71c5a3047f4f8f83ed7603f678e922e572554b8e0ce5125521c55091f36aaa",
+      "size": 5348
     },
     {
       "kind": "mkp_preset",
@@ -6914,8 +6889,8 @@
       "path": "delivery/mkp/presets/A1-fast260326.toml",
       "machineId": "A1",
       "versionId": "FAST260326",
-      "sha256": "dce07cc937508b0bd7181ce89a03c63dd02bcc65253a5ff99c4fbd6dc1f67205",
-      "size": 5360
+      "sha256": "d55af6332684664136e655a1c89bc1e94f316e7bb4285db5d193fa40f7a76ec5",
+      "size": 5353
     },
     {
       "kind": "mkp_preset",
@@ -6923,8 +6898,8 @@
       "path": "delivery/mkp/presets/A1-fast261111.toml",
       "machineId": "A1",
       "versionId": "FAST261111",
-      "sha256": "3813bca3eef2b3afe94794e18d3660e2549fbd6f12e0d851d9f75bebbbf2578a",
-      "size": 5360
+      "sha256": "981e495231e88f03bd5952ed33960586ae59e1b4df10f3b8afa3c7019ff4d5f6",
+      "size": 5353
     },
     {
       "kind": "mkp_preset",
@@ -6932,8 +6907,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "796ecc5a94c66973f12f7712ab9f47061e4ef4eef4387337fb4263594fc99d4a",
-      "size": 5363
+      "sha256": "25910daf01adf4b2679b7259aa509414ffc804dcf628ae77606dd366355f4754",
+      "size": 5356
     },
     {
       "kind": "mkp_preset",
@@ -6941,8 +6916,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast260326.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST260326",
-      "sha256": "6b10082c90ce1a2c8fb99ccbee3d60c8b98f7b76d5d71e43b03ba1e078f5770b",
-      "size": 5363
+      "sha256": "318619025c5ebf16811a704cc1f07889a34d049ec67d2228af1a4d4de8a51011",
+      "size": 5356
     },
     {
       "kind": "mkp_preset",
@@ -6950,8 +6925,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast261111.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST261111",
-      "sha256": "06d2da2dcc70ae6db7ec3fe3a3a3b41e67b629269ed076f17e10258751fc1272",
-      "size": 5363
+      "sha256": "1bd7db31bf44e8defefdce6061d1a3d49231e8d9986586f5e1ead7a55c3eccec",
+      "size": 5356
     },
     {
       "kind": "mkp_preset",
@@ -6959,8 +6934,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "83121771c6ea465c988ecc68d04e83573ab61f9ca72f8c8c26a1306a7bcd2724",
-      "size": 5504
+      "sha256": "076f9be6f70a6d29dc26552a525cd4bcacfef378c383d001b64782c86a76c906",
+      "size": 5497
     },
     {
       "kind": "mkp_preset",
@@ -6968,8 +6943,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "d16a043e70ff879d5f0d2c471793673464a7d6168beaa549aa3add059c8bd4bb",
-      "size": 5504
+      "sha256": "f001782dc734fd6db8fdbe7a31210384cec88b93937bea23f686d9d5f731947e",
+      "size": 5497
     },
     {
       "kind": "icon",

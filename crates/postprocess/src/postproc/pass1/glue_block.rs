@@ -247,13 +247,59 @@ fn emit_jump_run(
         return Ok((i, last.0, last.1, cur_z));
     }
 
-    let landed_z = glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed) + extra_land_lift;
+    /*
+     * 落笔高度要看**下一段**是边缘带还是正常档。
+     *
+     * 标记是紧贴着涂胶行插的（`;EDGE_RAISE` 之后紧跟第一条涂胶移动），而落笔发生在
+     * 它**之前** —— 只看 `pending_raise`（上一次的状态）就会先落到正常高度，
+     * 于是那条贴着边的涂胶段笔下得太低（2026-11-16 实测漏判的那一段就是这个原因）。
+     */
+    let lift = match upcoming_edge_raise(lines, i) {
+        Some(true) => ir_data.glue.edge_lift.max(0.0),
+        Some(false) => 0.0,
+        None => extra_land_lift,
+    };
+    let landed_z = glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed) + lift;
     sink.push_str(&format!("G1 Z{}", format_z(landed_z)));
     sink.push_str(&format!(
         "G1 F{}",
         format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
     ));
     Ok((i, last.0, last.1, landed_z))
+}
+
+/// 从 `from` 往后看：**下一段涂胶**落在哪个档（`Some(true)` = 边缘带）。
+///
+/// 途中允许穿过空行、其余注释、空走与嵌套的跳转标记 —— 那些都不改变"这一段是抬是落"。
+/// 一旦遇到真正的移动行（带 E 或不是空走）就收手：那说明标记不在这趟里，
+/// 交给调用方沿用上一次的状态（`None`）。
+fn upcoming_edge_raise(lines: &[String], from: usize) -> Option<bool> {
+    for line in lines.iter().skip(from) {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with("; FEATURE") || t.starts_with(";FEATURE") {
+            continue;
+        }
+        if t.contains(crate::gcode::MARKER_EDGE_RAISE) {
+            return Some(true);
+        }
+        if t.contains(crate::gcode::MARKER_EDGE_NORMAL) {
+            return Some(false);
+        }
+        if t.contains(crate::gcode::MARKER_ZJUMP_START)
+            || t.contains(crate::gcode::MARKER_ZJUMP_INTERNAL)
+            || t.contains(crate::gcode::MARKER_MICRO_LIFT)
+        {
+            continue;
+        }
+        if is_travel_line(t) {
+            continue;
+        }
+        if t.starts_with(';') {
+            continue;
+        }
+        return None;
+    }
+    None
 }
 
 /// 这一段连续空走是否真的把笔挪了位置（零长度重复句不算）。
@@ -474,6 +520,19 @@ fn write_glue_lines(
         let t = l.trim();
         (t.starts_with("G1 ") || t.starts_with("G2 ") || t.starts_with("G3 ")) && t.contains(" E")
     });
+    /*
+     * 段首那条前导空走会被 `emit_glue_block` 整段跳过（`skip_leading`），而边缘标记是
+     * 插在「这一段的第一条移动」之前的 —— 那条移动有可能正是被跳过的那条空走。
+     * 先把被跳过那几行里的标记读进来，别让边缘带因为"位置太靠前"静默失效。
+     */
+    for line in lines.iter().take(skip_leading.min(lines.len())) {
+        let t = line.trim();
+        if t.contains(MARKER_EDGE_RAISE) {
+            pending_raise = true;
+        } else if t.contains(MARKER_EDGE_NORMAL) {
+            pending_raise = false;
+        }
+    }
     let mut emitted_move = skip_leading > 0;
     let mut idx = skip_leading;
     while idx < lines.len() {
@@ -537,8 +596,8 @@ fn write_glue_lines(
             prev_y = ly;
             if !z_after.is_nan() {
                 pen_z = z_after;
-                /* 这次落了：把「现在停在哪个档」记成落笔时用的那一档 */
-                cur_raised = pending_raise;
+                /* 这次落了：按**实际落到的 Z** 记住档位（落笔可能已经用了下一段的标记） */
+                cur_raised = z_after > land_z + 1e-6;
             }
             idx = next;
             continue;
@@ -579,8 +638,8 @@ fn write_glue_lines(
             prev_y = ly;
             if !z_after.is_nan() {
                 pen_z = z_after;
-                /* 这次落了：把「现在停在哪个档」记成落笔时用的那一档 */
-                cur_raised = pending_raise;
+                /* 这次落了：按**实际落到的 Z** 记住档位（落笔可能已经用了下一段的标记） */
+                cur_raised = z_after > land_z + 1e-6;
             }
             idx = next;
             continue;
@@ -617,8 +676,8 @@ fn write_glue_lines(
             prev_y = ly;
             if !z_after.is_nan() {
                 pen_z = z_after;
-                /* 这次落了：把「现在停在哪个档」记成落笔时用的那一档 */
-                cur_raised = pending_raise;
+                /* 这次落了：按**实际落到的 Z** 记住档位（落笔可能已经用了下一段的标记） */
+                cur_raised = z_after > land_z + 1e-6;
             }
             idx = next;
             continue;
@@ -648,8 +707,8 @@ fn write_glue_lines(
             prev_y = ly;
             if !z_after.is_nan() {
                 pen_z = z_after;
-                /* 这次落了：把「现在停在哪个档」记成落笔时用的那一档 */
-                cur_raised = pending_raise;
+                /* 这次落了：按**实际落到的 Z** 记住档位（落笔可能已经用了下一段的标记） */
+                cur_raised = z_after > land_z + 1e-6;
             }
             idx = next;
             continue;

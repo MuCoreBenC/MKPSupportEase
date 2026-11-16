@@ -1242,6 +1242,27 @@ pub fn run(
      * 抄的是一份克隆，**不重读预设**：这一趟跑的确实是这一份。
      */
     let ir_before = ir.clone();
+    /*
+     * 边缘带调试转储（`MKP_EDGE_DEBUG=1`）：钩子是**原地处理**、手里没有产物路径，
+     * 所以开跑前把落点设成这一天的存档目录 —— 跑完打开那个文件夹就在那儿，
+     * 不用去别处翻。没设这个变量时一个字节都不写。
+     */
+    /*
+     * ★ 钩子这个进程是**切片器拉起来的**（BBS → SupportEase），终端里 export 的 env
+     *   根本传不进来。所以除了环境变量，还认数据根下的一个哨兵文件：
+     *   `<user>/edge-debug.on` —— `touch` 一下就开，删掉就关，与谁拉起进程无关。
+     */
+    let dump_wanted = std::env::var_os("MKP_EDGE_DEBUG").is_some()
+        || crate::fsx::paths::user_root_headless()
+            .map(|r| r.join("edge-debug.on").exists())
+            .unwrap_or(false);
+    let dump_dir = if dump_wanted {
+        crate::archive::history_root()
+            .map(|root| root.join(crate::archive::day_dir(crate::archive::now_local())))
+    } else {
+        None
+    };
+    postprocess::postproc::pass1::set_edge_dump_root(dump_dir);
     let outcome = if defer_print_time {
         pipeline::process_with_ir_deferred_print_time_with_tower_ask(
             IrProcessRequest {
