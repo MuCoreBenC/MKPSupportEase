@@ -57,6 +57,13 @@ const IDENTITY = new THREE.Quaternion()
 const EXPLODE_Z = 12
 /** 视角立方体点一下之后转过去的时长（秒） */
 const SNAP_SECONDS = 0.3
+/**
+ * 2D→3D 回程时切透视的进度。
+ *
+ * 放在中段而不是最后一帧：那时相机还在远处、模型还没完全显出来，
+ * 而且切的一瞬间会把透视 FOV 反算成与正交同画幅，看不出跳变。
+ */
+const PERSPECTIVE_SWITCH_AT = 0.5
 
 export class View3d {
   private readonly canvas: HTMLCanvasElement
@@ -123,6 +130,7 @@ export class View3d {
     up: THREE.Vector3
     zoom: number
     ortho: boolean
+    fov: number
   } | null = null
   /**
    * 伪 2D 运镜：除了方向与距离，还插值 up / target / 正交 zoom，
@@ -139,6 +147,12 @@ export class View3d {
     distTo: number
     zoomFrom: number
     zoomTo: number
+    /** >=0 表示回程中要从正交切到透视；值为切换进度 */
+    switchAt: number
+    switched: boolean
+    /** 正交画幅半高 → 终点画幅半高；切透视后用它们反算 FOV */
+    halfFrom: number
+    halfTo: number
     /** 走 3D→2D 时把模型渐隐；回来时渐显 */
     fade: 'out' | 'in'
     t: number
@@ -304,6 +318,7 @@ export class View3d {
       up: this.cam.up.clone(),
       zoom: this.cam.zoom,
       ortho: this.ortho,
+      fov: this.camP.fov,
     }
     if (!this.ortho) this.setOrtho(true)
     this.pseudo = true
@@ -320,6 +335,10 @@ export class View3d {
       distTo: 1000,
       zoomFrom: this.camO.zoom,
       zoomTo: zoom,
+      switchAt: -1,
+      switched: false,
+      halfFrom: 0,
+      halfTo: 0,
       fade: 'out',
       t: 0,
       done,
@@ -366,7 +385,7 @@ export class View3d {
       return
     }
     this.snapToPseudo(view)
-    const halfTan = Math.tan((this.camP.fov * Math.PI) / 360)
+    const homeTan = Math.tan((home.fov * Math.PI) / 360)
     this.flyAnim = {
       from: new THREE.Vector3(0, 0, 1),
       to: home.dir.clone(),
@@ -377,13 +396,33 @@ export class View3d {
       distFrom: this.camO.position.distanceTo(this.controls.target),
       distTo: home.dist,
       zoomFrom: this.camO.zoom,
-      /* 回透视前最后那一帧正交要与透视在 home 距离上的画幅一致 */
-      zoomTo: home.ortho ? home.zoom : ORTHO_BASE / Math.max(1e-9, home.dist * halfTan),
+      zoomTo: home.ortho ? home.zoom : ORTHO_BASE / Math.max(1e-9, home.dist * homeTan),
+      /* 透视档：中段切，别把投影切换堆在最后一帧 */
+      switchAt: home.ortho ? -1 : PERSPECTIVE_SWITCH_AT,
+      switched: false,
+      halfFrom: ORTHO_BASE / Math.max(1e-9, this.camO.zoom),
+      halfTo: home.dist * homeTan,
       fade: 'in',
       t: 0,
       done,
     }
     this.controls.enabled = false
+  }
+
+  /**
+   * 切透视的那一次：把透视 FOV 反算成当前正交画幅，
+   * 于是切的一帧在 target 平面上像素对得上；相机又还在远处，纵深差也看不出来。
+   */
+  private enterPerspective(half: number, dist: number): void {
+    const fov = (2 * Math.atan(half / Math.max(1e-9, dist)) * 180) / Math.PI
+    this.camP.fov = Math.min(120, Math.max(1, fov))
+    this.camP.position.copy(this.camO.position)
+    this.camP.quaternion.copy(this.camO.quaternion)
+    this.camP.up.copy(this.camO.up)
+    this.camP.zoom = 1
+    this.camP.updateProjectionMatrix()
+    this.ortho = false
+    this.controls.object = this.camP
   }
 
   /** 记录每种线原本的不透明度，过渡时按比例渐隐，结束再原样恢复 */
@@ -853,8 +892,9 @@ export class View3d {
     let flyDone: (() => void) | null = null
     if (this.flyAnim !== null) {
       /*
-       * 环绕飞行：方向 / up / target / 正交 zoom 一起插值。
-       * 最后一帧由 `zoomForView` 精确对齐 2D，不靠“差不多装下”。
+       * 环绕飞行：方向 / up / target 一起插值。
+       * 透视档不是等到最后才切：在中段相机还远、模型半透明时切，
+       * 并把 FOV 反算成同一画幅，之后边飞边把 FOV 拉回原来的值。
        */
       const a = this.flyAnim
       a.t = Math.min(1, a.t + dt / 0.85)
@@ -864,28 +904,51 @@ export class View3d {
       const q = new THREE.Quaternion().setFromUnitVectors(dir.normalize(), a.to)
       const cur = a.from.clone().applyQuaternion(IDENTITY.clone().slerp(q, k)).normalize()
       this.controls.target.lerpVectors(a.targetFrom, a.targetTo, k)
-      const dist = a.distFrom + (a.distTo - a.distFrom) * k
-      this.cam.position.copy(this.controls.target).addScaledVector(cur, dist)
-      this.cam.up.copy(a.upFrom).lerp(a.upTo, k).normalize()
-      this.cam.lookAt(this.controls.target)
-      this.camO.zoom = a.zoomFrom + (a.zoomTo - a.zoomFrom) * k
-      this.camO.updateProjectionMatrix()
+
+      /* 切透视前距离先留在远处；切完再用剩下的进度收回到 home 视距 */
+      const hold = a.switchAt >= 0 && !a.switched
+      const kDist =
+        a.switchAt < 0 || a.switchAt >= 1
+          ? k
+          : Math.min(1, Math.max(0, (k - a.switchAt) / (1 - a.switchAt)))
+      const dist = hold ? a.distFrom : a.distFrom + (a.distTo - a.distFrom) * kDist
+
+      if (a.switchAt >= 0 && !a.switched && k >= a.switchAt) {
+        /* 用切换那一刻的实际正交画幅，不用起始值：前面 zoom 已经在插值了 */
+        a.halfFrom = ORTHO_BASE / Math.max(1e-9, a.zoomFrom + (a.zoomTo - a.zoomFrom) * k)
+        this.enterPerspective(a.halfFrom, dist)
+        a.switched = true
+      }
+
+      const cam = this.cam
+      cam.position.copy(this.controls.target).addScaledVector(cur, dist)
+      cam.up.copy(a.upFrom).lerp(a.upTo, k).normalize()
+      cam.lookAt(this.controls.target)
+      if (this.ortho) {
+        this.camO.zoom = a.zoomFrom + (a.zoomTo - a.zoomFrom) * k
+        this.camO.updateProjectionMatrix()
+      } else {
+        /* 保持画幅连续：half/dist 决定 FOV，终点正好回到 home.fov */
+        const half = a.halfFrom + (a.halfTo - a.halfFrom) * k
+        const fov = (2 * Math.atan(half / Math.max(1e-9, dist)) * 180) / Math.PI
+        this.camP.fov = Math.min(120, Math.max(1, fov))
+        this.camP.updateProjectionMatrix()
+      }
       this.setFade(a.fade === 'out' ? 1 - k : k)
       if (a.t >= 1) {
         const home = this.homePose
         if (a.fade === 'in') {
+          if (a.switchAt >= 0 && !a.switched) {
+            this.enterPerspective(a.halfFrom, dist)
+            a.switched = true
+          }
+          if (home !== null && !home.ortho) {
+            this.camP.fov = home.fov
+            this.camP.zoom = 1
+            this.camP.updateProjectionMatrix()
+          }
           this.pseudo = false
           this.syncVisibility()
-        }
-        if (a.fade === 'in' && home !== null && !home.ortho) {
-          /* 进 2D 前是透视：落回透视，别把人留在正交档 */
-          this.ortho = false
-          this.camP.position.copy(this.camO.position)
-          this.camP.quaternion.copy(this.camO.quaternion)
-          this.camP.up.copy(this.camO.up)
-          this.camP.zoom = 1
-          this.camP.updateProjectionMatrix()
-          this.controls.object = this.camP
         }
         this.flyAnim = null
         this.controls.enabled = true
