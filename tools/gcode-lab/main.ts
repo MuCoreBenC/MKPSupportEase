@@ -66,6 +66,7 @@ const el = {
   layers: $('layers'),
   layerOther: $('layer-other'),
   reset: $('reset'),
+  explode: $('explode'),
   refit: $('refit'),
   ortho: $('ortho'),
   layermode: $('layermode'),
@@ -408,6 +409,12 @@ el.reset.addEventListener('click', () => {
 el.refit.addEventListener('click', () => {
   if (state.view === '2d') view2d.recenter()
   else view3d.refit()
+})
+
+/* 爆炸图：一层一层沿 Z 拉开，镜头同时往后拉、往上抬 */
+el.explode.addEventListener('click', () => {
+  view3d.toggleExplode()
+  el.explode.setAttribute('aria-pressed', view3d.isExploded() ? 'true' : 'false')
 })
 
 /* 透视 / 正交：钮上写的是**现在**是哪一档 */

@@ -235,6 +235,12 @@ input[type='range']:hover::-webkit-slider-thumb {
   border-color: var(--dim);
 }
 
+/* 开着的那一颗（爆炸） */
+.btn[aria-pressed='true'] {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
 /* ---------------- 三栏 ---------------- */
 
 .grid {
@@ -445,8 +451,8 @@ input[type='range']:hover::-webkit-slider-thumb {
   position: absolute;
   left: 10px;
   bottom: 34px;
-  width: 132px;
-  height: 132px;
+  width: 112px;
+  height: 112px;
   touch-action: none;
 }
 

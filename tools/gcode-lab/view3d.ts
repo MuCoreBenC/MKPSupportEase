@@ -97,6 +97,26 @@ export class View3d {
   /** 每帧报一次视距（顶栏那把缩放滑杆要跟着滚轮走） */
   onFrame: ((distance: number) => void) | null = null
 
+  /* ---- 爆炸图 ---- */
+  /** 顶点着色器里按「第几层」把这一层整体抬高多少（对象空间 mm，之后还要乘 Z 倍数） */
+  private readonly explodeUniform = { value: 0 }
+  /** 每层多抬多少（对象空间 mm），按模型高度与层数算 */
+  private explodeGap = 0
+  /** 炸开之后整体重心上移多少（世界 mm，已含 Z 倍数） */
+  private explodeRise = 0
+  /** 0 = 合起来，1 = 全炸开 */
+  private explodeT = 0
+  private exploded = false
+  private explodeAnim: {
+    from: number
+    to: number
+    t: number
+    dist: number
+    targetZ: number
+  } | null = null
+  /** 炸开之前的机位（收回去时还原它） */
+  private explodeHome: { dist: number; targetZ: number } | null = null
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true })
@@ -150,6 +170,7 @@ export class View3d {
   /** 打印本体：每类一层，开关按类独立；层滑块靠 `bounds` 切 */
   setPrint(print: PrintModel): void {
     this.print = print
+    this.updateExplodeScale()
     this.rebuildPrint()
     this.applyRanges()
     this.framed = false
@@ -190,6 +211,7 @@ export class View3d {
   setExaggeration(n: number): void {
     this.exaggeration = n
     this.group.scale.set(1, 1, n)
+    this.updateExplodeScale()
   }
 
   /** 回到默认视角：朝向与位置都回默认 */
@@ -220,6 +242,48 @@ export class View3d {
 
   isOrtho(): boolean {
     return this.ortho
+  }
+
+  isExploded(): boolean {
+    return this.exploded
+  }
+
+  /**
+   * 爆炸图：每层沿 Z 抬高，同时把镜头往后拉、顺着往上抬。
+   *
+   * 「往上」是必须的：炸开之后整摞往上长，镜头不跟着抬就会有一半跑出画面；
+   * 距离也要跟着放大，否则层间距还是挤在一起，等于没炸开。
+   */
+  toggleExplode(): void {
+    this.exploded = !this.exploded
+    /* 炸开之前的机位记下来：收回去时按它还原，不能停在拉远之后的距离上 */
+    if (this.exploded || this.explodeHome === null) {
+      this.explodeHome = { dist: this.distance(), targetZ: this.controls.target.z }
+    }
+    this.explodeAnim = {
+      from: this.explodeT,
+      to: this.exploded ? 1 : 0,
+      t: 0,
+      dist: this.explodeHome.dist,
+      targetZ: this.explodeHome.targetZ,
+    }
+    this.controls.enabled = false
+  }
+
+  /** 按模型高度与层数定「每层抬多少」和「重心上移多少」 */
+  private updateExplodeScale(): void {
+    const p = this.print
+    const n = p?.layers.length ?? 0
+    if (p === null || n < 2) {
+      this.explodeGap = 0
+      this.explodeRise = 0
+      return
+    }
+    const height = Math.max(0.5, p.zMax - p.zMin)
+    /* 炸开后的总高度约为原来的两倍多：多出来的那部分平摊到层间隙上 */
+    this.explodeGap = (height * 1.4) / (n - 1)
+    this.explodeRise = (this.explodeGap * (n - 1) * this.exaggeration) / 2
+    this.explodeUniform.value = this.explodeGap * this.explodeT
   }
 
   /** 透视 / 正交。两台相机共用一份位姿，切过去画面大小不变 */
@@ -363,6 +427,41 @@ export class View3d {
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault())
   }
 
+  /**
+   * 让这一层的顶点按 `aLayer`（第几层）沿 Z 抬高 `uExplode`。
+   *
+   * 顶点是按层排好序的，所以爆炸只是着色器里加一次乘法 —— 拖滑块时不用重建几何。
+   * 注入点选 `begin_vertex`：`transformed` 刚拿到本地坐标，还没进模型矩阵（于是
+   * 组上的 Z 倍数照样会乘上去）。
+   */
+  private attachExplode(mat: THREE.Material): void {
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uExplode = this.explodeUniform
+      shader.vertexShader =
+        'attribute float aLayer;\nuniform float uExplode;\n' + shader.vertexShader
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\n  transformed.z += aLayer * uExplode;',
+      )
+    }
+  }
+
+  /** 这一块涂胶算第几层（离它最近的打印层） */
+  private layerIndexOf(z: number): number {
+    const p = this.print
+    if (p === null || p.layers.length === 0) return 0
+    let best = 0
+    let bestD = Infinity
+    for (let i = 0; i < p.layers.length; i += 1) {
+      const d = Math.abs((p.layers[i] as number) - z)
+      if (d < bestD) {
+        bestD = d
+        best = i
+      }
+    }
+    return best
+  }
+
   private buildGrid(): THREE.GridHelper {
     const p = palette()
     const color = hex(p.line, 0x232a33)
@@ -387,12 +486,15 @@ export class View3d {
     const dim = new THREE.Color(hex(p.dim, 0x8b949e))
     const positions: number[] = []
     const colors: number[] = []
+    const layers: number[] = []
     for (const block of blocks) {
       const base = blockLayerZ(block)
+      const li = this.layerIndexOf(base)
       for (const m of block.moves) {
         if (m.level === 'up') continue
         const z = base + GLUE_LIFT_MM
         positions.push(m.from.x, m.from.y, z, m.to.x, m.to.y, z)
+        layers.push(li, li)
         const c = colored ? (m.level === 'raised' ? raised : normal) : dim
         colors.push(c.r, c.g, c.b, c.r, c.g, c.b)
       }
@@ -400,6 +502,7 @@ export class View3d {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+    geo.setAttribute('aLayer', new THREE.Float32BufferAttribute(layers, 1))
     /* 涂胶是这个试验台的主角：关掉深度测试，被模型挡住时也画在最上面 */
     const mat = new THREE.LineBasicMaterial({
       vertexColors: true,
@@ -407,6 +510,7 @@ export class View3d {
       opacity,
       depthTest: !colored,
     })
+    this.attachExplode(mat)
     const layer = new THREE.LineSegments(geo, mat)
     if (colored) layer.renderOrder = 3
     return layer
@@ -455,12 +559,20 @@ export class View3d {
       if (data.length === 0) continue
       const geo = new THREE.BufferGeometry()
       geo.setAttribute('position', new THREE.BufferAttribute(data, 3))
+      /* 每层的段数是已知的（`bounds` 是前缀和），按段数铺一遍层号 */
+      const edge = this.print.bounds[kind]
+      const layerIdx = new Float32Array(data.length / 3)
+      for (let i = 0; i < this.print.layers.length; i += 1) {
+        layerIdx.fill(i, (edge[i] as number) * 2, (edge[i + 1] as number) * 2)
+      }
+      geo.setAttribute('aLayer', new THREE.BufferAttribute(layerIdx, 1))
       const t = tone[kind]
       const mat = new THREE.LineBasicMaterial({
         color: t.hex,
         transparent: true,
         opacity: t.opacity,
       })
+      this.attachExplode(mat)
       const layer = new THREE.LineSegments(geo, mat)
       this.printLayers.set(kind, layer)
       this.group.add(layer)
@@ -577,7 +689,28 @@ export class View3d {
     const dt = this.last === 0 ? 1 / 60 : Math.min(0.1, (now - this.last) / 1000)
     this.last = now
 
-    if (this.tween === null) {
+    if (this.explodeAnim !== null) {
+      /* 爆炸这一段自己摆相机：镜头往后拉、跟着往上抬 */
+      const a = this.explodeAnim
+      a.t = Math.min(1, a.t + dt / 1.2)
+      const k = 1 - (1 - a.t) ** 3
+      this.explodeT = a.from + (a.to - a.from) * k
+      this.explodeUniform.value = this.explodeGap * this.explodeT
+      const dir = this.cam.position.clone().sub(this.controls.target)
+      const len = dir.length()
+      if (len > 1e-9) {
+        dir.divideScalar(len)
+        this.controls.target.z = a.targetZ + this.explodeRise * this.explodeT
+        const want = a.dist * (1 + 0.85 * this.explodeT)
+        this.cam.position.copy(this.controls.target).addScaledVector(dir, want)
+      }
+      if (a.t >= 1) {
+        this.explodeAnim = null
+        this.controls.enabled = true
+        this.last = 0
+        this.controls.update()
+      }
+    } else if (this.tween === null) {
       this.controls.update()
     } else {
       /* 补间期间不调 controls.update()：它会按自己记的球坐标把相机位置盖回去 */

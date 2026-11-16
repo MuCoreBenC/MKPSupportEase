@@ -27,6 +27,11 @@ const FACES: { normal: THREE.Vector3; label: string }[] = [
 
 const SIZE = 0.86
 const CORNER_R = 0.09
+/**
+ * 正交相机的半高。比立方体本身大一圈（立方体的斜对角约 0.61 + 圆点半径），
+ * 角上那颗提示点才不会被画布边缘切掉。
+ */
+const FRUSTUM = 0.92
 /** 立方体相机的站位距离（正交，只影响近远裁面） */
 const CAM_DIST = 4
 
@@ -56,7 +61,7 @@ export class ViewCube {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true })
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
 
-    this.camera = new THREE.OrthographicCamera(-0.78, 0.78, 0.78, -0.78, 0.1, 10)
+    this.camera = new THREE.OrthographicCamera(-FRUSTUM, FRUSTUM, FRUSTUM, -FRUSTUM, 0.1, 10)
     this.camera.up.set(0, 0, 1)
     this.camera.position.set(2.4, -2.4, 2)
     this.camera.lookAt(0, 0, 0)
@@ -91,10 +96,10 @@ export class ViewCube {
     const w = Math.max(1, rect.width)
     const h = Math.max(1, rect.height)
     this.renderer.setSize(w, h, false)
-    this.camera.left = -0.78 * (w / h)
-    this.camera.right = 0.78 * (w / h)
-    this.camera.top = 0.78
-    this.camera.bottom = -0.78
+    this.camera.left = -FRUSTUM * (w / h)
+    this.camera.right = FRUSTUM * (w / h)
+    this.camera.top = FRUSTUM
+    this.camera.bottom = -FRUSTUM
     this.camera.updateProjectionMatrix()
   }
 
@@ -223,14 +228,13 @@ export class ViewCube {
 
     const toCam = this.camera.position.clone().normalize()
     let best = -1
-    let bestD = 10
+    let bestD = 9
     this.corners.forEach((corner, i) => {
       /*
-       * 只认**轮廓上**的顶点（相邻三个面里有看得见的、也有背过去的）。
-       * 斜着看的时候，最近的那个顶点正好投影在立方体正中 —— 它要是也算角，
-       * 点「前面」就会跳到 45° 那个视角上去，这正是作者遇到的那一下。
+       * 朝向镜头那一半的顶点都算（含**最近的那个**：斜看时它正好在立方体正中，
+       * 作者就是要能从那儿点进去）。背面的顶点会投影到面里，必须挡掉。
        */
-      if (!onSilhouette(corner.position, toCam)) return
+      if (corner.position.dot(toCam) <= 0.05) return
       const p = corner.position.clone().project(this.camera)
       const sx = (p.x * 0.5 + 0.5) * rect.width
       const sy = (-p.y * 0.5 + 0.5) * rect.height
@@ -270,20 +274,6 @@ export class ViewCube {
  * 一个面的姿态：局部 +Z = 法线（朝外），局部 +Y = 贴图的"上"。
  * 自己拼基向量而不用 `lookAt` —— `lookAt` 还要看父级世界矩阵，这里一眼能读清。
  */
-/**
- * 这个顶点在不在立方体的轮廓上：相邻三个面里，既有朝向镜头的、也有背过去的。
- * （正对着的那个顶点三个面都朝前、背面的都朝后，两者都不算轮廓。）
- */
-function onSilhouette(pos: THREE.Vector3, toCam: THREE.Vector3): boolean {
-  const normals = [
-    new THREE.Vector3(Math.sign(pos.x), 0, 0),
-    new THREE.Vector3(0, Math.sign(pos.y), 0),
-    new THREE.Vector3(0, 0, Math.sign(pos.z)),
-  ]
-  const front = normals.filter((n) => n.dot(toCam) > 0.01).length
-  return front > 0 && front < 3
-}
-
 function basisOf(normal: THREE.Vector3): THREE.Matrix4 {
   const z = normal.clone()
   const x = new THREE.Vector3().crossVectors(upHint(z), z).normalize()
