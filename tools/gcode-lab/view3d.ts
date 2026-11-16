@@ -64,10 +64,22 @@ const SNAP_SECONDS = 0.3
  * 而且切的一瞬间会把透视 FOV 反算成与正交同画幅，看不出跳变。
  */
 const PERSPECTIVE_SWITCH_AT = 0.2
-/** 距离/画幅先调完的进度（切透视之后算起） */
-const FLY_DIST_END = 0.62
-/** 方向 / 目标点从这时才开始动，保证「先定视距，再移动」 */
-const FLY_MOVE_START = 0.58
+/**
+ * 两条曲线错峰：
+ *  - 视距（画幅）在切透视之后很快收尾：**先快后慢**（easeOutQuad）；
+ *  - 方向 / 目标点几乎同时起步，但**先慢后快**、末尾再收住（late smoothstep）。
+ * 于是前段主要是缩放、后段主要是移动，中间自然交接，不再「先冲一段再转」。
+ */
+const FLY_DIST_END = 0.72
+const FLY_MOVE_START = 0.12
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
+/** 先快后慢：起步就有速度，收尾没有 */
+const easeOutQuad = (v: number): number => 1 - (1 - clamp01(v)) ** 2
+/** 先慢后快、末端也收住；速度峰在 2/3 处 */
+const easeLate = (v: number): number => {
+  const x = clamp01(v)
+  return x * x * x * (4 - 3 * x)
+}
 
 export class View3d {
   private readonly canvas: HTMLCanvasElement
@@ -905,17 +917,17 @@ export class View3d {
       const k = 1 - (1 - a.t) ** 3
       /* 切透视点的**线性时间**：k 是缓出值，不能直接拿来排阶段 */
       const switchT = a.switchAt >= 0 ? 1 - Math.cbrt(1 - a.switchAt) : 0
-      const ease = (v: number): number => 1 - (1 - Math.min(1, Math.max(0, v))) ** 3
       /*
-       * 先调距离 / 画幅，再转方向和目标点。
-       * 以前距离被挤在切透视之后与旋转一起做，视距特别大 / 小时就成了
-       * 「猛地冲一段再转」；现在两件事分开排，各自的时长都够用。
+       * 缩放与移动用两条**错峰曲线**：
+       * 视距先快后慢（`easeOutQuad`），方向与目标点先慢后快、末尾收住（`easeLate`）。
+       * 它们从切透视后几乎同时起步，速度峰不在一个时刻，所以看着是一条连贯的运镜，
+       * 而不是「先把距离拉完、再开始转」那种两段式。
        */
       const kDist =
         a.switchAt >= 0
-          ? ease((a.t - switchT) / (FLY_DIST_END - switchT))
+          ? easeOutQuad((a.t - switchT) / (FLY_DIST_END - switchT))
           : k
-      const kMove = a.switchAt >= 0 ? ease((a.t - FLY_MOVE_START) / (1 - FLY_MOVE_START)) : k
+      const kMove = a.switchAt >= 0 ? easeLate((a.t - FLY_MOVE_START) / (1 - FLY_MOVE_START)) : k
 
       const dir = a.from.clone()
       if (a.from.dot(a.to) < -0.999) dir.x += 1e-3
