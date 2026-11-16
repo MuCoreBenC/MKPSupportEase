@@ -348,7 +348,7 @@ export class View3d {
       targetFrom: this.controls.target.clone(),
       targetTo: new THREE.Vector3(view.cx, view.cy, 0),
       distFrom: offset.length(),
-      distTo: 1000,
+      distTo: this.distanceForView(view),
       zoomFrom: this.camO.zoom,
       zoomTo: zoom,
       switchAt: -1,
@@ -368,6 +368,19 @@ export class View3d {
   }
 
   /**
+   * 2D 当前缩放对应的**等效 3D 视距**。
+   *
+   * 以前伪顶视把相机硬放在 1000mm，结果从 2D 切回 3D 时视距先从 2D 的值
+   * 跳到 1000 再收到 home —— 看起来就是「先把视距拉得很大再缩小」。
+   * 正交下距离不影响画幅，但切透视时它就是起点；这里按同一个 scale 反算，
+   * 于是第一帧既同画面、又同视距。
+   */
+  private distanceForView(view: { scale: number; h: number }): number {
+    const halfTan = Math.tan((this.camP.fov * Math.PI) / 360)
+    return ORTHO_BASE / Math.max(1e-9, this.zoomForView(view) * halfTan)
+  }
+
+  /**
    * 瞬时把 3D 摆成「当前 2D」的伪顶视。
    *
    * 切回 3D 的那一帧必须接在 2D 最后一帧上：用户在 2D 里平移/缩放过，旧的 3D 顶视
@@ -377,9 +390,10 @@ export class View3d {
   snapToPseudo(view: { cx: number; cy: number; scale: number; w: number; h: number }): void {
     if (!this.ortho) this.setOrtho(true)
     const target = new THREE.Vector3(view.cx, view.cy, 0)
+    const dist = this.distanceForView(view)
     this.controls.target.copy(target)
     this.camO.up.set(0, 1, 0)
-    this.camO.position.copy(target).add(new THREE.Vector3(0, 0, 1000))
+    this.camO.position.copy(target).add(new THREE.Vector3(0, 0, dist))
     this.camO.lookAt(target)
     this.camO.zoom = this.zoomForView(view)
     this.camO.updateProjectionMatrix()
