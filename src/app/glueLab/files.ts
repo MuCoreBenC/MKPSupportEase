@@ -48,3 +48,51 @@ export function pairsWith(gcodeName: string, metaName: string): boolean {
   const got = (metaName.split(/[\\/]/).pop() ?? metaName).toLowerCase()
   return got === want
 }
+
+/* ---------------- 后处理原件 ---------------- */
+
+/** 后缀长度的字面量只此一处（判据顺序：`_original.gcode` 也以 `.gcode` 结尾） */
+const ORIGINAL_SUFFIX = '_original.gcode'
+
+/**
+ * 是不是后处理原件。产物的 `.gcode` 不算 —— 三份一起拖时必须先按这条把两者分开，
+ * 否则 `find(f => /\.gcode$/i.test(f))` 可能把原件当成产物打开。
+ */
+export function isOriginalName(name: string): boolean {
+  const base = (name.split(/[\\/]/).pop() ?? name).toLowerCase()
+  return base.endsWith(ORIGINAL_SUFFIX)
+}
+
+/** `xxx.gcode` → `xxx_original.gcode`（已经是原件名就原样返回，不叠后缀） */
+export function originalNameOf(gcodeName: string): string {
+  const base = gcodeName.split(/[\\/]/).pop() ?? gcodeName
+  const stem = base.replace(/\.gcode$/i, '').replace(/_original$/i, '')
+  return `${stem}${ORIGINAL_SUFFIX}`
+}
+
+/** `xxx_original.gcode` → `xxx.gcode`（不是原件名就返回 null） */
+export function gcodeNameOfOriginal(originalName: string): string | null {
+  const base = originalName.split(/[\\/]/).pop() ?? originalName
+  if (!base.toLowerCase().endsWith(ORIGINAL_SUFFIX)) return null
+  return `${base.slice(0, -ORIGINAL_SUFFIX.length)}.gcode`
+}
+
+/** 分两次拖时，判断这份原件是不是在等那个产物 */
+export function pairsWithOriginal(gcodeName: string, originalName: string): boolean {
+  return originalNameOf(gcodeName).toLowerCase() === (originalName.split(/[\\/]/).pop() ?? originalName).toLowerCase()
+}
+
+/**
+ * 在一堆名字里找与这个产物配对的元件；找不到返回 `null`。
+ * 优先精确匹配 `xxx_original.gcode`，其次忽略大小写。
+ */
+export function findOriginalName(gcodeName: string, names: Iterable<string>): string | null {
+  const want = originalNameOf(gcodeName)
+  let loose: string | null = null
+  for (const name of names) {
+    const base = name.split(/[\\/]/).pop() ?? name
+    if (base === want) return name
+    if (loose === null && base.toLowerCase() === want.toLowerCase()) loose = name
+  }
+  return loose
+}

@@ -5,7 +5,18 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { findMetaName, gcodeNameOfMeta, metaNameOf, pairsWith, stemOf } from './files'
+import {
+  findMetaName,
+  findOriginalName,
+  gcodeNameOfMeta,
+  gcodeNameOfOriginal,
+  isOriginalName,
+  metaNameOf,
+  originalNameOf,
+  pairsWith,
+  pairsWithOriginal,
+  stemOf,
+} from './files'
 
 describe('文件名配对', () => {
   it('带路径、大小写都能剥出主干', () => {
@@ -28,5 +39,30 @@ describe('文件名配对', () => {
   it('分两次拖：同名才算配对', () => {
     expect(pairsWith('x.gcode', 'x_meta.json')).toBe(true)
     expect(pairsWith('x.gcode', 'y_meta.json')).toBe(false)
+  })
+})
+
+describe('后处理原件', () => {
+  it('产物与原件互为对照，原件名不会叠两层后缀', () => {
+    expect(isOriginalName('x_original.gcode')).toBe(true)
+    expect(isOriginalName('a/b/X_ORIGINAL.GCODE')).toBe(true)
+    expect(isOriginalName('x.gcode')).toBe(false)
+
+    expect(originalNameOf('x.gcode')).toBe('x_original.gcode')
+    expect(originalNameOf('a/b/x.gcode')).toBe('x_original.gcode')
+    expect(originalNameOf('x_original.gcode')).toBe('x_original.gcode')
+
+    expect(gcodeNameOfOriginal('a/x_original.gcode')).toBe('x.gcode')
+    expect(gcodeNameOfOriginal('x.gcode')).toBeNull()
+  })
+
+  it('三份一起拖：原件只认同名产物，不会被当成产物', () => {
+    const names = ['x_original.gcode', 'x.gcode', 'x_meta.json', 'y_original.gcode']
+    expect(findOriginalName('x.gcode', names)).toBe('x_original.gcode')
+    expect(findOriginalName('y.gcode', names)).toBe('y_original.gcode')
+    expect(findOriginalName('z.gcode', names)).toBeNull()
+
+    expect(pairsWithOriginal('x.gcode', 'x_original.gcode')).toBe(true)
+    expect(pairsWithOriginal('x.gcode', 'y_original.gcode')).toBe(false)
   })
 })

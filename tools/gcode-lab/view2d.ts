@@ -18,6 +18,10 @@ export interface View2dData {
   predicted: Uint8Array
   /** 带宽覆盖的格子（由 `EdgeField.bandMask` 给） */
   mask: Uint8Array | null
+  /** 下方支撑覆盖（上一层支撑）：灰色垫在带宽下面；无支撑是 `null` */
+  under: { field: EdgeField; mask: Uint8Array } | null
+  /** 每条移动的余量是否不足阈值（1 = 不足）：起点画红点 */
+  underLow: Uint8Array
 }
 
 function segDistance(
@@ -39,14 +43,23 @@ export class View2d {
   private readonly canvas: HTMLCanvasElement
   private readonly ctx: CanvasRenderingContext2D
   private data: View2dData | null = null
+  /** 画布空着时左上角那句（没打开文件 / 这一层没有涂胶） */
+  private emptyText = '把产物 G-code 拖进窗口'
   private maskCanvas: HTMLCanvasElement | null = null
   private maskKey = ''
+  /** 下方支撑覆盖的离屏图（灰） */
+  private underCanvas: HTMLCanvasElement | null = null
+  private underKey = ''
   private scale = 4
   private cx = 0
   private cy = 0
   private w = 1
   private h = 1
   private selected: number | null = null
+  /** 代码面板 / 色带指过来的那条移动：只加粗，不改选中 */
+  private hover: number | null = null
+  private hoverRaf = 0
+  private hoverAt = { x: 0, y: 0 }
   /* 鼠标单键拖动；触屏一律不用单指移动 —— 一指只点选 */
   private dragging = false
   private dragFrom = { x: 0, y: 0, cx: 0, cy: 0 }
@@ -59,6 +72,8 @@ export class View2d {
   /** 比例尺读数（mm / 100px），由 `draw` 更新 */
   readonly onScale: (mmPer100px: number) => void
   readonly onPick: (index: number | null) => void
+  /** 指针扫过哪一条（`null` = 不在任何一条上）；代码面板据此高亮行 */
+  onHover: ((index: number | null) => void) | null = null
 
   constructor(canvas: HTMLCanvasElement, onScale: (v: number) => void, onPick: (i: number | null) => void) {
     this.canvas = canvas
@@ -71,6 +86,7 @@ export class View2d {
     canvas.addEventListener('wheel', this.handleWheel, { passive: false })
     canvas.addEventListener('pointerdown', this.handleDown)
     canvas.addEventListener('pointermove', this.handleMove)
+    canvas.addEventListener('pointermove', this.handleHover)
     canvas.addEventListener('pointerup', this.handleUp)
     canvas.addEventListener('pointercancel', this.handleUp)
     canvas.addEventListener('pointerleave', this.handleLeave)
@@ -114,8 +130,40 @@ export class View2d {
     return bbox.maxX >= x0 && bbox.minX <= x1 && bbox.maxY >= y0 && bbox.minY <= y1
   }
 
+  /** 没有当前块（这一层还没涂胶）：别留着上一块的线 */
+  clear(emptyText = '把产物 G-code 拖进窗口'): void {
+    this.data = null
+    this.selected = null
+    this.emptyText = emptyText
+    this.draw()
+  }
+
+  /** 阈值变了：只换红点，不重建几何 */
+  setUnderLow(low: Uint8Array): void {
+    if (this.data === null) return
+    this.data.underLow = low
+    this.draw()
+  }
+
   select(index: number | null): void {
     this.selected = index
+    this.draw()
+  }
+
+  /** 代码行 / 色带悬停指过来：加粗那一条，不动选中 */
+  setHover(index: number | null): void {
+    if (this.hover === index) return
+    this.hover = index
+    this.draw()
+  }
+
+  /**
+   * 只平移，不动缩放：代码面板的「起点 / 终点」与跳转都靠它。
+   * 缩放一动，观察尺度就断了 —— 作者要的是「眼睛不动，画面挪过去」。
+   */
+  centerOn(x: number, y: number): void {
+    this.cx = x
+    this.cy = y
     this.draw()
   }
 
@@ -269,6 +317,26 @@ export class View2d {
   private handleLeave = (): void => {
     /* 指针捕获期间 leave 不该打断手势；只有鼠标真的离开且没按键才收 */
     if (this.pointers.size === 0) this.dragging = false
+    if (this.hover !== null) {
+      this.hover = null
+      this.draw()
+      this.onHover?.(null)
+    }
+  }
+
+  /** 指针扫过：按帧节流挑最近的一条，报给外面（代码面板高亮那一行） */
+  private handleHover = (e: PointerEvent): void => {
+    const rect = this.canvas.getBoundingClientRect()
+    this.hoverAt = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    if (this.hoverRaf !== 0) return
+    this.hoverRaf = requestAnimationFrame(() => {
+      this.hoverRaf = 0
+      const index = this.pick(this.hoverAt.x, this.hoverAt.y)
+      if (index === this.hover) return
+      this.hover = index
+      this.draw()
+      this.onHover?.(index)
+    })
   }
 
   private handleClick = (e: MouseEvent): void => {
@@ -305,15 +373,69 @@ export class View2d {
     if (!this.data) {
       ctx.fillStyle = palette().dim
       ctx.font = '12px -apple-system, sans-serif'
-      ctx.fillText('把产物 G-code 拖进窗口', 16, 24)
+      ctx.fillText(this.emptyText, 16, 24)
       return
     }
     this.drawGrid()
+    this.drawUnder()
     this.drawMask()
     this.drawMoves()
+    this.drawUnderLow()
     this.drawFaces()
+    this.drawHover()
     this.drawSelection()
     this.onScale((100 / this.scale))
+  }
+
+  /** 下方支撑覆盖：灰色的「有料」区，垫在蓝色带宽下面 */
+  private drawUnder(): void {
+    const { data, ctx, scale } = this
+    if (!data?.under) return
+    const f = data.under.field
+    const key = `${data.block.index}:${f.nx}x${f.ny}`
+    if (this.underCanvas === null || this.underKey !== key) {
+      const off = document.createElement('canvas')
+      off.width = f.nx
+      off.height = f.ny
+      const octx = off.getContext('2d')
+      if (!octx) return
+      const img = octx.createImageData(f.nx, f.ny)
+      for (let i = 0; i < data.under.mask.length; i += 1) {
+        if (!data.under.mask[i]) continue
+        /* 屏幕 y 是反的，图要上下翻一下才不会镜像（与带宽同一套） */
+        const x = i % f.nx
+        const y = (i - x) / f.nx
+        const t = ((f.ny - 1 - y) * f.nx + x) * 4
+        img.data[t] = 150
+        img.data[t + 1] = 150
+        img.data[t + 2] = 158
+        img.data[t + 3] = 46
+      }
+      octx.putImageData(img, 0, 0)
+      this.underCanvas = off
+      this.underKey = key
+    }
+    const [sx, sy] = this.toScreen(f.x0, f.y0 + f.ny * f.cellMm)
+    ctx.save()
+    ctx.imageSmoothingEnabled = true
+    ctx.drawImage(this.underCanvas, sx, sy, f.nx * f.cellMm * scale, f.ny * f.cellMm * scale)
+    ctx.restore()
+  }
+
+  /** 余量不够的涂胶段：起点点一个红点，扫一眼就知道哪几段悬着 */
+  private drawUnderLow(): void {
+    const { data, ctx } = this
+    if (!data) return
+    ctx.save()
+    ctx.fillStyle = palette().red
+    data.block.moves.forEach((m, i) => {
+      if (data.underLow[i] !== 1) return
+      const [x, y] = this.toScreen(m.from.x, m.from.y)
+      ctx.beginPath()
+      ctx.arc(x, y, 2.2, 0, Math.PI * 2)
+      ctx.fill()
+    })
+    ctx.restore()
   }
 
   private drawGrid(): void {
@@ -485,6 +607,25 @@ export class View2d {
     return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null
   }
 
+  /** 悬停：比选中细一档、用蓝色，不动选中那条的白色描边 */
+  private drawHover(): void {
+    const { data, ctx } = this
+    if (!data || this.hover === null || this.hover === this.selected) return
+    const m = data.block.moves[this.hover]
+    if (!m) return
+    const [ax, ay] = this.toScreen(m.from.x, m.from.y)
+    const [bx, by] = this.toScreen(m.to.x, m.to.y)
+    ctx.save()
+    ctx.strokeStyle = palette().blue
+    ctx.lineWidth = 3
+    ctx.globalAlpha = 0.85
+    ctx.beginPath()
+    ctx.moveTo(ax, ay)
+    ctx.lineTo(bx, by)
+    ctx.stroke()
+    ctx.restore()
+  }
+
   private drawSelection(): void {
     const { data, ctx } = this
     if (!data || this.selected === null) return
@@ -499,10 +640,16 @@ export class View2d {
     ctx.moveTo(ax, ay)
     ctx.lineTo(bx, by)
     ctx.stroke()
+    /* 起点实心、终点空心：代码面板那两枚「起点 / 终点」在图上各有对应物 */
     ctx.fillStyle = palette().text
     ctx.beginPath()
     ctx.arc(ax, ay, 2.5, 0, Math.PI * 2)
     ctx.fill()
+    ctx.strokeStyle = palette().text
+    ctx.lineWidth = 1.4
+    ctx.beginPath()
+    ctx.arc(bx, by, 2.6, 0, Math.PI * 2)
+    ctx.stroke()
     ctx.restore()
   }
 }

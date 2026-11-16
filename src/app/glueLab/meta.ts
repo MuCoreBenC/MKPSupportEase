@@ -55,3 +55,8 @@ export function readGlueOffsets(meta: unknown): GlueOffsets | null {
 export function metaPathOf(gcodePath: string): string {
   return `${gcodePath.replace(/\.gcode$/i, '')}_meta.json`
 }
+
+/** 产物路径 → 同处理后原件路径（`a/b/x.gcode` → `a/b/x_original.gcode`） */
+export function originalPathOf(gcodePath: string): string {
+  return `${gcodePath.replace(/\.gcode$/i, '')}_original.gcode`
+}

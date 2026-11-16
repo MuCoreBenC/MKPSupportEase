@@ -60,6 +60,12 @@
           <span class="ctl-label">抬起</span>
           <span id="lift" class="ctl-val">—</span>
         </span>
+        <label class="ctl">
+          <span class="ctl-label">下方余量</span>
+          <input id="under" type="range" min="0" max="200" step="5" value="50" />
+          <span id="under-val" class="ctl-val">0.50</span>
+        </label>
+        <button id="trust" type="button" class="btn" aria-pressed="false" title="采信下方余量：余量够的涂胶段建议不必抬">采信</button>
       </div>
       <div class="bar-right">
         <div class="seg" id="view">
@@ -95,18 +101,6 @@
         <canvas id="c3d" class="layer hidden"></canvas>
         <div id="scale" class="scale">—</div>
         <div id="badge" class="badge hidden"></div>
-        <div id="offset" class="offset hidden">
-          <div class="offset-title">
-            <span>涂胶偏移</span>
-            <span id="off-note" class="muted">—</span>
-          </div>
-          <label>X <input id="off-x" type="number" step="0.05" value="0" /></label>
-          <label>Y <input id="off-y" type="number" step="0.05" value="0" /></label>
-          <label>笔 Z <input id="off-tz" type="number" step="0.05" value="0" /></label>
-          <label>胶 Z <input id="off-gz" type="number" step="0.05" value="0" /></label>
-          <button id="off-zero" type="button" class="btn">归零</button>
-        </div>
-        <canvas id="cube" class="viewcube hidden"></canvas>
         <div id="layers" class="layers hidden">
           <span class="layers-title">显示</span>
           <button type="button" class="eye" data-kind="glue" aria-pressed="true" title="涂胶">
@@ -137,6 +131,18 @@
             <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-on" /></svg><span>其它</span>
           </button>
         </div>
+        <div id="offset" class="offset hidden">
+          <div class="offset-head">
+            <span>涂胶偏移</span>
+            <span id="off-note" class="muted">—</span>
+            <button id="off-zero" type="button" class="btn" title="X、Y 回零，Z 回到这一层表面">归零</button>
+          </div>
+          <label>X <input id="off-x" type="number" step="0.05" value="0" /></label>
+          <label>Y <input id="off-y" type="number" step="0.05" value="0" /></label>
+          <label>笔Z <input id="off-tz" type="number" step="0.05" value="0" /></label>
+          <label>胶Z <input id="off-gz" type="number" step="0.05" value="0" /></label>
+        </div>
+        <canvas id="cube" class="viewcube hidden"></canvas>
         <div id="side" class="side hidden">
           <div class="side-item">
             <input id="layer" class="vslider" type="range" min="0" max="0" step="1" value="0" />
@@ -156,6 +162,7 @@
         </div>
         <div id="faces" class="faces"></div>
         <div id="detail" class="detail"></div>
+        <section id="code" class="code"></section>
       </aside>
     </main>
 

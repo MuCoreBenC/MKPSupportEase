@@ -75,13 +75,30 @@ export class EdgeField {
     this.dist = dist
   }
 
-  /** 一条涂胶路径 → 距离场。点太少或退化成一个点时返回 `null` */
-  static build(moves: readonly Stroke[]): EdgeField | null {
+  /**
+   * 一条涂胶路径 → 距离场。点太少或退化成一个点时返回 `null`。
+   *
+   * `fillHoles` 把被覆盖区围住的孔一律当实心（判「下方支撑」时要的）：
+   * 孔里是零件本体，笔走过去有东西托着，不该算边。与外界连通的缺口不填。
+   */
+  static build(
+    moves: readonly Stroke[],
+    opts: { material?: readonly Stroke[] } = {},
+  ): EdgeField | null {
     let minX = Infinity
     let minY = Infinity
     let maxX = -Infinity
     let maxY = -Infinity
     for (const m of moves) {
+      for (const p of [m.from, m.to]) {
+        minX = Math.min(minX, p.x)
+        minY = Math.min(minY, p.y)
+        maxX = Math.max(maxX, p.x)
+        maxY = Math.max(maxY, p.y)
+      }
+    }
+    /* 材料那一份（撑 + 零件本体）也进包围盒：孔比支撑范围大时网格不能裁掉它 */
+    for (const m of opts.material ?? []) {
       for (const p of [m.from, m.to]) {
         minX = Math.min(minX, p.x)
         minY = Math.min(minY, p.y)
@@ -124,6 +141,20 @@ export class EdgeField {
           }
         }
       }
+    }
+
+    /* 填内孔：只填「孔里真有材料」的（零件墙/填充/桥接），真空气孔留着 */
+    if (opts.material !== undefined) {
+      const material = new Uint8Array(nx * ny)
+      for (const m of opts.material) {
+        const len = Math.hypot(m.to.x - m.from.x, m.to.y - m.from.y)
+        const steps = Math.min(200_000, Math.max(1, Math.ceil(len / (cell * 0.5))))
+        for (let k = 0; k <= steps; k += 1) {
+          const t = k / steps
+          material[at(m.from.x + (m.to.x - m.from.x) * t, m.from.y + (m.to.y - m.from.y) * t)] = 1
+        }
+      }
+      fillHoles(covered, material, nx, ny)
     }
 
     /* 连通块标号 + 每块短边（一层里可能就是好几张互不相连的面） */
@@ -262,6 +293,13 @@ export class EdgeField {
     return band > 0 && this.edgeDistance(p) < band
   }
 
+  /** 每格有没有料（1 = 覆盖）。画「下方支撑」的覆盖层用 */
+  coverageMask(): Uint8Array {
+    const mask = new Uint8Array(this.nx * this.ny)
+    for (let i = 0; i < mask.length; i += 1) mask[i] = this.comp[i] === 0 ? 0 : 1
+    return mask
+  }
+
   /** 供 2D 视图铺热力：每格是否落在带内（1 = 带内） */
   bandMask(rule: EdgeRule): Uint8Array {
     const mask = new Uint8Array(this.nx * this.ny)
@@ -275,5 +313,71 @@ export class EdgeField {
       if (d < band) mask[i] = 1
     }
     return mask
+  }
+}
+/**
+ * 填内孔：从四条边泛洪，泛洪不到的未覆盖格子就是「被围住的孔」，一律置为覆盖。
+ *
+ * 与外界连通的缺口不会被填 —— 那才是真正的边。孔里是零件本体（墙 / 填充 / 桥接），
+ * 笔走过去有东西托着，所以不当边看。
+ */
+function fillHoles(covered: Uint8Array, material: Uint8Array, nx: number, ny: number): void {
+  const outside = new Uint8Array(nx * ny)
+  const stack: number[] = []
+  const visit = (x: number, y: number): void => {
+    if (x < 0 || y < 0 || x >= nx || y >= ny) return
+    const i = y * nx + x
+    if (covered[i] === 1 || outside[i] === 1) return
+    outside[i] = 1
+    stack.push(i)
+  }
+  for (let x = 0; x < nx; x += 1) {
+    visit(x, 0)
+    visit(x, ny - 1)
+  }
+  for (let y = 0; y < ny; y += 1) {
+    visit(0, y)
+    visit(nx - 1, y)
+  }
+  while (stack.length > 0) {
+    const i = stack.pop() as number
+    const x = i % nx
+    const y = (i - x) / nx
+    visit(x - 1, y)
+    visit(x + 1, y)
+    visit(x, y - 1)
+    visit(x, y + 1)
+  }
+
+  /* 逐孔连通块：块里**有材料**才整块填平；真空气孔原样留着 */
+  const seen = new Uint8Array(nx * ny)
+  const hole: number[] = []
+  for (let start = 0; start < covered.length; start += 1) {
+    if (covered[start] === 1 || outside[start] === 1 || seen[start] === 1) continue
+    hole.length = 0
+    let hasMaterial = false
+    seen[start] = 1
+    stack.push(start)
+    while (stack.length > 0) {
+      const i = stack.pop() as number
+      hole.push(i)
+      if (material[i] === 1) hasMaterial = true
+      const x = i % nx
+      const y = (i - x) / nx
+      const push = (xx: number, yy: number): void => {
+        if (xx < 0 || yy < 0 || xx >= nx || yy >= ny) return
+        const j = yy * nx + xx
+        if (covered[j] === 1 || outside[j] === 1 || seen[j] === 1) return
+        seen[j] = 1
+        stack.push(j)
+      }
+      push(x - 1, y)
+      push(x + 1, y)
+      push(x, y - 1)
+      push(x, y + 1)
+    }
+    if (hasMaterial) {
+      for (const i of hole) covered[i] = 1
+    }
   }
 }

@@ -32,6 +32,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
+import type { EdgeField } from '../../src/app/glueLab/band'
 import type { LabBlock, PrintKind, PrintModel } from '../../src/app/glueLab/parse'
 import { hex, palette } from './theme'
 
@@ -96,6 +97,8 @@ export class View3d {
   private grid: THREE.GridHelper
   private allLayer: THREE.LineSegments | null = null
   private curLayer: THREE.LineSegments | null = null
+  /** 悬停那一条单独描的一道线（代码面板 / 色带指过来时用） */
+  private hoverLayer: THREE.Line | null = null
   private print: PrintModel | null = null
   /** `${对象 id}:${类别}` → 那一块线段；对象过滤只改可见性，不重建几何 */
   private readonly printLayers = new Map<
@@ -129,8 +132,29 @@ export class View3d {
   private objectFilter: number | null = null
   /** 涂胶相对「这一层表面」的额外抬高（mm）：把两个 Z 偏移调成 0 之后的差值 */
   private glueZShift = 0
+  /** 当前块的预测（与 `block.moves` 对齐）：与产物里的档不一致的那几条画红 */
+  private predicted: Uint8Array | null = null
+  /** 预测带宽铺在层表面上的那块半透明面 */
+  private band: THREE.Mesh | null = null
+  private bandTexture: THREE.CanvasTexture | null = null
+  /** 重建带宽纹理的键：换块 / 改外几条 / 改线距才重算 */
+  private bandKey = ''
   /** 每帧报一次视距（顶栏那把缩放滑杆要跟着滚轮走） */
   onFrame: ((distance: number) => void) | null = null
+
+  /* ---- 指到 / 点中某条涂胶线 ---- */
+  /** 当前块：几何段号 → `block.moves` 下标（`buildGlue` 跳过空走，两边同序） */
+  private curPick: number[] = []
+  private readonly ray = new THREE.Raycaster()
+  /** 按下时的屏幕位置：抬手时挪得超过 4px 就算拖拽，不当作点选 */
+  private press: { x: number; y: number } | null = null
+  /** 等下一帧再拾取的指针位置（拖拽与换块期间清空） */
+  private hoverAt: { x: number; y: number } | null = null
+  private hoverRaf = 0
+  /** 上次报出去的命中，用来避免同一帧反复回调 */
+  private hovered: number | null = null
+  onHover: ((move: number | null) => void) | null = null
+  onPick: ((move: number) => void) | null = null
 
   /* ---- 爆炸图 ---- */
   private exploded = false
@@ -257,15 +281,21 @@ export class View3d {
 
   select(index: number): void {
     this.index = index
+    this.press = null
+    this.clearHoverNow()
     if (this.curLayer) {
       this.group.remove(this.curLayer)
       this.curLayer.geometry.dispose()
       ;(this.curLayer.material as THREE.Material).dispose()
       this.curLayer = null
     }
+    this.curPick = []
     const block = this.blocks[index]
     if (!block) return
-    const layer = this.buildGlue([block], true, 1)
+    block.moves.forEach((m, i) => {
+      if (m.level !== 'up') this.curPick.push(i)
+    })
+    const layer = this.buildGlue([block], true, 1, this.predicted)
     this.curLayer = layer
     this.group.add(layer)
     this.group.scale.set(1, 1, this.exaggeration)
@@ -683,6 +713,137 @@ export class View3d {
     this.controls.update()
   }
 
+  /**
+   * 把视野中心挪到某个端点：朝向与视距都没动，只换 `controls.target` 与相机位置。
+   * 代码面板的「起点 / 终点」与点行跳转走这里。
+   */
+  focusAt(x: number, y: number, z: number): void {
+    const target = new THREE.Vector3(x, y, z)
+    const active = this.cam
+    const offset = active.position.clone().sub(this.controls.target)
+    this.controls.target.copy(target)
+    active.position.copy(target).add(offset)
+    const other = this.ortho ? this.camP : this.camO
+    other.position.copy(active.position)
+    other.quaternion.copy(active.quaternion)
+    other.up.copy(active.up)
+    this.controls.update()
+  }
+
+  /** 当前块里某条移动的起点 / 终点 / 中点；坐标含 Z 倍数与涂胶抬高 */
+  focusMove(move: number, at: 'from' | 'to' | 'mid'): void {
+    const block = this.blocks[this.index]
+    const m = block?.moves[move]
+    if (!block || !m) return
+    const anchor = blockLayerZ(block)
+    const base = block.normalZ ?? anchor
+    const p =
+      at === 'from'
+        ? m.from
+        : at === 'to'
+          ? m.to
+          : { x: (m.from.x + m.to.x) / 2, y: (m.from.y + m.to.y) / 2 }
+    const z = (anchor + (m.z - base) + this.glueZShift + GLUE_LIFT_MM) * this.exaggeration
+    this.focusAt(p.x, p.y, z)
+  }
+
+  /** 代码行 / 色带悬停：把这一条单独描粗，不动当前块的高亮 */
+  setHover(move: number | null): void {
+    const block = this.blocks[this.index]
+    if (!block) return
+    const m = move === null ? null : (block.moves[move] ?? null)
+    if (m === null || m.level === 'up') {
+      if (this.hoverLayer !== null) this.hoverLayer.visible = false
+      return
+    }
+    const anchor = blockLayerZ(block)
+    const base = block.normalZ ?? anchor
+    const z = anchor + (m.z - base) + this.glueZShift + GLUE_LIFT_MM
+    if (this.hoverLayer === null) {
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0], 3))
+      const mat = new THREE.LineBasicMaterial({
+        color: hex(palette().blue, 0x4c8dff),
+        transparent: true,
+        opacity: 0.9,
+        depthTest: false,
+      })
+      const line = new THREE.Line(geo, mat)
+      line.renderOrder = 4
+      this.hoverLayer = line
+      this.group.add(line)
+    }
+    this.hoverLayer.geometry.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute([m.from.x, m.from.y, z, m.to.x, m.to.y, z], 3),
+    )
+    this.hoverLayer.geometry.computeBoundingSphere()
+    this.hoverLayer.visible = true
+  }
+
+  /* ---- 指到 / 点中 ---- */
+
+  /**
+   * 屏幕位置 → 当前块的一条落笔移动。
+   *
+   * 只测当前块那一条 `LineSegments`：别的块的涂胶是暗色底图，能选中会一路串到没打开的块。
+   * 容差按屏幕 8px 换算成世界单位，与 2D 的 `pick` 同一手感；正交档用画幅而不是视距。
+   */
+  private pickAt(clientX: number, clientY: number): number | null {
+    const layer = this.curLayer
+    if (layer === null || !layer.visible || this.curPick.length === 0) return null
+    const rect = this.canvas.getBoundingClientRect()
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1,
+      -((clientY - rect.top) / Math.max(1, rect.height)) * 2 + 1,
+    )
+    this.ray.setFromCamera(ndc, this.cam)
+    /* 射线是在 `group` 的局部坐标里量的：先把 Z 倍数摊回去，屏幕容差才不会被放大 */
+    const avgScale = (1 + 1 + Math.max(1e-9, this.exaggeration)) / 3
+    this.ray.params.Line.threshold = this.pickThreshold(rect.height) * avgScale
+    const hit = this.ray.intersectObject(layer, false)[0]
+    if (hit === undefined) return null
+    /* `LineSegments` 给的 `index` 是顶点号，一段两个点 */
+    const seg = Math.floor((hit.index ?? -1) / 2)
+    return seg >= 0 ? (this.curPick[seg] ?? null) : null
+  }
+
+  /** 屏幕 8px 在这台相机下有多宽（mm）；下限 0.02 防止贴到毫米级时一条都选不中 */
+  private pickThreshold(heightPx: number): number {
+    const half = this.ortho
+      ? ORTHO_BASE / Math.max(1e-9, this.camO.zoom)
+      : this.distance() * Math.tan((this.camP.fov * Math.PI) / 360)
+    return Math.max(0.02, (2 * half * 8) / Math.max(1, heightPx))
+  }
+
+  /** 指针停一下再拾取：每帧最多算一次，命中没变就不回调 */
+  private scheduleHover(x: number, y: number): void {
+    this.hoverAt = { x, y }
+    if (this.hoverRaf !== 0) return
+    this.hoverRaf = requestAnimationFrame(() => {
+      this.hoverRaf = 0
+      const at = this.hoverAt
+      if (at === null) return
+      const move = this.pickAt(at.x, at.y)
+      if (move === this.hovered) return
+      this.hovered = move
+      this.canvas.style.cursor = move === null ? '' : 'pointer'
+      this.onHover?.(move)
+    })
+  }
+
+  private clearHoverNow(): void {
+    if (this.hoverRaf !== 0) {
+      cancelAnimationFrame(this.hoverRaf)
+      this.hoverRaf = 0
+    }
+    this.hoverAt = null
+    if (this.hovered === null) return
+    this.hovered = null
+    this.canvas.style.cursor = ''
+    this.onHover?.(null)
+  }
+
   /** 系统换深浅色：网格与所有线段的颜色都要重建（顶点色烘在 geometry 里） */
   refreshTheme(): void {
     this.scene.remove(this.grid)
@@ -744,6 +905,29 @@ export class View3d {
       capture: true,
       passive: true,
     })
+    /*
+     * 点选：按下记位置，抬手时挪不到 4px 才算「点」。右键与拖拽都留给 OrbitControls，
+     * 指针在画布外松开时由 window 那一条把 pending 清掉，否则之后永远不拾取。
+     */
+    this.canvas.addEventListener('pointerdown', (e) => {
+      this.press = e.button === 0 ? { x: e.clientX, y: e.clientY } : null
+    })
+    this.canvas.addEventListener('pointermove', (e) => {
+      if (this.press !== null) return
+      this.scheduleHover(e.clientX, e.clientY)
+    })
+    this.canvas.addEventListener('pointerup', (e) => {
+      const press = this.press
+      this.press = null
+      if (press === null || e.button !== 0) return
+      if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 4) return
+      const move = this.pickAt(e.clientX, e.clientY)
+      if (move !== null) this.onPick?.(move)
+    })
+    this.canvas.addEventListener('pointerleave', () => this.clearHoverNow())
+    window.addEventListener('pointerup', () => {
+      this.press = null
+    })
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault())
   }
 
@@ -765,10 +949,12 @@ export class View3d {
     blocks: readonly LabBlock[],
     colored: boolean,
     opacity: number,
+    predicted?: Uint8Array | null,
   ): THREE.LineSegments {
     const p = palette()
     const normal = new THREE.Color(hex(p.teal, 0x2bb6a8))
     const raised = new THREE.Color(hex(p.amber, 0xf0a020))
+    const badColor = new THREE.Color(hex(p.red, 0xe5484d))
     const dim = new THREE.Color(hex(p.dim, 0x8b949e))
     const positions: number[] = []
     const colors: number[] = []
@@ -780,11 +966,14 @@ export class View3d {
        * 基准对齐到这一块自己的层高上 —— 涂胶本来就是落在那一层的表面上。
        */
       const base = block.normalZ ?? anchor
-      for (const m of block.moves) {
+      for (let mi = 0; mi < block.moves.length; mi += 1) {
+        const m = block.moves[mi]
         if (m.level === 'up') continue
         const z = anchor + (m.z - base) + this.glueZShift + GLUE_LIFT_MM
         positions.push(m.from.x, m.from.y, z, m.to.x, m.to.y, z)
-        const c = colored ? (m.level === 'raised' ? raised : normal) : dim
+        /* 与 2D 同一套：预测与产物里的档对不上就描红 */
+        const bad = predicted !== undefined && predicted !== null && (predicted[mi] === 1) !== (m.level === 'raised')
+        const c = colored ? (bad ? badColor : m.level === 'raised' ? raised : normal) : dim
         colors.push(c.r, c.g, c.b, c.r, c.g, c.b)
       }
     }
@@ -912,6 +1101,7 @@ export class View3d {
     if (this.allLayer) this.allLayer.visible = glueOn && !onlyLayer && this.objectFilter === null
     /* 当前那一块涂胶：对象过滤时按它的位置判 */
     if (this.curLayer) this.curLayer.visible = (glueOn && glueObjectOk) || this.pseudo
+    if (this.band) this.band.visible = glueOn && glueObjectOk
     for (const { layer, object, kind } of this.printLayers.values()) {
       layer.visible = this.shown.has(kind) && (this.objectFilter === null || this.objectFilter === object)
     }
@@ -957,6 +1147,73 @@ export class View3d {
     this.select(this.index)
   }
 
+  /** 当前块的预测换了（换块 / 拖「外几条」）：按新预测重画，红标与 2D 同步 */
+  setPredicted(predicted: Uint8Array | null): void {
+    this.predicted = predicted
+    if (this.curLayer !== null) this.select(this.index)
+  }
+
+  /**
+   * 预测带宽：与 2D 同一张 mask、同一个颜色，铺在这一块的层表面上。
+   *
+   * 纹理只在「块 / 外几条 / 线距」变了才重建（`key`），拖滑杆不会每个 input 事件都上传一遍；
+   * 平面本身要跟着 `layerZ` 走，但不吃 `glueZShift` —— 带宽标的是哪一层，不是笔尖在哪。
+   */
+  setBand(field: EdgeField | null, mask: Uint8Array | null, key: string, layerZ: number): void {
+    if (field === null || mask === null) {
+      if (this.band !== null) this.band.visible = false
+      return
+    }
+    if (this.band === null) {
+      const mesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(1, 1),
+        new THREE.MeshBasicMaterial({
+          transparent: true,
+          depthWrite: false,
+          /* 与涂胶线同一档：这一层就在模型肚子里，吃深度的话整块都看不见 */
+          depthTest: false,
+          side: THREE.DoubleSide,
+        }),
+      )
+      mesh.renderOrder = 1
+      this.band = mesh
+      this.group.add(mesh)
+    }
+    if (this.bandKey !== key) {
+      const canvas = document.createElement('canvas')
+      canvas.width = field.nx
+      canvas.height = field.ny
+      const ctx = canvas.getContext('2d')
+      if (ctx === null) return
+      const img = ctx.createImageData(field.nx, field.ny)
+      for (let i = 0; i < mask.length; i += 1) {
+        if (!mask[i]) continue
+        const x = i % field.nx
+        const y = (i - x) / field.nx
+        /* 屏幕 y 是反的，图要上下翻一下才不会镜像（与 2D 的 `drawMask` 同一条） */
+        const t = ((field.ny - 1 - y) * field.nx + x) * 4
+        img.data[t] = 76
+        img.data[t + 1] = 141
+        img.data[t + 2] = 255
+        img.data[t + 3] = 64
+      }
+      ctx.putImageData(img, 0, 0)
+      this.bandTexture?.dispose()
+      const tex = new THREE.CanvasTexture(canvas)
+      tex.colorSpace = THREE.SRGBColorSpace
+      this.bandTexture = tex
+      const mat = this.band.material as THREE.MeshBasicMaterial
+      mat.map = tex
+      mat.needsUpdate = true
+      this.bandKey = key
+    }
+    const w = field.nx * field.cellMm
+    const h = field.ny * field.cellMm
+    this.band.scale.set(w, h, 1)
+    this.band.position.set(field.x0 + w / 2, field.y0 + h / 2, layerZ + GLUE_LIFT_MM)
+    this.band.visible = this.shown.has('glue') && this.glueInFilter()
+  }
+
   /** 只显示某一个模型（`null` = 全看） */
   setObjectFilter(id: number | null): void {
     this.objectFilter = id
@@ -965,12 +1222,31 @@ export class View3d {
 
   /* ---- 相机 ---- */
 
-  /** 可见几何的外接框（关掉的层不算，免得画面被看不见的东西撑大） */
+  /**
+   * 可见几何的外接框。
+   *
+   * 只看**画出来的那一段**（`drawRange`）而不是整份几何：层滑块切到第一层时，
+   * 整份包围盒还是 8.5mm 的整摞，框进去就只剩画面正中一个点，什么都看不出来。
+   * 关掉的层也不算，免得画面被看不见的东西撑大。
+   */
   private visibleBox(): THREE.Box3 {
     const box = new THREE.Box3()
+    const v = new THREE.Vector3()
     for (const child of this.group.children) {
       if (!child.visible) continue
-      box.expandByObject(child)
+      const geom = (child as THREE.Mesh).geometry as THREE.BufferGeometry | undefined
+      if (geom === undefined) continue
+      const pos = geom.getAttribute('position')
+      if (pos === undefined) continue
+      const range = geom.drawRange
+      const start = Math.max(0, range.start)
+      const end = range.count === Infinity ? pos.count : Math.min(pos.count, start + range.count)
+      if (end <= start) continue
+      child.updateMatrixWorld(true)
+      for (let i = start; i < end; i += 1) {
+        v.fromBufferAttribute(pos as THREE.BufferAttribute, i).applyMatrix4(child.matrixWorld)
+        box.expandByPoint(v)
+      }
     }
     return box
   }

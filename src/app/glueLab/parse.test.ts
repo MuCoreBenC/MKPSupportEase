@@ -92,6 +92,27 @@ describe('parsePrint', () => {
     expect(print.objects.map((o) => o.id)).toEqual([0])
     expect(print.objects[0]?.kinds.travel.length / 6).toBe(1)
   })
+
+  it('省前导零的坐标照样认：`Z.2` / `X.5`（切片器就这么写）', () => {
+    const text = [
+      '; start printing object, unique label id: 7',
+      '; FEATURE: Outer wall',
+      'G1 Z.2',
+      'G1 X.5 Y.5 E.1',
+      'G1 X10 Y10 E.2',
+      'G1 Z.4',
+      'G1 X20 Y20 E.3',
+    ].join('\n')
+    const print = parsePrint(text)
+    expect(print.layers).toEqual([0.2, 0.4])
+    const obj = print.objects.find((o) => o.id === 7)
+    if (!obj) throw new Error('fixture 里没有对象 7')
+    /* 第一层的两条记在 0.2 上：解析不出 Z 的话整层会掉进上一层 */
+    expect([...obj.bounds.outer]).toEqual([0, 2, 3])
+    expect(obj.kinds.outer[2]).toBeCloseTo(0.2)
+    /* 第三段（12 个数之后）的 Z 是 0.4 */
+    expect(obj.kinds.outer[14]).toBeCloseTo(0.4)
+  })
 })
 
 describe('parseBlocks / shiftBlocks', () => {
@@ -107,6 +128,13 @@ describe('parseBlocks / shiftBlocks', () => {
       [';MKP_BEGIN paint', 'G1 Z6.85', 'G1 X1 Y1', ';MKP_END paint'].join('\n'),
     )
     expect(blocks[0]?.layerZ).toBeNull()
+  })
+
+  it('块头的 `z=.6` 省前导零也认', () => {
+    const blocks = parseBlocks(
+      [';MKP_BEGIN paint ev=1 z=.6', 'G1 Z6.85', 'G1 X1 Y1', ';MKP_END paint'].join('\n'),
+    )
+    expect(blocks[0]?.layerZ).toBeCloseTo(0.6)
   })
 
   it('整体平移：坐标与笔尖 Z 跟着走，层高不动', () => {

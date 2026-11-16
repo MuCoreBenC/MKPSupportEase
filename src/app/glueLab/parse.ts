@@ -73,10 +73,14 @@ const BLOCK_END = ';MKP_END paint'
  */
 export const MAX_EDGE_LIFT_MM = 2.0
 
+/*
+ * 切片器会省掉前导零（`G1 Z.2`、`G1 X.5`）。只认「整数开头」的话这些行解析不出坐标，
+ * Z 会停在上一层的旧值 —— 整层的移动被记到别的层上，第一层自然一片空白。
+ */
 const AXIS = {
-  X: /X(-?\d+(?:\.\d*)?)/,
-  Y: /Y(-?\d+(?:\.\d*)?)/,
-  Z: /Z(-?\d+(?:\.\d*)?)/,
+  X: /X(-?(?:\d+(?:\.\d*)?|\.\d+))/,
+  Y: /Y(-?(?:\d+(?:\.\d*)?|\.\d+))/,
+  Z: /Z(-?(?:\d+(?:\.\d*)?|\.\d+))/,
 } as const
 
 function axis(line: string, name: keyof typeof AXIS): number | null {
@@ -93,7 +97,11 @@ interface RawMove {
 
 /** 产物全文 → 涂胶块（没有 `;MKP_BEGIN paint` 时返回空数组） */
 export function parseBlocks(text: string): LabBlock[] {
-  const lines = text.split(/\r?\n/)
+  return parseBlocksFromLines(text.split(/\r?\n/))
+}
+
+/** 已经切好行的入口：试验台把同一份行数组同时交给索引与解析，不再拆一遍 1.9MB */
+export function parseBlocksFromLines(lines: readonly string[]): LabBlock[] {
   const blocks: LabBlock[] = []
   let beginLine = -1
   let raws: RawMove[] | null = null
@@ -113,7 +121,7 @@ export function parseBlocks(text: string): LabBlock[] {
     const t = lines[i].trim()
     if (t.startsWith(BLOCK_BEGIN)) {
       beginLine = i
-      const m = /\bz=(-?\d+(?:\.\d+)?)/.exec(t)
+      const m = /\bz=(-?(?:\d+(?:\.\d*)?|\.\d+))/.exec(t)
       layerZ = m ? Number(m[1]) : null
       raws = []
       continue
@@ -252,6 +260,11 @@ const KIND_OF: Record<string, PrintKind> = {
   'Support ironing': 'ironing',
 }
 
+/** `; FEATURE:` 的名字 → 类别；认不出就是 `other`（哪些名字没认出由 `parsePrint` 另记） */
+export function kindOfFeature(name: string): PrintKind {
+  return KIND_OF[name.trim()] ?? 'other'
+}
+
 /** 产物里的一个模型（`; start printing object, unique label id: N`） */
 export interface PrintObject {
   /** 那个 label id；`0` = 不在任何对象里的移动（起始擦料线这类） */
@@ -303,7 +316,11 @@ const LABEL = /label id:\s*(\d+)/
  * 顶点按 Z 升序排好：图上那把层滑块靠 `drawRange` 切层，拖起来才是即时的。
  */
 export function parsePrint(text: string): PrintModel {
-  const lines = text.split(/\r?\n/)
+  return parsePrintFromLines(text.split(/\r?\n/))
+}
+
+/** 见 [`parseBlocksFromLines`]：同一份行数组交给两边 */
+export function parsePrintFromLines(lines: readonly string[]): PrintModel {
   /** 对象 id → 层 key → 这一层各类的顶点 */
   const byObject = new Map<number, Map<string, { z: number; bucket: Record<PrintKind, number[]> }>>()
   const unknown = new Set<string>()
