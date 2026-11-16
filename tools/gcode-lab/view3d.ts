@@ -15,8 +15,8 @@
  *
  * # 相机手感
  *
- * - **缩放朝光标**（`zoomToCursor = true`）：这样能一直推到某个面、甚至穿进去；
- *   朝 target 收的话推到 target 就到头了（越推越空，看着像"卡住"）。
+ * - **缩放朝画面中心**（`zoomToCursor = false`）：滚轮不改 `target`，旋转中心稳定；
+ *   最小视距 0.02mm，仍然能一路推到某个面、甚至穿进去。
  * - **平移走 OrbitControls 自带的 pan**：它把相机与 target 一起挪，转起来绕的是
  *   画面中心那一点。machine-motion 那边反过来（中心钉在机器上、平移走投影 skew）——
  *   那是「一台机器」该有的手感，这里是一堆互相独立的层。
@@ -200,7 +200,7 @@ export class View3d {
     this.controls = new OrbitControls(this.camP, canvas)
     this.controls.enableDamping = true
     this.controls.dampingFactor = 0.12
-    this.controls.zoomToCursor = true
+    this.controls.zoomToCursor = false
     this.controls.enablePan = true
     this.controls.zoomSpeed = ZOOM_SPEED
     this.controls.minDistance = MIN_DISTANCE
@@ -547,13 +547,14 @@ export class View3d {
     if (from.lengthSq() < 1e-9) return
     const to = dir.clone().normalize()
     /*
-     * 正顶 / 正底：`up` 是 +Z，视线正好平行于它，`lookAt` 会退化。
-     * 让方向偏 0.1° 就够定死"屏幕上方是 -Y"，肉眼看不出差别。
+     * 侧面：屏幕上方是世界 +Z；顶 / 底：视线已平行于 +Z，改用 ±Y 当 up。
+     * 于是点「前面 / 右面」是正对的正方形，点「顶部」是正俯视，
+     * 不用再把方向扭 0.1° 去绕开 lookAt 退化。
      */
-    if (Math.abs(to.z) > 0.999) {
-      to.y -= 0.002
-      to.normalize()
-    }
+    const up =
+      Math.abs(to.z) > 0.999 ? new THREE.Vector3(0, Math.sign(to.z), 0) : new THREE.Vector3(0, 0, 1)
+    this.camP.up.copy(up)
+    this.camO.up.copy(up)
     const q = new THREE.Quaternion().setFromUnitVectors(from.clone().normalize(), to)
     this.tween = { q, from, t: 0 }
     this.controls.enabled = false

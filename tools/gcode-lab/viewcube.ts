@@ -34,7 +34,6 @@ const CORNER_R = 0.09
 const FRUSTUM = 0.92
 /** 立方体相机的站位距离（正交，只影响近远裁面） */
 const CAM_DIST = 4
-
 export class ViewCube {
   private readonly canvas: HTMLCanvasElement
   private readonly renderer: THREE.WebGLRenderer
@@ -251,10 +250,17 @@ export class ViewCube {
     return hit ? this.planes.indexOf(hit.object as THREE.Mesh) : null
   }
 
-  /** 命中项 → 世界方向：立方体就是世界坐标，面沿法线、角在顶点，直接读位置 */
+  /** 命中项 → 世界方向：和切片器 BBS 的视角立方体同一套规则 */
   private dirOf(hit: number): THREE.Vector3 | null {
     const obj = hit < 6 ? this.planes[hit] : this.corners[hit - 6]
-    return obj ? obj.position.clone().normalize() : null
+    if (!obj) return null
+    const p = obj.position.clone()
+    /*
+     * 角 = 等轴测：站在那个角上，前面在左、右面在右、顶面在顶。
+     * 面 = 正对：点「前面」就是正前方，点「右面」就是正右方，不倾斜。
+     */
+    if (hit >= 6) p.z *= 0.75
+    return p.normalize()
   }
 
   /** 悬停着色：面提亮，角点亮 */
