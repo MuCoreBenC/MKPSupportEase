@@ -209,6 +209,14 @@ export const en: Record<StringKey, string> = {
   'settings.glue.allModels': 'Also glue each model’s first layer',
   'settings.glue.allModelsNote': 'Off: tower only. On: also each model’s first layer.',
 
+  /* Settings: under-support margin (experimental, 2026-11-17) */
+  'settings.under.title': 'Under-support margin',
+  'settings.under.desc': 'Skip the lift when the pen has support well inside its edge (experimental)',
+  'settings.under.enable': 'Enable under-support margin',
+  'settings.under.enableNote': 'Only changes segments the edge band would raise; off = byte-identical output.',
+  'settings.under.margin': 'Margin',
+  'settings.under.marginNote': 'No lift when at least this far from the support edge ({min}–{max}mm).',
+
   'settings.presets.title': 'Presets',
   'settings.presets.desc': 'Copy and script defaults',
   'settings.presets.copies': 'Copies follow cloud updates',

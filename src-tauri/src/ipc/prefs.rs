@@ -357,6 +357,9 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "notifyOnFinish": r.notify_on_finish,
                 "uiMode": r.ui_mode.wire(),
                 "glueBottomEnabled": r.glue_bottom_enabled,
+                /* 下方支撑余量（实验，2026-11-17）：余量够的涂胶段不抬高 */
+                "underSupportEnabled": r.under_support_enabled,
+                "underSupportMm": r.under_support_mm,
                 "skipVibrationCalibration": r.skip_vibration_calibration,
                 "beginStageRetractEnabled": r.begin_stage_retract_enabled,
                 "beginStageRetractZLiftMm": r.begin_stage_retract_z_lift_mm,
@@ -395,6 +398,10 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "zLift": {
                     "min": runtime::app_state::BEGIN_STAGE_RETRACT_Z_LIFT_MIN,
                     "max": runtime::app_state::BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
+                },
+                "underSupport": {
+                    "min": runtime::app_state::UNDER_SUPPORT_MM_MIN,
+                    "max": runtime::app_state::UNDER_SUPPORT_MM_MAX,
                 },
             },
         }))

@@ -2979,6 +2979,8 @@ export const mockApi: MkpApi = {
       notifyOnFinish: mockPostproc.notifyOnFinish ?? true,
       uiMode: mockPostproc.uiMode ?? 'gui',
       glueBottomEnabled: mockPostproc.glueBottomEnabled ?? false,
+      underSupportEnabled: mockPostproc.underSupportEnabled ?? false,
+      underSupportMm: mockPostproc.underSupportMm ?? 0.5,
       skipVibrationCalibration: mockPostproc.skipVibrationCalibration ?? false,
       beginStageRetractEnabled: mockPostproc.beginStageRetractEnabled ?? true,
       beginStageRetractZLiftMm: mockPostproc.beginStageRetractZLiftMm ?? 5,
@@ -3013,6 +3015,7 @@ export const mockApi: MkpApi = {
         zDwell: { min: 1, max: 20 },
         xyDwell: { min: 1, max: 10 },
         zLift: { min: 20, max: 100 },
+        underSupport: { min: 0, max: 2 },
       },
     }
   },

@@ -218,6 +218,14 @@ export const zhTW: Record<StringKey, string> = {
   'settings.glue.allModels': '所有模型首層也塗',
   'settings.glue.allModelsNote': '關閉只塗擦料塔；開啟會塗每個模型的首層。',
 
+  /* 設定頁：下方支撐餘量（實驗，2026-11-17） */
+  'settings.under.title': '下方支撐餘量',
+  'settings.under.desc': '筆下方有支撐、且離邊夠遠時就不抬（實驗）',
+  'settings.under.enable': '啟用下方支撐餘量',
+  'settings.under.enableNote': '只改「邊緣帶本來要抬」的段；關掉與舊版逐位元組一致。',
+  'settings.under.margin': '餘量閾值',
+  'settings.under.marginNote': '離支撐邊界 ≥ 這個寬度就不抬（{min}–{max}mm）。',
+
   /* 設定頁：預設 */
   'settings.presets.title': '預設',
   'settings.presets.desc': '複製與腳本的預設行為',

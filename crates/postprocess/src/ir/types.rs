@@ -537,6 +537,12 @@ pub struct DebugIr {
 pub struct PrefsIr {
     /// 支撑面下方一层也涂胶。
     pub glue_bottom_enabled: bool,
+    /// **下方支撑余量（实验）**：涂胶段离笔下方支撑边界够远时就不抬高。
+    #[serde(default)]
+    pub under_support_enabled: bool,
+    /// 下方支撑余量的阈值（mm），量程 0–2、出厂 0.5。
+    #[serde(default)]
+    pub under_support_mm: f64,
     /// 跳过 G-code 里的震动补偿校准检测（M970/M974）。
     pub skip_vibration_calibration: bool,
     /// 开头插入收笔序列。
@@ -578,6 +584,8 @@ impl Default for PrefsIr {
     fn default() -> Self {
         Self {
             glue_bottom_enabled: false,
+            under_support_enabled: false,
+            under_support_mm: 0.5,
             skip_vibration_calibration: false,
             begin_stage_retract_enabled: true,
             begin_stage_retract_z_lift_mm: 5,

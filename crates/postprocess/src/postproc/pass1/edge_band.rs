@@ -87,6 +87,15 @@ struct EdgeGrid {
 
 impl EdgeGrid {
     fn build(moves: &[Move]) -> Option<Self> {
+        Self::build_inner(moves, None)
+    }
+
+    /// `material`：同层**所有材料**（支撑 + 零件本体）的移动。
+    ///
+    /// 给了就只填「里面真有料」的内孔 —— 孔里是零件（墙/填充/桥接），笔走过去有东西
+    /// 托着，不该算边；真空气孔不填，涂胶走过去照样按贴边处理。
+    /// 与外界连通的缺口永远不填（那才是外边界）。
+    fn build_inner(moves: &[Move], material: Option<&[Move]>) -> Option<Self> {
         let (mut min_x, mut min_y) = (f64::MAX, f64::MAX);
         let (mut max_x, mut max_y) = (f64::MIN, f64::MIN);
         for m in moves {
@@ -134,6 +143,20 @@ impl EdgeGrid {
                     }
                 }
             }
+        }
+
+        if let Some(mat) = material {
+            let mut mat_covered = vec![false; nx * ny];
+            for m in mat {
+                let len = dist(m.from, m.to);
+                let steps = ((len / (cell * 0.5)).ceil() as usize).clamp(1, 200_000);
+                for k in 0..=steps {
+                    let p = lerp(m.from, m.to, k as f64 / steps as f64);
+                    let i = at(p.0, p.1);
+                    mat_covered[i] = true;
+                }
+            }
+            fill_holes_with_material(&mut covered, &mat_covered, nx, ny);
         }
 
         /* 连通块标号 + 每块的短边（涂胶面可能就是好几张互不相连的面） */
@@ -296,6 +319,134 @@ impl EdgeGrid {
     }
 }
 
+/// 填内孔：只填「里面真有材料」的孔。
+///
+/// 1. 从四条边泛洪 `covered`（支撑覆盖），泛洪不到的未覆盖格子 = 被围住的孔；
+/// 2. 逐孔连通块看 `material`（支撑 + 零件本体）：块里**有料**才整块填平；
+/// 3. 真空气孔原样留着 —— 涂胶走过去照样按贴边处理（2026-11-17 作者纠正）。
+fn fill_holes_with_material(covered: &mut [bool], material: &[bool], nx: usize, ny: usize) {
+    let mut outside = vec![false; nx * ny];
+    let mut stack: Vec<usize> = Vec::new();
+    {
+        let visit = |x: isize, y: isize, outside: &mut Vec<bool>, stack: &mut Vec<usize>| {
+            if x < 0 || y < 0 || x as usize >= nx || y as usize >= ny {
+                return;
+            }
+            let i = y as usize * nx + x as usize;
+            if covered[i] || outside[i] {
+                return;
+            }
+            outside[i] = true;
+            stack.push(i);
+        };
+        for x in 0..nx {
+            visit(x as isize, 0, &mut outside, &mut stack);
+            visit(x as isize, ny as isize - 1, &mut outside, &mut stack);
+        }
+        for y in 0..ny {
+            visit(0, y as isize, &mut outside, &mut stack);
+            visit(nx as isize - 1, y as isize, &mut outside, &mut stack);
+        }
+        while let Some(i) = stack.pop() {
+            let (x, y) = (i % nx, i / nx);
+            visit(x as isize - 1, y as isize, &mut outside, &mut stack);
+            visit(x as isize + 1, y as isize, &mut outside, &mut stack);
+            visit(x as isize, y as isize - 1, &mut outside, &mut stack);
+            visit(x as isize, y as isize + 1, &mut outside, &mut stack);
+        }
+    }
+
+    /* 逐孔连通块：块里有材料才填 */
+    let mut seen = vec![false; nx * ny];
+    let mut hole: Vec<usize> = Vec::new();
+    for start in 0..covered.len() {
+        if covered[start] || outside[start] || seen[start] {
+            continue;
+        }
+        hole.clear();
+        let mut has_material = false;
+        seen[start] = true;
+        stack.push(start);
+        while let Some(k) = stack.pop() {
+            hole.push(k);
+            if material[k] {
+                has_material = true;
+            }
+            let (x, y) = (k % nx, k / nx);
+            let mut push = |xx: isize, yy: isize, stack: &mut Vec<usize>| {
+                if xx < 0 || yy < 0 || xx as usize >= nx || yy as usize >= ny {
+                    return;
+                }
+                let j = yy as usize * nx + xx as usize;
+                if covered[j] || outside[j] || seen[j] {
+                    return;
+                }
+                seen[j] = true;
+                stack.push(j);
+            };
+            push(x as isize - 1, y as isize, &mut stack);
+            push(x as isize + 1, y as isize, &mut stack);
+            push(x as isize, y as isize - 1, &mut stack);
+            push(x as isize, y as isize + 1, &mut stack);
+        }
+        if has_material {
+            for k in &hole {
+                covered[*k] = true;
+            }
+        }
+    }
+}
+
+/// **下方支撑覆盖**（2026-11-17，lab 验过之后接进来）。
+///
+/// 与 [`EdgeGrid`] 同一套格子与距离场，差别只有一条：**填内孔**。
+/// 输入是「上一层支撑材料」的线段 `(x0, y0, x1, y1)`，不是 G-code 行。
+pub(crate) struct UnderGrid {
+    grid: EdgeGrid,
+}
+
+impl UnderGrid {
+    /// `support` = 支撑材料的线段；`all` = 同一层**所有挤出**（支撑 + 零件本体）。
+    ///
+    /// 支撑铺成覆盖区；`all` 只用来回答「这个孔里有没有料」—— 有料（墙/填充/桥接）
+    /// 才填平，真空气孔留着，涂胶走过去照样算贴边。
+    pub(crate) fn build(
+        support: &[(f64, f64, f64, f64)],
+        all: &[(f64, f64, f64, f64)],
+    ) -> Option<Self> {
+        if support.is_empty() {
+            return None;
+        }
+        let to_moves = |segs: &[(f64, f64, f64, f64)]| -> Vec<Move> {
+            segs.iter()
+                .map(|&(x0, y0, x1, y1)| Move {
+                    line: 0,
+                    from: (x0, y0),
+                    to: (x1, y1),
+                    e: 0.0,
+                })
+                .collect()
+        };
+        let moves = to_moves(support);
+        let material = to_moves(all);
+        EdgeGrid::build_inner(&moves, Some(&material)).map(|grid| Self { grid })
+    }
+
+    /// 这一小段（一条移动的 `t0..t1`）是不是整段都离支撑边界 ≥ `mm`。
+    /// 端点 + 中间各取一次；任一点不够就算不够（宁可多抬）。
+    fn covers(&self, m: &Move, t0: f64, t1: f64, mm: f64) -> bool {
+        let steps = 4usize;
+        for k in 0..=steps {
+            let t = t0 + (t1 - t0) * (k as f64 / steps as f64);
+            let p = lerp(m.from, m.to, t);
+            if self.grid.edge_distance(p) < mm {
+                return false;
+            }
+        }
+        true
+    }
+}
+
 /// 一条够长、方向可靠的移动。
 struct Stroke {
     start: (f64, f64),
@@ -354,7 +505,16 @@ fn estimate_pitch(moves: &[Move]) -> f64 {
 }
 
 /// 按边缘带切段并插标记。`lines <= 0` 或 `lift <= 0` ⇒ 原样返回。
-pub(crate) fn apply(iface: &[String], lines: i64, lift: f64) -> Vec<String> {
+///
+/// `under` = （上一层支撑覆盖, 余量阈值 mm）：给了就再叠一条判据 ——
+/// 这一小段整段都离支撑边界 ≥ 阈值 ⇒ **不抬**（哪怕它落在边缘带里）。
+/// 只覆盖「本来要抬」的段，不新增抬升。
+pub(crate) fn apply(
+    iface: &[String],
+    lines: i64,
+    lift: f64,
+    under: Option<(&UnderGrid, f64)>,
+) -> Vec<String> {
     if lines <= 0 || lift <= 0.0 || iface.is_empty() {
         return iface.to_vec();
     }
@@ -400,13 +560,15 @@ pub(crate) fn apply(iface: &[String], lines: i64, lift: f64) -> Vec<String> {
             continue;
         }
         for p in pieces {
-            if p.edge != raised {
-                out.push(if p.edge {
+            /* 下方支撑余量够 ⇒ 这一小段不抬（只在「本来要抬」时才有意义） */
+            let edge = p.edge && !under.is_some_and(|(grid, mm)| grid.covers(m, p.t0, p.t1, mm));
+            if edge != raised {
+                out.push(if edge {
                     MARKER_EDGE_RAISE.to_string()
                 } else {
                     MARKER_EDGE_NORMAL.to_string()
                 });
-                raised = p.edge;
+                raised = edge;
             }
             let e = m.e * (p.t1 - p.t0);
             /* 整段没被切开 ⇒ 原行原样留下（少一次格式化，也不会因为重排丢参数） */
@@ -837,7 +999,7 @@ mod tests {
                 .as_ref()
                 .map(|g| moves.iter().filter(|m| g.is_edge(m.from, lines)).count())
                 .unwrap_or(0);
-            let out = apply(&iface, lines, lift);
+            let out = apply(&iface, lines, lift, None);
             let raise = out.iter().filter(|l| *l == MARKER_EDGE_RAISE).count();
             let normal = out.iter().filter(|l| *l == MARKER_EDGE_NORMAL).count();
             total_moves += moves.len();
@@ -919,14 +1081,14 @@ mod tests {
     #[test]
     fn off_returns_input_unchanged() {
         let input = square(40.0, 100.0, 100.0);
-        assert_eq!(apply(&input, 0, 1.0), input, "0 条 = 关");
-        assert_eq!(apply(&input, 2, 0.0), input, "抬起 0 = 关");
+        assert_eq!(apply(&input, 0, 1.0, None), input, "0 条 = 关");
+        assert_eq!(apply(&input, 2, 0.0, None), input, "抬起 0 = 关");
     }
 
     #[test]
     fn edge_pieces_are_raised_and_interior_is_not() {
         let input = rect(40.0, 40.0, 100.0, 100.0);
-        let out = apply(&input, 2, 1.5);
+        let out = apply(&input, 2, 1.5, None);
         assert!(out.len() > input.len(), "交界处被切开，行会变多");
         assert!(out.iter().any(|l| l == MARKER_EDGE_RAISE), "边缘段要标出来");
         assert!(
@@ -992,7 +1154,7 @@ mod tests {
             "G1 X114.216 Y104.169 E0.04",
             "G1 X114.216 Y98.337 E0.03",
         ]);
-        let out = apply(&input, 2, 0.5);
+        let out = apply(&input, 2, 0.5, None);
         assert_eq!(out[0], "G1 X114.216 Y98.337", "零位移那条原样留着");
         assert_eq!(out[1], MARKER_EDGE_RAISE, "整圈都要抬");
         assert!(
@@ -1035,7 +1197,7 @@ mod tests {
                 format_float(y)
             ));
         }
-        let out = apply(&input, 2, 0.5);
+        let out = apply(&input, 2, 0.5, None);
         assert!(out.iter().any(|l| l == MARKER_EDGE_RAISE), "外圈在边缘带上");
         assert!(
             out.iter().any(|l| l == MARKER_EDGE_NORMAL),
@@ -1095,5 +1257,81 @@ mod tests {
         assert!(small < big, "两张面确实一大一小（{small:.2} / {big:.2}）");
         assert!((grid.band_mm(small, 2) - 0.8).abs() < 1e-9);
         assert!((grid.band_mm(big, 2) - 0.8).abs() < 1e-9);
+    }
+
+    /* ---- 下方支撑余量（2026-11-17） ---- */
+
+    /// 一片 0.4mm 间距的横线，铺满 `[x0,x1] × [y0,y1]`。
+    fn hatch(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<(f64, f64, f64, f64)> {
+        let mut out = Vec::new();
+        let mut y = y0;
+        while y <= y1 + 1e-9 {
+            out.push((x0, y, x1, y));
+            y += 0.4;
+        }
+        out
+    }
+
+    /// 孔里**有零件材料**（墙 / 填充 / 桥接）⇒ 填平：笔走过去有东西托着。
+    #[test]
+    fn under_grid_fills_holes_with_material() {
+        let mut support = hatch(0.0, 0.0, 10.0, 3.0);
+        support.extend(hatch(0.0, 7.0, 10.0, 10.0));
+        support.extend(hatch(0.0, 3.0, 3.0, 7.0));
+        support.extend(hatch(7.0, 3.0, 10.0, 7.0));
+        /* 孔里那圈零件本体（内墙） */
+        let mut all = support.clone();
+        all.extend(hatch(3.5, 3.5, 6.5, 3.5));
+        all.extend(hatch(3.5, 3.5, 3.5, 6.5));
+        let grid = UnderGrid::build(&support, &all).expect("铺得出网格");
+        assert!(
+            grid.grid.edge_distance((5.0, 5.0)) > 2.0,
+            "孔里有料 ⇒ 当实心"
+        );
+    }
+
+    /// 孔里**真空**（只有支撑、没有零件）⇒ 不填，涂胶走过去照样算贴边。
+    #[test]
+    fn under_grid_keeps_empty_holes() {
+        let mut support = hatch(0.0, 0.0, 10.0, 3.0);
+        support.extend(hatch(0.0, 7.0, 10.0, 10.0));
+        support.extend(hatch(0.0, 3.0, 3.0, 7.0));
+        support.extend(hatch(7.0, 3.0, 10.0, 7.0));
+        let grid = UnderGrid::build(&support, &support).expect("铺得出网格");
+        assert_eq!(grid.grid.edge_distance((5.0, 5.0)), 0.0, "真空气孔不许填平");
+    }
+
+    /// 与外界连通的缺口不填：那才是真正的边。
+    #[test]
+    fn under_grid_keeps_open_gaps() {
+        let mut segs = hatch(0.0, 0.0, 10.0, 1.0);
+        segs.extend(hatch(0.0, 1.0, 1.0, 10.0));
+        segs.extend(hatch(9.0, 1.0, 10.0, 10.0));
+        let grid = UnderGrid::build(&segs, &segs).expect("铺得出网格");
+        assert_eq!(grid.grid.edge_distance((5.0, 5.0)), 0.0, "U 形里面是空的");
+    }
+
+    /// 余量够的段不抬：整块涂胶面都落在一大片支撑上。
+    #[test]
+    fn supported_pieces_are_not_raised() {
+        /* `rect(w, h, x, y)`：60×60 的一块，落在 30..110 的支撑正中间 */
+        let input = rect(60.0, 60.0, 40.0, 40.0);
+        let segs = hatch(30.0, 30.0, 110.0, 110.0);
+        let grid = UnderGrid::build(&segs, &segs).expect("铺得出网格");
+        let out = apply(&input, 2, 1.5, Some((&grid, 0.5)));
+        assert!(
+            !out.iter().any(|l| l == MARKER_EDGE_RAISE),
+            "四周都在支撑里，不该有抬升标记"
+        );
+    }
+
+    /// 支撑不在笔下面 ⇒ 原判照旧（该抬还抬）。
+    #[test]
+    fn unsupported_pieces_still_raise() {
+        let input = rect(60.0, 60.0, 40.0, 40.0);
+        let segs = hatch(200.0, 200.0, 210.0, 210.0);
+        let grid = UnderGrid::build(&segs, &segs).expect("铺得出网格");
+        let out = apply(&input, 2, 1.5, Some((&grid, 0.5)));
+        assert!(out.iter().any(|l| l == MARKER_EDGE_RAISE));
     }
 }

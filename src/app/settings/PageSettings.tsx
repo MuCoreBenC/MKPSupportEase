@@ -122,6 +122,7 @@ import GuideImageModal from '../guide/GuideImage'
 /* 后处理偏好那几块（2026-10-17）：各自一个文件，迁页时整块搬走即可 */
 import PostprocModeSection from './PostprocModeSection'
 import CalibSection from './CalibSection'
+import UnderSupportSection from './UnderSupportSection'
 import BedGlueSection from './BedGlueSection'
 import DataSection from './DataSection'
 /* 预设那一块（2026-10-20）：与上面同一条规矩（自己一个文件、只管自己那一行） */
@@ -1859,6 +1860,7 @@ export default function PageSettings({
       <div id="postproc" data-sec className={s.group}>
         <PostprocModeSection />
         <CalibSection nested />
+        <UnderSupportSection nested />
         <BedGlueSection nested />
       </div>
 

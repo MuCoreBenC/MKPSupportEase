@@ -129,6 +129,8 @@ export function usePostprocPrefs(): PostprocPrefsApi {
           notifyOnFinish: wire.notifyOnFinish ?? before.resolved.notifyOnFinish,
           uiMode: wire.uiMode ?? before.resolved.uiMode,
           glueBottomEnabled: wire.glueBottomEnabled ?? before.resolved.glueBottomEnabled,
+          underSupportEnabled: wire.underSupportEnabled ?? before.resolved.underSupportEnabled,
+          underSupportMm: wire.underSupportMm ?? before.resolved.underSupportMm,
           skipVibrationCalibration:
             wire.skipVibrationCalibration ?? before.resolved.skipVibrationCalibration,
           beginStageRetractEnabled:

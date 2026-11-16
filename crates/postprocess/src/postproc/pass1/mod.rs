@@ -45,7 +45,9 @@ pub(crate) use glue_block::{
 use std::collections::HashMap;
 
 use crate::diag::PostprocError;
-use crate::gcode::{format_e, has_slicer_comment_prefix, match_slicer_comment, math_round};
+use crate::gcode::{
+    extract_coord, format_e, has_slicer_comment_prefix, match_slicer_comment, math_round,
+};
 use crate::ir::{Ir, num_strip};
 
 use classifier::{LineClass, classify_line};
@@ -222,6 +224,17 @@ pub fn first_pass(
     let mut current_layer_height = 0.0f64;
     let mut last_layer_height = 0.0f64;
     let mut layer_thickness = 0.0f64;
+    /*
+     * 下方支撑余量（实验，2026-11-17）：攒每一层支撑材料的挤出移动。
+     * 涂胶块写在层的开头，笔落下去时托着它的是**上一层** —— Z_HEIGHT 切换时
+     * 把刚攒的收进 `prev_support`，本层重新攒。
+     */
+    /* 第五个数：这一条是不是支撑材料（真 = 支撑，假 = 零件本体）。
+     * 零件本体不铺覆盖区，只用来回答「孔里有没有料」。 */
+    let mut layer_moves: Vec<(f64, f64, f64, f64, bool)> = Vec::new();
+    let mut prev_moves: Vec<(f64, f64, f64, f64, bool)> = Vec::new();
+    let mut in_support = false;
+    let mut support_xy: Option<(f64, f64)> = None;
     let mut last_xy_command = String::new();
     let mut last_xy_command_fe_flag = true;
     let mut start_idx = 0usize;
@@ -455,6 +468,9 @@ pub fn first_pass(
 
         if match_slicer_comment(trimmed, "Z_HEIGHT: ") {
             last_layer_height = current_layer_height;
+            /* 上一层的支撑收口：它才是这一层涂胶笔下的承托面 */
+            prev_moves = std::mem::take(&mut layer_moves);
+            support_xy = None;
             let nums = num_strip(trimmed);
             if let Some(&n) = nums.first() {
                 current_layer_height = n;
@@ -463,6 +479,29 @@ pub fn first_pass(
             layer_thickness = current_layer_height - last_layer_height;
             ir_data.state.inconsistent_count += 1;
             stats.total_z_height_layers += 1;
+        }
+
+        /* ---- 下方支撑：按层攒「支撑 + 零件本体」的挤出移动（实验判据的数据源） ----
+         * 开关关着就一行不攒：产物与旧版逐字节一致，也不付这份内存。
+         * 支撑铺覆盖区；零件本体只用于判「孔里有没有料」（填内孔的条件）。 */
+        if ir_data.prefs.under_support_enabled && class == LineClass::Feature {
+            in_support = crate::gcode::is_support_material_feature(trimmed);
+        }
+        if ir_data.prefs.under_support_enabled
+            && class == LineClass::Motion
+            && !trimmed.contains("G1 F")
+        {
+            let bytes = trimmed.as_bytes();
+            let x = extract_coord(bytes, b'X');
+            let y = extract_coord(bytes, b'Y');
+            let e = extract_coord(bytes, b'E');
+            /* 只算挤出（有 E 且为正）：空走横跨两个岛会凭空连出一片假覆盖 */
+            if (x.is_some() || y.is_some()) && e.is_some_and(|v| v > 0.0) {
+                let from = support_xy.unwrap_or((x.unwrap_or(0.0), y.unwrap_or(0.0)));
+                let to = (x.unwrap_or(from.0), y.unwrap_or(from.1));
+                layer_moves.push((from.0, from.1, to.0, to.1, in_support));
+                support_xy = Some(to);
+            }
         }
 
         if trimmed.contains("; model printing time:") {
@@ -1267,6 +1306,23 @@ pub fn first_pass(
              * 它带回来的是**带标记的同一份路径**（边缘段插 `;EDGE_RAISE`），一段不删；
              * 两个参数都是 0 时原样返回，输出逐字节不变。
              */
+            /*
+             * 下方支撑余量（实验）：上一层支撑铺一张填过孔的覆盖图，
+             * 余量够的段不让它抬。开关关着 / 没攒到支撑 ⇒ `None`，输出与旧版一致。
+             */
+            let under_cfg = if ir_data.prefs.under_support_enabled && !prev_moves.is_empty() {
+                let support: Vec<(f64, f64, f64, f64)> = prev_moves
+                    .iter()
+                    .filter(|m| m.4)
+                    .map(|m| (m.0, m.1, m.2, m.3))
+                    .collect();
+                let all: Vec<(f64, f64, f64, f64)> =
+                    prev_moves.iter().map(|m| (m.0, m.1, m.2, m.3)).collect();
+                edge_band::UnderGrid::build(&support, &all)
+                    .map(|grid| (grid, ir_data.prefs.under_support_mm.max(0.0)))
+            } else {
+                None
+            };
             let banded: Option<Vec<String>> = if iface.is_empty() {
                 None
             } else {
@@ -1274,6 +1330,7 @@ pub fn first_pass(
                     &iface,
                     ir_data.glue.edge_lines,
                     ir_data.glue.edge_lift,
+                    under_cfg.as_ref().map(|(grid, mm)| (grid, *mm)),
                 ))
             };
             let layer_iface: &[String] = banded.as_deref().unwrap_or(&iface);

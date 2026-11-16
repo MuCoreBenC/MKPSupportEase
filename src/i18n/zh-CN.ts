@@ -222,6 +222,14 @@ export const zhCN = {
   'settings.glue.allModels': '所有模型首层也涂',
   'settings.glue.allModelsNote': '关闭只涂擦料塔；开启会涂每个模型的首层。',
 
+  /* 设置页：下方支撑余量（实验，2026-11-17） */
+  'settings.under.title': '下方支撑余量',
+  'settings.under.desc': '笔下面有支撑、且离边够远时就不抬（实验）',
+  'settings.under.enable': '启用下方支撑余量',
+  'settings.under.enableNote': '只改「边缘带本来要抬」的段；关掉与旧版逐字节一致。',
+  'settings.under.margin': '余量阈值',
+  'settings.under.marginNote': '离支撑边界 ≥ 这个宽度就不抬（{min}–{max}mm）。',
+
   /* 设置页：预设 */
   'settings.presets.title': '预设',
   'settings.presets.desc': '复制与脚本的默认行为',

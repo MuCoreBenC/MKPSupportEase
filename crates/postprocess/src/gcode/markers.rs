@@ -192,6 +192,15 @@ pub fn is_support_related_feature(line: &str) -> bool {
     SUPPORT_FEATURES.iter().any(|f| has_feature(line, f))
 }
 
+/// **支撑材料族**（含泛指 `Support`，2026-11-17）。
+///
+/// 判「笔下方有没有支撑」要把泛指 `;FEATURE: Support`（支撑本体）也算进去，
+/// 而 [`is_support_related_feature`] 只认四个具名族、会把 `Support` 本身漏掉。
+/// `Support` 是所有支撑名的前缀，一次即可覆盖全部支撑族。
+pub fn is_support_material_feature(line: &str) -> bool {
+    has_feature(line, "Support")
+}
+
 /// `IsIroningFeature`：`;FEATURE: <熨烫族名>` 前缀命中。
 pub fn is_ironing_feature(line: &str) -> bool {
     IRONING_FEATURES.iter().any(|f| has_feature(line, f))

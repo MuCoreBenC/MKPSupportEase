@@ -212,6 +212,14 @@ export const ja: Record<StringKey, string> = {
   'settings.glue.allModels': 'すべてのモデルの 1 層目にも塗布',
   'settings.glue.allModelsNote': 'オフはタワーのみ、オンは各モデルの 1 層目にも塗布します。',
 
+  /* 設定画面：下支持の余白（実験、2026-11-17） */
+  'settings.under.title': '下支持の余白',
+  'settings.under.desc': 'ペン下に支持があり、端から十分離れていれば浮かせない（実験）',
+  'settings.under.enable': '下支持の余白を有効にする',
+  'settings.under.enableNote': 'エッジ帯で浮かせる区間だけに効く。オフなら出力は完全に同じ。',
+  'settings.under.margin': '余白しきい値',
+  'settings.under.marginNote': '支持の端からこの幅以上離れていれば浮かせない（{min}–{max}mm）。',
+
   'settings.presets.title': 'プリセット',
   'settings.presets.desc': 'コピーとスクリプトの既定値',
   'settings.presets.copies': 'コピーもクラウド更新に追従',

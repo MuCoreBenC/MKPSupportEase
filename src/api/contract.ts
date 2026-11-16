@@ -2359,6 +2359,10 @@ export interface ResolvedPostprocPrefs {
   notifyOnFinish: boolean
   uiMode: PostprocUiMode
   glueBottomEnabled: boolean
+  /** **下方支撑余量（实验）**：涂胶段离笔下方支撑边界够远就不抬高 */
+  underSupportEnabled: boolean
+  /** 余量阈值（mm），量程见 `limits.underSupport` */
+  underSupportMm: number
   skipVibrationCalibration: boolean
   beginStageRetractEnabled: boolean
   beginStageRetractZLiftMm: number
@@ -2417,6 +2421,10 @@ export interface PostprocPrefsWire {
   notifyOnFinish?: boolean | null
   uiMode?: PostprocUiMode | null
   glueBottomEnabled?: boolean | null
+  /** **下方支撑余量（实验）**：`null` = 回到出厂档（关） */
+  underSupportEnabled?: boolean | null
+  /** 余量阈值（mm）：`null` = 回到出厂档（0.5） */
+  underSupportMm?: number | null
   skipVibrationCalibration?: boolean | null
   beginStageRetractEnabled?: boolean | null
   beginStageRetractZLiftMm?: number | null
@@ -2456,6 +2464,7 @@ export interface PostprocPrefsView {
     zDwell: { min: number; max: number }
     xyDwell: { min: number; max: number }
     zLift: { min: number; max: number }
+    underSupport: { min: number; max: number }
   }
 }
 
