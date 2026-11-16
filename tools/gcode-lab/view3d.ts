@@ -55,6 +55,8 @@ export type LayerMode = 'current' | 'all'
 const IDENTITY = new THREE.Quaternion()
 /** 爆炸把 Z 倍数拉到多少（作者要的「炸成 10~15」取中间） */
 const EXPLODE_Z = 12
+/** 「视角」按钮回到的默认机位：前面在左、右面在右、顶面在顶 */
+const DEFAULT_DIR = new THREE.Vector3(0.85, -1, 0.75).normalize()
 /** 视角立方体点一下之后转过去的时长（秒） */
 const SNAP_SECONDS = 0.3
 /**
@@ -163,14 +165,16 @@ export class View3d {
     distTo: number
     zoomFrom: number
     zoomTo: number
-    /** >=0 表示回程中要从正交切到透视；值为切换进度 */
+    /** >=0 表示途中要换投影；值为切换进度 */
     switchAt: number
     switched: boolean
-    /** 正交画幅半高 → 终点画幅半高；切透视后用它们反算 FOV */
+    /** 途中换到哪一台 */
+    switchTo: 'ortho' | 'perspective' | null
+    /** 正交画幅半高 → 终点画幅半高；换投影后用它们反算 FOV / zoom */
     halfFrom: number
     halfTo: number
-    /** 走 3D→2D 时把模型渐隐；回来时渐显 */
-    fade: 'out' | 'in'
+    /** 'none' = 不动可见性（复位 / 换投影用） */
+    fade: 'out' | 'in' | 'none'
     t: number
     done: () => void
   } | null = null
@@ -273,9 +277,42 @@ export class View3d {
     this.group.scale.set(1, 1, n)
   }
 
-  /** 回到默认视角：朝向与位置都回默认 */
+  /**
+   * 回到默认视角：朝向、目标点、距离一起补间。
+   *
+   * 默认机位是「前面在左、右面在右、顶面在顶」；不管中途被伪 2D 把 up 翻成 +Y，
+   * 这里都把它插回 +Z，不会停在歪掉的取景上。
+   */
   resetView(): void {
-    this.frame()
+    this.group.updateMatrixWorld(true)
+    const box = this.visibleBox()
+    if (box.isEmpty()) return
+    const center = box.getCenter(new THREE.Vector3())
+    const dist = this.fitDistance(Math.max(1, box.getSize(new THREE.Vector3()).length() / 2))
+    const halfTan = Math.tan((this.camP.fov * Math.PI) / 360)
+    const distFrom = this.distance()
+    const fromUp = this.cam.up.clone()
+    this.flyAnim = {
+      from: this.cam.position.clone().sub(this.controls.target).normalize(),
+      to: DEFAULT_DIR.clone(),
+      upFrom: fromUp,
+      upTo: new THREE.Vector3(0, 0, 1),
+      targetFrom: this.controls.target.clone(),
+      targetTo: center,
+      distFrom,
+      distTo: dist,
+      zoomFrom: this.ortho ? this.camO.zoom : 1,
+      zoomTo: this.ortho ? ORTHO_BASE / Math.max(1e-9, dist * halfTan) : 1,
+      switchAt: -1,
+      switched: false,
+      switchTo: null,
+      halfFrom: distFrom * halfTan,
+      halfTo: dist * halfTan,
+      fade: 'none',
+      t: 0,
+      done: () => {},
+    }
+    this.controls.enabled = false
   }
 
   /**
@@ -284,7 +321,7 @@ export class View3d {
    * 与「视角」的区别：那一颗会把朝向也掰回默认的等轴测，这一颗只把你现在看的
    * 这个方向摆正 —— 转到满意的角度之后用它把模型放回画面里。
    */
-  refit(): void {
+  refit(instant = false): void {
     const dir = this.cam.position.clone().sub(this.controls.target)
     if (dir.lengthSq() < 1e-9) return
     dir.normalize()
@@ -292,11 +329,37 @@ export class View3d {
     const box = this.visibleBox()
     if (box.isEmpty()) return
     const center = box.getCenter(new THREE.Vector3())
-    const radius = Math.max(1, box.getSize(new THREE.Vector3()).length() / 2)
-    this.controls.target.copy(center)
-    this.cam.position.copy(center).addScaledVector(dir, this.fitDistance(radius))
-    this.applyOrthoZoom()
-    this.controls.update()
+    const dist = this.fitDistance(Math.max(1, box.getSize(new THREE.Vector3()).length() / 2))
+    if (instant) {
+      this.controls.target.copy(center)
+      this.cam.position.copy(center).addScaledVector(dir, dist)
+      this.applyOrthoZoom()
+      this.controls.update()
+      return
+    }
+    const distFrom = this.distance()
+    const halfTan = Math.tan((this.camP.fov * Math.PI) / 360)
+    this.flyAnim = {
+      from: dir,
+      to: dir.clone(),
+      upFrom: this.cam.up.clone(),
+      upTo: this.cam.up.clone(),
+      targetFrom: this.controls.target.clone(),
+      targetTo: center,
+      distFrom,
+      distTo: dist,
+      zoomFrom: this.ortho ? this.camO.zoom : 1,
+      zoomTo: this.ortho ? ORTHO_BASE / Math.max(1e-9, dist * halfTan) : 1,
+      switchAt: -1,
+      switched: false,
+      switchTo: null,
+      halfFrom: distFrom * halfTan,
+      halfTo: dist * halfTan,
+      fade: 'none',
+      t: 0,
+      done: () => {},
+    }
+    this.controls.enabled = false
   }
 
   isOrtho(): boolean {
@@ -336,7 +399,7 @@ export class View3d {
       ortho: this.ortho,
       fov: this.camP.fov,
     }
-    if (!this.ortho) this.setOrtho(true)
+    if (!this.ortho) this.setOrtho(true, true)
     this.pseudo = true
     this.syncVisibility()
     const zoom = this.zoomForView(view)
@@ -353,6 +416,7 @@ export class View3d {
       zoomTo: zoom,
       switchAt: -1,
       switched: false,
+      switchTo: null,
       halfFrom: 0,
       halfTo: 0,
       fade: 'out',
@@ -388,7 +452,7 @@ export class View3d {
    * 完成，浏览器没机会先画出旧相机。
    */
   snapToPseudo(view: { cx: number; cy: number; scale: number; w: number; h: number }): void {
-    if (!this.ortho) this.setOrtho(true)
+    if (!this.ortho) this.setOrtho(true, true)
     const target = new THREE.Vector3(view.cx, view.cy, 0)
     const dist = this.distanceForView(view)
     this.controls.target.copy(target)
@@ -430,6 +494,7 @@ export class View3d {
       /* 透视档：中段切，别把投影切换堆在最后一帧 */
       switchAt: home.ortho ? -1 : PERSPECTIVE_SWITCH_AT,
       switched: false,
+      switchTo: home.ortho ? null : 'perspective',
       halfFrom: ORTHO_BASE / Math.max(1e-9, this.camO.zoom),
       halfTo: home.dist * homeTan,
       fade: 'in',
@@ -437,6 +502,17 @@ export class View3d {
       done,
     }
     this.controls.enabled = false
+  }
+
+  /** 切正交：和 `enterPerspective` 反过来，画幅保持同一半高 */
+  private enterOrtho(half: number): void {
+    this.camO.position.copy(this.camP.position)
+    this.camO.quaternion.copy(this.camP.quaternion)
+    this.camO.up.copy(this.camP.up)
+    this.camO.zoom = ORTHO_BASE / Math.max(1e-9, half)
+    this.camO.updateProjectionMatrix()
+    this.ortho = true
+    this.controls.object = this.camO
   }
 
   /**
@@ -483,7 +559,7 @@ export class View3d {
     this.exploded = !this.exploded
     if (this.exploded) {
       /* 先把模型摆回画面正中，再开始炸 —— 不然是从画面外飞进来的 */
-      this.refit()
+      this.refit(true)
       this.explodeHome = {
         z: this.exaggeration,
         dist: this.distance(),
@@ -492,35 +568,65 @@ export class View3d {
     }
     const home = this.explodeHome
     this.explodeAnim = {
-      from: home?.z ?? this.exaggeration,
+      /* 收回去时从**当前**倍数起步，不要从 home 跳过去 */
+      from: this.exaggeration,
       to: this.exploded ? EXPLODE_Z : (home?.z ?? this.exaggeration),
       t: 0,
     }
     this.controls.enabled = false
   }
 
-  /** 透视 / 正交。两台相机共用一份位姿，切过去画面大小不变 */
-  setOrtho(on: boolean): void {
+  /**
+   * 透视 / 正交。按钮走补间：中途换相机，前后画幅不变；
+   * 内部切伪 2D 时传 `instant`，不要和运镜叠在一起。
+   */
+  setOrtho(on: boolean, instant = false): void {
     if (on === this.ortho) return
-    const from = this.cam
-    const d = this.distance()
-    this.ortho = on
-    const to = this.cam
-    to.up.copy(from.up)
-    to.quaternion.copy(from.quaternion)
-    to.position.copy(from.position)
-    if (on) {
-      this.applyOrthoZoom()
-    } else {
-      /* 回透视：把相机拉到等效视距上，画幅不变 */
-      const dir = to.position.clone().sub(this.controls.target)
-      const len = dir.length()
-      if (len > 1e-9) {
-        to.position.copy(this.controls.target).addScaledVector(dir.divideScalar(len), d)
+    if (instant) {
+      const from = this.cam
+      const d = this.distance()
+      this.ortho = on
+      const to = this.cam
+      to.up.copy(from.up)
+      to.quaternion.copy(from.quaternion)
+      to.position.copy(from.position)
+      if (on) {
+        this.applyOrthoZoom()
+      } else {
+        const dir = to.position.clone().sub(this.controls.target)
+        const len = dir.length()
+        if (len > 1e-9) to.position.copy(this.controls.target).addScaledVector(dir.divideScalar(len), d)
       }
+      this.controls.object = to
+      this.controls.update()
+      return
     }
-    this.controls.object = to
-    this.controls.update()
+    const half = this.ortho
+      ? ORTHO_BASE / Math.max(1e-9, this.camO.zoom)
+      : this.distance() * Math.tan((this.camP.fov * Math.PI) / 360)
+    const dir = this.cam.position.clone().sub(this.controls.target).normalize()
+    this.flyAnim = {
+      from: dir,
+      to: dir.clone(),
+      upFrom: this.cam.up.clone(),
+      upTo: this.cam.up.clone(),
+      targetFrom: this.controls.target.clone(),
+      targetTo: this.controls.target.clone(),
+      distFrom: this.distance(),
+      distTo: this.distance(),
+      /* 换相机前后各自认自己的 zoom，不要在另一台的 tick 分支里被写坏 */
+      zoomFrom: on ? ORTHO_BASE / Math.max(1e-9, half) : this.camO.zoom,
+      zoomTo: on ? ORTHO_BASE / Math.max(1e-9, half) : this.camO.zoom,
+      switchAt: 0.5,
+      switched: false,
+      switchTo: on ? 'ortho' : 'perspective',
+      halfFrom: half,
+      halfTo: half,
+      fade: 'none',
+      t: 0,
+      done: () => {},
+    }
+    this.controls.enabled = false
   }
 
   /** 当前那台相机 */
@@ -889,12 +995,21 @@ export class View3d {
     if (box.isEmpty()) return
     const center = box.getCenter(new THREE.Vector3())
     const radius = Math.max(1, box.getSize(new THREE.Vector3()).length() / 2)
-    const dir = new THREE.Vector3(0.85, -1, 0.75).normalize()
+    this.camP.up.set(0, 0, 1)
+    this.camO.up.set(0, 0, 1)
     this.controls.target.copy(center)
-    this.cam.position.copy(center).addScaledVector(dir, this.fitDistance(radius))
+    this.cam.position.copy(center).addScaledVector(DEFAULT_DIR, this.fitDistance(radius))
     this.applyOrthoZoom()
     this.controls.update()
     this.framed = true
+  }
+
+  private switchingToPerspective(a: NonNullable<View3d['flyAnim']>): boolean {
+    return a.switchTo === 'perspective' && a.switchAt >= 0
+  }
+
+  private switchingToOrtho(a: NonNullable<View3d['flyAnim']>): boolean {
+    return a.switchTo === 'ortho' && a.switchAt >= 0
   }
 
   /** 近裁面 = 视距的 2%（下界 0.01mm）：远景保住深度精度，贴到毫米级也不裁 */
@@ -955,7 +1070,8 @@ export class View3d {
       const dist = hold ? a.distFrom : a.distFrom + (a.distTo - a.distFrom) * kDist
 
       if (a.switchAt >= 0 && !a.switched && k >= a.switchAt) {
-        this.enterPerspective(a.halfFrom, dist)
+        if (a.switchTo === 'ortho') this.enterOrtho(a.halfFrom)
+        else this.enterPerspective(a.halfFrom, dist)
         a.switched = true
       }
 
@@ -973,19 +1089,24 @@ export class View3d {
         this.camP.fov = Math.min(120, Math.max(1, fov))
         this.camP.updateProjectionMatrix()
       }
-      this.setFade(a.fade === 'out' ? 1 - k : k)
+      if (a.fade !== 'none') this.setFade(a.fade === 'out' ? 1 - k : k)
       if (a.t >= 1) {
-        const home = this.homePose
+        if (a.switchAt >= 0 && !a.switched) {
+          if (a.switchTo === 'ortho') this.enterOrtho(a.halfTo)
+          else this.enterPerspective(a.halfTo, a.distTo)
+          a.switched = true
+        }
+        if (this.switchingToPerspective(a)) {
+          const finalFov = (2 * Math.atan(a.halfTo / Math.max(1e-9, a.distTo)) * 180) / Math.PI
+          this.camP.fov = finalFov
+          this.camP.zoom = 1
+          this.camP.updateProjectionMatrix()
+        }
+        if (this.switchingToOrtho(a)) {
+          this.camO.zoom = ORTHO_BASE / Math.max(1e-9, a.halfTo)
+          this.camO.updateProjectionMatrix()
+        }
         if (a.fade === 'in') {
-          if (a.switchAt >= 0 && !a.switched) {
-            this.enterPerspective(a.halfFrom, dist)
-            a.switched = true
-          }
-          if (home !== null && !home.ortho) {
-            this.camP.fov = home.fov
-            this.camP.zoom = 1
-            this.camP.updateProjectionMatrix()
-          }
           this.pseudo = false
           this.syncVisibility()
         }
