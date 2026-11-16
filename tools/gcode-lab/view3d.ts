@@ -332,25 +332,53 @@ export class View3d {
     return (2 * ORTHO_BASE * Math.min(400, Math.max(0.4, view.scale))) / Math.max(1, view.h)
   }
 
+  /**
+   * 瞬时把 3D 摆成「当前 2D」的伪顶视。
+   *
+   * 切回 3D 的那一帧必须接在 2D 最后一帧上：用户在 2D 里平移/缩放过，旧的 3D 顶视
+   * 就不作数了。这里用同一个 `cx/cy/scale` 反算 target 与 zoom，且在同一 JS 任务里
+   * 完成，浏览器没机会先画出旧相机。
+   */
+  snapToPseudo(view: { cx: number; cy: number; scale: number; w: number; h: number }): void {
+    if (!this.ortho) this.setOrtho(true)
+    const target = new THREE.Vector3(view.cx, view.cy, 0)
+    this.controls.target.copy(target)
+    this.camO.up.set(0, 1, 0)
+    this.camO.position.copy(target).add(new THREE.Vector3(0, 0, 1000))
+    this.camO.lookAt(target)
+    this.camO.zoom = this.zoomForView(view)
+    this.camO.updateProjectionMatrix()
+    this.controls.object = this.camO
+    this.pseudo = true
+    this.setFade(0)
+    this.syncVisibility()
+  }
+
   /** 从伪 2D 的顶视飞回进入 2D 前的机位，并把渐隐的东西带回来 */
-  flyFromTop(done: () => void): void {
+  flyFromTop(
+    view: { cx: number; cy: number; scale: number; w: number; h: number },
+    done: () => void,
+  ): void {
     const home = this.homePose
-    const offset = this.cam.position.clone().sub(this.controls.target)
-    if (home === null || offset.lengthSq() < 1e-9) {
+    /* 从没进过 2D（首帧就是 2D）：不要摆成伪顶视，按普通 3D 走 */
+    if (home === null) {
       done()
       return
     }
+    this.snapToPseudo(view)
+    const halfTan = Math.tan((this.camP.fov * Math.PI) / 360)
     this.flyAnim = {
-      from: offset.clone().normalize(),
+      from: new THREE.Vector3(0, 0, 1),
       to: home.dir.clone(),
-      upFrom: this.cam.up.clone(),
+      upFrom: this.camO.up.clone(),
       upTo: home.up.clone(),
       targetFrom: this.controls.target.clone(),
       targetTo: home.target.clone(),
-      distFrom: offset.length(),
+      distFrom: this.camO.position.distanceTo(this.controls.target),
       distTo: home.dist,
       zoomFrom: this.camO.zoom,
-      zoomTo: home.ortho ? home.zoom : 1,
+      /* 回透视前最后那一帧正交要与透视在 home 距离上的画幅一致 */
+      zoomTo: home.ortho ? home.zoom : ORTHO_BASE / Math.max(1e-9, home.dist * halfTan),
       fade: 'in',
       t: 0,
       done,

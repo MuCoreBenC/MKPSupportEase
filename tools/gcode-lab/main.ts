@@ -530,6 +530,18 @@ view3d.onExaggeration = (z) => {
   el.exagVal.textContent = String(Math.round(z))
 }
 
+function syncZoomReadout(): void {
+  /* 两把尺子不是同一个量，切过去先把滑杆摆到当前视图的位置 */
+  if (state.view === '3d') {
+    const d = view3d.distance()
+    el.zoom.value = String(toSlider(d, ZOOM_RANGE['3d']))
+    el.zoomVal.textContent = d < 10 ? `视距 ${d.toFixed(2)}` : `视距 ${d.toFixed(0)}`
+  } else {
+    el.zoom.value = String(toSlider(view2d.scaleOf(), ZOOM_RANGE['2d']))
+    el.zoomVal.textContent = ''
+  }
+}
+
 function applyView(next: '2d' | '3d'): void {
   state.view = next
   el.view.querySelectorAll('button').forEach((b) => {
@@ -542,15 +554,7 @@ function applyView(next: '2d' | '3d'): void {
   if (next === '3d') viewCube.resize()
   view3d.setVisible(next === '3d')
   if (next === '2d') view2d.resize()
-  /* 两把尺子不是同一个量，切过去先把滑杆摆到当前视图的位置 */
-  if (next === '3d') {
-    const d = view3d.distance()
-    el.zoom.value = String(toSlider(d, ZOOM_RANGE['3d']))
-    el.zoomVal.textContent = d < 10 ? `视距 ${d.toFixed(2)}` : `视距 ${d.toFixed(0)}`
-  } else {
-    el.zoom.value = String(toSlider(view2d.scaleOf(), ZOOM_RANGE['2d']))
-    el.zoomVal.textContent = ''
-  }
+  syncZoomReadout()
 }
 
 el.view.addEventListener('click', (e) => {
@@ -566,9 +570,14 @@ el.view.addEventListener('click', (e) => {
     view3d.flyToTop(view2d.viewOf(), () => applyView('2d'))
     return
   }
-  /* 从 2D 回 3D：先把 3D 摆出来，再带着渐显飞回进来前的机位 */
+  /*
+   * 从 2D 回 3D：把 3D 摆出来后，立刻用**当前 2D 视图**摆成伪顶视，
+   * 再从这个姿态飞回原机位。两步在同一个任务里，第一帧不会露出旧相机。
+   */
+  const view = view2d.viewOf()
   applyView('3d')
-  view3d.flyFromTop(() => {})
+  view3d.flyFromTop(view, () => {})
+  syncZoomReadout()
 })
 
 el.object.addEventListener('change', () => {
