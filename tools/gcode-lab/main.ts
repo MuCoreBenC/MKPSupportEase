@@ -9,12 +9,13 @@
 
 import { EdgeField } from '../../src/app/glueLab/band'
 import type { EdgeRule } from '../../src/app/glueLab/band'
-import { countLevels, landedMoves, parseBlocks } from '../../src/app/glueLab/parse'
-import type { LabBlock, LabMove } from '../../src/app/glueLab/parse'
+import { countLevels, landedMoves, parseBlocks, parsePrint } from '../../src/app/glueLab/parse'
+import type { LabBlock, LabMove, PrintModel } from '../../src/app/glueLab/parse'
 import { estimatePitch } from '../../src/app/glueLab/pitch'
 import type { PitchEstimate } from '../../src/app/glueLab/pitch'
 import { onThemeChange, palette } from './theme'
 import { View2d } from './view2d'
+import { ViewCube } from './viewcube'
 import { View3d } from './view3d'
 
 const $ = <T extends HTMLElement>(id: string): T => {
@@ -36,6 +37,12 @@ const state = {
   predicted: new Uint8Array(0),
   /** 每块有没有窄面（后台扫，见 `scanNarrow`） */
   narrow: new Map<number, boolean>(),
+  print: null as PrintModel | null,
+  /** 层滑块指向第几层（`state.print.layers` 的下标） */
+  layerIndex: 0,
+  layerMode: 'all' as 'all' | 'current',
+  /** 正拖着缩放滑杆：这期间别让视图把值写回来 */
+  zoomBusy: false,
 }
 
 const el = {
@@ -56,6 +63,18 @@ const el = {
   faces: $('faces'),
   scale: $('scale'),
   badge: $('badge'),
+  layers: $('layers'),
+  layerOther: $('layer-other'),
+  reset: $('reset'),
+  refit: $('refit'),
+  ortho: $('ortho'),
+  layermode: $('layermode'),
+  side: $('side'),
+  layer: $<HTMLInputElement>('layer'),
+  layerVal: $('layer-val'),
+  zoom: $<HTMLInputElement>('zoom'),
+  zoomVal: $('zoom-val'),
+  cube: $<HTMLCanvasElement>('cube'),
   c2d: $<HTMLCanvasElement>('c2d'),
   c3d: $<HTMLCanvasElement>('c3d'),
   cz: $<HTMLCanvasElement>('cz'),
@@ -65,6 +84,12 @@ const view2d = new View2d(
   el.c2d,
   (mmPer100) => {
     el.scale.textContent = `100px = ${mmPer100.toFixed(1)}mm`
+    /* 2D 的缩放滑杆跟着滚轮走（2D 那套是「以光标为锚点」的，这里只做回显） */
+    if (!state.zoomBusy && state.view === '2d') {
+      el.zoom.value = String(toSlider(100 / mmPer100, ZOOM_RANGE['2d']))
+      /* 2D 的比例尺在右下角那块，这里不重复写数字 */
+      el.zoomVal.textContent = ''
+    }
   },
   (index) => {
     state.selected = index
@@ -73,6 +98,8 @@ const view2d = new View2d(
   },
 )
 const view3d = new View3d(el.c3d)
+const viewCube = new ViewCube(el.cube)
+viewCube.onPick = (dir) => view3d.setDirection(dir)
 
 const rule = (): EdgeRule => ({ lines: state.lines, pitchMm: state.pitch.mm })
 
@@ -92,12 +119,23 @@ function loadText(name: string, text: string): void {
     '产物里的 Z 是当时那套参数做的决定；预测按顶栏「外几条 × 线距」现算，两者本来就可能不一样。'
   el.badge.classList.remove('hidden')
   renderBlocks()
+  const print = parsePrint(text)
+  state.print = print
+  /* 认不出的 `; FEATURE:` 不给它单开一格，折进「其它」那张；一格都没有就不显示 */
+  el.layerOther.classList.toggle('hidden', print.unknown.length === 0)
+  view3d.setPrint(print)
   view3d.setBlocks(blocks, 0)
-  loadBlock(0)
+  loadBlock(0, true)
+  el.side.classList.remove('hidden')
+  /* 默认停在最顶层：一开始就是「全看」，往下拖才切 */
+  const top = Math.max(0, print.layers.length - 1)
+  el.layer.max = String(top)
+  el.layer.value = String(top)
+  setLayer(top)
   scanNarrow()
 }
 
-function loadBlock(index: number): void {
+function loadBlock(index: number, refit = false): void {
   const block = state.blocks[index]
   if (!block) return
   state.index = index
@@ -109,7 +147,7 @@ function loadBlock(index: number): void {
     ? `${state.pitch.mm.toFixed(2)}mm 回落`
     : `${state.pitch.mm.toFixed(2)}mm 实测`
   el.lift.textContent = block.raisedZ === null ? '—' : `${block.liftMm.toFixed(2)}mm`
-  refreshRule()
+  refreshRule(refit)
   view3d.select(index)
   el.c2d.classList.remove('fade-in')
   void el.c2d.offsetWidth
@@ -117,7 +155,7 @@ function loadBlock(index: number): void {
   renderBlocks()
 }
 
-function refreshRule(): void {
+function refreshRule(refit = false): void {
   const block = state.blocks[state.index]
   if (!block) return
   const r = rule()
@@ -127,13 +165,16 @@ function refreshRule(): void {
     if (m.level === 'up' || !state.field) return
     state.predicted[i] = state.field.isEdge(m.from, r) ? 1 : 0
   })
-  view2d.setData({
-    block,
-    field: state.field,
-    rule: r,
-    predicted: state.predicted,
-    mask: state.mask,
-  })
+  view2d.setData(
+    {
+      block,
+      field: state.field,
+      rule: r,
+      predicted: state.predicted,
+      mask: state.mask,
+    },
+    refit,
+  )
   view2d.select(state.selected)
   renderFaces()
   renderDetail()
@@ -341,8 +382,159 @@ el.view.addEventListener('click', (e) => {
   el.view.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b === btn))
   el.c2d.classList.toggle('hidden', next !== '2d')
   el.scale.classList.toggle('hidden', next !== '2d')
+  el.layers.classList.toggle('hidden', next !== '3d')
+  el.cube.classList.toggle('hidden', next !== '3d')
+  if (next === '3d') viewCube.resize()
   view3d.setVisible(next === '3d')
   if (next === '2d') view2d.resize()
+  /* 两把尺子不是同一个量，切过去先把滑杆摆到当前视图的位置 */
+  if (next === '3d') {
+    const d = view3d.distance()
+    el.zoom.value = String(toSlider(d, ZOOM_RANGE['3d']))
+    el.zoomVal.textContent = d < 10 ? `视距 ${d.toFixed(2)}` : `视距 ${d.toFixed(0)}`
+  } else {
+    el.zoom.value = String(toSlider(view2d.scaleOf(), ZOOM_RANGE['2d']))
+    el.zoomVal.textContent = ''
+  }
+})
+
+/* 「视角」= 当前视图的还原：2D 回到铺满那一块，3D 回到默认机位 */
+el.reset.addEventListener('click', () => {
+  if (state.view === '2d') view2d.fit()
+  else view3d.resetView()
+})
+
+/* 「居中」= 只摆位置、不动缩放与朝向 */
+el.refit.addEventListener('click', () => {
+  if (state.view === '2d') view2d.recenter()
+  else view3d.refit()
+})
+
+/* 透视 / 正交：钮上写的是**现在**是哪一档 */
+el.ortho.addEventListener('click', () => {
+  view3d.setOrtho(!view3d.isOrtho())
+  el.ortho.textContent = view3d.isOrtho() ? '正交' : '透视'
+})
+
+/* ---- 层滑块 ---- */
+
+function blockLayer(block: LabBlock): number {
+  return block.layerZ ?? block.normalZ ?? 0
+}
+
+function setLayer(index: number): void {
+  const layers = state.print?.layers ?? []
+  if (layers.length === 0) return
+  const i = Math.max(0, Math.min(index, layers.length - 1))
+  state.layerIndex = i
+  const z = layers[i] as number
+  el.layerVal.textContent = `${i + 1}/${layers.length} Z${z.toFixed(2)}`
+  view3d.setLayer(i, state.layerMode)
+  /*
+   * 涂胶块跟着层走：取**不高于这一层的最后一块**。
+   * 不用「最近的一块」—— 那样在两条涂胶层之间来回拖会前后跳（作者报的「位置总在变化」），
+   * 而且「这一层时的涂胶状态」本来就是最近一次涂过的那块。
+   */
+  let best = 0
+  state.blocks.forEach((block, k) => {
+    if (blockLayer(block) <= z + 1e-9) best = k
+  })
+  if (best !== state.index) loadBlock(best)
+}
+
+el.layer.addEventListener('input', () => setLayer(Number(el.layer.value)))
+
+el.layermode.addEventListener('click', () => {
+  state.layerMode = state.layerMode === 'all' ? 'current' : 'all'
+  el.layermode.textContent = state.layerMode === 'all' ? '全部层' : '当前层'
+  setLayer(state.layerIndex)
+})
+
+/* ---- 缩放滑杆（2D / 3D 同一把，对数刻度） ---- */
+
+const ZOOM_RANGE = {
+  '2d': { lo: 0.4, hi: 400 },
+  '3d': { lo: 0.01, hi: 2000 },
+} as const
+
+function fromSlider(t: number, range: { lo: number; hi: number }): number {
+  const a = Math.log10(range.lo)
+  return 10 ** (a + (Math.log10(range.hi) - a) * t)
+}
+
+function toSlider(v: number, range: { lo: number; hi: number }): number {
+  const a = Math.log10(range.lo)
+  const t = (Math.log10(Math.max(range.lo, Math.min(range.hi, v))) - a) / (Math.log10(range.hi) - a)
+  return Math.round(t * 1000)
+}
+
+el.zoom.addEventListener('input', () => {
+  const t = Number(el.zoom.value) / 1000
+  if (state.view === '2d') view2d.setScale(fromSlider(t, ZOOM_RANGE['2d']))
+  else view3d.setDistance(fromSlider(t, ZOOM_RANGE['3d']))
+})
+
+for (const ev of ['pointerdown', 'pointerup', 'pointercancel'] as const) {
+  el.zoom.addEventListener(ev, () => {
+    state.zoomBusy = ev === 'pointerdown'
+  })
+}
+
+/* 3D 每帧把视距报回来，滑杆与读数跟着滚轮走 */
+view3d.onFrame = (d) => {
+  viewCube.update(view3d.cameraQuaternion())
+  if (state.zoomBusy || state.view !== '3d') return
+  el.zoom.value = String(toSlider(d, ZOOM_RANGE['3d']))
+  el.zoomVal.textContent = d < 10 ? `视距 ${d.toFixed(2)}` : `视距 ${d.toFixed(0)}`
+}
+
+/*
+ * 显示开关：点一下切换；**按住往下拖会一路扫过去**，把经过的那几行都设成同一档
+ * （Blender 大纲视图里按着眼睛往下抹那种）。一次拖拽里每行只设一次，不会来回翻。
+ */
+let paintOn: boolean | null = null
+
+function setKindRow(row: HTMLElement, on: boolean): void {
+  row.setAttribute('aria-pressed', on ? 'true' : 'false')
+  row.querySelector('use')?.setAttribute('href', on ? '#eye-on' : '#eye-off')
+  const kind = row.dataset.kind
+  if (kind) view3d.setKindVisible(kind, on)
+}
+
+/** 光标底下是哪一行（拖拽期间指针被捕获在面板上，只能靠坐标找） */
+function rowAt(x: number, y: number): HTMLElement | null {
+  const hit = document.elementFromPoint(x, y)?.closest('[data-kind]')
+  return hit instanceof HTMLElement && el.layers.contains(hit) ? hit : null
+}
+
+el.layers.addEventListener('pointerdown', (e) => {
+  const row = (e.target as HTMLElement).closest<HTMLElement>('[data-kind]')
+  if (!row) return
+  e.preventDefault()
+  paintOn = row.getAttribute('aria-pressed') !== 'true'
+  setKindRow(row, paintOn)
+  el.layers.setPointerCapture(e.pointerId)
+})
+
+el.layers.addEventListener('pointermove', (e) => {
+  if (paintOn === null) return
+  const row = rowAt(e.clientX, e.clientY)
+  if (row) setKindRow(row, paintOn)
+})
+
+for (const ev of ['pointerup', 'pointercancel'] as const) {
+  window.addEventListener(ev, () => {
+    paintOn = null
+  })
+}
+
+/* 键盘：回车 / 空格切换当前这一行 */
+el.layers.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return
+  const row = (e.target as HTMLElement).closest<HTMLElement>('[data-kind]')
+  if (!row) return
+  e.preventDefault()
+  setKindRow(row, row.getAttribute('aria-pressed') !== 'true')
 })
 
 window.addEventListener('keydown', (e) => {
@@ -358,6 +550,7 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('resize', () => {
   view2d.resize()
   view3d.resize()
+  viewCube.resize()
   renderStrip()
 })
 
@@ -365,6 +558,7 @@ window.addEventListener('resize', () => {
 onThemeChange(() => {
   view2d.resize()
   view3d.refreshTheme()
+  viewCube.refreshTheme()
   renderStrip()
 })
 

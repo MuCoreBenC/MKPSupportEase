@@ -1,21 +1,27 @@
 /*
- * 3D 层堆叠：把每一块涂胶按它自己那一档 Z 摆起来，Z 方向可放大。
+ * 3D：打印本体（墙 / 填充 / 支撑 / 支撑面 / 熨烫面）+ 涂胶路径，按真实 Z 堆起来。
  *
  * 挣位置的只有一件事 —— **层间漂移**：同一条边这层抬了、下层没抬，2D 里看不出来，
  * 堆起来就是一道豁口。别处（判定为什么错）仍然看 2D。
  *
  * 坐标用 Z 朝上（相机 `up` 设成 +Z），与 G-code 一致，免得读图时还要在脑子里翻。
+ * 涂胶块的高度取 `;MKP_BEGIN paint … z=`（层高），不是笔尖 Z —— 笔尖比层高多出一个
+ * 机械偏移，拿它画会浮在模型上方好几个毫米。
+ *
+ * # 层滑块
+ *
+ * `parse.ts` 把顶点按 Z 升序排好并给出每层的段数前缀，所以「看到第 i 层」只是
+ * `geometry.setDrawRange`，切层不重建几何 —— 拖着滑块走是即时的。
  *
  * # 相机手感
  *
- * 照 machine-motion 那一套（那边调过好几轮，别再自己发明一遍）：
- *
- * - **旋转中心钉在模型上**：`zoomToCursor` 关掉 —— 开着的话滚几次中心就跑到模型旁边的
- *   空地上，转起来像绕着屏幕中心甩；
- * - **平移会把中心一起带走**：右键拖拽走 OrbitControls 自带的 pan（改 `target`），
- *   所以拖完再转，转的是新位置上的那个点；
- * - **Shift = 精调**：三个速度一起缩到 1/6，同时把左右键换手（左键平移、右键旋转）；
- * - **近裁面跟着视距走**（视距的 2%）：可以一路推进去看某一层的豁口，不会在 1mm 处被裁掉。
+ * - **缩放朝光标**（`zoomToCursor = true`）：这样能一直推到某个面、甚至穿进去；
+ *   朝 target 收的话推到 target 就到头了（越推越空，看着像"卡住"）。
+ * - **平移走 OrbitControls 自带的 pan**：它把相机与 target 一起挪，转起来绕的是
+ *   画面中心那一点。machine-motion 那边反过来（中心钉在机器上、平移走投影 skew）——
+ *   那是「一台机器」该有的手感，这里是一堆互相独立的层。
+ * - **Shift = 精调**：三个速度一起缩到 1/6，同时左右键换手（左键平移、右键旋转）。
+ * - **近裁面跟着视距走**（视距的 2%）：贴到毫米级也不裁。
  *
  * # 重画
  *
@@ -26,47 +32,99 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
-import type { LabBlock } from '../../src/app/glueLab/parse'
+import type { LabBlock, PrintKind, PrintModel } from '../../src/app/glueLab/parse'
 import { hex, palette } from './theme'
 
 /** Shift 档的速度倍率：与 machine-motion 同一档（滚轮一格约 0.9% 视距） */
 const NAV_FINE = 1 / 6
+/** 滚轮一格推拉多少：OrbitControls 默认 0.95（5%/格）在本仓的机位下推不动 */
+const ZOOM_SPEED = 2.2
+const MIN_DISTANCE = 0.01
+const MAX_DISTANCE = 3000
+/** 涂胶块在 3D 里抬起一点点，免得和它贴着的支撑面同深度打架 */
+const GLUE_LIFT_MM = 0.02
+/**
+ * 正交那台相机的基准半高（mm）。正交的画幅 = 基准 / `zoom`，
+ * 于是 `zoom` 与透视的视距可以互换（见 `applyOrthoZoom` / `distance`）。
+ */
+const ORTHO_BASE = 100
+
+/** 层滑块的两种走线视图（切片器里那一颗钮） */
+export type LayerMode = 'current' | 'all'
+
+const IDENTITY = new THREE.Quaternion()
+/** 视角立方体点一下之后转过去的时长（秒） */
+const SNAP_SECONDS = 0.3
 
 export class View3d {
   private readonly canvas: HTMLCanvasElement
   private readonly renderer: THREE.WebGLRenderer
   private readonly scene = new THREE.Scene()
-  private readonly camera: THREE.PerspectiveCamera
+  private readonly camP: THREE.PerspectiveCamera
+  private readonly camO: THREE.OrthographicCamera
+  /** 在看的是不是正交那台 */
+  private ortho = false
   private readonly controls: OrbitControls
   private readonly group = new THREE.Group()
   private grid: THREE.GridHelper
   private allLayer: THREE.LineSegments | null = null
   private curLayer: THREE.LineSegments | null = null
+  private print: PrintModel | null = null
+  private readonly printLayers = new Map<PrintKind, THREE.LineSegments>()
   private blocks: LabBlock[] = []
+  /** 每块累计的**段**数（与 `blocks` 同序，升序）；层滑块切涂胶栈用 */
+  private blockEdges: number[] = [0]
   private index = 0
-  private baseZ = 0
+  private layerIndex = -1
+  private layerMode: LayerMode = 'all'
   private exaggeration = 20
   private visible = false
   private framed = false
   private raf = 0
+  /** 视角立方体点完之后的那一段补间 */
+  private tween: { q: THREE.Quaternion; from: THREE.Vector3; t: number } | null = null
+  private last = 0
   private readonly baseSpeed = { rotate: 1, pan: 1, zoom: 1 }
+  private readonly shown = new Set<string>([
+    'glue',
+    'outer',
+    'inner',
+    'fill',
+    'support',
+    'supportFace',
+    'ironing',
+  ])
+  /** 每帧报一次视距（顶栏那把缩放滑杆要跟着滚轮走） */
+  onFrame: ((distance: number) => void) | null = null
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true })
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1))
 
-    this.camera = new THREE.PerspectiveCamera(42, 1, 0.1, 5000)
-    this.camera.up.set(0, 0, 1)
-    this.camera.position.set(180, -180, 160)
+    this.camP = new THREE.PerspectiveCamera(42, 1, 0.1, 5000)
+    this.camP.up.set(0, 0, 1)
+    this.camP.position.set(180, -180, 160)
 
-    this.controls = new OrbitControls(this.camera, canvas)
+    this.camO = new THREE.OrthographicCamera(
+      -ORTHO_BASE,
+      ORTHO_BASE,
+      ORTHO_BASE,
+      -ORTHO_BASE,
+      0.1,
+      100000,
+    )
+    this.camO.up.set(0, 0, 1)
+    this.camO.position.copy(this.camP.position)
+
+    this.controls = new OrbitControls(this.camP, canvas)
     this.controls.enableDamping = true
-    this.controls.dampingFactor = 0.1
-    this.controls.zoomToCursor = false
-    this.controls.screenSpacePanning = true
-    this.controls.minDistance = 0.05
-    this.controls.maxDistance = 4000
+    this.controls.dampingFactor = 0.12
+    this.controls.zoomToCursor = true
+    this.controls.enablePan = true
+    this.controls.zoomSpeed = ZOOM_SPEED
+    this.controls.minDistance = MIN_DISTANCE
+    this.controls.maxDistance = MAX_DISTANCE
     this.baseSpeed = {
       rotate: this.controls.rotateSpeed,
       pan: this.controls.panSpeed,
@@ -82,15 +140,34 @@ export class View3d {
 
   setBlocks(blocks: LabBlock[], index: number): void {
     this.blocks = blocks
-    const zs = blocks
-      .map((b) => b.normalZ)
-      .filter((z): z is number => z !== null)
-      .sort((a, b) => a - b)
-    this.baseZ = zs.length > 0 ? (zs[0] as number) : 0
-    this.rebuildAll()
+    this.rebuildGlue()
     this.select(index)
+    this.applyRanges()
     this.framed = false
     if (this.visible) this.frame()
+  }
+
+  /** 打印本体：每类一层，开关按类独立；层滑块靠 `bounds` 切 */
+  setPrint(print: PrintModel): void {
+    this.print = print
+    this.rebuildPrint()
+    this.applyRanges()
+    this.framed = false
+    if (this.visible) this.frame()
+  }
+
+  setKindVisible(kind: string, visible: boolean): void {
+    if (visible) this.shown.add(kind)
+    else this.shown.delete(kind)
+    this.syncVisibility()
+  }
+
+  /** 层滑块：`index < 0` = 全看 */
+  setLayer(index: number, mode: LayerMode): void {
+    this.layerIndex = index
+    this.layerMode = mode
+    this.applyRanges()
+    this.syncVisibility()
   }
 
   select(index: number): void {
@@ -103,15 +180,123 @@ export class View3d {
     }
     const block = this.blocks[index]
     if (!block) return
-    const layer = this.build([block], true, 1)
+    const layer = this.buildGlue([block], true, 1)
     this.curLayer = layer
     this.group.add(layer)
     this.group.scale.set(1, 1, this.exaggeration)
+    this.syncVisibility()
   }
 
   setExaggeration(n: number): void {
     this.exaggeration = n
     this.group.scale.set(1, 1, n)
+  }
+
+  /** 回到默认视角：朝向与位置都回默认 */
+  resetView(): void {
+    this.frame()
+  }
+
+  /**
+   * 只换位置、不换朝向：绕**当前视线方向**重新对中、重新缩放。
+   *
+   * 与「视角」的区别：那一颗会把朝向也掰回默认的等轴测，这一颗只把你现在看的
+   * 这个方向摆正 —— 转到满意的角度之后用它把模型放回画面里。
+   */
+  refit(): void {
+    const dir = this.cam.position.clone().sub(this.controls.target)
+    if (dir.lengthSq() < 1e-9) return
+    dir.normalize()
+    this.group.updateMatrixWorld(true)
+    const box = this.visibleBox()
+    if (box.isEmpty()) return
+    const center = box.getCenter(new THREE.Vector3())
+    const radius = Math.max(1, box.getSize(new THREE.Vector3()).length() / 2)
+    this.controls.target.copy(center)
+    this.cam.position.copy(center).addScaledVector(dir, this.fitDistance(radius))
+    this.applyOrthoZoom()
+    this.controls.update()
+  }
+
+  isOrtho(): boolean {
+    return this.ortho
+  }
+
+  /** 透视 / 正交。两台相机共用一份位姿，切过去画面大小不变 */
+  setOrtho(on: boolean): void {
+    if (on === this.ortho) return
+    const from = this.cam
+    const d = this.distance()
+    this.ortho = on
+    const to = this.cam
+    to.up.copy(from.up)
+    to.quaternion.copy(from.quaternion)
+    to.position.copy(from.position)
+    if (on) {
+      this.applyOrthoZoom()
+    } else {
+      /* 回透视：把相机拉到等效视距上，画幅不变 */
+      const dir = to.position.clone().sub(this.controls.target)
+      const len = dir.length()
+      if (len > 1e-9) {
+        to.position.copy(this.controls.target).addScaledVector(dir.divideScalar(len), d)
+      }
+    }
+    this.controls.object = to
+    this.controls.update()
+  }
+
+  /** 当前那台相机 */
+  private get cam(): THREE.PerspectiveCamera | THREE.OrthographicCamera {
+    return this.ortho ? this.camO : this.camP
+  }
+
+  /** 视距（正交档给的是**等效**视距：同样的 `zoom` 换成透视该站多远） */
+  distance(): number {
+    if (!this.ortho) return this.camP.position.distanceTo(this.controls.target)
+    const halfTan = Math.tan((this.camP.fov * Math.PI) / 360)
+    return ORTHO_BASE / Math.max(1e-9, this.camO.zoom * halfTan)
+  }
+
+  /** 视角立方体每帧要它：立方体的朝向 = 这个东西的逆 */
+  cameraQuaternion(): THREE.Quaternion {
+    return this.cam.quaternion.clone()
+  }
+
+  /** 转到某个方向（视角立方体点面 / 点角都走这里） */
+  setDirection(dir: THREE.Vector3): void {
+    const target = this.controls.target
+    const from = this.cam.position.clone().sub(target)
+    if (from.lengthSq() < 1e-9) return
+    const to = dir.clone().normalize()
+    /*
+     * 正顶 / 正底：`up` 是 +Z，视线正好平行于它，`lookAt` 会退化。
+     * 让方向偏 0.1° 就够定死"屏幕上方是 -Y"，肉眼看不出差别。
+     */
+    if (Math.abs(to.z) > 0.999) {
+      to.y -= 0.002
+      to.normalize()
+    }
+    const q = new THREE.Quaternion().setFromUnitVectors(from.clone().normalize(), to)
+    this.tween = { q, from, t: 0 }
+    this.controls.enabled = false
+  }
+
+  /** 缩放滑杆：沿当前视线改视距，朝向与 target 不动 */
+  setDistance(d: number): void {
+    const want = Math.min(MAX_DISTANCE, Math.max(MIN_DISTANCE, d))
+    if (this.ortho) {
+      /* 正交没有「远近」，改的是画幅：等效视距 → zoom */
+      const halfTan = Math.tan((this.camP.fov * Math.PI) / 360)
+      this.camO.zoom = ORTHO_BASE / (want * halfTan)
+      this.camO.updateProjectionMatrix()
+      return
+    }
+    const dir = this.camP.position.clone().sub(this.controls.target)
+    const len = dir.length()
+    if (len < 1e-9) return
+    this.camP.position.copy(this.controls.target).addScaledVector(dir.divideScalar(len), want)
+    this.controls.update()
   }
 
   /** 系统换深浅色：网格与所有线段的颜色都要重建（顶点色烘在 geometry 里） */
@@ -121,8 +306,10 @@ export class View3d {
     ;(this.grid.material as THREE.Material).dispose()
     this.grid = this.buildGrid()
     this.scene.add(this.grid)
-    this.rebuildAll()
+    this.rebuildPrint()
+    this.rebuildGlue()
     this.select(this.index)
+    this.applyRanges()
   }
 
   /** 2D/3D 切换。第一次显示时再量尺寸 + 取景，隐藏时画布是 0×0 */
@@ -143,8 +330,11 @@ export class View3d {
     const w = Math.max(1, rect.width)
     const h = Math.max(1, rect.height)
     this.renderer.setSize(w, h, false)
-    this.camera.aspect = w / h
-    this.camera.updateProjectionMatrix()
+    this.camP.aspect = w / h
+    this.camP.updateProjectionMatrix()
+    this.camO.left = -ORTHO_BASE * (w / h)
+    this.camO.right = ORTHO_BASE * (w / h)
+    this.camO.updateProjectionMatrix()
   }
 
   /* ---------------- 内部 ---------------- */
@@ -158,8 +348,7 @@ export class View3d {
       /*
        * Shift 换手：左键平移、右键旋转。
        * OrbitControls 自己在 `onPointerDown` 里看到 shiftKey 会把左右再对调一次，
-       * 所以这里要先写成「对调之后正好」的那一套 —— 用的是公开的 `mouseButtons` 配置，
-       * 没有去改库里的东西。
+       * 所以这里要先写成「对调之后正好」的那一套 —— 用的是公开的 `mouseButtons` 配置。
        */
       this.controls.mouseButtons.LEFT = shift ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE
       this.controls.mouseButtons.RIGHT = shift ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN
@@ -185,7 +374,9 @@ export class View3d {
     return grid
   }
 
-  private build(
+  /* ---- 涂胶 ---- */
+
+  private buildGlue(
     blocks: readonly LabBlock[],
     colored: boolean,
     opacity: number,
@@ -197,9 +388,10 @@ export class View3d {
     const positions: number[] = []
     const colors: number[] = []
     for (const block of blocks) {
+      const base = blockLayerZ(block)
       for (const m of block.moves) {
         if (m.level === 'up') continue
-        const z = Math.max(0, m.z - this.baseZ)
+        const z = base + GLUE_LIFT_MM
         positions.push(m.from.x, m.from.y, z, m.to.x, m.to.y, z)
         const c = colored ? (m.level === 'raised' ? raised : normal) : dim
         colors.push(c.r, c.g, c.b, c.r, c.g, c.b)
@@ -208,55 +400,204 @@ export class View3d {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
-    const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity })
-    return new THREE.LineSegments(geo, mat)
+    /* 涂胶是这个试验台的主角：关掉深度测试，被模型挡住时也画在最上面 */
+    const mat = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity,
+      depthTest: !colored,
+    })
+    const layer = new THREE.LineSegments(geo, mat)
+    if (colored) layer.renderOrder = 3
+    return layer
   }
 
-  private rebuildAll(): void {
+  private rebuildGlue(): void {
     if (this.allLayer) {
       this.group.remove(this.allLayer)
       this.allLayer.geometry.dispose()
       ;(this.allLayer.material as THREE.Material).dispose()
       this.allLayer = null
     }
-    this.allLayer = this.build(this.blocks, false, 0.4)
+    this.allLayer = this.buildGlue(this.blocks, false, 0.4)
     this.group.add(this.allLayer)
+
+    this.blockEdges = [0]
+    let seg = 0
+    for (const block of this.blocks) {
+      for (const m of block.moves) if (m.level !== 'up') seg += 1
+      this.blockEdges.push(seg)
+    }
+  }
+
+  /* ---- 打印本体 ---- */
+
+  private rebuildPrint(): void {
+    for (const layer of this.printLayers.values()) {
+      this.group.remove(layer)
+      layer.geometry.dispose()
+      ;(layer.material as THREE.Material).dispose()
+    }
+    this.printLayers.clear()
+    if (this.print === null) return
+
+    const p = palette()
+    const tone: Record<PrintKind, { hex: number; opacity: number }> = {
+      outer: { hex: hex(p.text, 0xe6edf3), opacity: 0.85 },
+      inner: { hex: hex(p.dim, 0x8b949e), opacity: 0.55 },
+      fill: { hex: hex(p.dim, 0x8b949e), opacity: 0.3 },
+      support: { hex: hex(p.green, 0x3fb950), opacity: 0.45 },
+      supportFace: { hex: hex(p.green, 0x3fb950), opacity: 0.85 },
+      ironing: { hex: hex(p.violet, 0xa371f7), opacity: 0.9 },
+      other: { hex: hex(p.dim, 0x8b949e), opacity: 0.3 },
+    }
+    for (const [kind, data] of Object.entries(this.print.kinds) as [PrintKind, Float32Array][]) {
+      if (data.length === 0) continue
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute('position', new THREE.BufferAttribute(data, 3))
+      const t = tone[kind]
+      const mat = new THREE.LineBasicMaterial({
+        color: t.hex,
+        transparent: true,
+        opacity: t.opacity,
+      })
+      const layer = new THREE.LineSegments(geo, mat)
+      this.printLayers.set(kind, layer)
+      this.group.add(layer)
+    }
+  }
+
+  /* ---- 层滑块 / 可见性 ---- */
+
+  /** 把「看到第 i 层」翻成 `drawRange`（顶点数 = 段数 × 2） */
+  private applyRanges(): void {
+    const p = this.print
+    if (p !== null && p.layers.length > 0) {
+      for (const [kind, layer] of this.printLayers) {
+        const edge = p.bounds[kind]
+        const total = layer.geometry.getAttribute('position').count
+        if (this.layerIndex < 0) {
+          layer.geometry.setDrawRange(0, total)
+          continue
+        }
+        const i = Math.min(this.layerIndex, p.layers.length - 1)
+        const from = this.layerMode === 'all' ? 0 : (edge[i] as number)
+        const to = edge[i + 1] as number
+        layer.geometry.setDrawRange(from * 2, (to - from) * 2)
+      }
+    }
+    if (this.allLayer) {
+      const total = this.allLayer.geometry.getAttribute('position').count
+      const cut = this.glueCutSegments()
+      this.allLayer.geometry.setDrawRange(0, cut === null ? total : cut * 2)
+    }
+  }
+
+  /** 涂胶栈切到第几段为止（`null` = 不切） */
+  private glueCutSegments(): number | null {
+    if (this.layerIndex < 0 || this.print === null) return null
+    const z = this.print.layers[Math.min(this.layerIndex, this.print.layers.length - 1)]
+    if (z === undefined) return null
+    let last = 0
+    for (let i = 0; i < this.blocks.length; i += 1) {
+      const block = this.blocks[i] as LabBlock
+      if (blockLayerZ(block) <= z + 1e-9) last = i + 1
+    }
+    return this.blockEdges[last] ?? null
+  }
+
+  private syncVisibility(): void {
+    const glueOn = this.shown.has('glue')
+    const onlyLayer = this.layerMode === 'current' && this.layerIndex >= 0
+    if (this.allLayer) this.allLayer.visible = glueOn && !onlyLayer
+    if (this.curLayer) this.curLayer.visible = glueOn
+    for (const [kind, layer] of this.printLayers) layer.visible = this.shown.has(kind)
+  }
+
+  /* ---- 相机 ---- */
+
+  /** 可见几何的外接框（关掉的层不算，免得画面被看不见的东西撑大） */
+  private visibleBox(): THREE.Box3 {
+    const box = new THREE.Box3()
+    for (const child of this.group.children) {
+      if (!child.visible) continue
+      box.expandByObject(child)
+    }
+    return box
+  }
+
+  /** 半径这么大的一坨东西，透视要站多远才装得下（正交按等效视距换算） */
+  private fitDistance(radius: number): number {
+    const fov = (this.camP.fov * Math.PI) / 180
+    return (radius / Math.sin(fov / 2)) * 1.05
+  }
+
+  /** 正交画幅跟到当前视距：`zoom = 基准 / (视距 × tan(fov/2))` */
+  private applyOrthoZoom(): void {
+    const d = this.camO.position.distanceTo(this.controls.target)
+    const halfTan = Math.tan((this.camP.fov * Math.PI) / 360)
+    this.camO.zoom = ORTHO_BASE / Math.max(1e-9, d * halfTan)
+    this.camO.updateProjectionMatrix()
   }
 
   private frame(): void {
-    const box = new THREE.Box3().setFromObject(this.group)
+    this.group.updateMatrixWorld(true)
+    const box = this.visibleBox()
     if (box.isEmpty()) return
     const center = box.getCenter(new THREE.Vector3())
     const radius = Math.max(1, box.getSize(new THREE.Vector3()).length() / 2)
-    const fov = (this.camera.fov * Math.PI) / 180
-    const dist = (radius / Math.sin(fov / 2)) * 1.05
     const dir = new THREE.Vector3(0.85, -1, 0.75).normalize()
     this.controls.target.copy(center)
-    this.camera.position.copy(center).addScaledVector(dir, dist)
+    this.cam.position.copy(center).addScaledVector(dir, this.fitDistance(radius))
+    this.applyOrthoZoom()
     this.controls.update()
     this.framed = true
   }
 
-  /** 近裁面 = 视距的 2%（下界 0.02mm）：远景保住深度精度，贴到毫米级也不裁 */
+  /** 近裁面 = 视距的 2%（下界 0.01mm）：远景保住深度精度，贴到毫米级也不裁 */
   private syncNear(): void {
-    const d = this.camera.position.distanceTo(this.controls.target)
-    const near = Math.max(0.02, d * 0.02)
+    /* 正交是平行投影，近远裁面不会卡到贴脸的面，别跟着视距动 */
+    if (this.ortho) return
+    const d = this.distance()
+    const near = Math.max(0.01, d * 0.02)
     const far = Math.max(1000, d * 20)
     if (
-      Math.abs(this.camera.near - near) > near * 0.05 ||
-      Math.abs(this.camera.far - far) > far * 0.05
+      Math.abs(this.camP.near - near) > near * 0.05 ||
+      Math.abs(this.camP.far - far) > far * 0.05
     ) {
-      this.camera.near = near
-      this.camera.far = far
-      this.camera.updateProjectionMatrix()
+      this.camP.near = near
+      this.camP.far = far
+      this.camP.updateProjectionMatrix()
     }
   }
 
   private readonly tick = (): void => {
     this.raf = requestAnimationFrame(this.tick)
+    const now = performance.now()
+    const dt = this.last === 0 ? 1 / 60 : Math.min(0.1, (now - this.last) / 1000)
+    this.last = now
+
+    if (this.tween === null) {
+      this.controls.update()
+    } else {
+      /* 补间期间不调 controls.update()：它会按自己记的球坐标把相机位置盖回去 */
+      const tw = this.tween
+      tw.t = Math.min(1, tw.t + dt / SNAP_SECONDS)
+      const k = 1 - (1 - tw.t) ** 3
+      const q = IDENTITY.clone().slerp(tw.q, k)
+      this.cam.position.copy(this.controls.target).add(tw.from.clone().applyQuaternion(q))
+      this.cam.lookAt(this.controls.target)
+      if (tw.t >= 1) {
+        this.tween = null
+        this.controls.enabled = true
+        this.last = 0
+        this.controls.update()
+      }
+    }
+
     this.syncNear()
-    this.controls.update()
-    this.renderer.render(this.scene, this.camera)
+    this.renderer.render(this.scene, this.cam)
+    this.onFrame?.(this.distance())
   }
 
   private start(): void {
@@ -269,4 +610,9 @@ export class View3d {
     cancelAnimationFrame(this.raf)
     this.raf = 0
   }
+}
+
+/** 涂胶块画在哪一层：优先用 `;MKP_BEGIN paint … z=`，老产物没有就退回笔尖 Z */
+export function blockLayerZ(block: LabBlock): number {
+  return block.layerZ ?? block.normalZ ?? 0
 }

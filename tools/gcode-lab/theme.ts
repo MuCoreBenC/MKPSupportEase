@@ -17,6 +17,9 @@ export interface Palette {
   teal: string
   blue: string
   red: string
+  green: string
+  violet: string
+  cube: string
   /** 空走的颜色（带透明度） */
   up: string
   /** 网格线的颜色（带透明度） */
@@ -43,6 +46,9 @@ export function palette(): Palette {
     teal: readVar('--teal', '#2bb6a8'),
     blue: readVar('--blue', '#4c8dff'),
     red: readVar('--red', '#e5484d'),
+    green: readVar('--green', '#3fb950'),
+    violet: readVar('--violet', '#a371f7'),
+    cube: readVar('--cube', '#2b3542'),
     up: readVar('--up', 'rgba(139, 148, 158, 0.30)'),
     grid: readVar('--grid', 'rgba(35, 42, 51, 0.9)'),
   }

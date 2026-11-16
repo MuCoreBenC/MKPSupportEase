@@ -52,7 +52,9 @@ export interface LabBlock {
   endLine: number
   moves: LabMove[]
   segments: LabSegment[]
-  /** 正常落笔 Z；块内一条落笔移动都没有时是 `null` */
+  /** 这一块对应的**层高**（`;MKP_BEGIN paint … z=`）；没有标就 `null` */
+  layerZ: number | null
+  /** 正常落笔 Z（笔尖高度，含笔的机械偏移）；块内一条落笔移动都没有时是 `null` */
   normalZ: number | null
   /** 抬高档 Z；认不出来时是 `null`，原因在 `note` */
   raisedZ: number | null
@@ -105,16 +107,19 @@ export function parseBlocks(text: string): LabBlock[] {
   let y = 0
   let z = 0
   let hasPos = false
+  let layerZ: number | null = null
 
   for (let i = 0; i < lines.length; i += 1) {
     const t = lines[i].trim()
     if (t.startsWith(BLOCK_BEGIN)) {
       beginLine = i
+      const m = /\bz=(-?\d+(?:\.\d+)?)/.exec(t)
+      layerZ = m ? Number(m[1]) : null
       raws = []
       continue
     }
     if (t.startsWith(BLOCK_END)) {
-      if (raws) blocks.push(finishBlock(blocks.length, beginLine, i, raws))
+      if (raws) blocks.push(finishBlock(blocks.length, beginLine, i, layerZ, raws))
       raws = null
       continue
     }
@@ -138,7 +143,13 @@ export function parseBlocks(text: string): LabBlock[] {
   return blocks
 }
 
-function finishBlock(index: number, beginLine: number, endLine: number, raws: RawMove[]): LabBlock {
+function finishBlock(
+  index: number,
+  beginLine: number,
+  endLine: number,
+  layerZ: number | null,
+  raws: RawMove[],
+): LabBlock {
   const levels = [...new Set(raws.map((m) => m.z))].sort((a, b) => a - b)
   const normalZ = levels.length > 0 ? levels[0] : null
   let raisedZ: number | null = null
@@ -180,11 +191,182 @@ function finishBlock(index: number, beginLine: number, endLine: number, raws: Ra
     endLine,
     moves,
     segments,
+    layerZ,
     normalZ,
     raisedZ,
     liftMm: raisedZ !== null && normalZ !== null ? raisedZ - normalZ : 0,
     bbox: landedBBox(moves),
     note,
+  }
+}
+
+/* ---------------- 打印本体（3D 里当背景） ---------------- */
+
+/**
+ * 打印本体的类别。
+ *
+ * 支撑拆成三档是作者要的（与切片器预览同一套区分）：**支撑**、**支撑面**
+ * （`Support interface`，顶上那几层）、**熨烫面**（`Support ironing`，涂胶真正落上去的那一面）。
+ * `other` 兜住认不出的 `; FEATURE:`。
+ */
+export type PrintKind =
+  | 'outer'
+  | 'inner'
+  | 'fill'
+  | 'support'
+  | 'supportFace'
+  | 'ironing'
+  | 'other'
+
+export const PRINT_KINDS: readonly PrintKind[] = [
+  'outer',
+  'inner',
+  'fill',
+  'support',
+  'supportFace',
+  'ironing',
+  'other',
+]
+
+/**
+ * `; FEATURE:` 的名字 → 类别。
+ *
+ * 名字是 Bambu Studio 给的（`; FEATURE: Outer wall` 这种），不是我们编的；
+ * 认不出的落到 `other` —— 新版本切片器多一类时它会亮在 `other` 里，而不是消失。
+ */
+const KIND_OF: Record<string, PrintKind> = {
+  'Outer wall': 'outer',
+  'Floating vertical shell': 'outer',
+  'Inner wall': 'inner',
+  'Sparse infill': 'fill',
+  'Internal solid infill': 'fill',
+  'Gap infill': 'fill',
+  'Top surface': 'fill',
+  'Bottom surface': 'fill',
+  Bridge: 'fill',
+  Support: 'support',
+  'Support transition': 'support',
+  'Support interface': 'supportFace',
+  'Support ironing': 'ironing',
+}
+
+export interface PrintModel {
+  /** 每类的线段顶点（`x,y,z` 三元组，两个端点一组），**按层升序排好** */
+  kinds: Record<PrintKind, Float32Array>
+  /** 升序的层 Z（取自 `G1 Z`） */
+  layers: number[]
+  /**
+   * 每类在每层的区间：`bounds[k][i] … bounds[k][i+1]`，单位是**段**。
+   * 长度恒为 `layers.length + 1` —— 于是"看到第 i 层"= `drawRange(0, bounds[i+1]*2)`，
+   * 不用重建几何。
+   */
+  bounds: Record<PrintKind, Uint32Array>
+  /** 认不出的 `; FEATURE:` 名字（界面提示用；空数组 = 全认识） */
+  unknown: string[]
+  zMin: number
+  zMax: number
+}
+
+const emptyBuckets = (): Record<PrintKind, number[]> => ({
+  outer: [],
+  inner: [],
+  fill: [],
+  support: [],
+  supportFace: [],
+  ironing: [],
+  other: [],
+})
+
+/**
+ * 产物全文 → 打印本体（只取**带 E 的移动**：空走不画，那是行程不是模型）。
+ *
+ * 涂胶块里的移动要跳过 —— 它们也带 E、也会被 `; FEATURE:` 打上 Support ironing，
+ * 但那是 `parseBlocks` 的活，两边都画就重了。
+ *
+ * 顶点按 Z 升序排好：图上那把层滑块靠 `drawRange` 切层，拖起来才是即时的。
+ */
+export function parsePrint(text: string): PrintModel {
+  const lines = text.split(/\r?\n/)
+  /** z(3 位小数) → 这一层各类的顶点 */
+  const byLayer = new Map<string, { z: number; bucket: Record<PrintKind, number[]> }>()
+  const unknown = new Set<string>()
+  let kind: PrintKind = 'other'
+  let x = 0
+  let y = 0
+  let z = 0
+  let hasPos = false
+  let inBlock = false
+  let zMin = Infinity
+  let zMax = -Infinity
+
+  for (const raw of lines) {
+    const t = raw.trim()
+    if (t.startsWith(BLOCK_BEGIN)) {
+      inBlock = true
+      continue
+    }
+    if (t.startsWith(BLOCK_END)) {
+      inBlock = false
+      continue
+    }
+    if (inBlock) continue
+    if (t.startsWith('; FEATURE:')) {
+      const name = t.slice('; FEATURE:'.length).trim()
+      const k = KIND_OF[name]
+      if (k === undefined) unknown.add(name)
+      kind = k ?? 'other'
+      continue
+    }
+    if (!t.startsWith('G1 ') && !t.startsWith('G2 ') && !t.startsWith('G3 ')) continue
+
+    const nz = axis(t, 'Z')
+    const nx = axis(t, 'X')
+    const ny = axis(t, 'Y')
+    if (nz !== null) z = nz
+    if (nx === null && ny === null) continue
+    const from = hasPos ? { x, y } : { x: nx ?? x, y: ny ?? y }
+    if (nx !== null) x = nx
+    if (ny !== null) y = ny
+    hasPos = true
+
+    /* 只画挤出的：`E` 在、且不是零（`E.3742` 这种省前导零的写法一并认） */
+    const em = /\bE(-?(?:\d+(?:\.\d*)?|\.\d+))/.exec(t)
+    if (em === null || Number(em[1]) <= 0) continue
+    const key = z.toFixed(3)
+    let slot = byLayer.get(key)
+    if (slot === undefined) {
+      slot = { z, bucket: emptyBuckets() }
+      byLayer.set(key, slot)
+    }
+    slot.bucket[kind].push(from.x, from.y, z, x, y, z)
+    if (z < zMin) zMin = z
+    if (z > zMax) zMax = z
+  }
+
+  const keys = [...byLayer.keys()].sort((a, b) => Number(a) - Number(b))
+  const kinds = {} as Record<PrintKind, Float32Array>
+  const bounds = {} as Record<PrintKind, Uint32Array>
+  for (const k of PRINT_KINDS) {
+    const flat: number[] = []
+    const edge = new Uint32Array(keys.length + 1)
+    let seg = 0
+    keys.forEach((key, i) => {
+      const arr = byLayer.get(key)?.bucket[k] ?? []
+      for (const v of arr) flat.push(v)
+      seg += arr.length / 6
+      edge[i + 1] = seg
+    })
+    kinds[k] = Float32Array.from(flat)
+    bounds[k] = edge
+  }
+
+  return {
+    kinds,
+    layers: keys.map(Number),
+    bounds,
+    unknown: [...unknown],
+    zMin: Number.isFinite(zMin) ? zMin : 0,
+    zMax: Number.isFinite(zMax) ? zMax : 0,
   }
 }
 

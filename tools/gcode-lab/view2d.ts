@@ -84,11 +84,28 @@ export class View2d {
     this.draw()
   }
 
-  setData(data: View2dData): void {
+  /**
+   * 换一块。`refit` 只在「刚打开文件」时给 —— 切块时**保住当前的缩放与位置**，
+   * 否则每点一下左边，画面就重排一次（作者原话：「这个位置总是在变化」）。
+   * 新块整个落在画外时才回到铺满，不然会看到一片空白还不知道为什么。
+   */
+  setData(data: View2dData, refit = false): void {
     this.data = data
     this.maskCanvas = null
     this.maskKey = ''
-    this.fit()
+    if (refit || !this.inView()) this.fit()
+    else this.draw()
+  }
+
+  /** 这一块的外接框和当前画面有交集吗 */
+  private inView(): boolean {
+    const bbox = this.data?.block.bbox
+    if (!bbox) return false
+    const [ax, ay] = this.fromScreen(0, 0)
+    const [bx, by] = this.fromScreen(this.w, this.h)
+    const [x0, x1] = [Math.min(ax, bx), Math.max(ax, bx)]
+    const [y0, y1] = [Math.min(ay, by), Math.max(ay, by)]
+    return bbox.maxX >= x0 && bbox.minX <= x1 && bbox.maxY >= y0 && bbox.minY <= y1
   }
 
   select(index: number | null): void {
@@ -96,7 +113,26 @@ export class View2d {
     this.draw()
   }
 
-  /** 把这一块按比例铺满画面 */
+  /** 缩放滑杆：直接设 px/mm（与滚轮同一个量） */
+  setScale(s: number): void {
+    this.scale = Math.min(400, Math.max(0.4, s))
+    this.draw()
+  }
+
+  scaleOf(): number {
+    return this.scale
+  }
+
+  /** 只把这一块挪回画面正中：缩放不动（「居中」按钮的 2D 档） */
+  recenter(): void {
+    const bbox = this.data?.block.bbox
+    if (!bbox) return
+    this.cx = (bbox.minX + bbox.maxX) / 2
+    this.cy = (bbox.minY + bbox.maxY) / 2
+    this.draw()
+  }
+
+  /** 把这一块按比例铺满画面（「视角」按钮的 2D 档） */
   fit(): void {
     const bbox = this.data?.block.bbox
     if (!bbox) {

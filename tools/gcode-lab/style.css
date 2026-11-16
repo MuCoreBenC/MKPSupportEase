@@ -20,6 +20,9 @@
   --teal: #2bb6a8;
   --blue: #4c8dff;
   --red: #e5484d;
+  /* 支撑 / 熨烫：与切片器预览同一套语义 */
+  --green: #3fb950;
+  --violet: #a371f7;
 
   /* canvas 专用的两个（带透明度，直接当 strokeStyle 用） */
   --up: rgba(139, 148, 158, 0.3);
@@ -32,6 +35,8 @@
   /* 两处渐变的上端：顶栏与主区的辉光 */
   --bar-top: #171d25;
   --stage-glow: #18202a;
+  /* 视角立方体的面：比舞台亮一档，字才看得清 */
+  --cube: #2b3542;
 
   --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
 }
@@ -51,6 +56,8 @@
     --teal: #0f8b81;
     --blue: #2f6fe0;
     --red: #cc2f36;
+    --green: #1a7f37;
+    --violet: #8250df;
 
     --up: rgba(103, 114, 127, 0.26);
     --grid: rgba(221, 227, 234, 0.95);
@@ -60,6 +67,7 @@
 
     --bar-top: #ffffff;
     --stage-glow: #e9eef5;
+    --cube: #ffffff;
   }
 }
 
@@ -208,6 +216,25 @@ input[type='range']:hover::-webkit-slider-thumb {
   color: var(--text);
 }
 
+.btn {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.btn:hover {
+  color: var(--text);
+  border-color: var(--dim);
+}
+
 /* ---------------- 三栏 ---------------- */
 
 .grid {
@@ -346,6 +373,135 @@ input[type='range']:hover::-webkit-slider-thumb {
   color: var(--dim);
   font-size: 10px;
   pointer-events: none;
+}
+
+/* ---------------- 3D 显示开关 ---------------- */
+
+/* 竖排一列眼睛：可以按住往下拖、一路扫过去（Blender 大纲视图那种手感） */
+.layers {
+  position: absolute;
+  left: 12px;
+  top: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-1);
+  user-select: none;
+  touch-action: none;
+}
+
+.layers-title {
+  padding: 0 6px 3px;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.eye {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.eye svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.eye:hover {
+  background: var(--bg-2);
+}
+
+.eye[aria-pressed='false'] {
+  color: var(--dim);
+}
+
+.eye[aria-pressed='false'] svg {
+  opacity: 0.55;
+}
+
+/* symbol 定义用的，不占位 */
+.icons {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+/* ---------------- 视角立方体 ---------------- */
+
+.viewcube {
+  position: absolute;
+  left: 10px;
+  bottom: 34px;
+  width: 132px;
+  height: 132px;
+  touch-action: none;
+}
+
+/* ---------------- 右侧两条竖滑杆 ---------------- */
+
+.side {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  height: min(420px, 62%);
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.side-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.side-val {
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/*
+ * 竖向 range。
+ * 用 `input.vslider` 这个选择器是必须的：上面那条 `input[type='range']`（108×2px）
+ * 的优先级比单个类高，不这么写宽度会被它按回去。
+ */
+input.vslider {
+  flex: 1;
+  width: 16px;
+  height: auto;
+  min-height: 80px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  /* WebKit 自带旋转（Chrome / Safari 都认）；别再用 `writing-mode` 套一层 */
+  -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
+  accent-color: var(--teal);
+  cursor: pointer;
+}
+
+input.vslider:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* ---------------- 右栏 ---------------- */
