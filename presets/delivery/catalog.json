@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "78eaab6e2800da64",
+  "revision": "86c0271930753b91",
   "publishedAt": "2026-11-15T17:54:23Z",
   "brands": [
     {
@@ -1767,15 +1767,15 @@
         "configKey": "FirstPenRevitalizationFlag",
         "tomlKey": "first_pen_revitalization_flag",
         "jsonKey": "first_pen_revitalization_flag",
-        "label": "首笔润笔",
-        "labelEn": "First-pen priming",
-        "labelJa": "初回の慣らし",
-        "labelTw": "首筆潤筆",
-        "desc": "在擦料塔的首层涂胶润湿胶笔，仅在开启擦料塔时有效。",
-        "descEn": "Primes the glue pen on the tower's first glue layer. Only applies when the wipe tower is on.",
-        "descJa": "拭き取りタワーの初層塗布で接着ペンを馴染ませます。タワー使用時のみ有効です。",
-        "descTw": "在擦料塔的首層塗膠潤濕膠筆，僅在開啟擦料塔時有效。",
-        "tomlComment": "首笔润笔标志",
+        "label": "首层塔上预出胶",
+        "labelEn": "First-layer pre-glue on tower",
+        "labelJa": "初層タワー予備吐出",
+        "labelTw": "首層塔上預出膠",
+        "desc": "首层涂胶前在擦料塔上让胶笔先出胶，仅在开启擦料塔时有效。",
+        "descEn": "Before the first glue layer, pre-dispense on the wipe tower. Only applies when the wipe tower is on.",
+        "descJa": "初層塗布前に拭き取りタワーで接着ペンを予備吐出させます。タワー使用時のみ有効です。",
+        "descTw": "首層塗膠前在擦料塔上讓膠筆先出膠，僅在開啟擦料塔時有效。",
+        "tomlComment": "首层塔上预出胶",
         "valueType": "bool",
         "uiComponent": "switch",
         "defaultValue": false,
@@ -6880,8 +6880,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "62145325f24516a3e0518cf7860144ff6a5fdef1709c4d7c8e40386a2c4b7c03",
-      "size": 5348
+      "sha256": "8427bf16bab749b7c4f63815cde652c2742e78994c7cefdc04319c84223789af",
+      "size": 5351
     },
     {
       "kind": "mkp_preset",
@@ -6889,8 +6889,8 @@
       "path": "delivery/mkp/presets/A1-fast260326.toml",
       "machineId": "A1",
       "versionId": "FAST260326",
-      "sha256": "11d6362b891df7f7fc2c3f4e73f0e842b92f113e951682df89c4b7c51dcf44d8",
-      "size": 5353
+      "sha256": "ffe61dba08d7557c31fc216c05aefbdafe68f4aa4feabb23e40e64d58e702886",
+      "size": 5356
     },
     {
       "kind": "mkp_preset",
@@ -6898,8 +6898,8 @@
       "path": "delivery/mkp/presets/A1-fast261111.toml",
       "machineId": "A1",
       "versionId": "FAST261111",
-      "sha256": "a380b1d631d00fc093911e3377ea5981f492433321d274c4c3ee79ad54a5e48a",
-      "size": 5353
+      "sha256": "114a614f5b4f505e09ab877c1cba25c4a704a24e6f44429a68dd99bde1e48463",
+      "size": 5356
     },
     {
       "kind": "mkp_preset",
@@ -6907,8 +6907,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "1e24dc54a14bc877f49bb28082a6d5994c9780e728ae31a5c48bbd7f2478e4e0",
-      "size": 5356
+      "sha256": "712aa316f5265abb7e72ceed141cec5d26b0becf2f136bd7779e22f8251cae7c",
+      "size": 5359
     },
     {
       "kind": "mkp_preset",
@@ -6916,8 +6916,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast260326.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST260326",
-      "sha256": "e6fdda17e8b87720f25bd65f488ca3f54233cd4564686618aa5888358a2e9b85",
-      "size": 5356
+      "sha256": "6ff81c6d6f8a7a05abbb597f8a489c62779ab936514bf0fca3eacc63367e3d95",
+      "size": 5359
     },
     {
       "kind": "mkp_preset",
@@ -6925,8 +6925,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast261111.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST261111",
-      "sha256": "8a923070ec6e196e17a7e7cb551f6cdd04d2e8b12b69c51ea83d105e8056220b",
-      "size": 5356
+      "sha256": "616e3c4270c226275c45bc2b23c27eb90f7842e031f737eeb1131cff9ba45cab",
+      "size": 5359
     },
     {
       "kind": "mkp_preset",
@@ -6934,8 +6934,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "9709e7a2272c26d7a12d20bd5225f18de73227dcc7e0f7dc66f19eb80c3dada6",
-      "size": 5497
+      "sha256": "f5794de046b9efbd818bf67bbc4851369cb604dec09481aaf52cefb89f5e9be5",
+      "size": 5500
     },
     {
       "kind": "mkp_preset",
@@ -6943,8 +6943,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "ba9fe0fca8039b750865940babf82802e4d3dfe71caeefcf9dafe2033bc96232",
-      "size": 5497
+      "sha256": "284099a463f9ca1b58b12e3cd1c347b5eb8f48828ca4501564bc364aff01e3d0",
+      "size": 5500
     },
     {
       "kind": "icon",

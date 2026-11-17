@@ -24,7 +24,7 @@ L802
 G92 E0
 G1 F30000
 """
-first_pen_revitalization_flag = false # 首笔润笔标志
+first_pen_revitalization_flag = false # 首层塔上预出胶
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
 MKP_extrude = 0 # 挤出长度(mm)
 MKP_extrude_speed = 25 # 挤出速度(mm/s)
