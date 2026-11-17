@@ -51,6 +51,25 @@ export function readGlueOffsets(meta: unknown): GlueOffsets | null {
   return { x: x ?? 0, y: y ?? 0, toolZ: toolZ ?? 0, glueZ: glueZ ?? 0 }
 }
 
+/**
+ * `meta.json` → 这次运行实际生效的「靠外几条」。
+ *
+ * 试验台的预测必须与产物用同一套参数，否则「预测 vs 实际」比的是两个口径。
+ * 两处都认：`detail.snapshot.params.*` 是那次的参数快照（用户在「修改参数」里填的数），
+ * `detail.snapshot.ir.Glue.EdgeLines` 是内核真正吃到的值。前者优先。
+ */
+export function readEdgeLines(meta: unknown): number | null {
+  if (typeof meta !== 'object' || meta === null) return null
+  const detail = (meta as Record<string, unknown>).detail
+  if (typeof detail !== 'object' || detail === null) return null
+  const snap = (detail as Record<string, unknown>).snapshot as Record<string, unknown> | undefined
+  const fromParams = pick(snap?.['params'], 'wiping.glue_edge_lines')
+  if (fromParams !== null) return fromParams
+  const ir = snap?.['ir']
+  const glue = typeof ir === 'object' && ir !== null ? (ir as Record<string, unknown>).Glue : null
+  return pick(glue, 'EdgeLines')
+}
+
 /** 产物路径 → 同名元数据路径（`a/b/x.gcode` → `a/b/x_meta.json`） */
 export function metaPathOf(gcodePath: string): string {
   return `${gcodePath.replace(/\.gcode$/i, '')}_meta.json`

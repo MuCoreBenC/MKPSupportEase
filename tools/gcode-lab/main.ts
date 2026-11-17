@@ -18,7 +18,13 @@ import { alignLines } from '../../src/app/glueLab/diff'
 import type { LineAlignment } from '../../src/app/glueLab/diff'
 import { indexLines, splitLines } from '../../src/app/glueLab/lines'
 import type { LineIndex } from '../../src/app/glueLab/lines'
-import { ZERO_OFFSETS, metaPathOf, originalPathOf, readGlueOffsets } from '../../src/app/glueLab/meta'
+import {
+  ZERO_OFFSETS,
+  metaPathOf,
+  originalPathOf,
+  readEdgeLines,
+  readGlueOffsets,
+} from '../../src/app/glueLab/meta'
 import type { GlueOffsets } from '../../src/app/glueLab/meta'
 import { estimatePitch } from '../../src/app/glueLab/pitch'
 import type { PitchEstimate } from '../../src/app/glueLab/pitch'
@@ -165,6 +171,21 @@ view3d.onPick = (move) => selectMove(move)
 
 const rule = (): EdgeRule => ({ lines: state.lines, pitchMm: state.pitch.mm })
 
+/**
+ * 写「外几条」：状态、滑杆、显示值三处一起改。
+ *
+ * 导入与手拖共用这一处 —— 预测必须与产物同一套参数才有可比性，所以导入时
+ * 先把滑杆改成 meta 里那次运行真正用的数（`readEdgeLines`），之后用户照样可以拖。
+ */
+function setEdgeLines(n: number): void {
+  const min = Number(el.lines.min)
+  const max = Number(el.lines.max)
+  const lines = Math.max(min, Math.min(max, Math.round(n)))
+  state.lines = lines
+  el.lines.value = String(lines)
+  el.linesVal.textContent = String(lines)
+}
+
 /** 底部台阶带：`renderStrip` 画一条就记一条，悬停 / 点击靠它反查移动 */
 let stripHits: { x0: number; x1: number; mi: number }[] = []
 const STRIP_GAP = 4
@@ -220,9 +241,20 @@ function loadTextSync(name: string, text: string, meta?: unknown, original?: Ori
   state.actualOffsets = (meta === undefined ? null : readGlueOffsets(meta)) ?? { ...ZERO_OFFSETS }
   /* 一开始按「真实生效的那一套」显示：偏移与产物里的一模一样 */
   state.offsets = { ...state.actualOffsets }
+  /*
+   * 「外几条」也按 meta 走：产物是几条就按几条判，不拿写死的 2 去比。
+   * 读不到（没 meta / 旧产物没这个字段）就保持滑杆现状，并让人看得出来。
+   */
+  const edgeLines = meta === undefined ? null : readEdgeLines(meta)
+  if (edgeLines !== null) setEdgeLines(edgeLines)
   refreshTipBlocks()
   fillOffsetInputs()
-  el.offNote.textContent = meta === undefined ? '未读到 meta · 可再拖同名 meta' : '已读 meta'
+  el.offNote.textContent =
+    meta === undefined
+      ? '未读到 meta · 可再拖同名 meta'
+      : edgeLines === null
+        ? '已读 meta · 无「边缘带条数」'
+        : '已读 meta'
   el.offset.classList.remove('hidden')
   layoutOverlays()
   const blocks = shiftBlocks(state.rawBlocks, offsetShift())
@@ -638,8 +670,9 @@ function renderDetail(): void {
   el.detailSub.textContent = `${block.segments.length} 段`
   const bad = mismatchCount(block)
   const under = underCounts(block)
-  const underLine =
-    under.none === counts.normal + counts.raised
+  const underLine = !underOn()
+    ? `下方余量 <b>判据关闭</b><br />`
+    : under.none === counts.normal + counts.raised
       ? `下方支撑 <b>无</b><br />`
       : `下方余量够 <b>${under.ok}</b> 条 · 不足 ${under.low}${under.none > 0 ? ` · 无支撑 ${under.none}` : ''}<br />`
   let html = `<div class="summary">
@@ -667,9 +700,20 @@ function mismatchCount(block: LabBlock): number {
   return n
 }
 
+/**
+ * 下方余量判据参不参与。
+ *
+ * 阈值滑杆拖到 0 = **关掉这条减法**（回落到纯边缘带），不是「任何余量都算够」。
+ * 按后者算的话 0 会让每条有支撑的线都判「够」，等于把边缘带整个废掉。
+ */
+function underOn(): boolean {
+  return state.underMm > 0
+}
+
 /** 按当前阈值把「余量不足」标出来：红点、汇总、建议共用这一份 */
 function computeUnderLow(block: LabBlock): Uint8Array {
   const low = new Uint8Array(block.moves.length)
+  if (!underOn()) return low
   block.moves.forEach((m, i) => {
     if (m.level === 'up') return
     const margin = state.underMargin[i] as number
@@ -686,7 +730,7 @@ function underCounts(block: LabBlock): { ok: number; low: number; none: number }
   block.moves.forEach((m, i) => {
     if (m.level === 'up') return
     const margin = state.underMargin[i] as number
-    if (!Number.isFinite(margin)) none += 1
+    if (!underOn() || !Number.isFinite(margin)) none += 1
     else if (margin >= state.underMm) ok += 1
     else low += 1
   })
@@ -705,8 +749,16 @@ function moveRows(m: LabMove, index: number): string {
   const fmt = (n: number): string => n.toFixed(2)
   const margin = state.underMargin[index] as number
   const hasUnder = Number.isFinite(margin)
-  const enough = hasUnder && margin >= state.underMm
-  const suggest = state.trustUnder && enough ? '不必抬' : actual ? '抬起' : '正常'
+  const enough = underOn() && hasUnder && margin >= state.underMm
+  /*
+   * 建议只回答「按判据该不该抬」，**不看产物实际做了什么**。
+   *
+   * 以前这里回落到 `actual`，于是「建议」和「实际档」永远是同一个值，
+   * 产物没抬时建议也跟着说「正常」—— 那一栏就失去了对照的意义。
+   * 现在三档各有出处：不在带里 = 正常，带里且余量够 = 不必抬，带里但余量不足 = 抬起。
+   */
+  const suggest = !pred ? '正常' : state.trustUnder && enough ? '不必抬' : '抬起'
+  const enoughTone = !underOn() ? 'muted' : enough ? '' : 'bad'
   return `<dl class="kv">
     <dt>行号</dt><dd>${m.line + 1}</dd>
     <dt>起点</dt><dd>${fmt(m.from.x)}, ${fmt(m.from.y)}</dd>
@@ -714,8 +766,8 @@ function moveRows(m: LabMove, index: number): string {
     <dt>长度</dt><dd>${fmt(Math.hypot(m.to.x - m.from.x, m.to.y - m.from.y))}mm</dd>
     <dt>实际档</dt><dd class="${bad ? 'bad' : ''}">${actual ? '抬起' : '正常'}（Z ${m.z.toFixed(2)}）</dd>
     <dt>预测</dt><dd class="${bad ? 'bad' : ''}">${pred ? '边缘带' : '里面'}</dd>
-    <dt>下方余量</dt><dd class="${hasUnder ? (enough ? '' : 'bad') : 'muted'}">${hasUnder ? `${fmt(margin)}mm` : '无支撑'}</dd>
-    <dt>建议</dt><dd class="${suggest === '不必抬' ? '' : bad ? 'bad' : ''}">${suggest}</dd>
+    <dt>下方余量</dt><dd class="${hasUnder ? enoughTone : 'muted'}">${hasUnder ? `${fmt(margin)}mm` : '无支撑'}</dd>
+    <dt>建议</dt><dd class="${suggest === '正常' ? '' : bad ? 'bad' : 'good'}">${suggest}</dd>
     <dt>距边界</dt><dd>${fmt(d)}mm</dd>
     <dt>面短边</dt><dd>#${field ? field.faceId(m.from) : 0} ${fmt(short)}mm</dd>
     <dt>带宽</dt><dd>${fmt(band)}mm</dd>
@@ -848,8 +900,7 @@ el.cz.addEventListener('click', (e) => {
 /* ---------------- 事件 ---------------- */
 
 el.lines.addEventListener('input', () => {
-  state.lines = Number(el.lines.value)
-  el.linesVal.textContent = String(state.lines)
+  setEdgeLines(Number(el.lines.value))
   refreshRule()
 })
 
@@ -1086,6 +1137,11 @@ el.offZero.addEventListener('click', () => {
 
 /** 分两次拖：gcode 已打开，后来补上同名 meta */
 function applyMeta(name: string, meta: unknown): void {
+  const edgeLines = readEdgeLines(meta)
+  if (edgeLines !== null) {
+    setEdgeLines(edgeLines)
+    refreshRule()
+  }
   const offsets = readGlueOffsets(meta)
   if (offsets === null) {
     el.offNote.textContent = `${name} 里没有偏移`
@@ -1095,7 +1151,7 @@ function applyMeta(name: string, meta: unknown): void {
   state.offsets = { ...offsets }
   refreshTipBlocks()
   fillOffsetInputs()
-  el.offNote.textContent = '已读 meta'
+  el.offNote.textContent = edgeLines === null ? '已读 meta · 无「边缘带条数」' : '已读 meta'
   applyOffsets()
 }
 

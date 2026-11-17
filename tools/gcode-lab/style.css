@@ -651,6 +651,11 @@ input.vslider:disabled {
   color: var(--red);
 }
 
+/* 「建议」与实际档一致时用的正向色；判据说该抬、产物真抬了，就不该是红的 */
+.kv dd.good {
+  color: var(--green);
+}
+
 .summary {
   padding: 8px 0 10px;
   color: var(--dim);

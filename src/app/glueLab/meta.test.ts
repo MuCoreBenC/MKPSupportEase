@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { metaPathOf, readGlueOffsets } from './meta'
+import { metaPathOf, readEdgeLines, readGlueOffsets } from './meta'
 
 const REAL = {
   detail: {
@@ -41,6 +41,30 @@ describe('readGlueOffsets', () => {
     expect(readGlueOffsets({})).toBeNull()
     expect(readGlueOffsets(null)).toBeNull()
     expect(readGlueOffsets('x')).toBeNull()
+  })
+})
+
+describe('readEdgeLines', () => {
+  it('优先读参数快照里那次运行的数', () => {
+    expect(
+      readEdgeLines({
+        detail: { snapshot: { params: { 'wiping.glue_edge_lines': 1 }, ir: { Glue: { EdgeLines: 4 } } } },
+      }),
+    ).toBe(1)
+  })
+
+  it('没有参数快照时回落到内核吃到的 IR 值', () => {
+    expect(readEdgeLines({ detail: { snapshot: { ir: { Glue: { EdgeLines: 3 } } } } })).toBe(3)
+  })
+
+  it('0 是合法值（= 关掉边缘带），不能当「没读到」', () => {
+    expect(readEdgeLines({ detail: { snapshot: { params: { 'wiping.glue_edge_lines': 0 } } } })).toBe(0)
+  })
+
+  it('读不到就是 null（滑杆保持现状，不拿默认值去猜产物）', () => {
+    expect(readEdgeLines({})).toBeNull()
+    expect(readEdgeLines(undefined)).toBeNull()
+    expect(readEdgeLines({ detail: {} })).toBeNull()
   })
 })
 
