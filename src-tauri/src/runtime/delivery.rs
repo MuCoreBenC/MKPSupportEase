@@ -703,12 +703,8 @@ pub fn restore_archived(
         )));
     };
     let source = resolve_in(internal_root, path)?;
-    let bytes = std::fs::read(&source).map_err(|_| {
-        AppError::not_found(messages::text(
-            "ui.ipc.catalog.069",
-            &[("rel", &path.to_string())],
-        ))
-    })?;
+    let bytes = std::fs::read(&source)
+        .map_err(|_| AppError::not_found(messages::text("ui.ipc.catalog.069", &[("rel", path)])))?;
     let sha = hex(&Sha256::digest(&bytes));
     if !is_preset(file) {
         let target = resolve_in(internal_root, &file.path)?;
@@ -1120,6 +1116,9 @@ fn modified_unix_of(path: &Path) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    /* 造测试素材就得直接写文件：这一条与 `ipc/presets.rs` 的 tests 同一个口径 */
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
     use crate::runtime::catalog::Catalog;
 
@@ -2244,7 +2243,12 @@ mod tests {
         let catalog = catalog_with(vec![v2.clone()]);
         assert_eq!(stored_bytes(root.path(), &v2).unwrap(), b"# v2\n");
 
-        restore_archived(root.path(), &catalog, "archive/delivery/mkp/presets/A1.toml").unwrap();
+        restore_archived(
+            root.path(),
+            &catalog,
+            "archive/delivery/mkp/presets/A1.toml",
+        )
+        .unwrap();
 
         assert_eq!(
             stored_bytes(root.path(), &v2).unwrap(),
@@ -2265,7 +2269,11 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let v1 = preset_entry("A1.toml", b"# v1\n");
         let catalog = catalog_with(vec![v1.clone()]);
-        for bad in ["delivery/mkp/presets/A1.toml", "/etc/passwd", "../archive/x"] {
+        for bad in [
+            "delivery/mkp/presets/A1.toml",
+            "/etc/passwd",
+            "../archive/x",
+        ] {
             assert!(
                 restore_archived(root.path(), &catalog, bad).is_err(),
                 "{bad} 不该被当成归档路径"

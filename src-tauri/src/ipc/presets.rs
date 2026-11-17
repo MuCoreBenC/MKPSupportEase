@@ -1957,9 +1957,6 @@ mod tests {
         assert!(choices.iter().filter(|c| c.deprecated).count() < choices.len());
     }
 
-    /// 缓存按字节配对：同一份字节复用解析结果，字节变了自动 miss。
-    /// 目录换新（升级/应用远端更新）后没有失效钩子可忘 —— 构造上就不存在那个坑
-    #[test]
     /// 跟着换：**只换已经放入的那几份**，没放入的不新建（换代不该往切片器里塞东西）
     #[test]
     fn replace_placed_only_touches_copies_that_are_already_there() {
@@ -1980,6 +1977,8 @@ mod tests {
         );
     }
 
+    /// 缓存按字节配对：同一份字节复用解析结果，字节变了自动 miss。
+    /// 目录换新（升级/应用远端更新）后没有失效钩子可忘 —— 构造上就不存在那个坑
     #[test]
     fn the_byte_cache_serves_and_invalidates_itself() {
         let shared = Arc::new(runtime::Catalog::default());
