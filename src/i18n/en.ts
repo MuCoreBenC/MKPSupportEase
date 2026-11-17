@@ -1823,7 +1823,7 @@ export const en: Record<StringKey, string> = {
   'presets.table.detail.key.cloudRelease': 'New on cloud',
   'presets.table.detail.versionUnknown': 'Unknown (nothing was recorded)',
   'presets.table.detail.key.basedOn': 'Based on',
-  'presets.table.detail.key.cloudCurrent': 'Cloud latest',
+  'presets.table.detail.key.cloudCurrent': 'Catalog release',
   'presets.table.detail.serialShort': ' · v{n}',
   'presets.table.detail.more.shaBased': 'Based on',
   'presets.table.detail.more.shaCloud': 'Cloud latest',

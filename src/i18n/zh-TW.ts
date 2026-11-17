@@ -1851,7 +1851,7 @@ export const zhTW: Record<StringKey, string> = {
   'presets.table.detail.key.cloudRelease': '雲端新版',
   'presets.table.detail.versionUnknown': '未知（當時沒有記錄）',
   'presets.table.detail.key.basedOn': '這份基於',
-  'presets.table.detail.key.cloudCurrent': '雲端最新',
+  'presets.table.detail.key.cloudCurrent': '目錄發布',
   'presets.table.detail.serialShort': ' · 第 {n} 版',
   'presets.table.detail.more.shaBased': '這份基於',
   'presets.table.detail.more.shaCloud': '雲端最新',

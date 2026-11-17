@@ -1818,7 +1818,7 @@ export const ja: Record<StringKey, string> = {
   'presets.table.detail.key.cloudRelease': 'クラウド新版',
   'presets.table.detail.versionUnknown': '不明（当時の記録がありません）',
   'presets.table.detail.key.basedOn': 'このコピーの元',
-  'presets.table.detail.key.cloudCurrent': 'クラウド最新',
+  'presets.table.detail.key.cloudCurrent': 'カタログ公開',
   'presets.table.detail.serialShort': ' · 第 {n} 版',
   'presets.table.detail.more.shaBased': 'このコピーの元',
   'presets.table.detail.more.shaCloud': 'クラウド最新',

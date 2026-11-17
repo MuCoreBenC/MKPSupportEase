@@ -143,7 +143,7 @@ import type { Machine } from '../../api'
  * （CSS 里没有 `[data-machine]` 选择器、探针也没读它），整条链（导入 + 变量 + 属性 +
  * `ui/machineTone.ts` 整个模块）一起删了。
  */
-import { instantText, longStatText, relativePart, shortStatText } from '../store/package'
+import { instantText, longStatText, shortStatText } from '../store/package'
 /* 详情卡双列的中线自适应（量出来的，见那个文件的头注释） */
 import { fitSplitWhenResized } from './splitFit'
 /* a03：所有 WHY（悬停用）导入已随「去悬停提示」移除 */
@@ -169,7 +169,6 @@ import {
   USAGE_KEY,
   usageCellText,
   identityDisplayOf,
-  relativeLabel,
   isDetachedCopy,
   originCellOf,
   updateStateOf,
@@ -1874,7 +1873,8 @@ export default function PresetTable({
                                 分支与序号进折叠区（一行里塞不下，也不该塞）。
                               */}
                               {(row.basedOnFacts?.cloudPublishedAt ?? row.publishedAt) != null && (
-                                <div className={s.dRow}>
+                                /* 此刻给到分钟：相对时间（"1 天前"）答不了"到底哪一刻" */
+                                <div className={s.dRow} data-tip={tr('presets.table.detail.cloudPublishedAt.why')}>
                                   <span className={s.dKey}>
                                     {tr('presets.table.detail.key.cloudCurrent')}
                                   </span>
@@ -1883,11 +1883,7 @@ export default function PresetTable({
                                       const raw =
                                         row.basedOnFacts?.cloudPublishedAt ?? row.publishedAt ?? null
                                       if (raw === null) return null
-                                      const abs = instantText(raw) ?? raw
-                                      const rel = relativePart(raw, Date.now())
-                                      return rel === null ? abs : (
-                                        <span title={abs}>{relativeLabel(tr, rel)}</span>
-                                      )
+                                      return longStatText(raw) ?? raw
                                     })()}
                                   </span>
                                 </div>

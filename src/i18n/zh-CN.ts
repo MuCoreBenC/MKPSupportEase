@@ -1883,7 +1883,7 @@ export const zhCN = {
   'presets.table.detail.versionUnknown': '未知（当时没有记录）',
   /* 版本对照两行（2026-11-13）：右列只留这两行，其余收进折叠区 */
   'presets.table.detail.key.basedOn': '这份基于',
-  'presets.table.detail.key.cloudCurrent': '云端最新',
+  'presets.table.detail.key.cloudCurrent': '目录发布',
   'presets.table.detail.serialShort': ' · 第 {n} 版',
   'presets.table.detail.more.shaBased': '这份基于',
   'presets.table.detail.more.shaCloud': '云端最新',
