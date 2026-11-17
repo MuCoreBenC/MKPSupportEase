@@ -846,7 +846,7 @@ pub(crate) fn retract_at(ir_data: &Ir) -> RetractAt {
 
 /// 一次换笔该发多少回抽：`Some(..)` = 内核发这一笔，`None` = 不发（模板自带，或量填 0）。
 ///
-/// **整段 swap 只有一笔回抽。** 两个发起 swap 的地方各发一次：涂胶块与首笔活化，
+/// **整段 swap 只有一笔回抽。** 两个发起 swap 的地方各发一次：涂胶块与润笔，
 /// 插在哪由 [`retract_at`] 决定。`mount_toolhead` 只在 `wait` / `after_dock` 两档动手 ——
 /// 谁在里面无条件补一笔，就等于每次换笔抽两遍（0.0.11 就是这么把 E 抽成了两笔）。
 pub(crate) fn swap_retract(ir_data: &Ir) -> Option<SwapRetract> {
@@ -1192,6 +1192,12 @@ pub(crate) fn emit_glue_block(
         {
             sink.push_str(";Gluepen Revitalization Start");
             sink.push_str(&stage_comment_line(MkpStage::RevitalizationStart, ""));
+            /*
+             * 润笔要在**落笔高度**上重画：这一段之前只发过 XY 回位（Z 还停在净空高度），
+             * 少了这一句整段就悬在模型上方画（2026-11-17 实测 Z12.3、层顶 7.3）。
+             * 高度口径与正式涂胶同一套：`Landed` = 层顶 + 胶 Z 偏移。
+             */
+            sink.push_str(&format!("G1 Z{}", format_z(land_z)));
             let revitalization_speed =
                 ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor;
             sink.push_str(&format!("G1 F{}", format_speed(revitalization_speed)));
@@ -1291,6 +1297,15 @@ pub(crate) fn emit_glue_block(
             }
             sink.push_str(";Gluepen Revitalization End");
             sink.push_str(&stage_comment_line(MkpStage::RevitalizationEnd, ""));
+            /*
+             * 回位是空走：抬回平飞高度再走，别贴着面横移。
+             * 段间抬升开着（默认 2mm）的那条分支自己会抬到 `Hop`，这里只管那一条
+             * 不抬的分支 —— 顺手把 `start_z` 记成笔实际在的高度，发射端才知道要落笔。
+             */
+            if ir_data.glue.inter_model_lift_height <= 0.0 {
+                start_z = glue_nozzle_z(ir_data, current_layer_height, PenZ::Travel);
+                sink.push_str(&format!("G1 Z{}", format_z(start_z)));
+            }
             stats.prime_total_length += accumulated_dist;
             if !ir_data.prime.per_model {
                 ir_data.state.this_layer_revitalization = false;

@@ -871,12 +871,12 @@ pub fn second_pass(
             }
         }
 
-        // 跳过涂胶块 mount 序列（首笔活化已下笔）
+        // 跳过涂胶块 mount 序列（润笔已下笔）
         if ctx.skipping_mount_sequence {
             // MKP 标记穿透：这一段整体被丢弃，但标记行必须活着，否则
             // swap#1 的 BEGIN/END 一起消失、事件只剩 paint→swap（违反 EV_SHAPE）。
             // 代价是这一次 swap 成为空区间（观看端 SWAP_HAS_MOTION warn）——
-            // 取笔动作确实发生在首笔活化里，不在这个块里。
+            // 取笔动作确实发生在润笔里，不在这个块里。
             // 两个判定先算成值（同序），`line` 才能整份移动进 sink。
             let is_mark = crate::postproc::marks::is_mark_line(trimmed);
             let mounted = trimmed.contains(";Toolhead Mounted");
@@ -1189,7 +1189,7 @@ pub fn second_pass(
             ctx.last_tower_z = ctx.layer_z();
         }
 
-        // 第二个 CHANGE_LAYER：首层模型打完 → 首笔活化（校准模式禁用）
+        // 第二个 CHANGE_LAYER：首层模型打完 → 润笔（校准模式禁用）
         if !was_first_layer_tower_flag
             && ctx.first_layer_model_finished_flag
             && match_slicer_comment(trimmed, "CHANGE_LAYER")

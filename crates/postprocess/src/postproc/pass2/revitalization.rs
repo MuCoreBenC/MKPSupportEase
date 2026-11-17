@@ -1,4 +1,4 @@
-//! 首笔活化（对照 processor/revitalization_block.go 逐行移植）。
+//! 润笔（对照 processor/revitalization_block.go 逐行移植）。
 //!
 //! pass2 第二个 CHANGE_LAYER 触发（首层全部 feature 打完后）；
 //! 校准模式强制禁用。四象限小螺旋复用 tower::generate_mini_spiral_gcode。

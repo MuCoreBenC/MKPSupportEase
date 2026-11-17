@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "bd21174ec3f17cdf",
+  "revision": "0ec5cec25bf1a286",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -1766,15 +1766,15 @@
         "configKey": "FirstPenRevitalizationFlag",
         "tomlKey": "first_pen_revitalization_flag",
         "jsonKey": "first_pen_revitalization_flag",
-        "label": "首笔活化",
+        "label": "首笔润笔",
         "labelEn": "First-pen priming",
-        "labelJa": "初回筆の活性化",
-        "labelTw": "首筆活化",
-        "desc": "在擦料塔的首层涂胶激活胶笔出胶，仅在开启擦料塔时有效。",
+        "labelJa": "初回の慣らし",
+        "labelTw": "首筆潤筆",
+        "desc": "在擦料塔的首层涂胶润湿胶笔，仅在开启擦料塔时有效。",
         "descEn": "Primes the glue pen on the tower's first glue layer. Only applies when the wipe tower is on.",
-        "descJa": "拭き取りタワーの初層塗布で接着ペンを出液させます。タワー使用時のみ有効です。",
-        "descTw": "在擦料塔的首層塗膠啟用膠筆出膠，僅在開啟擦料塔時有效。",
-        "tomlComment": "首笔活化标志",
+        "descJa": "拭き取りタワーの初層塗布で接着ペンを馴染ませます。タワー使用時のみ有効です。",
+        "descTw": "在擦料塔的首層塗膠潤濕膠筆，僅在開啟擦料塔時有效。",
+        "tomlComment": "首笔润笔标志",
         "valueType": "bool",
         "uiComponent": "switch",
         "defaultValue": false,
@@ -6172,10 +6172,10 @@
             "labelEn": "Priming",
             "labelJa": "プライミング",
             "labelTw": "潤筆",
-            "description": "润笔与首笔活化参数",
+            "description": "润笔参数",
             "descriptionEn": "Priming and first-pen activation parameters",
             "descriptionJa": "プライミングと初回筆の活性化パラメータ",
-            "descriptionTw": "潤筆與首筆活化參數",
+            "descriptionTw": "潤筆與潤筆參數",
             "order": 0.0
           },
           {

@@ -475,7 +475,7 @@
       "desc": "在擦料塔的首层涂胶激活胶笔出胶，仅在开启擦料塔时有效",
       "jsonKey": "first_pen_revitalization_flag",
       "key": "toolhead.first_pen_revitalization_flag",
-      "label": "首笔活化",
+      "label": "首笔润笔",
       "layout": {
         "order": 0,
         "sectionId": "pen_revitalization"
@@ -484,14 +484,14 @@
       "scope": "universal",
       "section": "toolhead",
       "selectable": true,
-      "tomlComment": "首笔活化标志",
+      "tomlComment": "首笔润笔标志",
       "tomlKey": "first_pen_revitalization_flag",
       "uiComponent": "switch",
       "valueType": "bool",
       "labelEn": "First-pen priming",
       "descEn": "Activates the glue pen while gluing the first layer of the wipe tower; only effective when the tower is enabled",
-      "labelJa": "初回筆の活性化",
-      "labelTw": "首筆活化",
+      "labelJa": "初回の慣らし",
+      "labelTw": "首筆潤筆",
       "descJa": "ワイプタワーの 1 層目で塗布しながらペンを活性化します。ワイプタワー有効時のみ働きます",
       "descTw": "在擦拭塔的首層塗膠時活化膠筆出膠，僅在開啟擦拭塔時有效"
     },
@@ -3467,7 +3467,7 @@
       "order": 60,
       "sections": [
         {
-          "description": "润笔与首笔活化参数",
+          "description": "润笔参数",
           "id": "pen_revitalization",
           "label": "润笔",
           "order": 0,
@@ -3476,7 +3476,7 @@
           "labelJa": "プライミング",
           "labelTw": "潤筆",
           "descriptionJa": "プライミングと初回筆の活性化パラメータ",
-          "descriptionTw": "潤筆與首筆活化參數"
+          "descriptionTw": "潤筆與潤筆參數"
         },
         {
           "description": "涂胶基础参数",

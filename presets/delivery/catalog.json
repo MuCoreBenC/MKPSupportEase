@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "15808a0dbdd1db9f",
+  "revision": "78eaab6e2800da64",
   "publishedAt": "2026-11-15T17:54:23Z",
   "brands": [
     {
@@ -1767,15 +1767,15 @@
         "configKey": "FirstPenRevitalizationFlag",
         "tomlKey": "first_pen_revitalization_flag",
         "jsonKey": "first_pen_revitalization_flag",
-        "label": "首笔活化",
+        "label": "首笔润笔",
         "labelEn": "First-pen priming",
-        "labelJa": "初回筆の活性化",
-        "labelTw": "首筆活化",
-        "desc": "在擦料塔的首层涂胶激活胶笔出胶，仅在开启擦料塔时有效。",
+        "labelJa": "初回の慣らし",
+        "labelTw": "首筆潤筆",
+        "desc": "在擦料塔的首层涂胶润湿胶笔，仅在开启擦料塔时有效。",
         "descEn": "Primes the glue pen on the tower's first glue layer. Only applies when the wipe tower is on.",
-        "descJa": "拭き取りタワーの初層塗布で接着ペンを出液させます。タワー使用時のみ有効です。",
-        "descTw": "在擦料塔的首層塗膠啟用膠筆出膠，僅在開啟擦料塔時有效。",
-        "tomlComment": "首笔活化标志",
+        "descJa": "拭き取りタワーの初層塗布で接着ペンを馴染ませます。タワー使用時のみ有効です。",
+        "descTw": "在擦料塔的首層塗膠潤濕膠筆，僅在開啟擦料塔時有效。",
+        "tomlComment": "首笔润笔标志",
         "valueType": "bool",
         "uiComponent": "switch",
         "defaultValue": false,
@@ -6173,10 +6173,10 @@
             "labelEn": "Priming",
             "labelJa": "プライミング",
             "labelTw": "潤筆",
-            "description": "润笔与首笔活化参数",
+            "description": "润笔参数",
             "descriptionEn": "Priming and first-pen activation parameters",
             "descriptionJa": "プライミングと初回筆の活性化パラメータ",
-            "descriptionTw": "潤筆與首筆活化參數",
+            "descriptionTw": "潤筆與潤筆參數",
             "order": 0.0
           },
           {
@@ -6880,7 +6880,7 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "de71c5a3047f4f8f83ed7603f678e922e572554b8e0ce5125521c55091f36aaa",
+      "sha256": "62145325f24516a3e0518cf7860144ff6a5fdef1709c4d7c8e40386a2c4b7c03",
       "size": 5348
     },
     {
@@ -6889,7 +6889,7 @@
       "path": "delivery/mkp/presets/A1-fast260326.toml",
       "machineId": "A1",
       "versionId": "FAST260326",
-      "sha256": "d55af6332684664136e655a1c89bc1e94f316e7bb4285db5d193fa40f7a76ec5",
+      "sha256": "11d6362b891df7f7fc2c3f4e73f0e842b92f113e951682df89c4b7c51dcf44d8",
       "size": 5353
     },
     {
@@ -6898,7 +6898,7 @@
       "path": "delivery/mkp/presets/A1-fast261111.toml",
       "machineId": "A1",
       "versionId": "FAST261111",
-      "sha256": "981e495231e88f03bd5952ed33960586ae59e1b4df10f3b8afa3c7019ff4d5f6",
+      "sha256": "a380b1d631d00fc093911e3377ea5981f492433321d274c4c3ee79ad54a5e48a",
       "size": 5353
     },
     {
@@ -6907,7 +6907,7 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "25910daf01adf4b2679b7259aa509414ffc804dcf628ae77606dd366355f4754",
+      "sha256": "1e24dc54a14bc877f49bb28082a6d5994c9780e728ae31a5c48bbd7f2478e4e0",
       "size": 5356
     },
     {
@@ -6916,7 +6916,7 @@
       "path": "delivery/mkp/presets/A1_MINI-fast260326.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST260326",
-      "sha256": "318619025c5ebf16811a704cc1f07889a34d049ec67d2228af1a4d4de8a51011",
+      "sha256": "e6fdda17e8b87720f25bd65f488ca3f54233cd4564686618aa5888358a2e9b85",
       "size": 5356
     },
     {
@@ -6925,7 +6925,7 @@
       "path": "delivery/mkp/presets/A1_MINI-fast261111.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST261111",
-      "sha256": "1bd7db31bf44e8defefdce6061d1a3d49231e8d9986586f5e1ead7a55c3eccec",
+      "sha256": "8a923070ec6e196e17a7e7cb551f6cdd04d2e8b12b69c51ea83d105e8056220b",
       "size": 5356
     },
     {
@@ -6934,7 +6934,7 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "076f9be6f70a6d29dc26552a525cd4bcacfef378c383d001b64782c86a76c906",
+      "sha256": "9709e7a2272c26d7a12d20bd5225f18de73227dcc7e0f7dc66f19eb80c3dada6",
       "size": 5497
     },
     {
@@ -6943,7 +6943,7 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "f001782dc734fd6db8fdbe7a31210384cec88b93937bea23f686d9d5f731947e",
+      "sha256": "ba9fe0fca8039b750865940babf82802e4d3dfe71caeefcf9dafe2033bc96232",
       "size": 5497
     },
     {
