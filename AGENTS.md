@@ -120,6 +120,21 @@ presets/…（源）→ crates/preset/assets/presets/*（include_str! 进客户�
   缺它内核零副作用拒绝；CLI 必须 `--confirm`；工作台那颗按钮 = 人当次点的确认。
 - 打了 tag 就得让 `release.json` 同代（`assert_release_info_matches_tag`）。
 - 想看会做什么用 `--dry-run`（零写入，不用问）。
+- **发哪一档由人指定**：只跑 `npm run ship -- --what local|preview|stable|presets`，
+  `--what` 取自人当次那句话，AI 不许自己判断。跑完把 `ship` 的核对结果贴出来 ——
+  它核远端 tag / Release / **main 上的清单**；最后一格不等就是「以为发了其实没发」，
+  缺的那一步永远是清单 PR。
+
+### 5.6 建 PR 只走 `npm run pr`
+
+不许直接 `gh pr create`。`scripts/pr.mjs` 拦三件：
+
+- **进号分支不建 PR**：`chore/next-preview-*`、`chore/version-*`、`chore/next-dev-version` 只推远端；
+- **标题必须等于最新提交主题** —— 只允许 squash，main 上那一条的标题就是它；
+- **已有 PR 标题对不上就停**，`--replace` 才关旧开新。
+
+理由：2026-11-12 复用一个早开着的 PR，squash 进 main 的提交标题成了上一轮的内容，
+`git log` 从此指着别的东西。判据本身有自检（`node scripts/check-pr.mjs`，在 `npm run lint` 里）。
 
 ## 6. 判定口径
 
