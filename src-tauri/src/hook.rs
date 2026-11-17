@@ -3149,12 +3149,22 @@ mod tests {
     /// 进程级只设一次（测试多线程，`Once` 保不竞态）；临时目录故意 `forget` ——
     /// drop 会在别的测试还在用时删根，进程退出时由 OS 收拾。
     fn isolate_data_root() {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| {
-            let dir = tempfile::tempdir().expect("测试数据根临时目录");
-            std::env::set_var(crate::fsx::paths::DATA_ROOT_ENV, dir.path());
-            std::mem::forget(dir);
+        /*
+         * 每次调用都把它**按回去**，不只第一次。
+         *
+         * 环境变量是整个测试进程共用的，而 `fsx::paths` 那条用例会设完再 `remove_var`。
+         * 两条测试并发时，这里设好的值可能被删掉 ⇒ `run` 读到别处的根 ⇒ 产物只剩
+         * 一小截（实测 561363 → 43702，报的就是"后处理只能让文件变长"那条）。
+         * 原来用 `Once` 只设一次，被删掉之后再也补不回来。
+         */
+        static ROOT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+        let dir = ROOT.get_or_init(|| {
+            let d = tempfile::tempdir().expect("测试数据根临时目录");
+            let p = d.path().to_path_buf();
+            std::mem::forget(d);
+            p
         });
+        unsafe { std::env::set_var(crate::fsx::paths::DATA_ROOT_ENV, dir) };
     }
 
     fn run_headless(toml: &std::path::Path, gcode: &std::path::Path) -> Result<Outcome, HookError> {

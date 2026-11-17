@@ -355,10 +355,19 @@ mod tests {
     #[test]
     fn the_headless_root_can_be_overridden() {
         let d = root();
-        /* 环境变量是进程级的，这个用例自己设自己收（同一条测试进程里别的地方不读它） */
+        /*
+         * 环境变量是进程级的：设完要**按回原值**，不能一删了事。
+         *
+         * 别的模块的用例（`hook` 那组）也靠它做隔离 —— 删掉等于把人家那份一起抹了，
+         * 那边就跑到别处的根上去了（实测产物 561363 → 43702）。
+         */
+        let prev = std::env::var_os(DATA_ROOT_ENV);
         unsafe { std::env::set_var(DATA_ROOT_ENV, d.path()) };
         let got = internal_root_headless().expect("给了开关就该算得出根");
-        unsafe { std::env::remove_var(DATA_ROOT_ENV) };
+        match prev {
+            Some(v) => unsafe { std::env::set_var(DATA_ROOT_ENV, v) },
+            None => unsafe { std::env::remove_var(DATA_ROOT_ENV) },
+        }
         assert_eq!(got, d.path());
         for sub in INTERNAL_DIRS {
             assert!(d.path().join(sub).is_dir(), "{sub} 该建出来");
