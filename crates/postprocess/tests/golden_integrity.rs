@@ -69,9 +69,13 @@ const VENDORED: &[(&str, &str, u64)] = &[
         // 2026-11-12：整链自有基线 —— `tests/golden/42274.2.gcode` +
         // `tests/fixtures/config/A1.toml` 原样进管线，出来的字节。判据纯逐字节，
         // 不做任何剔除。再生入口在 `tests/end_to_end.rs` 头部。
+        // 2026-11-18 再生：纯 `PrefsIr` 默认值收敛到 `presets/client-defaults.toml` 后，
+        // 那份里 `SkipVibrationCalibration` / `UnderSupportEnabled` 是开的 ——
+        // 产物少掉 M970/M974 那四行震动校准指令（672282 → 672201 字节）。
+        // 差异逐行审过：只删那四行，其余字节不动。
         "42274.2.e2e-A1.config.gcode",
-        "58178b52ac71d5585ccb0c90df3c61c8be3b5d757b0c3032d89bfb53baf83b1a",
-        672_282,
+        "d75458936d137d41fbf770b6ce22417a2acf1c3e8a1bbdd4ad183efa7e7916fc",
+        672_201,
     ),
 ];
 
