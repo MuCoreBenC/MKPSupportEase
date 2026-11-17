@@ -72,9 +72,16 @@ export function fitSplit(cols: HTMLElement): void {
   /* 不是双列（将来真有单列档）就别动它 */
   if (left === undefined || right === undefined) return
 
+  /*
+   * ★ 变量写在**父级**（卡片根），不是 `cols` 自己：卡底那两块折叠区（`dMoreGrid`）
+   *   在双列**外面**，它们也要按同一条中线排（2026-11-17 作者：「也加一个竖线，
+   *   然后右边的和上面对齐」）—— 变量写在 `cols` 上的话，那两块读不到。
+   */
+  const host = cols.parentElement ?? cols
+
   let best: Pick | null = null
   for (const split of SPLITS) {
-    cols.style.setProperty('--dSplit', String(split))
+    host.style.setProperty('--dSplit', String(split))
     const hl = contentHeight(left)
     const hr = contentHeight(right)
     const one: Pick = {
@@ -86,7 +93,7 @@ export function fitSplit(cols: HTMLElement): void {
     }
     if (best === null || better(one, best)) best = one
   }
-  cols.style.setProperty('--dSplit', String(best?.split ?? 0.5))
+  host.style.setProperty('--dSplit', String(best?.split ?? 0.5))
 }
 
 /**
@@ -99,17 +106,26 @@ export function fitSplit(cols: HTMLElement): void {
  * 返回拆除函数（effect 里直接 `return`）。
  */
 export function fitSplitWhenResized(cols: HTMLElement): () => void {
-  let raf = 0
+  /*
+   * 一帧最多量一次（rAF 只用来合并同一帧里的多次 observer 回调）。
+   * 拆除时**不取消已排的那一帧**，只让它空转 —— `alive` 就是那道闸：
+   * 少一次 `cancelAnimationFrame`，行为一样，也少一个跨环境的类型坑。
+   */
+  let alive = true
+  let scheduled = false
   let lastWidth = -1
   const run = () => {
-    raf = 0
+    scheduled = false
+    if (!alive) return
     const width = cols.clientWidth
     if (width === lastWidth) return
     lastWidth = width
     fitSplit(cols)
   }
   const schedule = () => {
-    if (raf === 0) raf = requestAnimationFrame(run)
+    if (scheduled) return
+    scheduled = true
+    window.requestAnimationFrame(run)
   }
   const ro = new ResizeObserver(schedule)
   ro.observe(cols)
@@ -120,8 +136,8 @@ export function fitSplitWhenResized(cols: HTMLElement): () => void {
    */
   run()
   return () => {
+    alive = false
     ro.disconnect()
-    if (raf !== 0) cancelAnimationFrame(raf)
-    cols.style.removeProperty('--dSplit')
+    ;(cols.parentElement ?? cols).style.removeProperty('--dSplit')
   }
 }

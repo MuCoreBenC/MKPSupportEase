@@ -1863,8 +1863,6 @@ export default function PageSettings({
         <CalibSection nested />
         <UnderSupportSection nested />
         <BedGlueSection nested />
-        {/* 这一类自己的收尾动作：11 项一起置回「没设过」，由后端按出厂值重算 */}
-        <ResetPostprocDefaults nested />
       </div>
 
       {/* 预设：自己一张卡（`PresetsSection` 自带卡片头） */}
@@ -2077,6 +2075,9 @@ export default function PageSettings({
           </p>
         )}
       </section>
+
+      {/* 恢复默认：正文最后一块 —— 一次改 11 项，不属于任何一组 */}
+      <ResetPostprocDefaults host={pageEl} />
           </div>
         </main>
       </div>

@@ -168,7 +168,6 @@ import {
   USAGE_HINT,
   USAGE_KEY,
   usageCellText,
-  identityDisplayOf,
   isDetachedCopy,
   originCellOf,
   updateStateOf,
@@ -932,7 +931,12 @@ export default function PresetTable({
                        * （行上有「更新」按钮、那块却一个字都没有 —— 2026-11-17 作者截图）。
                        */
                       text: updateState === undefined ? null : UPDATE_STATE_TEXT[updateState],
-                      action: 'none' as const,
+                      /*
+                       * 有新版就要说得出"该更新" —— `needsUpdate` 读 `status.action`，
+                       * 这一格一直写 `none` 的话，切片器档永远判成"不用更新"，
+                       * 详情里那些"有新版才该出现"的行也就永远不会出现。
+                       */
+                      action: updateState === 'update' ? ('update' as const) : ('none' as const),
                       warn: row.presetState === 'tampered',
                       hint: null,
                     }
@@ -951,7 +955,8 @@ export default function PresetTable({
                * 这时「本地发布线 / 本地 SHA-256 / 判定」不是"记不清"—— 是**还没有**。
                * 原来三格都写「未知（当时没有记录）」，删掉一份预设再看它就会读成人品问题。
                */
-              const obtainedUnix = row.origin === 'local' ? row.obtainedUnix : null
+              /* 云端交付行现在也带这一格（本机那份是哪次下载进来的），不再按 origin 掐掉 */
+              const obtainedUnix = row.obtainedUnix ?? null
               /*
                * 版本判定**不再单独画一格**：结论与右列「更新状态」是同一件事，
                * 而且老文件常常只说得清"无法确认"，那一格只会让人以为坏了。
@@ -1804,7 +1809,7 @@ export default function PresetTable({
                               <Icon name="refresh" size={13} className={s.dSecIcon} />
                               <span>{tr('presets.table.detail.update')}</span>
                               {/* 看本机这一份的正文（切片器配置那一档没有别的入口） */}
-                              {onView !== undefined && row.downloaded && (
+                              {onView !== undefined && row.presetState === 'ok' && (
                                 <button
                                   type="button"
                                   className={s.dReveal}
@@ -1842,48 +1847,96 @@ export default function PresetTable({
                                 </div>
                               )}
 
-                              {row.origin === 'local' && (
+                              {/*
+                                只属于 MKP：「这份基于哪一版」是另存 / 复制那条线的概念，
+                                切片器配置没有复制功能，这一格对它没有意义（2026-11-17 作者）。
+                              */}
+                              {row.origin === 'local' && row.kind === 'mkp_preset' && (
                                 <div className={s.dRow}>
                                   <span className={s.dKey}>
                                     {tr('presets.table.detail.key.basedOn')}
                                   </span>
                                   <span className={s.dVal}>
-                                    {instantText(row.versionPublishedAt ?? undefined) ??
-                                      tr('presets.table.detail.versionUnknown')}
-                                    {verdictFacts?.sourceSerial != null && (
-                                      <span className={s.dWhyInline}>
-                                        {tr('presets.table.detail.serialShort', {
-                                          n: String(verdictFacts.sourceSerial),
-                                        })}
-                                      </span>
-                                    )}
+                                    {/*
+                                      切片器配置没有 `[mkp_source]` 那套"基于哪一版"的记录，
+                                      但它属于哪一代目录是知道的（`ownPublishedAt` = 这份字节
+                                      所属那一代的发布时刻）—— 照实摆它，不写「未知」。
+                                    */}
+                                    {(() => {
+                                      const raw =
+                                        (row.kind === 'mkp_preset'
+                                          ? row.versionPublishedAt
+                                          : row.ownPublishedAt) ?? null
+                                      const at =
+                                        raw === null
+                                          ? tr('presets.table.detail.versionUnknown')
+                                          : (instantText(raw) ?? raw)
+                                      const serial = verdictFacts?.sourceSerial ?? null
+                                      return serial === null
+                                        ? at
+                                        : `${tr('presets.table.detail.versionNo', { n: String(serial) })} · ${at}`
+                                    })()}
                                   </span>
                                 </div>
                               )}
 
                               {/*
-                                ★ **云端新版发布**：**只有真有新版、且真给更新按钮时**才出现。
-                                本地能用的状态下不显示云端时间 —— 那会让人以为"云端有新的"，
-                                却没有任何可更新的版本（作者 2026-10-29 的口径）。
-                                这一行同时说"新版从哪来"（`Gitee · main`）。
+                                三档三件事（2026-11-17 方案 A）：
+                                  · 云端表「云端发布」   = 这一代目录的发布身份（第 N 版 · 时刻）
+                                  · 本地表「这一版属于」 = 本机这份是哪一代（只有切片器需要；
+                                                           MKP 由「这份基于」回答同一件事）
+                                  · 本地表「云端当前版」 = 只在真有新版时出现
                               */}
-                              {/*
-                                「云端当前」**永久显示**（不跟「有没有新版」走）：
-                                没有新版也要看得见云端停在哪一版。时间用相对值，悬停给到分钟的绝对时间；
-                                分支与序号进折叠区（一行里塞不下，也不该塞）。
-                              */}
-                              {(row.basedOnFacts?.cloudPublishedAt ?? row.publishedAt) != null && (
-                                /* 此刻给到分钟：相对时间（"1 天前"）答不了"到底哪一刻" */
-                                <div className={s.dRow} data-tip={tr('presets.table.detail.cloudPublishedAt.why')}>
+                              {row.scope === 'cloud' &&
+                                (row.basedOnFacts?.cloudPublishedAt ?? row.publishedAt) != null && (
+                                  <div
+                                    className={s.dRow}
+                                    data-tip={tr('presets.table.detail.cloudPublishedAt.why')}
+                                  >
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.key.cloudCurrent')}
+                                    </span>
+                                    <span className={s.dVal}>
+                                      {(() => {
+                                        const raw =
+                                          row.basedOnFacts?.cloudPublishedAt ?? row.publishedAt ?? null
+                                        if (raw === null) return null
+                                        const at = longStatText(raw) ?? raw
+                                        const serial = row.basedOnFacts?.cloudSerial ?? null
+                                        return serial === null
+                                          ? at
+                                          : `${tr('presets.table.detail.versionNo', { n: String(serial) })} · ${at}`
+                                      })()}
+                                    </span>
+                                  </div>
+                                )}
+                              {row.scope === 'local' &&
+                                row.kind !== 'mkp_preset' &&
+                                row.ownPublishedAt != null && (
+                                  <div className={s.dRow}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.key.belongs')}
+                                    </span>
+                                    <span className={s.dVal}>
+                                      {longStatText(row.ownPublishedAt) ?? tr(UNKNOWN)}
+                                    </span>
+                                  </div>
+                                )}
+                              {row.scope === 'local' && needsUpdate && row.publishedAt != null && (
+                                <div
+                                  className={s.dRow}
+                                  data-tip={tr('presets.table.detail.cloudPublishedAt.why')}
+                                >
                                   <span className={s.dKey}>
-                                    {tr('presets.table.detail.key.cloudCurrent')}
+                                    {tr('presets.table.detail.key.cloudNow')}
                                   </span>
                                   <span className={s.dVal}>
                                     {(() => {
-                                      const raw =
-                                        row.basedOnFacts?.cloudPublishedAt ?? row.publishedAt ?? null
-                                      if (raw === null) return null
-                                      return longStatText(raw) ?? raw
+                                      const at = longStatText(row.publishedAt) ?? tr(UNKNOWN)
+                                      const serial = row.basedOnFacts?.cloudSerial ?? null
+                                      return serial === null
+                                        ? at
+                                        : `${tr('presets.table.detail.versionNo', { n: String(serial) })} · ${at}`
                                     })()}
                                   </span>
                                 </div>
@@ -1893,10 +1946,12 @@ export default function PresetTable({
                           </section>
 
                           {/*
-                            ④ 文件时间 —— 这一份落在盘上之后的两次时间。
-                            本机没有这一份（云端行）时整组不画（与左列「文件位置」同一个判据）。
+                            ④ 文件时间 —— 这一份落在盘上之后的两次时间：
+                              · 本地修改时间 = 盘上那份文件的 mtime（真 mtime，不是事件时刻）
+                              · 下载时间     = 这份字节是下载 / 替换进来的那一刻
+                            **有事实就画**（切片器配置、云端交付行都有这两格）；两格都没有整组不画。
                           */}
-                          {row.origin === 'local' && (
+                          {(row.localModifiedText != null || obtainedUnix != null) && (
                             <section className={s.dSec}>
                               <div className={s.dSecHead}>
                                 <Icon name="clock" size={13} className={s.dSecIcon} />
@@ -1908,12 +1963,26 @@ export default function PresetTable({
                                     {tr('presets.table.detail.more.modified')}
                                   </span>
                                   <span className={s.dVal}>
-                                    {longStatText(row.modifiedText) ?? tr(UNKNOWN)}
+                                    {longStatText(row.localModifiedText ?? row.modifiedText) ??
+                                      tr(UNKNOWN)}
                                   </span>
                                 </div>
                                 <div className={s.dRow}>
                                   <span className={s.dKey}>
-                                    {tr('presets.table.detail.more.obtained')}
+                                    {/*
+                                      三档三个词，每档都说实话（2026-11-17 作者：
+                                      「更新了也没变这个时间」）：
+                                        · 本地副本  → **最初下载时间**（更新不重写那一刻）
+                                        · 交付行替换过 → **更新时间**
+                                        · 交付行下过 → **下载时间**
+                                    */}
+                                    {tr(
+                                      row.origin === 'local'
+                                        ? 'presets.table.detail.more.firstObtained'
+                                        : 'arrivalBy' in row && row.arrivalBy === 'replaced'
+                                          ? 'presets.table.detail.more.updatedAt'
+                                          : 'presets.table.detail.more.obtained',
+                                    )}
                                   </span>
                                   <span className={s.dVal}>
                                     {obtainedUnix != null
@@ -2005,8 +2074,7 @@ export default function PresetTable({
                               <div className={s.dMoreGrid}>
                                 {/*
                                   本机留档（原「原文镜像」）**单独占一行**（第十八轮 2026-10-30
-                                  作者圈图）—— 它是一条长路径，挤在半栏里会被截成两截；
-                                  剩下四条是**两两成行**：发布线一行、SHA 一行，云端在左、本地在右。
+                                  作者圈图）—— 它是一条长路径，挤在半栏里会被截成两截。
                                 */}
                                 {row.origin === 'local' && (
                                   <div className={`${s.dRow} ${s.dMoreFull}`}>
@@ -2019,35 +2087,69 @@ export default function PresetTable({
                                   </div>
                                 )}
                                 {/*
-                                  分支与序号只在这里说一次（「云端当前」那一行只说时间）——
-                                  同一个号在界面上出现两遍，读的人一定会问哪个是哪个。
+                                  **与主体同一套双列**（2026-11-17 作者：「也加一个竖线，
+                                  然后右边的和上面对齐」）：左 = 云端侧，右 = 本地侧，
+                                  中缝那条竖线与上面那条同位置、同一色。
+                                  切片器没有"这份基于 / 下载"（那是另存 / 复制的血统），
+                                  右列整个不出现，左列跨满。
                                 */}
-                                {verdictFacts?.cloudSource != null && (
-                                  <div className={s.dRow}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.more.cloudRef')}
-                                    </span>
-                                    <span className={s.dVal}>
-                                      {identityDisplayOf(tr, verdictFacts.cloudSource)}
-                                    </span>
+                                {/*
+                                  **只摆 SHA，每个都标明是哪一个版本时刻的**（2026-11-17 作者：
+                                  「不要再说指纹了，还是用 SHA 吧」）：
+                                    来源版本 SHA = 我这份基于的那一版云端原文
+                                    本机 SHA     = 盘上这份自己的字节
+                                  两个相同，就说明下载之后没动过。主区「来源」已经说了从哪个源来，
+                                  这里不再重复源地址。
+                                */}
+                                {row.kind === 'mkp_preset' && (
+                                  <div className={s.dMoreCol}>
+                                    {verdictFacts != null && (
+                                      <div
+                                        className={s.dRow}
+                                        data-tip={verdictFacts.sourceSha256 ?? undefined}
+                                      >
+                                        <span className={s.dKey}>
+                                          {tr('presets.table.detail.more.shaBased')}
+                                        </span>
+                                        <span className={`${s.dVal} ${s.dMono}`}>
+                                          {shortSha(verdictFacts.sourceSha256) ??
+                                            tr('presets.table.detail.more.none')}
+                                        </span>
+                                      </div>
+                                    )}
+                                    {/*
+                                      **只用盘上现算的那一格**（`localSha256`）—— 不能拿
+                                      `downloadSha256` 顶：那是"下载那一刻云端原文"，
+                                      用户下载后改过就对不上了，写在这里会撒谎。
+                                    */}
+                                    {(() => {
+                                      const mine = row.localSha256 ?? null
+                                      if (mine === null) return null
+                                      return (
+                                        <div className={s.dRow} data-tip={mine}>
+                                          <span className={s.dKey}>
+                                            {tr('presets.table.detail.more.shaDownload')}
+                                          </span>
+                                          <span className={`${s.dVal} ${s.dMono}`}>
+                                            {shortSha(mine) ?? tr('presets.table.detail.more.none')}
+                                          </span>
+                                        </div>
+                                      )
+                                    })()}
                                   </div>
                                 )}
-                                {/*
-                                  三行 SHA 都是「事实」：没有来源记录（老文件）就整组不摆 ——
-                                  与上面发布线那一行同一个判据，不拿「无」填满三行。
-                                */}
-                                {verdictFacts != null && (
-                                  <>
-                                    <div className={s.dRow} data-tip={verdictFacts.sourceSha256 ?? undefined}>
-                                      <span className={s.dKey}>
-                                        {tr('presets.table.detail.more.shaBased')}
-                                      </span>
-                                      <span className={`${s.dVal} ${s.dMono}`}>
-                                        {shortSha(verdictFacts.sourceSha256) ??
-                                          tr('presets.table.detail.more.none')}
-                                      </span>
-                                    </div>
-                                    <div className={s.dRow} data-tip={verdictFacts.cloudSha256 ?? undefined}>
+                                <div
+                                  className={
+                                    row.kind === 'mkp_preset'
+                                      ? s.dMoreColR
+                                      : `${s.dMoreCol} ${s.dMoreFull}`
+                                  }
+                                >
+                                  {verdictFacts != null && (
+                                    <div
+                                      className={s.dRow}
+                                      data-tip={verdictFacts.cloudSha256 ?? undefined}
+                                    >
                                       <span className={s.dKey}>
                                         {tr('presets.table.detail.more.shaCloud')}
                                       </span>
@@ -2056,54 +2158,18 @@ export default function PresetTable({
                                           tr('presets.table.detail.more.none')}
                                       </span>
                                     </div>
-                                    <div className={s.dRow} data-tip={verdictFacts.downloadSha256 ?? undefined}>
-                                      <span className={s.dKey}>
-                                        {tr('presets.table.detail.more.shaDownload')}
-                                      </span>
-                                      <span className={`${s.dVal} ${s.dMono}`}>
-                                        {shortSha(verdictFacts.downloadSha256) ??
-                                          tr('presets.table.detail.more.none')}
-                                      </span>
-                                    </div>
-                                  </>
-                                )}
+                                  )}
+                                </div>
                               </div>
                             </details>
                           )}
                         </div>
 
-                        {/* preset 行的版本指纹（云端最新版本/发布时间），第二行 muted meta */}
-                        {row.origin === 'preset' && (
-                          <div className={s.dMeta}>
-                            {row.scope === 'local' &&
-                              row.ownPublishedAt != null &&
-                              row.ownPublishedAt !== row.publishedAt && (
-                                <>
-                                  <span>
-                                    {tr('presets.table.detail.publishedHere', {
-                                      time: longStatText(row.ownPublishedAt) ?? tr(UNKNOWN),
-                                    })}
-                                  </span>
-                                  <i className={s.dDot} aria-hidden>·</i>
-                                </>
-                              )}
-                            {row.scope === 'local' && (
-                              <>
-                                <span>
-                                  {tr('presets.table.detail.publishedCloud', {
-                                    time: longStatText(row.publishedAt ?? undefined) ?? tr(UNKNOWN),
-                                  })}
-                                </span>
-                                <i className={s.dDot} aria-hidden>·</i>
-                              </>
-                            )}
-                            <span>
-                              {tr('presets.table.detail.cloudVersion', {
-                                version: row.presetVersion ?? tr(UNKNOWN),
-                              })}
-                            </span>
-                          </div>
-                        )}
+                        {/*
+                          卡底这一行（本机 / 云端 / 云端 revision）**整行退休**（2026-11-17 方案 A）：
+                          那三个数在上面各有自己的一格 —— 「这一版属于」「云端当前版」「云端指纹」，
+                          在同一张卡里说两遍，读者只会问"哪个是哪个"。
+                        */}
 
                         {/* 认不出的注记：不顶在主词上，放成讲道理的一行 */}
                         {untrusted && (

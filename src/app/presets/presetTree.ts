@@ -270,11 +270,17 @@ export function originCellOf(tr: Tr, row: PresetTableRow): OriginCell {
     const full = row.basedOnFacts?.sourceRef ?? null
     const ref = row.cloudFile ?? (row.basedOnSource?.split('/').pop() ?? null)
 
-    /* 用户自己另存出来的：指向母本那一份（可点） */
+    /*
+     * 用户自己另存出来的：**正文只写「备份」**，母本名字留在悬停与定位里。
+     *
+     * 2026-11-17 作者：「这个来源我觉得就多余……最多就是备份，就是恢复进来的」——
+     * `本地 · A1_MINI-fast260326 copy.toml` 这种写法把"我这份是从哪份拷的"
+     * 摆在了最显眼的位置，而用户此刻要读的是"这份是不是我要用的"。
+     */
     if (kind === 'copy') {
       if (row.originName) {
         return {
-          text: tr('presets.tree.origin.localCopy', { name: row.originName }),
+          text: tr('presets.tree.origin.backup'),
           ref: null,
           title: tr('presets.tree.origin.localCopyTitle', { name: row.originName }),
           locate: {
@@ -311,10 +317,7 @@ export function originCellOf(tr: Tr, row: PresetTableRow): OriginCell {
     if (kind === 'download') {
       const branch = identityRefOf(full)
       return {
-        text:
-          branch === null
-            ? tr('presets.tree.origin.cloud')
-            : tr('presets.tree.origin.cloudRef', { ref: branch }),
+        text: cloudOriginText(tr, full),
         ref,
         title:
           branch === null
@@ -370,17 +373,16 @@ export function originCellOf(tr: Tr, row: PresetTableRow): OriginCell {
      * `云端 · main` 对不上；源类型属于"当前设置"那一层，收进「更多」即可。
      */
     const identity = row.basedOnFacts?.cloudSource ?? null
-    const branch = identityRefOf(identity)
     return {
-      text:
-        branch === null
-          ? tr('presets.tree.origin.cloud')
-          : tr('presets.tree.origin.cloudRef', { ref: branch }),
+      text: cloudOriginText(tr, identity),
       ref: null,
       title:
         identity === null
           ? tr('presets.tree.origin.cloudNoRefTitle')
-          : tr('presets.tree.origin.cloudTitle', { ref: branch ?? '-' }),
+          : tr('presets.tree.origin.cloudTitle', {
+              /* 有分支念分支，没有就念「哪条线」（自建源的主机）—— 与正文同一套口径 */
+              ref: identityRefOf(identity) ?? identityLineOf(identity) ?? '-',
+            }),
       full: identity,
       why: null,
     }
@@ -686,18 +688,46 @@ export function branchKept(
   return !hasSource || branchMatches(mine ?? null, current)
 }
 
+/**
+ * 源身份里的**「哪条线」**：`github` / `gitee` 念平台名，自建源念**主机**（带端口）。
+ *
+ * 自建目录源（`custom#127.0.0.1:8787@-`）以前整段念成 `custom` —— 那是内部枚举名，
+ * 用户读不出"这是我那台机器上的源"（2026-11-17 作者：「不要写 custom」）。
+ */
+export function identityLineOf(key: string | null | undefined): string | null {
+  if (!key) return null
+  const [host, rest] = key.split('#')
+  if (host === 'github') return 'GitHub'
+  if (host === 'gitee') return 'Gitee'
+  const repo = (rest ?? '').split('@')[0]
+  /*
+   * 自建目录源记的是 `主机:端口/交付目录`（`127.0.0.1:8787/delivery`）——
+   * `/delivery` 是目录名，不是"哪条线"，念出来只会让人以为源名字就叫这个。
+   */
+  const line = repo.split('/')[0]
+  return line !== '' ? line : (host || null)
+}
+
 /** `github#owner/repo@main` → `GitHub · main`（有新版那一行显示"从哪来的新版"） */
 export function identityDisplayOf(tr: Tr, key: string | null | undefined): string | null {
   if (!key) return null
-  const host = key.split('#')[0]
-  const platform =
-    host === 'github'
-      ? 'GitHub'
-      : host === 'gitee'
-        ? 'Gitee'
-        : (host || tr('presets.tree.identity.unknownSource'))
+  const line = identityLineOf(key) ?? tr('presets.tree.identity.unknownSource')
   const ref = identityRefOf(key)
-  return ref === null ? platform : `${platform} · ${ref}`
+  return ref === null ? line : `${line} · ${ref}`
+}
+
+/**
+ * 云端来源那一格写什么：有分支就是 `云端 · main`；没有分支（自建目录源）就把
+ * **主机**接在后面（`云端 · 127.0.0.1:8787`），而不是退回光秃秃的「云端」——
+ * 那句什么也没说（2026-11-17 作者：「它就应该显示云端，然后加上分支之类的」）。
+ */
+function cloudOriginText(tr: Tr, identity: string | null | undefined): string {
+  const branch = identityRefOf(identity ?? null)
+  if (branch !== null) return tr('presets.tree.origin.cloudRef', { ref: branch })
+  const line = identityLineOf(identity)
+  return line === null
+    ? tr('presets.tree.origin.cloud')
+    : `${tr('presets.tree.origin.cloud')} · ${line}`
 }
 
 /**
@@ -1782,6 +1812,16 @@ export interface PresetRowBase {
    */
   sizeText?: string
   modifiedText?: string
+  /**
+   * **盘上那份文件的 mtime**（真值，不是事件时刻）。详情「本地修改时间」读它。
+   *
+   * 它与 `modifiedText` 是两件事：后者在本地表那一列答"这份字节什么时候到的"，
+   * 这个答"这份文件在盘上最后一次被写入"（自己在外头改过、重新下载过都会动）。
+   * 没有（云端行 / 盘上没有这份）就是 `undefined`，界面照实「未知」。
+   */
+  localModifiedText?: string
+  /** **盘上这份的指纹**（前 8 位用于「下载」那一格）—— 没有就是本机还没有这一份 */
+  localSha256?: string | null
   /** 上面那两格是哪来的。`undefined` = 这个来源没有这两格（自己的文件、preset 行走别的口径） */
   statFrom?: 'file' | 'demo'
   /** 唯一底账（使用中指针）说正在使用的就是这一份。**全页最多一行** */
@@ -1963,6 +2003,13 @@ export interface PresetCloudRow extends PresetRowBase {
    * 切片器档不出这个字段：那一档照旧按 `presetState` 四态说话。
    */
   localState?: CloudLocalState
+  /**
+   * 「下载时间」：本机这一份是哪次下载 / 替换进来的（`DeliveryDownloaded` / `DeliveryReplaced`）。
+   *
+   * 与本地行那一格同义（都是事件时刻，不是 mtime）；没下过就是 `undefined`，
+   * 界面照实「未知」—— 不拿 mtime 顶。
+   */
+  obtainedUnix?: number | null
 }
 
 export type PresetTableRow = PresetLocalRow | PresetCloudRow
@@ -2187,6 +2234,18 @@ export interface DeliveryPresetSource {
    * 两处各判一次，迟早有一处忘了跟（"需更新"以前就是那样把坏档说成"未下载"的）。
    */
   state: PresetFileState
+  /**
+   * **盘上这份的指纹**（`OnDiskFile.sha256`）—— 「下载」那一格读它，答的是
+   * "我手上是哪一版"。与 [`sha256`]（目录登记的那一版）是两回事：盘上那份可能是旧版。
+   * `null` = 盘上没有这一份 / 老目录没给。
+   */
+  localSha256: string | null
+  /**
+   * 盘上那份文件的 **mtime**（`OnDiskFile.localModifiedUnix`）—— 只当「本地修改时间」。
+   * 它与 `downloadedUnix` / `replacedUnix` 回答的不是一件事：那两个是"什么时候到我机器上的"，
+   * 这个是"这份文件在盘上最后一次被写入"。**不许互相顶替**（AGENTS §6）。
+   */
+  localModifiedUnix: number | null
 }
 
 /** 一台机型下的一个文件：代表那一份 + 用到它的版本名与 id */
@@ -2790,6 +2849,8 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
         /* 来源记录：它当初基于云端哪一版、那一版现在还在不在（第七层） */
         basedOn: f.basedOn,
         basedOnFacts: f.basedOnFacts,
+        /* 这一份自己的字节摘要（「本机 SHA」那格；与「来源版本 SHA」是两个数） */
+        localSha256: f.sha256,
         branch: branchOf(f.basedOnFacts),
         basedOnSource: f.basedOnLabel,
         basedOnCloud: source,
@@ -2810,6 +2871,8 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
         originName: f.originName,
         cloudFile: f.cloudFile,
         versionPublishedAt: f.versionPublishedAt,
+        /* 「云端当前」那一行要的：当前目录的发布时刻（这份自己属于哪一代在 `versionPublishedAt`） */
+        publishedAt: input.releaseAt ?? undefined,
         obtainedUnix: f.obtainedUnix,
       }
     })
@@ -2991,6 +3054,14 @@ export function localRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
           (p.downloadedUnix ?? p.replacedUnix) === null
             ? undefined
             : new Date((p.downloadedUnix ?? p.replacedUnix)! * 1000).toISOString(),
+        /* 盘上那份文件自己的 mtime 与指纹（不是事件时刻 —— 那两格在 `modifiedText` / `obtainedUnix`） */
+        localModifiedText:
+          p.localModifiedUnix === null
+            ? undefined
+            : new Date(p.localModifiedUnix * 1000).toISOString(),
+        localSha256: p.localSha256,
+        /* 「下载时间」：这份字节是下载进来的还是替换上去的（两个事件至多一个有值） */
+        obtainedUnix: p.downloadedUnix ?? p.replacedUnix,
         arrivalBy:
           p.downloadedUnix !== null
             ? ('downloaded' as const)
@@ -3011,6 +3082,31 @@ export function localRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
         presetState: state,
         /* 发布时刻：展开详情「云端更新」一格（本地行的下载时间在 `modifiedText` 上） */
         publishedAt: releaseAt,
+        /*
+         * **「更多详情」那一块对切片器配置也要有**（2026-11-17 作者：本地表没有、
+         * 云端表有）。它只摆事实：当前源身份、目录这一版的 SHA、这份属于哪一代。
+         * `[mkp_source]` 那几格切片器没有记录，照实留 null；MKP 那支一个字不动。
+         */
+        basedOnFacts:
+          p.kind === 'mkp_preset'
+            ? undefined
+            : {
+                sourceKind: null,
+                sourceRef: null,
+                sourceRelease: null,
+                sourceVersionAt: null,
+                sourceSha256: null,
+                downloadSha256: null,
+                cloudSource: input.sourceIdentity ?? null,
+                cloudPublishedAt: p.deliveryPublishedAt,
+                cloudSha256: p.sha256,
+                sourceCatalog: null,
+                sourceSerial: null,
+                /* 「云端当前版」那格要念"第 N 版"，序号跟着目录走 */
+                cloudCatalog: input.catalogLine ?? null,
+                cloudSerial: input.catalogSerial ?? null,
+                unverifiedReason: null,
+              },
         live,
       }
     })
@@ -3325,6 +3421,14 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
          * （「未知」+ `PRESET_TIME_WHY.cloudMissing` 那句话）。
          */
         modifiedText: releaseAt ?? undefined,
+        /* 本机那份自己的 mtime 与 SHA（没下载过就是「未知」，界面照实说） */
+        localModifiedText:
+          p.localModifiedUnix === null
+            ? undefined
+            : new Date(p.localModifiedUnix * 1000).toISOString(),
+        localSha256: p.localSha256,
+        /* 「下载时间」：本机这一份是哪次下载 / 替换进来的（没下过就是未知） */
+        obtainedUnix: p.downloadedUnix ?? p.replacedUnix,
         applied: live,
         pinned: pinned.includes(`preset:${p.fileName}`),
         pinOrder: pinned.indexOf(`preset:${p.fileName}`),

@@ -349,6 +349,10 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
         let root = internal_root(&app)?;
         let raw = runtime::app_state::postproc_prefs(&root)?;
         let r = raw.resolved();
+        /* 出厂档：全 `null` 解析出来的那一份（与 `resolved()` 同一个函数，不另算一套） */
+        let f = serde_json::from_str::<runtime::app_state::PostprocPrefs>("{}")
+            .map_err(|e| AppError::internal(format!("出厂偏好解析不了：{e}")))?
+            .resolved();
         Ok(serde_json::json!({
             /* 原样那一格（界面用来判断"这一项动过没有"） */
             "raw": raw,
@@ -392,6 +396,26 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "debugUseTravelSpeed": r.debug_use_travel_speed,
                 "debugRepeat": r.debug_repeat,
                 "debugMoveY": r.debug_move_y,
+            },
+            /*
+             * 出厂档 = 全 `null` 解析出来的那一份。
+             *
+             * 恢复默认的对比要用它：只写「出厂」两个字，用户看不出点完会变成开还是关、
+             * 数字是多少。这里只给那 11 项（`PrefsIr` 的全部），与 `resetDefaults` 的
+             * 补丁一一对应；调试动作那组有自己那颗恢复，不在这里。
+             */
+            "factory": {
+                "skipVibrationCalibration": f.skip_vibration_calibration,
+                "beginStageRetractEnabled": f.begin_stage_retract_enabled,
+                "beginStageRetractZLiftMm": f.begin_stage_retract_z_lift_mm,
+                "zCalibrationDwellSec": f.z_calibration_dwell_sec,
+                "xyCalibrationDwellSec": f.xy_calibration_dwell_sec,
+                "underSupportEnabled": f.under_support_enabled,
+                "underSupportMm": f.under_support_mm,
+                "glueBottomEnabled": f.glue_bottom_enabled,
+                "bedGlueEnabled": f.bed_glue_enabled,
+                "bedGlueAllModels": f.bed_glue_all_models,
+                "autoTowerPosition": f.auto_tower_position.wire(),
             },
             /* 量程（界面画数字框要用，**不另写一份**在 TS 里） */
             "limits": {

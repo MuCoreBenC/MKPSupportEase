@@ -747,6 +747,9 @@ export function usePresetData(importRevision = 0): PresetData {
           downloadedUnix: onDisk.get(f.fileName)?.downloadedUnix ?? null,
           replacedUnix: onDisk.get(f.fileName)?.replacedUnix ?? null,
           deliveryPublishedAt: onDisk.get(f.fileName)?.publishedAt ?? null,
+          /* 盘上这份自己的指纹与 mtime（两格都只答"我手上这一份"，与目录那版无关） */
+          localSha256: onDisk.get(f.fileName)?.sha256 ?? null,
+          localModifiedUnix: onDisk.get(f.fileName)?.localModifiedUnix ?? null,
           state: stateOf(f.fileName),
         },
       ]

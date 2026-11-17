@@ -1213,6 +1213,13 @@ export interface LocalPresetFile {
   /** 最后改动时刻（UTF **epoch 秒**）。界面自己转人话：默认构建不引时间库 */
   modifiedUnix: number | null
   /**
+   * **盘上这份自己的指纹**（整份字节的 SHA-256）—— 详情「本机指纹」读它。
+   *
+   * 与 `basedOnFacts.sourceSha256`（来源那一版）/ `downloadSha256`（下载那一刻）
+   * 不是一回事：下载后改过、另存过，本机这份就与云端那个不同。读不出来 ⇒ `null`。
+   */
+  sha256: string | null
+  /**
    * 认得出是哪一类就给；**认不出是 `null`**。
    *
    * 后端只认 `.toml`（MKP 预设）—— 切片器那两类都是 `.json`，光看扩展名分不出
@@ -1796,6 +1803,18 @@ export interface OnDiskFile {
   downloadedUnix: number | null
   replacedUnix: number | null
   publishedAt: string | null
+  /**
+   * **盘上这份的指纹**（预设 = 索引里那版；其余 = 现场算）。
+   *
+   * 与目录登记的 SHA 是两回事：它答"我手上这份是哪一版"，界面上「下载」那一格读它。
+   * 认不出出身的旧字节也算得出（它就是字节本身），不是"未知"。
+   */
+  sha256: string
+  /**
+   * 盘上那份文件的 mtime（epoch 秒）。**只当「本地修改时间」** ——
+   * 不许拿去顶「云端发布时刻」（AGENTS §6）；读不到是 `null`，界面照实「未知」。
+   */
+  localModifiedUnix: number | null
 }
 
 /**
@@ -2468,6 +2487,25 @@ export interface PostprocPrefsWire {
 export interface PostprocPrefsView {
   raw: PostprocPrefsWire
   resolved: ResolvedPostprocPrefs
+  /**
+   * **出厂档**（全 `null` 解析出来的那一份），只含 `PrefsIr` 那 11 项。
+   *
+   * 设置页「恢复默认」的对比要用它 —— 只写「出厂」两个字，用户看不出点完变成
+   * 开还是关、数字多少。调试动作那组不在这里（它有自己的恢复）。
+   */
+  factory: {
+    skipVibrationCalibration: boolean
+    beginStageRetractEnabled: boolean
+    beginStageRetractZLiftMm: number
+    zCalibrationDwellSec: number
+    xyCalibrationDwellSec: number
+    underSupportEnabled: boolean
+    underSupportMm: number
+    glueBottomEnabled: boolean
+    bedGlueEnabled: boolean
+    bedGlueAllModels: boolean
+    autoTowerPosition: string
+  }
   /** 量程来自后端，界面**不另写一份** */
   limits: {
     zDwell: { min: number; max: number }
@@ -4240,6 +4278,14 @@ export interface MkpApi {
    * 版本链与事件账不动：那是历史事实，不是这份文件的附属。
    */
   deleteArchivedFile(path: string): Promise<void>
+
+  /**
+   * **用回归档里那一版**：把本机这一份换成旧版字节（已放入切片器的那份跟着换）。
+   *
+   * 只动本机：目录登记、版本链、事件账一个都不碰 —— 换回来之后这一份会被认成
+   * 「旧版本」，点「下载」就能换回云端当前版。入参与 [`deleteArchivedFile`] 同一个。
+   */
+  restoreArchivedFile(path: string): Promise<void>
 
   /**
    * 当前使用的是哪一份（全局唯一）。null = 还没用任何一份，是合法状态不是错误。

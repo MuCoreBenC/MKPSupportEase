@@ -1750,12 +1750,32 @@
   color: var(--text-1);
 }
 
-/* 展开后的技术值：两列（与主体双列同一条 28px 沟），长 SHA / 长路径不撑破卡 */
+/*
+ * 展开后的技术值：**与主体同一套双列**（2026-11-17 作者：「也加一个竖线，
+ * 然后右边的和上面对齐」）—— 列宽拿同一条 `--dSplit`（`fitSplit` 写在卡片根上），
+ * 中缝同一条 `--line`、同一个 30 + 30 的沟。
+ */
 .dMoreGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 28px;
+  grid-template-columns:
+    minmax(0, calc((100% - 60px) * var(--dSplit, 0.5)))
+    minmax(0, 1fr);
+  gap: 0 30px;
   margin-top: 8px;
+}
+
+.dMoreCol,
+.dMoreColR {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 中缝那条竖线：与 `.dColR` 同位置、同一色 —— 上下两条线要能连成一条 */
+.dMoreColR {
+  padding-left: 30px;
+  border-left: 1px solid var(--line);
 }
 
 /*

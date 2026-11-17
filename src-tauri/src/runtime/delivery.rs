@@ -1047,6 +1047,12 @@ pub struct OnDiskEntry {
     pub downloaded_unix: Option<u64>,
     pub replaced_unix: Option<u64>,
     pub published_at: Option<String>,
+    /// **盘上这份的指纹**（预设 = 索引里那版；其余 = 现场算）。
+    /// 界面上「下载」那一格就是它 —— 答的是"我手上这份是哪一版"，与目录登记的 SHA 是两回事
+    pub sha256: String,
+    /// 盘上那份文件的 mtime（epoch 秒）。**只当「本地修改时间」**，
+    /// 不许拿去顶「云端发布时刻」（AGENTS §6）；读不到就是 `None`，不编 0
+    pub local_modified_unix: Option<u64>,
 }
 
 /// [`downloaded_files`] 带时间的那一版（界面预设页本地表的「时间」列）。
@@ -1071,7 +1077,7 @@ fn entries_in_status(
         .files
         .iter()
         .filter_map(|f| {
-            let (sha, status) = if is_preset(f) {
+            let (sha, status, at) = if is_preset(f) {
                 let entry = delivery_index::entry(internal_root, &f.path)?;
                 /* 内容丢了 / 坏了 ⇒ 这份不算"在" */
                 content::read_bytes(internal_root, &entry.sha256)?;
@@ -1079,10 +1085,12 @@ fn entries_in_status(
                     Some(w) if entry.sha256 != w => FileOnDisk::Stale,
                     _ => FileOnDisk::Current,
                 };
-                (entry.sha256, status)
+                let at = content::content_path(internal_root, &entry.sha256);
+                (entry.sha256, status, at)
             } else {
-                let bytes = std::fs::read(internal_root.join(&f.path)).ok()?;
-                (sha_hex(&bytes), status_of(f, &bytes))
+                let at = internal_root.join(&f.path);
+                let bytes = std::fs::read(&at).ok()?;
+                (sha_hex(&bytes), status_of(f, &bytes), at)
             };
             if status != want {
                 return None;
@@ -1099,6 +1107,8 @@ fn entries_in_status(
                     _ => None,
                 },
                 published_at: generations.get(&sha).and_then(|g| g.published_at.clone()),
+                local_modified_unix: modified_unix_of(&at),
+                sha256: sha,
             })
         })
         .collect()
@@ -2280,6 +2290,40 @@ mod tests {
             );
         }
         assert!(stored_bytes(root.path(), &v1).is_none(), "一次都没写盘");
+    }
+
+    /// 盘上那份的事实：**指纹与 mtime 对非预设也给**（切片器配置那两格不再写"未知"）
+    #[test]
+    fn on_disk_entries_carry_the_fingerprint_and_mtime_for_plain_files() {
+        let root = tempfile::tempdir().unwrap();
+        let content = b"{\"type\":\"process\"}";
+        let file = entry("bbs.json", content);
+        let at = root.path().join(&file.path);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(&at, content).unwrap();
+
+        let catalog = catalog_with(vec![file]);
+        let got = downloaded_entries(root.path(), &catalog);
+
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].sha256, sha_hex(content), "指纹按盘上字节现算");
+        assert!(
+            got[0].local_modified_unix.is_some(),
+            "盘上有这一份就该给得出 mtime"
+        );
+        assert_eq!(
+            got[0].local_modified_unix,
+            modified_unix_of(&at),
+            "mtime 与那一份文件对得上"
+        );
+    }
+
+    /// 盘上没有这一份：不返回（更不会编一个 mtime 出来）
+    #[test]
+    fn on_disk_entries_skip_files_that_are_not_there() {
+        let root = tempfile::tempdir().unwrap();
+        let catalog = catalog_with(vec![entry("bbs.json", b"{}")]);
+        assert!(downloaded_entries(root.path(), &catalog).is_empty());
     }
 
     #[test]

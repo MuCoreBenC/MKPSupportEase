@@ -517,6 +517,7 @@ const mockLocal: LocalPresetFile[] = [
     fileName: 'A1-standard.toml',
     size: 2048,
     modifiedUnix: 1780000000,
+    sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
     kind: 'mkp_preset',
     state: 'ok',
     stateDetail: null,
@@ -541,6 +542,7 @@ const mockLocal: LocalPresetFile[] = [
     fileName: 'A1-fast.toml',
     size: 2048,
     modifiedUnix: 1780900000,
+    sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
     kind: 'mkp_preset',
     state: 'ok',
     stateDetail: null,
@@ -568,6 +570,7 @@ const mockLocal: LocalPresetFile[] = [
     fileName: 'A1 涂胶.toml',
     size: 2048,
     modifiedUnix: 1780500000,
+    sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
     kind: 'mkp_preset',
     state: 'ok',
     stateDetail: null,
@@ -592,6 +595,7 @@ const mockLocal: LocalPresetFile[] = [
     fileName: 'Process_0.2mm.json',
     size: 1024,
     modifiedUnix: 1780003600,
+    sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
     kind: null,
     state: null,
     stateDetail: null,
@@ -620,6 +624,7 @@ const mockLocal: LocalPresetFile[] = [
     fileName: '坏了的涂胶.toml',
     size: 1536,
     modifiedUnix: 1780007200,
+    sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
     kind: 'mkp_preset',
     state: 'unreadable',
     stateDetail: t('mock.err.tomlLine'),
@@ -1454,6 +1459,8 @@ let mockDownloaded: OnDiskFile[] = [
     downloadedUnix: 1780000000,
     replacedUnix: null,
     publishedAt: '2026-10-06T05:46:00Z',
+    sha256: 'a1f0000000000000000000000000000000000000000000000000000000000001',
+    localModifiedUnix: 1780000120,
   },
   {
     /** 套餐的另一半：`A1_STANDARD` 的切片器配置（见上面那段说明） */
@@ -1461,15 +1468,26 @@ let mockDownloaded: OnDiskFile[] = [
     downloadedUnix: 1780000000,
     replacedUnix: null,
     publishedAt: '2026-10-06T05:46:00Z',
+    sha256: 'a1f0000000000000000000000000000000000000000000000000000000000002',
+    localModifiedUnix: 1780000120,
   },
 ]
 let mockStale: OnDiskFile[] = [
-  { fileName: 'A1-fast.toml', downloadedUnix: 1777000000, replacedUnix: null, publishedAt: null },
+  {
+    fileName: 'A1-fast.toml',
+    downloadedUnix: 1777000000,
+    replacedUnix: null,
+    publishedAt: null,
+    sha256: 'a1f0000000000000000000000000000000000000000000000000000000000003',
+    localModifiedUnix: 1777000060,
+  },
   {
     fileName: 'A1mini-standard.toml',
     downloadedUnix: null,
     replacedUnix: 1777000000,
     publishedAt: null,
+    sha256: 'a1f0000000000000000000000000000000000000000000000000000000000004',
+    localModifiedUnix: 1777000060,
   },
 ]
 
@@ -1531,6 +1549,8 @@ async function mockDeliver(
       downloadedUnix: Math.floor(Date.now() / 1000),
       replacedUnix: null,
       publishedAt: '2026-10-06T05:46:00Z',
+      sha256: 'a1f0000000000000000000000000000000000000000000000000000000000005',
+      localModifiedUnix: Math.floor(Date.now() / 1000),
     },
   ]
   /* MKP toml 种一份演示正文（与 `fetchCloudPreset` 落本地那份同源）；别的类型没有正文可种 */
@@ -1992,6 +2012,7 @@ export const mockApi: MkpApi = {
       fileName,
       size,
       modifiedUnix: nowSec(),
+      sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
       kind: 'mkp_preset',
       /* 刚存出来的那份：假后端不解析 TOML，按演示口径记"能读"（真机上是后端算的） */
       state: 'ok',
@@ -2377,6 +2398,7 @@ export const mockApi: MkpApi = {
         fileName: name,
         size: MOCK_IMPORTED_TEXT.length,
         modifiedUnix: nowSec(),
+        sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
         kind: 'mkp_preset',
         state: 'ok',
         stateDetail: null,
@@ -2811,6 +2833,26 @@ export const mockApi: MkpApi = {
     }
   },
 
+  /* 用回归档那一版：演示里只把这一份的"手上这一版"换回它的旧字节，归档条目留着 */
+  async restoreArchivedFile(path) {
+    const row = mockArchived.find((a) => a.path === path)
+    if (row === undefined) {
+      throw new Error(t('mock.archive.noFile', { file: path }))
+    }
+    mockDownloaded = [
+      ...mockDownloaded.filter((f) => f.fileName !== row.fileName),
+      {
+        fileName: row.fileName,
+        downloadedUnix: Math.floor(Date.now() / 1000),
+        replacedUnix: null,
+        publishedAt: null,
+        sha256: row.sha256,
+        localModifiedUnix: Math.floor(Date.now() / 1000),
+      },
+    ]
+    mockStale = mockStale.filter((f) => f.fileName !== row.fileName)
+  },
+
   async downloadCatalogFiles(fileNames, onTick) {
     /* 逐份走同一条 `mockDeliver`；**一份失败不拖累别人**（与真机同口径），按份给结局 */
     const outcomes: DownloadOutcome[] = []
@@ -3012,6 +3054,25 @@ export const mockApi: MkpApi = {
     return {
       raw: mockPostproc,
       resolved,
+      /*
+       * 出厂档：**照抄 `presets/client-defaults.toml` 的 `[Prefs]`**。
+       *
+       * 浏览器预览没有内核，读不到那份文件 —— 改了默认值要同步这里，
+       * 否则「恢复默认」的对比框在预览里显示的是旧值（真机不受影响）。
+       */
+      factory: {
+        skipVibrationCalibration: false,
+        beginStageRetractEnabled: true,
+        beginStageRetractZLiftMm: 5,
+        zCalibrationDwellSec: 2,
+        xyCalibrationDwellSec: 3,
+        underSupportEnabled: false,
+        underSupportMm: 0.5,
+        glueBottomEnabled: false,
+        bedGlueEnabled: false,
+        bedGlueAllModels: false,
+        autoTowerPosition: 'ask',
+      },
       limits: {
         zDwell: { min: 1, max: 20 },
         xyDwell: { min: 1, max: 10 },
@@ -3403,6 +3464,7 @@ export const mockApi: MkpApi = {
         fileName,
         size: text.length,
         modifiedUnix: nowSec(),
+        sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
         kind: 'mkp_preset',
         state: 'ok',
         stateDetail: null,
@@ -3449,6 +3511,7 @@ export const mockApi: MkpApi = {
         fileName: name,
         size: text.length,
         modifiedUnix: nowSec(),
+        sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
         kind: 'mkp_preset',
         state: 'ok',
         stateDetail: null,

@@ -109,6 +109,12 @@ pub struct LocalFile {
     /// 用不了时的一句人话原因（可直接显示，比如"TOML 语法不对（第 3 行第 1 列）"）；
     /// 能用 / 不适用时是 `None`
     pub state_detail: Option<String>,
+    /// **盘上这份自己的指纹**（整份字节，SHA-256）。
+    ///
+    /// 与 `source` 里那两格（来源那一版 / 下载那一刻）不是一回事：那两个是**云端原文**的摘要，
+    /// 这个是**我手上这份**的 —— 用户下载后改过、另存过，它就与云端那个不同。
+    /// 读不出来（不是 UTF-8）⇒ `None`，界面照实不给。
+    pub sha256: Option<String>,
 }
 
 /// 这份用户文件**基于的云端版本**现在怎么样了。
@@ -716,7 +722,7 @@ pub fn local_files(user_root: &Path) -> Vec<LocalFile> {
              * 符号链接指向用户根外面的，在这里拦下，**一个字节都不读**（来源记录也一样不读）。
              * 只对预设候选暴露状态：别的文件本来就没有"能不能当预设用"这一档。
              */
-            let (head, source, state, state_detail) =
+            let (head, source, state, state_detail, full) =
                 match crate::fsx::paths::resolve_in(user_root, &rel) {
                     Err(_) => (
                         None,
@@ -725,6 +731,7 @@ pub fn local_files(user_root: &Path) -> Vec<LocalFile> {
                         (kind == Some(PRESET)).then(|| {
                             "它指向 presets-local/ 外面 —— 程序不读用户根外面的东西".to_owned()
                         }),
+                        None,
                     ),
                     Ok(real) => {
                         let (state, detail) = if kind == Some(PRESET) {
@@ -736,7 +743,7 @@ pub fn local_files(user_root: &Path) -> Vec<LocalFile> {
                         一次读整份文本，两处各取所需，不许为省一次 IO 抄成两份事实 */
                         let full = std::fs::read_to_string(&real).ok();
                         let source = full.as_deref().and_then(source_record::parse);
-                        (head_text(&real), source, state, detail)
+                        (head_text(&real), source, state, detail, full)
                     }
                 };
             let machine = head
@@ -760,6 +767,11 @@ pub fn local_files(user_root: &Path) -> Vec<LocalFile> {
                     .ok()
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs()),
+                /* 整份字节的摘要（`read_to_string` 读到的就是全部字节，不做换行转换） */
+                sha256: full.as_deref().map(|t| {
+                    use sha2::Digest;
+                    super::catalog::hex(&sha2::Sha256::digest(t.as_bytes()))
+                }),
             });
         }
     }

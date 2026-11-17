@@ -324,25 +324,41 @@
  * （作者 2026-11-11：「3 个字和 4 个字就差一点点的宽度，它还要变，我不喜欢这种」）。
  * 做法与 `PresetScopeBar.module.css` 的 `.optText` 同一套。
  */
+/*
+ * 四句候选叠在一处，但**只有当前那句参与布局** —— 胶囊宽度贴着此刻这句话。
+ *
+ * 早先四句都占着格子（`inline-grid` + `min-content`），格子取最长那句，
+ * 于是显示「已是最新」时左边永远空着「刷新失败」多出来的那截
+ * （作者 2026-11-17：「文字离胶囊左边的空」）。
+ *
+ * 现在：当前句 `static` 撑宽，其余三句 `absolute` 叠在右线上（`right: 0`）。
+ * 换档那一帧宽度立刻变成新句的宽 ⇒ `useLayoutEffect` 量到并动画过去，
+ * 交叉淡化照样工作（旧句脱离布局后仍停在原位，`opacity` 由 WAAPI 演）。
+ */
 .tbRefreshLabel {
-  display: inline-grid;
-  grid-template-columns: min-content;
+  position: relative;
+  /* flex 而不是 inline-block：当前那句回到常规流之后，靠 `align-items` 在 26px 高的
+     按钮里垂直居中。`inline-block` + `line-height: 1` 会把字压在行盒的基线上（偏低） */
+  display: flex;
   align-items: center;
   flex: none;
 }
 
 .tbRefreshLabel > * {
-  grid-area: 1 / 1;
-  /* 靠右对齐：字右缘挨着图标（不动），长出来的那半截往左伸 —— 换文案时右缘纹丝不动 */
-  justify-self: end;
+  /* 靠右：字右缘挨着图标（不动），长出来的那半截往左伸 —— 换文案时右缘纹丝不动 */
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
   font-size: var(--fs-label);
   white-space: nowrap;
-  /* 四条都占着格子（宽度取最长那句），只有当前那条不透明 —— 换档走交叉淡化
-     （WAAPI 演，见 layout effect），这里只是"平时谁看得见" */
   opacity: 0;
 }
 
+/* 当前那句回到常规流：它有多宽，胶囊就有多宽 */
 .tbRefreshLabel > [data-on='true'] {
+  position: static;
+  transform: none;
   opacity: 1;
 }
 

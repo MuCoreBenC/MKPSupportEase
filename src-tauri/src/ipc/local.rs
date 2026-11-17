@@ -81,6 +81,9 @@ pub struct LocalPresetFileDto {
     pub size: u64,
     /// 最后改动时刻（UTC epoch 秒）。界面自己转人话：默认构建不引时间库
     pub modified_unix: Option<u64>,
+    /// **盘上这份自己的指纹**（整份字节的 SHA-256）—— 详情「本机指纹」那一格读它。
+    /// 与来源记录里那两格（来源那一版 / 下载那一刻）不是一回事。读不出来 ⇒ `null`
+    pub sha256: Option<String>,
     /// 认得出是哪一类就给；**认不出是 `null`**（见 [`runtime::local::kind_of`]）。
     /// 界面上认不出的那一档**在任何类型档下都列** —— 不藏，也不替用户猜
     pub kind: Option<String>,
@@ -241,6 +244,7 @@ pub async fn get_local_preset_files(app: AppHandle) -> Result<Vec<LocalPresetFil
                     file_name: f.file_name,
                     size: f.size,
                     modified_unix: f.modified_unix,
+                    sha256: f.sha256,
                     kind: f.kind.map(str::to_owned),
                     state: f.state.map(|s| s.as_str().to_owned()),
                     state_detail: f.state_detail,

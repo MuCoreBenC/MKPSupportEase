@@ -783,6 +783,10 @@ pub struct OnDiskFileDto {
     pub downloaded_unix: Option<u64>,
     pub replaced_unix: Option<u64>,
     pub published_at: Option<String>,
+    /// 盘上这份的指纹（「下载」那一格读它，答的是"我手上是哪一版"）
+    pub sha256: String,
+    /// 盘上那份文件的 mtime（「本地修改时间」那一格；读不到 = `null`，不编）
+    pub local_modified_unix: Option<u64>,
 }
 
 /// 已经下载到下载区的文件（盘就是底账：文件在且 SHA 对得上才算数），带它的事件时间
@@ -798,6 +802,8 @@ pub async fn get_downloaded_files(app: AppHandle) -> Result<Vec<OnDiskFileDto>, 
                 downloaded_unix: e.downloaded_unix,
                 replaced_unix: e.replaced_unix,
                 published_at: e.published_at,
+                sha256: e.sha256,
+                local_modified_unix: e.local_modified_unix,
             })
             .collect())
     })
@@ -817,6 +823,8 @@ pub async fn get_stale_files(app: AppHandle) -> Result<Vec<OnDiskFileDto>, AppEr
                 downloaded_unix: e.downloaded_unix,
                 replaced_unix: e.replaced_unix,
                 published_at: e.published_at,
+                sha256: e.sha256,
+                local_modified_unix: e.local_modified_unix,
             })
             .collect())
     })

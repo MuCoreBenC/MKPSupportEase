@@ -1627,22 +1627,6 @@
 }
 
 /* 行尾那颗文本按钮：只做"打开某一扇窗"，不跟开关抢 */
-.textBtn {
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--surface-solid);
-  font: inherit;
-  font-size: var(--fs-label);
-  color: var(--text-2);
-  cursor: pointer;
-}
-
-.textBtn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
 /* 底栏左侧那句灰字：与右侧按钮同一行，长文自己省略 */
 .footNote {
   flex: 1 1 auto;
@@ -1760,6 +1744,8 @@
    */
   overflow-x: hidden;
   overflow-y: auto;
+  /* 滚动条出现/消失时宽度不跳：切换高级模式会改变内容高度，这一栏有时滚有时不滚 */
+  scrollbar-gutter: stable;
 }
 
 .debugParams {
@@ -1776,9 +1762,15 @@
      开关一开一关框高会跟着跳几个像素 */
   flex: 1 1 0;
   flex-direction: column;
-  min-height: 80px;
-  margin-top: 14px;
+  /*
+   * 这三项必须与 `.codeEditor` 逐字一致（120 / 8 / 有边框）：
+   * 两边一套是预览、一套是编辑，切「高级模式」时同一个框换了个壳，
+   * 差一个像素都会让整栏上下跳（作者看到的「容器有像素的移动」就是这个）。
+   */
+  min-height: 120px;
+  margin-top: 8px;
   padding: 10px 12px;
+  border: 1px solid var(--hairline);
   border-radius: 8px;
   background: var(--surface-sunken);
 }
@@ -1804,12 +1796,15 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px;
+  /* 高度钉死：带数字徽标的那颗与纯文字那颗必须一样高（作者截图里两颗差一截） */
+  height: 24px;
+  padding: 0 10px;
   border: 1px solid var(--hairline);
   border-radius: 999px;
   background: transparent;
   font: inherit;
   font-size: var(--fs-label);
+  line-height: 1;
   color: var(--text-2);
   cursor: pointer;
 }
@@ -2172,12 +2167,6 @@
 }
 
 /* 「恢复默认」那一行：左栏，靠左 */
-.resetRow {
-  display: flex;
-  justify-content: flex-start;
-  margin-top: 6px;
-}
-
 /* 底栏那句变成校验错误时：红字，与「有毛病」这件事对齐 */
 .footWarn {
   color: var(--danger);
