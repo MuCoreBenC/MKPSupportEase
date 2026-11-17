@@ -1,0 +1,44 @@
+/* 「组内顺序」触发器；框里的列表样式在 c14/sort */
+
+.trigger {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 5px 10px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  text-align: left;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.trigger:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+.trigger:disabled {
+  color: var(--text-3);
+  cursor: not-allowed;
+  background: var(--surface-sunken-solid);
+}
+
+.trigger:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  outline-offset: 1px;
+}
+
+.summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.caret {
+  flex: none;
+  color: var(--text-3);
+}

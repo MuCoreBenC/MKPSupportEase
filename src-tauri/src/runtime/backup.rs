@@ -26,6 +26,11 @@
 //! 「连同预设一起备份」）。没带预设的那份备份，恢复时也不许动现在这几棵 ——
 //! 判断依据是说明书里自己写的 `presets`。
 //!
+//! ★ 2026-11-13：执行归档（[`HISTORY_DIR`]）也可以**不**进（`include_history = false`，
+//! 界面上那颗「连同执行记录一起备份」）。它是包里最大的一块（原始 G-code + 处理后的
+//! G-code），通常也正是"备份慢"的来源。同一条规矩：没带执行记录的那份备份，
+//! 恢复时也不许动现在这一棵 —— 判断依据是说明书里自己写的 `history`。
+//!
 //! # 恢复：**全量覆盖**（作者认可的第一版口径）
 //!
 //! 作者问「要不要选择性恢复」。这里不做，理由与成熟方案的选择一致：
@@ -108,6 +113,33 @@ fn is_preset_entry(name: &str) -> bool {
         .any(|d| name.len() > d.len() && name.starts_with(d) && name.as_bytes()[d.len()] == b'/')
 }
 
+/// 执行归档那一棵（`user/gcode_history`）：报告页那份"历史"。
+///
+/// 它**不**在 [`PRESET_DIRS`] 里（那不是预设，是打印过程），但它是备份里**最大的一块**
+/// —— 原始 G-code 与处理后的 G-code 都在。界面上那颗「连同执行记录一起备份」就是这一格。
+const HISTORY_DIR: &str = "user/gcode_history";
+
+/// 这一条 zip 条目是不是落在执行归档那一棵里
+fn is_history_entry(name: &str) -> bool {
+    name.len() > HISTORY_DIR.len()
+        && name.starts_with(HISTORY_DIR)
+        && name.as_bytes()[HISTORY_DIR.len()] == b'/'
+}
+
+/// 恢复这一档要不要解开这一条（三桶：预设 / 执行记录 / 设置）。
+///
+/// 三桶是**互斥**的：条目归一桶，就只看那一桶的开关 —— 于是"包里没有的那一块"
+/// 不会被顺手清掉，也不会被当成别的桶漏进来。
+fn wanted(name: &str, take_presets: bool, take_history: bool, take_settings: bool) -> bool {
+    if is_preset_entry(name) {
+        take_presets
+    } else if is_history_entry(name) {
+        take_history
+    } else {
+        take_settings
+    }
+}
+
 /// **恢复范围**（2026-11-09）：界面恢复页那颗下拉的三档。
 ///
 /// 只决定"动不动那一块"：选中范围内仍是**整棵换掉**（回到那一刻），范围外一个都不碰。
@@ -149,11 +181,15 @@ pub struct BackupInfo {
     ///
     /// 老备份（这一格加进来之前打的）没有它 —— 那时**一律**把预设打进去，
     /// 所以缺省是 `true`：这是那批文件的**事实**，不是拿默认值圆过去。
-    #[serde(default = "presets_included_by_default")]
+    #[serde(default = "included_by_default")]
     pub presets: bool,
+    /// 这份里有没有"执行记录"（见 [`HISTORY_DIR`]）。缺省理由同上：这一格加进来之前
+    /// 打的包一律带着执行归档，那也是那批文件的事实。
+    #[serde(default = "included_by_default")]
+    pub history: bool,
 }
 
-fn presets_included_by_default() -> bool {
+fn included_by_default() -> bool {
     true
 }
 
@@ -381,12 +417,16 @@ fn entry_options(name: &str, modified: Option<SystemTime>) -> zip::write::Simple
 /// `include_presets = false`：跟预设有关的那几棵（[`PRESET_DIRS`]）**不进包**。
 /// 这份包恢复时也不许动它们 —— 判断依据写在说明书的 `presets` 那一格。
 ///
+/// `include_history = false`：执行归档（[`HISTORY_DIR`]）**不进包**，恢复时同样不动
+/// 现在那一棵 —— 判断依据写在说明书的 `history` 那一格。
+///
 /// `on_progress` 每一跳报一次（见 [`Progress`]）：打包按**字节**报，于是界面上那根条
 /// 与盘上真写出去的量是同一个数，不是按文件个数估出来的。
 pub fn create(
     internal: &Path,
     dest_dir: &Path,
     include_presets: bool,
+    include_history: bool,
     on_progress: &mut dyn FnMut(&Progress),
 ) -> Result<BackupSummary, AppError> {
     let created_unix = OffsetDateTime::now_utc().unix_timestamp();
@@ -401,8 +441,11 @@ pub fn create(
         }
     }
     for d in MANAGED_DIRS {
-        /* 「不连同预设」：那两棵整个不进（界面上那颗开关就是这一格） */
+        /* 「不连同预设 / 不连同执行记录」：那几棵整个不进（界面上那两颗开关就是这两格） */
         if !include_presets && PRESET_DIRS.contains(&d) {
+            continue;
+        }
+        if !include_history && d == HISTORY_DIR {
             continue;
         }
         files_under(internal, d, &mut names)?;
@@ -430,6 +473,7 @@ pub fn create(
         created_unix,
         files: names.len(),
         presets: include_presets,
+        history: include_history,
     };
     let info_bytes = serde_json::to_vec_pretty(&info)?;
 
@@ -553,6 +597,8 @@ fn copy_into_zip(
 /// ★ 先认说明书再动手 —— 中途报错会留下"恢复了一半"的现场，越早拒越好。
 /// ★ 说明书说这份**没带预设**（`presets = false`）时，`PRESET_DIRS` 那几棵既不删也不碰；
 ///   这时还硬要「仅预设」⇒ 当场报错，不静默什么都不做。
+/// ★ 说明书说这份**没带执行记录**（`history = false`）时，`user/gcode_history` 同样不删不碰
+///   （没有"仅执行记录"这一档，所以这里不报错；设置那几份照常换回去）。
 ///
 /// `on_progress` 按**文件条数**报；分母是**这一档**真正会解开的条目数（不是全包，
 /// 否则按范围恢复时那条永远走不满）。
@@ -618,17 +664,20 @@ pub fn restore(
     }
 
     /*
-     * 这一趟动不动那两块。`take_presets` 还要看说明书：**没带预设**的包，
-     * 就算选「全部」也不许动 [`PRESET_DIRS`] 里那几棵 —— 用户当初就是不想把它们卷进来，
-     * 恢复时更不该顺手清掉（那会把"没备份的预设"变成"删掉的预设"）。
+     * 这一趟动不动那三块。`take_presets` / `take_history` 还要看说明书：
+     * **没带预设 / 执行记录**的包，就算选「全部」也不许动那几棵 —— 用户当初就是不想
+     * 把它们卷进来，恢复时更不该顺手清掉（那会把"没备份的"变成"删掉的"）。
      */
     let take_presets = scope.presets() && info.presets;
     let take_settings = scope.settings();
+    let take_history = take_settings && info.history;
 
     /* ② 整棵换掉（"回到那一刻"的语义）：只换这一档管的那几棵 */
     for d in MANAGED_DIRS {
         let want = if PRESET_DIRS.contains(&d) {
             take_presets
+        } else if d == HISTORY_DIR {
+            take_history
         } else {
             take_settings
         };
@@ -657,8 +706,7 @@ pub fn restore(
         if name == INFO_FILE || entry.is_dir() {
             continue;
         }
-        let preset = is_preset_entry(name);
-        if (preset && take_presets) || (!preset && take_settings) {
+        if wanted(name, take_presets, take_history, take_settings) {
             total_files += 1;
         }
     }
@@ -672,8 +720,7 @@ pub fn restore(
         if name == INFO_FILE || entry.is_dir() {
             continue;
         }
-        let preset = is_preset_entry(&name);
-        if (preset && !take_presets) || (!preset && !take_settings) {
+        if !wanted(&name, take_presets, take_history, take_settings) {
             continue;
         }
         let rel = safe_rel(&name)?;
@@ -751,12 +798,18 @@ mod tests {
             b"# machine: A1\n[toolhead]\noffset_x = -0.7\n",
         )
         .unwrap();
+        /* 执行归档：报告页那一条（三件套里最小的一份够用了） */
+        atomic_write(
+            &internal.join("user/gcode_history/2026-11-10/23295.4_20261110_171911_meta.json"),
+            b"{\"ok\":true}",
+        )
+        .unwrap();
         /* 不该进备份的那些 */
         atomic_write(&internal.join("cloud/A1-standard.toml"), b"# cloud\n").unwrap();
         atomic_write(&internal.join("logs/app.log"), b"noise\n").unwrap();
     }
 
-    /// 备份里**有**该有的（目录 / 状态 / 历史 / 用户 toml），**没有**可重建的那些
+    /// 备份里**有**该有的（目录 / 状态 / 历史 / 用户 toml / 执行记录），**没有**可重建的那些
     #[test]
     fn a_backup_carries_everything_that_cannot_be_rebuilt() {
         let d = tempfile::tempdir().unwrap();
@@ -765,7 +818,7 @@ mod tests {
 
         let out = d.path().join("out");
         std::fs::create_dir_all(&out).unwrap();
-        let sum = create(&internal, &out, true, &mut |_| {}).unwrap();
+        let sum = create(&internal, &out, true, true, &mut |_| {}).unwrap();
 
         let mut names = Vec::new();
         let mut archive = zip::ZipArchive::new(std::fs::File::open(&sum.path).unwrap()).unwrap();
@@ -778,6 +831,7 @@ mod tests {
             "run/app-state.json",
             "run/preset-history/abc.json",
             "user/presets-local/A1 涂胶.toml",
+            "user/gcode_history/2026-11-10/23295.4_20261110_171911_meta.json",
         ] {
             assert!(
                 names.contains(&want.to_owned()),
@@ -806,7 +860,9 @@ mod tests {
         let zip_at = {
             let out = d.path().join("out");
             std::fs::create_dir_all(&out).unwrap();
-            create(&internal, &out, true, &mut |_| {}).unwrap().path
+            create(&internal, &out, true, true, &mut |_| {})
+                .unwrap()
+                .path
         };
 
         /* 现状被搞坏 / 多了东西 */
@@ -814,6 +870,11 @@ mod tests {
         atomic_write(
             &internal.join("user/presets-local/多出来的.toml"),
             "# 后来加的\n".as_bytes(),
+        )
+        .unwrap();
+        atomic_write(
+            &internal.join("user/gcode_history/2026-11-11/多出来的一条_meta.json"),
+            b"{\"ok\":true}",
         )
         .unwrap();
 
@@ -843,6 +904,18 @@ mod tests {
             internal.join("run/preset-history/abc.json").is_file(),
             "修改历史跟着备份一起回来"
         );
+        assert!(
+            !internal
+                .join("user/gcode_history/2026-11-11/多出来的一条_meta.json")
+                .exists(),
+            "执行记录那一棵也是整棵换掉"
+        );
+        assert!(
+            internal
+                .join("user/gcode_history/2026-11-10/23295.4_20261110_171911_meta.json")
+                .is_file(),
+            "备份里的执行记录得回来"
+        );
     }
 
     /// 「不连同预设」：那两棵不进包；拿这份恢复时，现在的预设也**原样不动**
@@ -853,7 +926,7 @@ mod tests {
         seed(&internal);
         let out = d.path().join("out");
         std::fs::create_dir_all(&out).unwrap();
-        let sum = create(&internal, &out, false, &mut |_| {}).unwrap();
+        let sum = create(&internal, &out, false, true, &mut |_| {}).unwrap();
 
         let mut archive = zip::ZipArchive::new(std::fs::File::open(&sum.path).unwrap()).unwrap();
         let entries = archive.len();
@@ -889,6 +962,53 @@ mod tests {
         );
     }
 
+    /// 「不连同执行记录」：那一棵不进包；拿这份恢复时，现在的执行记录也**原样不动**
+    #[test]
+    fn a_backup_can_leave_runs_out_and_restore_keeps_them() {
+        let d = tempfile::tempdir().unwrap();
+        let internal = d.path().join("appdata");
+        seed(&internal);
+        let out = d.path().join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        let sum = create(&internal, &out, true, false, &mut |_| {}).unwrap();
+
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&sum.path).unwrap()).unwrap();
+        let names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_owned())
+            .collect();
+        assert!(names.contains(&"catalog.json".to_owned()), "该有的还在");
+        assert!(
+            !names.iter().any(|n| is_history_entry(n)),
+            "开关关了就不该有执行记录：{names:?}"
+        );
+
+        /* 打完这份之后钩子又写了一条 —— 恢复不许碰执行记录那一棵 */
+        atomic_write(
+            &internal.join("user/gcode_history/2026-11-11/后来跑的一条_meta.json"),
+            b"{\"ok\":true}",
+        )
+        .unwrap();
+        restore(
+            &internal,
+            std::path::Path::new(&sum.path),
+            Scope::All,
+            &mut |_| {},
+        )
+        .unwrap();
+        assert!(
+            internal
+                .join("user/gcode_history/2026-11-11/后来跑的一条_meta.json")
+                .is_file(),
+            "没带执行记录的备份，恢复时不许动它"
+        );
+        assert!(
+            internal
+                .join("user/gcode_history/2026-11-10/23295.4_20261110_171911_meta.json")
+                .is_file(),
+            "原有的那条也还在"
+        );
+    }
+
     /// 「仅预设」：只换预设那几棵，设置 / 目录一个都不碰
     #[test]
     fn restoring_only_presets_leaves_settings_alone() {
@@ -898,7 +1018,9 @@ mod tests {
         let zip_at = {
             let out = d.path().join("out");
             std::fs::create_dir_all(&out).unwrap();
-            create(&internal, &out, true, &mut |_| {}).unwrap().path
+            create(&internal, &out, true, true, &mut |_| {})
+                .unwrap()
+                .path
         };
 
         /* 备份之后：设置被改坏、又多写了一份预设 */
@@ -941,7 +1063,9 @@ mod tests {
         let zip_at = {
             let out = d.path().join("out");
             std::fs::create_dir_all(&out).unwrap();
-            create(&internal, &out, true, &mut |_| {}).unwrap().path
+            create(&internal, &out, true, true, &mut |_| {})
+                .unwrap()
+                .path
         };
 
         /* 备份之后：设置被改坏、又多写了一份预设 */
@@ -981,7 +1105,9 @@ mod tests {
         let zip_at = {
             let out = d.path().join("out");
             std::fs::create_dir_all(&out).unwrap();
-            create(&internal, &out, false, &mut |_| {}).unwrap().path
+            create(&internal, &out, false, true, &mut |_| {})
+                .unwrap()
+                .path
         };
 
         let err = restore(
@@ -1024,7 +1150,9 @@ mod tests {
         let zip_at = {
             let out = d.path().join("out");
             std::fs::create_dir_all(&out).unwrap();
-            create(&internal, &out, true, &mut |_| {}).unwrap().path
+            create(&internal, &out, true, true, &mut |_| {})
+                .unwrap()
+                .path
         };
 
         {
@@ -1125,7 +1253,7 @@ mod tests {
         std::fs::create_dir_all(&out).unwrap();
 
         let mut ticks: Vec<Progress> = Vec::new();
-        create(&internal, &out, true, &mut |p| ticks.push(p.clone())).unwrap();
+        create(&internal, &out, true, true, &mut |p| ticks.push(p.clone())).unwrap();
 
         assert!(
             ticks.iter().any(|p| p.stage == Stage::Scan),
@@ -1150,7 +1278,9 @@ mod tests {
         let zip_at = {
             let out = d.path().join("out");
             std::fs::create_dir_all(&out).unwrap();
-            create(&internal, &out, true, &mut |_| {}).unwrap().path
+            create(&internal, &out, true, true, &mut |_| {})
+                .unwrap()
+                .path
         };
 
         let mut ticks: Vec<Progress> = Vec::new();

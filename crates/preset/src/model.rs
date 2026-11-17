@@ -38,6 +38,18 @@ pub struct ToolheadConfig {
     /// 收笔时回填的挤出量。`0` = 按 `|回抽| + 0.5` 自动，非 0 = 用它（联动关闭）。
     #[serde(rename = "MKP_extrude", default)]
     pub mkp_extrude: f64,
+    /// 回抽那一笔的进给速度（mm/s）。`0` = 没配，用内核默认 25。
+    #[serde(rename = "MKP_retract_speed", default)]
+    pub mkp_retract_speed: f64,
+    /// 回填那一笔的进给速度（mm/s）。`0` = 没配，用内核默认 25。
+    #[serde(rename = "MKP_extrude_speed", default)]
+    pub mkp_extrude_speed: f64,
+    /// 回抽插在换笔的哪一刻：`model` / `wait` / `after_dock`。认不出就报错，不兜底。
+    #[serde(rename = "MKP_retract_at", default)]
+    pub mkp_retract_at: String,
+    /// 回填量分摊到塔上的擦料移动里（一次挤完 vs 分摊）。
+    #[serde(rename = "MKP_extrude_spread", default)]
+    pub mkp_extrude_spread: bool,
     #[serde(default)]
     pub custom_mount_gcode: String,
     #[serde(default)]
@@ -101,18 +113,44 @@ pub struct WipingConfig {
     pub sheath_enable_height: f64,
     #[serde(default)]
     pub sheath_converge_layers: i64,
-    #[serde(default)]
-    pub ironing_e_sum_threshold: f64,
+    /// 单块熨烫的挤出上限：超过就移除这块熨烫（自动模式）。`0` = 任何挤出都算超过。
+    /// 缺键时取注册表默认值（7.9）；填 0 就按 0 判，不再兜回默认值。
+    #[serde(
+        default = "default_ironing_e_sum_limit",
+        alias = "ironing_e_sum_threshold"
+    )]
+    pub ironing_e_sum_limit: f64,
     #[serde(default)]
     pub ironing_mode: String,
     #[serde(default)]
     pub use_ironing_path: bool,
     #[serde(default)]
     pub ironing_coverage_threshold: f64,
+    #[serde(default, alias = "ironing_suppress_expand")]
+    pub ironing_keepout: f64,
+    #[serde(default, alias = "ironing_suppress_expand_mode")]
+    pub ironing_keepout_mode: String,
+    /// **边缘带**：这张涂胶面里最靠外的几条涂胶线。`0` = 关。
+    ///
+    /// 带宽 = 条数 × 这一层实测的线距，最多半张面 —— 见 `postproc::pass1::edge_band`。
+    /// 换喷嘴 / 稀疏比就是换预设，各自给条数。
     #[serde(default)]
-    pub ironing_suppress_expand: f64,
+    pub glue_edge_lines: i64,
+    /// **已退役**：旧口径「占涂胶面短边的百分比」。
+    ///
+    /// 保留这一格只为**老预设文件读得进来**（`glue_edge_percent = 10` 不会变成未知键报错），
+    /// 它的值不再参与任何计算，也不会被写出。
     #[serde(default)]
-    pub ironing_suppress_expand_mode: String,
+    pub glue_edge_percent: f64,
+    /// 边缘带上涂胶段的落笔抬高（mm）。`0` = 关。
+    #[serde(default)]
+    pub glue_edge_lift: f64,
+    /// **已退役**（2026-11-16）：旧的「涂胶面四周向内收 mm」。
+    ///
+    /// 保留这一格只为**老预设文件读得进来**（`glue_inset = …` 不会变成未知键报错），
+    /// 它的值不再参与任何计算，也不会被写出。
+    #[serde(default)]
+    pub glue_inset: f64,
     #[serde(default)]
     pub prime_trigger_layers: i64,
     #[serde(default)]
@@ -414,4 +452,10 @@ pub struct PresetFile {
 pub struct TomlConfig {
     pub toolhead: ToolheadConfig,
     pub wiping: WipingConfig,
+}
+
+/// `ironing_e_sum_limit` 缺键时的取值。与注册表 `defaultValue` 同源（7.9）；
+/// 字段级默认值让「缺键」与「填 0」分开：只有缺键才回落到这里。
+fn default_ironing_e_sum_limit() -> f64 {
+    7.9
 }

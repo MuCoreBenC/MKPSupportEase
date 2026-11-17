@@ -6,52 +6,52 @@
       "fingerprint": "82cdf4a620674012d2687bf7508ba959cac33168da566970fcced9826eb7d410"
     },
     "A1/FAST260326": {
-      "stamp": "2026-11-12T07:07:42Z",
-      "fingerprint": "34978c0167fae89cc44ae76b7f1860c9583cdb9954a3f62075aee4aaf9fc0a48"
+      "stamp": "2026-11-17T12:22:41Z",
+      "fingerprint": "3caf0ee1935bf300afe4000cfaed08171270f9b19be4efabc87d342b98ec8b91"
     },
     "A1/FAST261111": {
-      "stamp": "2026-11-12T07:07:42Z",
-      "fingerprint": "bc713861d8f1498bcf2e9b15576959f20585841b7bd9cdd3d4d17c11181ebd01"
+      "stamp": "2026-11-17T12:22:41Z",
+      "fingerprint": "1acb072deedf369e3eadfd1c19a487503fa6fdd158c0ef9bab05615716be0062"
     },
     "A1/FASTV3.3": {
       "stamp": "2026-11-10T17:10:39Z",
       "fingerprint": "fc2b49246447efe583801555532ef712ffec24a76b3508d272ec4c4faa9a054c"
     },
     "A1/STANDARD": {
-      "stamp": "2026-11-10T17:10:39Z",
-      "fingerprint": "80fa0a9ea8907bcbcbfcda5feaa2c2e325feb4cd73a34c505a6a8a5130869450"
+      "stamp": "2026-11-17T12:22:41Z",
+      "fingerprint": "8c8393d18dfcfb962a465968c57bfd7030d55ba2762d0b855c7f2981a23e98b3"
     },
     "A1_MINI/FAST": {
       "stamp": "2026-11-10T17:10:39Z",
       "fingerprint": "f231183b112aaebc20e4724784df56640f994656fab672d5010223ad2479fb6a"
     },
     "A1_MINI/FAST260326": {
-      "stamp": "2026-11-12T07:07:42Z",
-      "fingerprint": "57075d11a5451e45b88c201e4004ac927944ae7b7c5730a996300e55caa54c50"
+      "stamp": "2026-11-17T12:22:41Z",
+      "fingerprint": "4de2dc586457ca8040379ca689948d94534e9cc85b3b29198670b9c42da65a9b"
     },
     "A1_MINI/FAST261111": {
-      "stamp": "2026-11-12T07:07:42Z",
-      "fingerprint": "95cef103bebf09caa6b6850337d736a4844a2e14701bf4c15af08c373734e868"
+      "stamp": "2026-11-17T12:22:41Z",
+      "fingerprint": "efa9b4bd0867cd252dcaf25064cb85b9b05b7a1f3c5b0ddd3798f7bb757ab8bf"
     },
     "A1_MINI/FASTV3.3": {
       "stamp": "2026-11-10T17:10:39Z",
       "fingerprint": "a6aa65b52dae01d91a98ce7279c23606625064a406c3306eace6be046907b226"
     },
     "A1_MINI/STANDARD": {
-      "stamp": "2026-11-10T17:10:39Z",
-      "fingerprint": "cb6c74ee5813c839dd095751b71be49ec2867b1ce0a05af8074d98d51e31add7"
+      "stamp": "2026-11-17T12:22:41Z",
+      "fingerprint": "031e274502163002d5d6abecd24a8380a4dcad2e7727c536d9a81f848146fabf"
     },
     "P1S/LITE": {
-      "stamp": "2026-11-10T17:10:39Z",
-      "fingerprint": "04813152a62a808039b7c24478506e98f0220b0cabaae9940494882ca140db00"
+      "stamp": "2026-11-17T12:22:41Z",
+      "fingerprint": "8cdee9fe2b9c12e946c8e7455e1bdfa4dde71f179799cda75165626c93beb41f"
     },
     "P2S/STANDARD": {
-      "stamp": "2026-11-10T17:10:39Z",
-      "fingerprint": "54d4fca83dac1d2a7ee8c4d5d295b73670e06c792e0ee1d7581d0437f3086d0b"
+      "stamp": "2026-11-17T12:22:41Z",
+      "fingerprint": "b747773e89c9085d6a7f222b0136a4d272aa5c0381f2cbdabd63786335946fb9"
     },
     "X1C/LITE": {
-      "stamp": "2026-11-10T17:10:39Z",
-      "fingerprint": "3d2b42feaf77810b5f7157c9279cf3be582ddf68c1fa967eb2b67cebe7e994d5"
+      "stamp": "2026-11-17T12:22:41Z",
+      "fingerprint": "bbbda5ba54bf9c04d2198fd8c106bcda5c3b96bf7466a3efc68e4a9ea4423f54"
     }
   }
 }

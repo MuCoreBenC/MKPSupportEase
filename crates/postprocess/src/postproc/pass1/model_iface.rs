@@ -5,6 +5,8 @@
 
 use crate::gcode::{MARKER_ZJUMP_INTERNAL, MARKER_ZJUMP_START, extract_coord};
 
+use super::ironing_facts::MergeStats;
+
 /// 私有 bbox（Go 小写 bbox；与 geom::BBox 不同，仅本模块与 glue_block 用）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct IfaceBbox {
@@ -212,7 +214,7 @@ fn merge_group_segments(segs: Vec<Vec<String>>) -> Vec<String> {
 }
 
 /// `groupConsecutiveSegments`（model_z_map.go:186）：IoU>0 或间距<2 的相邻段合并。
-fn group_consecutive_segments(segments: Vec<Vec<String>>) -> Vec<Vec<String>> {
+pub(crate) fn group_consecutive_segments(segments: Vec<Vec<String>>) -> Vec<Vec<String>> {
     if segments.is_empty() {
         return Vec::new();
     }
@@ -260,18 +262,24 @@ pub(crate) fn convert_internal_jumps(iface: &[String]) -> Vec<String> {
 
 /// `BuildPerModelIface`（model_z_map.go:210）：按区域混合熨烫面 / 支撑面。
 /// threshold=0 时重叠即判覆盖；否则按路径长度覆盖率判。
+///
+/// 第二个返回值是**事后统计**（[`MergeStats`]）：它只是把这里本来就算出来的 `cov`
+/// 与配对数顺手带出去给执行记录，判定与输出行序列不受任何影响。
 pub(crate) fn build_per_model_iface(
     iface_ironing: &[String],
     iface_moisture: &[String],
     threshold: f64,
     suppress_expand: f64,
     suppress_expand_mode: &str,
-) -> Vec<String> {
+) -> (Vec<String>, MergeStats) {
     let ironing_groups = group_consecutive_segments(split_iface_by_model(iface_ironing));
     let moisture_groups = group_consecutive_segments(split_iface_by_model(iface_moisture));
 
     if ironing_groups.is_empty() {
-        return convert_internal_jumps(iface_moisture);
+        return (
+            convert_internal_jumps(iface_moisture),
+            MergeStats::default(),
+        );
     }
 
     let effective_threshold = threshold;
@@ -290,6 +298,8 @@ pub(crate) fn build_per_model_iface(
 
     let mut moisture_covered = vec![false; moisture_groups.len()];
     let mut ironing_used = vec![false; ironing_groups.len()];
+    /* 事后统计：真算出过覆盖率的那些配对里最小的那个（只记录，不参与判定） */
+    let mut min_coverage: Option<f64> = None;
 
     // Phase 1：判定覆盖关系
     for mi in 0..moisture_groups.len() {
@@ -340,6 +350,10 @@ pub(crate) fn build_per_model_iface(
             } else {
                 100.0
             };
+            min_coverage = Some(match min_coverage {
+                Some(prev) => prev.min(cov),
+                None => cov,
+            });
             if cov >= effective_threshold {
                 moisture_covered[mi] = true;
                 ironing_used[best] = true;
@@ -405,7 +419,7 @@ pub(crate) fn build_per_model_iface(
         result.extend(i_grp);
     }
 
-    result
+    (result, MergeStats { min_coverage })
 }
 
 // parseFloat（model_z_map.go:140）在 Go 侧无消费者，未移植。

@@ -1780,14 +1780,14 @@ G1 X78.795 Y82.749 E-0.400 F1800
 M106 S255.0
 M204 S10000
 G17
-G3 Z1.7 I.706 J.991 P1 E-0.4 F42000.0
+G1 E-0.4 F1500.0
+G3 Z1.7 I.706 J.991 P1 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z6.7
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z6.7
 ;MKP_END swap
@@ -2505,14 +2505,14 @@ G1 X79.712 Y83.161 E-0.400 F42000.0
 M106 S255.0
 M204 S10000
 G17
-G3 Z1.9 I.706 J.991 P1 E-0.4 F42000.0
+G1 E-0.4 F1500.0
+G3 Z1.9 I.706 J.991 P1 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z6.9
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z6.9
 ;MKP_END swap
@@ -3177,14 +3177,14 @@ G1 X79.695 Y83.187 E-0.400 F42000.0
 M106 S255.0
 M204 S10000
 G17
-G3 Z2.1 I.706 J.991 P1 E-0.4 F42000.0
+G1 E-0.4 F1500.0
+G3 Z2.1 I.706 J.991 P1 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z7.1
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z7.1
 ;MKP_END swap
@@ -3965,14 +3965,14 @@ G1 X79.689 Y83.196 E-0.400 F42000.0
 M106 S255.0
 M204 S10000
 G17
-G3 Z2.3 I.706 J.991 P1 E-0.4 F42000.0
+G1 E-0.4 F1500.0
+G3 Z2.3 I.706 J.991 P1 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z7.3
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z7.3
 ;MKP_END swap
@@ -4698,14 +4698,14 @@ G1 X79.707 Y83.167 E-0.400 F42000.0
 M106 S255.0
 M204 S10000
 G17
-G3 Z2.5 I.706 J.991 P1 E-0.4 F42000.0
+G1 E-0.4 F1500.0
+G3 Z2.5 I.706 J.991 P1 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z7.5
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z7.5
 ;MKP_END swap
@@ -5670,14 +5670,14 @@ G1 X79.696 Y83.184 E-0.400 F42000.0
 M106 S255.0
 M204 S10000
 G17
-G3 Z2.7 I.706 J.991 P1 E-0.4 F42000.0
+G1 E-0.4 F1500.0
+G3 Z2.7 I.706 J.991 P1 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z7.7
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z7.7
 ;MKP_END swap
@@ -6729,14 +6729,14 @@ G1 X78.283 Y86.440 E-0.400 F1800
 M106 S255.0
 M204 S10000
 G17
-G3 Z2.9 I.706 J.991 P1 E-0.4 F42000.0
+G1 E-0.4 F1500.0
+G3 Z2.9 I.706 J.991 P1 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z7.9
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z7.9
 ;MKP_END swap
@@ -7778,14 +7778,14 @@ G1 X79.620 Y83.315 E-0.400 F42000.0
 M106 S255.0
 M204 S10000
 G17
-G3 Z3.1 I.706 J.991 P1 E-0.4 F42000.0
+G1 E-0.4 F1500.0
+G3 Z3.1 I.706 J.991 P1 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z8.1
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z8.1
 ;MKP_END swap
@@ -8814,14 +8814,14 @@ G1 X79.478 Y83.493 E-0.400 F42000.0
 M106 S255.0
 M204 S10000
 G17
-G3 Z3.3 I.706 J.991 P1 E-0.4 F42000.0
+G1 E-0.4 F1500.0
+G3 Z3.3 I.706 J.991 P1 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z8.3
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z8.3
 ;MKP_END swap
@@ -9776,14 +9776,14 @@ G1 X79.146 Y97.604 E-0.400 F1800
 M106 S255.0
 M204 S10000
 G17
-G3 Z3.5 I.706 J.991 P1 E-0.4 F42000.0
+G1 E-0.4 F1500.0
+G3 Z3.5 I.706 J.991 P1 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z8.5
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
-G1 E-0.4 F1500
 ;Toolhead Mounted
 G1 Z8.5
 ;MKP_END swap

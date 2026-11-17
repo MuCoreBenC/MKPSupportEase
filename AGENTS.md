@@ -25,6 +25,17 @@
 - 清理按引用：当前索引、`history[].sha256`、回收记录、待处理更新引用的 SHA 不删；
   30 天或 20 份先到先清。不许为了目录干净整批删基线。
 
+## 1.6 出厂值只属于工作台
+
+- 注册表 / 目录里的 `default`、`baseValue`（版本覆盖时的基底值）是工作台的共用口径，
+  里面可能是**占位零**。客户端不得接收、不得展示、不得拿它当「恢复默认值」的目标，
+  也不得用它算「改了几项」。
+- 「恢复默认值」只认 `baseline-local/`：**最近一次与云端某一版逐字节一致落盘的原样**。
+  参数页底栏与「编辑文件」那颗读同一份字节，不是两套；部分采用、未保存的更新、
+  手动编辑都不刷新它。
+- 闸：`node scripts/check-no-factory-defaults.mjs`（已挂在 `npm run lint`）扫 `src/`，
+  命中 `factoryByKey` / `factoryValue` / `baseValue` / `params.row.dt.package` 即红。
+
 ## 2. 验证
 
 ```text
@@ -155,6 +166,19 @@ publishSerial  → 发布有没有往前走（单调，回滚也 +1）
   `本次启动` / `这次要跑` / `✔ 编译完`，实现共用 `scripts/build-stamp.mjs`。
 - 客户端产物在仓库根 `target/`，不是 `src-tauri/target/`（后者是死目录，别拿错）。
 - 工作台 dev 带 `--no-watch`：改 Rust 必须手动重启。
+
+## 6.6 状态行为先改表
+
+```text
+docs/PRESET-UPDATE-SPEC.md   「动作 × 决定 → 状态」的唯一规格
+```
+
+- 改徽章、按钮、判定档之前**先改表**；表里每一行都要能在
+  `src/app/presets/presetTree.test.ts` 或 `src-tauri/src/ipc/param_sync.rs` 的测试里找到。
+- 状态只有两个出口：后端 `runtime::local::based_on`、前端 `updateStatusOf`。
+  别处再判一套就算违约。
+- 「不勾 = 没表态」不成立：一次「应用」交回**全部**待处理项，没勾的是 `hold`（保持原值），
+  这一版就此结清，行上不许再挂「有新版本」。
 
 ## 7. 收工口径
 

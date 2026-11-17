@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>涂胶边缘带试验台</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <svg class="icons" aria-hidden="true">
+      <symbol id="eye-on" viewBox="0 0 16 16">
+        <path
+          d="M8 3.4c3 0 5.5 2.2 6.6 4.6-1.1 2.4-3.6 4.6-6.6 4.6S2.5 10.4 1.4 8C2.5 5.6 5 3.4 8 3.4z"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.3"
+        />
+        <circle cx="8" cy="8" r="2" fill="currentColor" />
+      </symbol>
+      <symbol id="eye-off" viewBox="0 0 16 16">
+        <path
+          d="M8 3.4c3 0 5.5 2.2 6.6 4.6-1.1 2.4-3.6 4.6-6.6 4.6S2.5 10.4 1.4 8C2.5 5.6 5 3.4 8 3.4z"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.3"
+          opacity="0.45"
+        />
+        <path d="M2.8 13.2 13.2 2.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" />
+      </symbol>
+    </svg>
+    <div id="busy" class="busy hidden">
+      <div class="busy-card">
+        <div id="busy-text" class="busy-text">解析中…</div>
+        <div class="busy-bar"><i></i></div>
+      </div>
+    </div>
+    <div id="drop" class="drop">
+      <div class="drop-card">
+        <div class="drop-title">把产物 G-code 拖进来</div>
+        <div class="drop-hint">从「历史」目录拿一份 <code>.gcode</code>，整份拖到窗口里</div>
+      </div>
+    </div>
+
+    <header class="bar">
+      <div class="bar-left">
+        <span class="brand">边缘带试验台</span>
+        <span id="file" class="file">未打开文件</span>
+      </div>
+      <div class="bar-mid">
+        <label class="ctl">
+          <span class="ctl-label">外几条</span>
+          <input id="lines" type="range" min="0" max="6" step="1" value="2" />
+          <span id="lines-val" class="ctl-val">2</span>
+        </label>
+        <span class="ctl ctl-static">
+          <span class="ctl-label">线距</span>
+          <span id="pitch" class="ctl-val">—</span>
+        </span>
+        <span class="ctl ctl-static">
+          <span class="ctl-label">抬起</span>
+          <span id="lift" class="ctl-val">—</span>
+        </span>
+        <label class="ctl">
+          <span class="ctl-label">下方余量</span>
+          <input id="under" type="range" min="0" max="200" step="5" value="50" />
+          <span id="under-val" class="ctl-val">0.50</span>
+        </label>
+        <button id="trust" type="button" class="btn" aria-pressed="false" title="采信下方余量：余量够的涂胶段建议不必抬">采信</button>
+      </div>
+      <div class="bar-right">
+        <div class="seg" id="view">
+          <button data-view="2d" class="on">2D</button>
+          <button data-view="3d">3D</button>
+        </div>
+        <label class="ctl ctl-3d">
+          <span class="ctl-label">Z ×</span>
+          <input id="exag" type="range" min="1" max="50" step="1" value="20" />
+          <span id="exag-val" class="ctl-val">20</span>
+        </label>
+        <select id="object" class="btn" title="只看其中一个模型"></select>
+        <button id="layermode" type="button" class="btn" title="走线视图：只看当前层 / 看到当前层为止">全部层</button>
+        <button id="ortho" type="button" class="btn" title="透视 / 正交切换">透视</button>
+        <button id="refit" type="button" class="btn" title="只把模型摆回画面，不动当前朝向">居中</button>
+        <button id="real" type="button" class="btn" title="Z 倍数回到 1:1，抬多少就是多少毫米">真实</button>
+        <button id="explode" type="button" class="btn" aria-pressed="false" title="每层沿 Z 炸开，镜头跟着拉远抬高">爆炸</button>
+        <button id="reset" type="button" class="btn" title="回到默认视角（朝向与位置都复位）">视角</button>
+      </div>
+    </header>
+
+    <main class="grid">
+      <aside class="panel panel-blocks">
+        <div class="panel-head">
+          <span>涂胶块</span>
+          <span id="blocks-count" class="muted">0</span>
+        </div>
+        <div id="blocks" class="blocks"></div>
+      </aside>
+
+      <section class="stage">
+        <canvas id="c2d" class="layer"></canvas>
+        <canvas id="c3d" class="layer hidden"></canvas>
+        <div id="scale" class="scale">—</div>
+        <div id="badge" class="badge hidden"></div>
+        <div id="layers" class="layers hidden">
+          <span class="layers-title">显示</span>
+          <button type="button" class="eye" data-kind="glue" aria-pressed="true" title="涂胶">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-on" /></svg><span>涂胶</span>
+          </button>
+          <button type="button" class="eye" data-kind="outer" aria-pressed="true" title="外墙">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-on" /></svg><span>外墙</span>
+          </button>
+          <button type="button" class="eye" data-kind="inner" aria-pressed="true" title="内墙">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-on" /></svg><span>内墙</span>
+          </button>
+          <button type="button" class="eye" data-kind="fill" aria-pressed="true" title="填充">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-on" /></svg><span>填充</span>
+          </button>
+          <button type="button" class="eye" data-kind="support" aria-pressed="true" title="支撑">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-on" /></svg><span>支撑</span>
+          </button>
+          <button type="button" class="eye" data-kind="supportFace" aria-pressed="true" title="支撑面">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-on" /></svg><span>支撑面</span>
+          </button>
+          <button type="button" class="eye" data-kind="travel" aria-pressed="false" title="空走">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-off" /></svg><span>空走</span>
+          </button>
+          <button type="button" class="eye" data-kind="ironing" aria-pressed="true" title="熨烫">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-on" /></svg><span>熨烫</span>
+          </button>
+          <button type="button" class="eye hidden" id="layer-other" data-kind="other" aria-pressed="true" title="其它">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#eye-on" /></svg><span>其它</span>
+          </button>
+        </div>
+        <div id="offset" class="offset hidden">
+          <div class="offset-head">
+            <span>涂胶偏移</span>
+            <span id="off-note" class="muted">—</span>
+            <button id="off-zero" type="button" class="btn" title="X、Y 回零，Z 回到这一层表面">归零</button>
+          </div>
+          <label>X <input id="off-x" type="number" step="0.05" value="0" /></label>
+          <label>Y <input id="off-y" type="number" step="0.05" value="0" /></label>
+          <label>笔Z <input id="off-tz" type="number" step="0.05" value="0" /></label>
+          <label>胶Z <input id="off-gz" type="number" step="0.05" value="0" /></label>
+        </div>
+        <canvas id="cube" class="viewcube hidden"></canvas>
+        <div id="side" class="side hidden">
+          <div class="side-item">
+            <input id="layer" class="vslider" type="range" min="0" max="0" step="1" value="0" />
+            <span id="layer-val" class="side-val">—</span>
+          </div>
+          <div class="side-item">
+            <input id="zoom" class="vslider" type="range" min="0" max="1000" step="1" value="500" />
+            <span id="zoom-val" class="side-val">—</span>
+          </div>
+        </div>
+      </section>
+
+      <aside class="panel panel-detail">
+        <div class="panel-head">
+          <span id="detail-title">逐条诊断</span>
+          <span id="detail-sub" class="muted"></span>
+        </div>
+        <div id="faces" class="faces"></div>
+        <div id="detail" class="detail"></div>
+        <section id="code" class="code"></section>
+      </aside>
+    </main>
+
+    <footer class="strip">
+      <div class="strip-head">
+        <span id="strip-title">落笔档（按移动顺序）</span>
+        <span class="legend">
+          <i class="sw sw-normal"></i>正常
+          <i class="sw sw-raised"></i>抬起
+          <i class="sw sw-bad"></i>与判定不一致
+        </span>
+      </div>
+      <canvas id="cz" class="strip-canvas"></canvas>
+    </footer>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -118,6 +118,7 @@ AppState 放的是「**应用现在是什么状态**」，不是「应用所有�
 | --- | --- | --- |
 | `notify_on_finish` | `hook_ui` 的 `Finished` 分支 → `crate::notify` | 否（纯界面行为） |
 | `ui_mode`（静默 / GUI） | `hook_ipc::wants_display` 决定**要不要起那扇窗** | 否 |
+| `auto_top_on_ask`（等回答时置顶，2026-11-17） | 前端 `App.tsx` 的 `asksForAnswer` → `ipc::window_layout::apply_pin` 的 `ask_top` | 否（纯窗口层级） |
 | `glue_bottom_enabled` | 写进 `ir.prefs` **与** `ir.state.glue_bottom_enabled` 两处 | **是** |
 | `skip_vibration_calibration` / `begin_stage_retract_*` / `z_calibration_dwell_sec` / `xy_calibration_dwell_sec` | 写进 `ir.prefs`，由 `pipeline/mod.rs` 读 | **是** |
 | `bed_glue_enabled` / `bed_glue_all_models` | 写进 `ir.prefs`，由 `pipeline/bed_glue.rs` 读 | **是** |

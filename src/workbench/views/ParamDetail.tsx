@@ -24,12 +24,11 @@ import { useEffect, useRef } from 'react'
 
 import type { ReactNode } from 'react'
 
-import type { Cell, Col, MachineNode, ParamView, Row, Words } from '../api'
+import type { Cell, Col, MachineNode, ParamView, RegistryView, Row, Words } from '../api'
 /* 值 → TOML 原文的唯一转换点（`String(null)` 会得到 "null"，数字控件回落成 0） */
 import { rawOf } from '../sheet/draftOverlay'
 import CellEditor from './CellEditor'
-import GroupPicker from './GroupPicker'
-import type { GroupedGroup } from './GroupPicker'
+import SortOrderButton from './pick/SortModal'
 import s from '../c14.module.css'
 
 export type ParamStatusId = 'follow' | 'own'
@@ -226,14 +225,14 @@ interface Props {
    */
   siblings?: { key: string; label: string }[] | null
   /**
-   * 把这一条在组里上 / 下挪一位 —— 传 `-1` / `+1`。
-   *
-   * 与编辑定义框里的 `moveOrder` 是**同一条数据**（`[params.layout].order`），
-   * 只是入口不同：那边先改前端草稿、按「确认」发一笔；这边每点一下箭头就发一笔。
-   * **两边写到的都是影子树**（`workbench/.draft/presets/`），「放弃」都撤得掉 ——
-   * 区别只在撤销栈的粒度（这边连挪三次 = 三笔）。
+   * 这一条所在的分组 id 与组名 —— 「组内顺序」那颗排序按钮要用
+   * （排序命令按分组落盘：`wb_set_section_order`）。
+   * 给了 `siblings` 却不给 `sectionId` 时那一格不画。
    */
-  onMoveOrder?: (dir: -1 | 1) => void
+  sectionId?: string
+  sectionLabel?: string
+  /** 排序排完了：把新注册表视图交回页面（与编辑定义框那一条同一跳） */
+  onOrderApplied?: (next: RegistryView) => void
   /**
    * 写某一层的值。`null` = 挂回继承。弃用闸在那条路上。
    *
@@ -260,7 +259,9 @@ export default function ParamDetail({
   onOpenGcode,
   onWriteLayer,
   siblings = null,
-  onMoveOrder,
+  sectionId,
+  sectionLabel,
+  onOrderApplied,
   layers = null,
 }: Props) {
   /*
@@ -460,7 +461,7 @@ export default function ParamDetail({
                   <button
                     type="button"
                     className={s.pRevert}
-                    data-tip={`回到保存值 ${rawOf(before)} —— 上次保存时这一层是多少。点了它就是「不跟随」（这一层自己钉住这个数）`}
+                    data-tip={`回到上次保存的 ${rawOf(before)}。`}
                     onClick={() =>
                       /* **总是写回那个值**：这颗叫「回到保存值」，点完就是那个数、且不跟随。
                          以前还看 `restPinned`，没钉着就发 null（= 挂回继承 = 跟随）——
@@ -478,8 +479,8 @@ export default function ParamDetail({
                     disabled={following}
                     data-tip={
                       following
-                        ? `已经在跟随 ${l.title} 的基底 —— 值就是基底那格（${followTo}），不用再点`
-                        : `回到跟随的值 —— 跟到${words.level.machine.label}基底现在的 ${followTo}（基底自己还没保存的改动也算）`
+                        ? `已在跟随基线，值是 ${followTo}。`
+                        : `交回基线：${followTo}。`
                     }
                     aria-label={`让 ${l.title} 跟随基底`}
                     onClick={() => write(null)}
@@ -491,7 +492,7 @@ export default function ParamDetail({
                     type="button"
                     className={s.pFollow}
                     data-kind="factory"
-                    data-tip={`恢复出厂默认 ${rawOf(param.defaultValue)} —— 删掉基底这一行，值回到注册表里的 defaultValue`}
+                    data-tip={`回到出厂默认 ${rawOf(param.defaultValue)}。`}
                     onClick={() => write(null)}
                   >
                     出厂 {rawOf(param.defaultValue)}
@@ -580,8 +581,8 @@ export default function ParamDetail({
           </div>
           <p className={s.cardNote}>
             {layers !== null
-              ? '每一行都能直接改；这里列的是对照里勾选的每一列（可跨机型）'
-              : <>每一行都能直接改；左侧选中的是 <b>{machineLabel(uid)}</b></>}
+              ? '每行都能改；这里是对照勾选的列，可跨机型。'
+              : <>每行都能改；左列是 <b>{machineLabel(uid)}</b> 基线。</>}
           </p>
         </section>
 
@@ -594,7 +595,7 @@ export default function ParamDetail({
               <button
                 type="button"
                 className={s.pDefEdit}
-                title="改名称、单位、值类型、范围、出厂默认、前置条件、弃用 —— 先进草稿，保存后写入"
+                title="改定义，保存后写入。"
                 onClick={onEditDef}
               >
                 编辑定义
@@ -720,39 +721,22 @@ export default function ParamDetail({
         </section>
 
         {/* 组内顺序（2026-11-02 作者：「这右侧也加一个组内排序的，就跟这些长得很像」）。
-             与编辑定义框里那座下拉**同一个长相、同一条数据**（`[params.layout].order`）：
-             展开后整组按当下顺序列出来，每行右边常驻上下箭头，就地挪。
-             右栏不经过前端草稿：每点一下箭头发一条 `wb_set_param_meta`。
-             但它进的是**影子树 + 事务**，右上角「保存」才写 `presets/`，「放弃」撤得掉。 */}
-        {siblings !== null && siblings.length > 1 && onMoveOrder !== undefined && (() => {
-          const at = siblings.findIndex((x) => x.key === param.key)
-          const orderGroups: GroupedGroup[] = [
-            {
-              title: null,
-              options: siblings.map((sib, i) => ({
-                value: sib.key,
-                label: sib.label,
-                by: `第 ${i + 1} / ${siblings.length} 位`,
-                ...(sib.key === param.key
-                  ? { move: { up: at > 0, down: at >= 0 && at < siblings.length - 1, onMove: onMoveOrder } }
-                  : { move: { up: false, down: false, onMove: () => undefined }, note: '只能挪这一条' }),
-              })),
-            },
-          ]
-          return (
-            <section className={s.pDSection}>
-              <div className={s.pDSecTitle}>组内顺序</div>
-              <GroupPicker
-                label="组内顺序"
-                groups={orderGroups}
-                value={param.key}
-                onChange={() => undefined}
-                width={300}
-              />
-              <p className={s.pDesc}>同一分组里的先后 — 客户端那一列也照这个排。</p>
-            </section>
-          )
-        })()}
+             2026-11-14 换成**与编辑定义框同一个排序模态框**（`pick/SortModal`）：
+             拖 / 输位次 / 撤销重做 / 恢复，确认即落盘（一次写完整组、一条撤销）。
+             右栏与定义框共用一件，不各维护一套箭头。 */}
+        {siblings !== null && siblings.length > 1 && sectionId !== undefined && (
+          <section className={s.pDSection}>
+            <div className={s.pDSecTitle}>组内顺序</div>
+            <SortOrderButton
+              sectionId={sectionId}
+              sectionLabel={sectionLabel ?? groupLabel}
+              rows={siblings.map((sib) => ({ key: sib.key, label: sib.label }))}
+              currentKey={param.key}
+              onApplied={onOrderApplied}
+            />
+            <p className={s.pDesc}>同一分组里的先后，客户端照此排列。</p>
+          </section>
+        )}
 
         {/* 技术信息：最底部、最弱的一档。**默认展开**（作者：就这些字，折叠反而
             多一下点击）—— 弱化靠位置与颜色，不靠藏起来。

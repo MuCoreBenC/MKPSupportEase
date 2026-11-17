@@ -1,10 +1,11 @@
 /*
  * 新分组的 id 规则 —— **全仓一份**。
  *
- * 为什么单独一个文件：有两个入口会建分组，都必须是"同一种东西"：
+ * 为什么单独一个文件：有三个入口会建分组，都必须是"同一种东西"：
  *
  *   · 参数定义框的「所属分组 → ＋」—— 建了跟着这条定义一起落盘；
- *   · 分组抽屉的「＋ 新增分组」—— 建完直接是空组，可以立刻删。
+ *   · 分组抽屉的「＋ 新增分组」—— 建完直接是空组，可以立刻删；
+ *   · 成员编辑框的「新增分组」—— 确认后先进框内草稿，跟着这一笔一起应用。
  *
  * 两个入口的规则（前缀 `custom_`、跳号挑下一个空位、后端 `ensure_section` 幂等）
  * 一旦各写一遍，改一处必然漏另一处。放这里两边都 import。
@@ -26,6 +27,18 @@ export function nextSectionId(known: { id: string }[]): string {
   const used = new Set(known.map((x) => x.id))
   for (let n = 1; ; n += 1) {
     const id = `${NEW_SECTION_PREFIX}${n}`
+    if (!used.has(id)) return id
+  }
+}
+
+/** 新页签的 id 前缀：与 `custom_` 分开，是因为页签与分组各占一个命名空间 */
+export const NEW_TAB_PREFIX = 'custom_tab_'
+
+/** 下一个可用的新页签 id（跳过已占的） */
+export function nextTabId(known: { id: string }[]): string {
+  const used = new Set(known.map((x) => x.id))
+  for (let n = 1; ; n += 1) {
+    const id = `${NEW_TAB_PREFIX}${n}`
     if (!used.has(id)) return id
   }
 }

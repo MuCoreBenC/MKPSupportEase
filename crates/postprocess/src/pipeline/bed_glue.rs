@@ -32,7 +32,7 @@
 
 use crate::gcode::OffsetMode;
 use crate::gcode::format::{format_speed, format_z};
-use crate::gcode::postprocess::has_e_param;
+use crate::gcode::postprocess::{get_e_value, has_e_param};
 use crate::ir::Ir;
 use crate::postproc::calibration;
 use crate::postproc::offset::process_gcode_offset;
@@ -44,6 +44,12 @@ const PRE_HEAT_TEMP: i64 = 50;
 
 /// 涂胶笔的写 Z 温度 —— 挂上笔之后走路径时用的 Z（`Toolhead.ZOffset + Glue.ZOffset`）。
 const GLUE_Z_MARGIN: f64 = 0.0;
+
+/// 判「这一段是不是擦料塔」时给足迹留的余量（mm）。
+///
+/// 切片器画的塔首层与 `calculate_tower_bbox` 那套包围盒不是同一份代码，
+/// 边缘会差一两毫米（斜肋 / brim）；2mm 足够盖住这点差，又不至于把贴塔的模型吞掉。
+const TOWER_FOOTPRINT_MARGIN: f64 = 2.0;
 
 /// 挂笔/预抬高度：`Toolhead.ZOffset` 之上 4mm。挂笔那行（`L801`）与进块前的
 /// 预抬都取这一个值 —— 于是装笔时 Z 不用再动，也不会出现两个数各说各话。
@@ -81,20 +87,9 @@ fn glue_feed_of(ir: &Ir, mode: &str, custom_mm_s: f64) -> f64 {
 ///
 /// **不占用原文的前三层**：原文第一层照样享受它自己那份抬升，两件事互不影响。
 ///
-/// 预设没填（旧配置 / `Ir::default()`）时退回 [`MOUNT_Z_LIFT`]，保持旧行为。
-/// 段间（模型之间 / 段与段之间）抬多高。
+/// 预设没填（旧配置 / `Ir::default()`）时退回 6.0（预设允许的下限）。
 ///
-/// 预设值 `glue_inter_model_lift_height`（本机 2.00mm，范围 2~5）。
-/// **绝不允许是 0**：0 意味着笔尖贴着刚涂的胶面平移，直接拖出一条胶痕 ——
-/// 旧配置 / `Ir::default()` 没填时退回 2.0（预设的下限，也是旧硬编码的那个值）。
-fn inter_model_lift(ir: &Ir) -> f64 {
-    if ir.glue.inter_model_lift_height > 0.0 {
-        ir.glue.inter_model_lift_height
-    } else {
-        2.0
-    }
-}
-
+/// ★ 它只管**换笔**（`L801`）与块首 `;Safe Z`；段与段之间的抬升见 [`inter_model_lift`]。
 fn mount_lift(ir: &Ir) -> f64 {
     /* 三级：前 3 层那档 → 普通那档 → 6.0（预设允许的下限）。
     旧的 `MOUNT_Z_LIFT = 4.0` 常量已删（2026-11-05 作者：「这个不需要了吧」）——
@@ -105,6 +100,27 @@ fn mount_lift(ir: &Ir) -> f64 {
         ir.glue.z_lift_height
     } else {
         6.0
+    }
+}
+
+/// 预涂胶**段间**至少抬多高（mm，**不含**写胶高度）。
+///
+/// 预设那一档 `glue_inter_model_lift_height`（出厂 2）是"胶面之间挪笔"用的，层内涂胶块
+/// 也吃它；可预涂胶这趟发生在第一层之前、笔尖正贴着板，2mm 真机上看着像没抬
+/// （作者 2026-11-13 真机验过：有抬，但太小）。所以这里给一个 4mm 的下限；
+/// 参数页调到 5 就按 5 —— 下限只是不让它掉回 2。
+const PRE_PRINT_MIN_HOP: f64 = 4.0;
+
+/// 段间（模型之间 / 段与段之间）抬多高。
+///
+/// 预设值 `glue_inter_model_lift_height`（本机 2.00mm，范围 2~5）。
+/// **绝不允许是 0**：0 意味着笔尖贴着刚涂的胶面平移，直接拖出一条胶痕 ——
+/// 旧配置 / `Ir::default()` 没填时退回 2.0（预设的下限，也是旧硬编码的那个值）。
+fn inter_model_lift(ir: &Ir) -> f64 {
+    if ir.glue.inter_model_lift_height > 0.0 {
+        ir.glue.inter_model_lift_height
+    } else {
+        2.0
     }
 }
 
@@ -154,14 +170,14 @@ pub fn apply_bed_glue(
 
     /* 进块前喷嘴停在哪 —— 卸完笔要送回这里。见 `build_block` 里那段回位注释。 */
     let resume_xy = last_xy_before(&working, insert_idx);
-    let block = build_block(
+    let block = compact_feeds(build_block(
         ir,
         &working,
         ir.prefs.bed_glue_all_models,
         target_bed_temp,
         lowered,
         resume_xy,
-    );
+    ));
     if block.is_empty() {
         return working;
     }
@@ -173,11 +189,58 @@ pub fn apply_bed_glue(
     out
 }
 
+/// 同一个进给连着出现时只留第一句。
+///
+/// 固件里 `F` 是**模态**的：`F600` 之后每一句不写 F 也还是 600。原来每条涂胶线都
+/// 再写一遍（几百行 `F600`），作者 2026-11-13：「每个都在后面加的 F600 有点奇怪」。
+/// 值变了照旧写；只剩一句指令的那种（`G1 F30000`）不删，免得出现光秃秃的 `G1`。
+fn compact_feeds(lines: Vec<String>) -> Vec<String> {
+    let mut last: Option<f64> = None;
+    lines
+        .into_iter()
+        .map(|line| {
+            let (code, comment) = match line.find(';') {
+                Some(i) => (&line[..i], line[i..].trim()),
+                None => (line.as_str(), ""),
+            };
+            let parts: Vec<&str> = code.split_whitespace().collect();
+            let Some(pos) = parts.iter().position(|p| p.len() > 1 && p.starts_with('F')) else {
+                return line;
+            };
+            let Ok(v) = parts[pos][1..].parse::<f64>() else {
+                return line;
+            };
+            if last != Some(v) {
+                last = Some(v);
+                return line;
+            }
+            if parts.len() <= 2 {
+                return line;
+            }
+            let kept: Vec<&str> = parts
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != pos)
+                .map(|(_, p)| *p)
+                .collect();
+            let mut out = kept.join(" ");
+            if !comment.is_empty() {
+                out.push(' ');
+                out.push_str(comment);
+            }
+            out
+        })
+        .collect()
+}
+
 /// 把一行里已有的 `F<数字>` 换成指定进给；没有 F 就追加在注释之前。
 ///
 /// 用途：涂胶行原本的进给是"塔护套的打印速度"，但胶笔的真实上限是
 /// 预设里的「涂胶速度限制」（`toolhead.speed_limit`，本机 70mm/s ⇒ `max_speed = 4200`）。
 /// 真机上超出这个上限的部分会被固件截掉，但 G-code 里写着 700mm/s 会让人误判。
+///
+/// ★ 它只管**走笔**那几行。路径里的平移（抬起来飞到塔心、段间挪笔）另有进给：
+///   塔那条见 `prime_tower_glue_path` 的 `before_descent`，模型那条见 [`segment_feed`]。
 fn set_feed(line: &str, feed: f64) -> String {
     let f = format!("F{}", format_speed(feed));
     let head_end = line.find(';').unwrap_or(line.len());
@@ -193,6 +256,22 @@ fn set_feed(line: &str, feed: f64) -> String {
         }
         None => format!("{} {}{}", head.trim_end(), f, tail),
     }
+}
+
+/// 涂胶路径里这一行该用哪个进给：**带 `E` 的是走笔，不带 `E` 的只是挪笔**。
+///
+/// 只给「所有模型首层也涂」那条用：段里不带 `E` 的几行是笔贴着胶面挪到下一笔，
+/// 归「段间横移速度」那一格（默认同样是机型移动速度，改过那一格就按改过的走）。
+fn segment_feed(line: &str, drawing: f64, travel: f64) -> f64 {
+    if has_e_param(line) { drawing } else { travel }
+}
+
+/// 这一句算不算**往板上涂胶**：带一个不小于 0 的 `E`（`E0` 是虚拟挤出那一类）。
+///
+/// 回抽 / 擦拭（`E` 为负）不算 —— 那几句是打印机收尾时的回拉，笔描过去只是在
+/// 板上多蹭一两毫米；纯空驶（不带 E）也不算。
+fn is_glue_line(line: &str) -> bool {
+    get_e_value(line).is_some_and(|v| v >= 0.0)
 }
 
 /// 把一串 `G1` 移动改写成 `G0`。
@@ -554,10 +633,12 @@ fn filter_unmount_lines(unmount_lines: &[String], fan_speed: f64) -> Vec<String>
     out
 }
 
-/// 擦料塔位置的涂胶路径：拿首层螺旋路径（`GenerateSheathGCode`）当轨迹，
-/// 逐行剥掉 Z、只留 XY，再套上笔的 XY 偏移。
-fn prime_tower_glue_path(ir: &Ir) -> Vec<String> {
-    let bbox = calculate_tower_bbox(
+/// 擦料塔的局部包围盒。
+///
+/// 塔那条涂胶路径与「跳过首层里的塔段」共用这一份 —— 两处各算一次就会有一天漂掉，
+/// 那时候要么塔段剔不掉（涂两遍），要么把模型剔掉（模型首层不涂）。
+fn tower_bbox_of(ir: &Ir) -> crate::postproc::tower::bbox::TowerBBox {
+    calculate_tower_bbox(
         &ir.wiping.outer_structure,
         ir.sheath.base_expand,
         ir.rib.extra_length,
@@ -565,7 +646,25 @@ fn prime_tower_glue_path(ir: &Ir) -> Vec<String> {
         0.0,
         ir.machine.nozzle_diameter,
         ir.machine.first_layer_height,
-    );
+    )
+}
+
+/// 擦料塔在**机器坐标**里的足迹：生成器里 `x_off = wiper_x - bbox.min_x`，
+/// 所以局部坐标的 min 角正好落在擦嘴点（`wiper_x/y`）上。
+fn tower_footprint(ir: &Ir) -> (f64, f64, f64, f64) {
+    let bbox = tower_bbox_of(ir);
+    (
+        ir.wiping.wiper_x,
+        ir.wiping.wiper_y,
+        ir.wiping.wiper_x + bbox.width(),
+        ir.wiping.wiper_y + bbox.height(),
+    )
+}
+
+/// 擦料塔位置的涂胶路径：拿首层螺旋路径（`GenerateSheathGCode`）当轨迹，
+/// 逐行剥掉 Z、只留 XY，再套上笔的 XY 偏移。
+fn prime_tower_glue_path(ir: &Ir) -> Vec<String> {
+    let bbox = tower_bbox_of(ir);
 
     let Some(sheath_lines) = generate_sheath_gcode(
         0,
@@ -596,12 +695,21 @@ fn prime_tower_glue_path(ir: &Ir) -> Vec<String> {
     let writing_z = ir.toolhead.z_offset + ir.glue.z_offset + GLUE_Z_MARGIN;
     let lift_z = ir.toolhead.z_offset + mount_lift(ir);
     let travel_speed = format_speed(ir.machine.travel_speed * 60.0);
+    /* 落笔之前还在 Safe Z 上（`;Print Z` 之前）：那一段只有一句"飞到塔心"，是空驶，
+    跟机型移动速度走 —— 作者 2026-11-13 揪出来的就是这一句写着涂胶速度、150mm 爬七八秒。 */
+    let travel_feed = ir.machine.travel_speed * 60.0;
     /* 笔的速度：预涂胶速度那一格（`follow` / `glue` / `custom` 三档） */
     let glue_feed = glue_feed_of(ir, &ir.glue.bed_glue_speed_mode, ir.glue.bed_glue_speed);
 
     let mut xy: Vec<String> = Vec::new();
+    /* 落了笔之后笔就贴着胶面走了，之后每一句都按涂胶速度（收尾那 3mm 也一样） */
+    let mut before_descent = true;
     for line in &sheath_lines {
         let t = line.trim();
+        if t.contains(";Print Z") {
+            before_descent = false;
+            continue;
+        }
         /* 只要 XY 运动：纯 Z 那些是原轨迹的抬升/换层，涂胶时 Z 恒定 */
         if !t.starts_with("G1 ") || !(t.contains('X') || t.contains('Y')) {
             continue;
@@ -616,9 +724,14 @@ fn prime_tower_glue_path(ir: &Ir) -> Vec<String> {
             ir,
         ) && !p.is_empty()
         {
-            /* 笔的速度上限 = 预设「涂胶速度限制」（`toolhead.speed_limit`），
+            /* 走笔那几行：笔的速度上限 = 预设「涂胶速度限制」（`toolhead.speed_limit`），
             不是护套那档打印速度 —— 作者：「我的 MKP 笔涂胶就是用这个速度的」。 */
-            xy.push(set_feed(&p, glue_feed));
+            let feed = if before_descent {
+                travel_feed
+            } else {
+                glue_feed
+            };
+            xy.push(set_feed(&p, feed));
         }
     }
     let Some(first) = xy.first() else {
@@ -646,9 +759,9 @@ fn all_models_glue_path(ir: &Ir, content: &[String]) -> Vec<String> {
     }
 
     let writing_z = ir.toolhead.z_offset + ir.glue.z_offset + GLUE_Z_MARGIN;
-    /* 段间抬升用预设那一档（`glue_inter_model_lift_height`，本机 2.00mm）——
-    原来这里是写死的 `+ 2.0`，用户在参数页把这一格改成 3 / 4 时根本不生效。 */
-    let lift_z = writing_z + inter_model_lift(ir);
+    /* 段间抬多高：写胶高度 + 预设那一档，**下限 4mm**（见 `PRE_PRINT_MIN_HOP`）——
+    出厂 2mm 在真机上看着像没抬；换成换笔那个 9.9 又太高（作者 2026-11-13 定 4）。 */
+    let lift_z = writing_z + inter_model_lift(ir).max(PRE_PRINT_MIN_HOP);
     let travel_speed = format_speed(ir.machine.travel_speed * 60.0);
     let glue_feed = glue_feed_of(ir, &ir.glue.bed_glue_speed_mode, ir.glue.bed_glue_speed);
     /* 段与段之间的横移：单独一格（默认 follow = 机型空驶速度） */
@@ -658,18 +771,32 @@ fn all_models_glue_path(ir: &Ir, content: &[String]) -> Vec<String> {
         ir.glue.glue_travel_speed,
     );
 
+    /* 擦料塔自己那条由 `prime_tower_glue_path` 涂；可它也在**首层**里（塔先打），
+    不剔掉就会把塔涂第二遍（第一段与塔那几十行逐行相同）。 */
+    let tower = tower_footprint(ir);
+
     let mut out = Vec::new();
     for seg in &segments {
+        if segment_lies_in_tower(seg, tower) {
+            continue;
+        }
+        /* 整段一句正向挤出都没有（只有空驶 / 回抽 / 下一层的挪笔）：没有胶可涂，不白飞一趟 */
+        if !seg.iter().any(|l| is_glue_line(l)) {
+            continue;
+        }
         /* 每一段（**含第一段**）都走「抬起来 → 平移到起点 → 落下去」：
         第一段之前笔还停在塔心那个写胶高度上，不抬就是一条横穿床面的胶痕。 */
-        let (nx, ny) = extract_first_xy(&seg[0]);
-        out.push(format!("G1 Z{} F{}", format_z(lift_z), travel_speed));
-        if !nx.is_empty() && !ny.is_empty() {
-            /* 这一段是笔在胶面之间横移（不是抬起来飞）：用「段间横移速度」那一格。 */
-            out.push(format!("G1 X{nx} Y{ny} F{}", format_speed(travel_feed)));
-        }
-        out.push(format!("G1 Z{} F{}", format_z(writing_z), travel_speed));
+        /* ★ 先把这一段过一遍偏移，再从**加工后**的首句里取落笔点：
+        手拼一条"原始坐标"的平飞线会差一个笔偏移，落笔后再把笔贴着板拖回来
+        （本机 Y 差 23mm，2026-11-13 作者揪出来的那 24 处）。 */
+        let mut drawn: Vec<String> = Vec::new();
+        /* `drawn` 第一句是不是"挪笔"（不带 E）—— 是的话落笔后它就是零长度空走 */
+        let mut first_is_travel = false;
         for line in seg {
+            /* 回抽 / 擦拭（E 为负）不是上胶：描它只是在板上多蹭那一两毫米 */
+            if get_e_value(line).is_some_and(|v| v < 0.0) {
+                continue;
+            }
             let stripped = strip_z(line);
             if let Ok(p) = process_gcode_offset(
                 &stripped,
@@ -680,12 +807,62 @@ fn all_models_glue_path(ir: &Ir, content: &[String]) -> Vec<String> {
                 ir,
             ) && !p.is_empty()
             {
-                /* 同塔那条：预涂胶速度那一格 */
-                out.push(set_feed(&p, glue_feed));
+                if drawn.is_empty() {
+                    first_is_travel = !has_e_param(line);
+                }
+                /* 走笔用预涂胶速度；段里不带 E 的那几行是挪笔，用段间横移速度 */
+                drawn.push(set_feed(&p, segment_feed(line, glue_feed, travel_feed)));
             }
         }
+        let Some(first) = drawn.first() else {
+            /* 整段都被偏移 / 边界筛掉了：不白飞一趟 */
+            continue;
+        };
+        let (fx, fy) = extract_first_xy(first);
+        out.push(format!("G1 Z{} F{}", format_z(lift_z), travel_speed));
+        if !fx.is_empty() && !fy.is_empty() {
+            /* 这一段是笔在胶面之间横移（不是抬起来飞）：用「段间横移速度」那一格。 */
+            out.push(format!("G1 X{fx} Y{fy} F{}", format_speed(travel_feed)));
+        }
+        out.push(format!("G1 Z{} F{}", format_z(writing_z), travel_speed));
+        /* 落笔点就是 `drawn[0]`：那一句若只是"挪到起点"，笔已经在上面了，跳过；
+        带 E 的首句是真的要走笔，不能丢。 */
+        out.extend(drawn.into_iter().skip(usize::from(first_is_travel)));
     }
     out
+}
+
+/// 这一整段是不是擦料塔（首层里塔会先打一遍，`extract_first_layer_paths` 会把它当模型）。
+///
+/// 判据是**整段**都落在塔足迹里（外扩 [`TOWER_FOOTPRINT_MARGIN`]）：
+/// 模型与塔相撞在碰撞步就被拦下，所以"整段都在足迹内"只可能是塔自己。
+fn segment_lies_in_tower(seg: &[String], tower: (f64, f64, f64, f64)) -> bool {
+    let (x0, y0, x1, y1) = tower;
+    let (mut x, mut y) = (None, None);
+    for line in seg {
+        /* 只改一个轴的行走（`G1 X…` 不带 Y）要沿用上一次的另一个轴 */
+        let (sx, sy) = extract_first_xy(line);
+        if let Ok(v) = sx.parse::<f64>() {
+            x = Some(v);
+        }
+        let y_here = if let Ok(v) = sy.parse::<f64>() {
+            y = Some(v);
+            y
+        } else {
+            y
+        };
+        let (Some(px), Some(py)) = (x, y_here) else {
+            return false;
+        };
+        if px < x0 - TOWER_FOOTPRINT_MARGIN
+            || px > x1 + TOWER_FOOTPRINT_MARGIN
+            || py < y0 - TOWER_FOOTPRINT_MARGIN
+            || py > y1 + TOWER_FOOTPRINT_MARGIN
+        {
+            return false;
+        }
+    }
+    x.is_some()
 }
 
 /// 从 G-code 里抠出**首层**的挤出路径，按空驶（不带 E 的 G1）切成一段段。
@@ -828,7 +1005,10 @@ fn strip_z(line: &str) -> String {
     format!("{}{}", &line[..start], &rest[end..])
 }
 
-/// 取一行里的 X、Y 数值原文（给段间平移用）。
+/// 取一行里的 X、Y 数值**原文**（空串 = 这一行没有那个轴）。
+///
+/// 两处在用：判"这一段是不是塔"（读的是首层原始行）与段间落笔点
+/// （读的是**已经加过笔偏移**的行走，见 `all_models_glue_path`）。
 fn extract_first_xy(line: &str) -> (String, String) {
     fn grab(line: &str, axis: char) -> String {
         let Some(idx) = line.find(axis) else {
@@ -850,6 +1030,15 @@ mod tests {
 
     fn lines(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// 给一台"真机"的边界：`Ir::default()` 全是 0，任何坐标都会被边界检查判越界，
+    /// 路径根本长不出来 —— 要测坐标本身，先得给一块床（0..256，可涂胶范围同宽）。
+    fn open_bed(ir: &mut Ir) {
+        ir.machine.max_x = 256.0;
+        ir.machine.max_y = 256.0;
+        ir.machine.glue_max_x = 256.0;
+        ir.machine.glue_max_y = 256.0;
     }
 
     /// 出厂（关）时**一行都不动** —— 这是"默认不影响任何人"的那条保证。
@@ -915,9 +1104,10 @@ mod tests {
             .iter()
             .position(|l| l.contains("virtual extrusion"))
             .expect("虚拟挤出那行还在");
+        /* 同一个进给连写会被 `compact_feeds` 收掉，所以只认坐标不认 F */
         let lift = out
             .iter()
-            .position(|l| l == "G0 Z10.0 F0.0")
+            .position(|l| l.starts_with("G0 Z10.0"))
             .expect("锚点之后要抬到装笔高度（默认兜底 6 + z_offset 4）");
         assert!(
             anchor < lift,
@@ -956,32 +1146,172 @@ mod tests {
         assert_eq!(path[2], "G1 Z3.95 F18000.0 ;Print Z", "到了起点才落笔");
     }
 
+    /// **飞到塔心用空驶速度，走笔才用预涂胶速度**（2026-11-13 作者揪出来的那行：
+    /// 从挂笔位飞到塔心的 `G0 X… Y…` 也写着 F1200，150mm 要爬七八秒）。
+    #[test]
+    fn the_flight_to_the_tower_uses_travel_speed() {
+        let mut ir = Ir::default();
+        ir.sheath.base_expand = 1.0;
+        ir.machine.travel_speed = 700.0; // F42000
+        ir.machine.nozzle_diameter = 0.4;
+        ir.machine.first_layer_height = 0.2;
+        ir.machine.retract_length = 0.8;
+        ir.tower.sheath_speed = 100.0;
+        ir.tower.first_layer_flow = 1.0;
+        ir.toolhead.z_offset = 4.0;
+        ir.toolhead.max_speed = 1200.0; // 涂胶速度 20mm/s
+        ir.glue.z_offset = -0.05;
+        ir.glue.bed_glue_speed_mode = "glue".to_owned();
+        /* 塔摆在床里（默认 wiper 0 会被边界检查剔掉，就看不到"飞过去"那一行） */
+        ir.wiping.wiper_x = 100.0;
+        ir.wiping.wiper_y = 100.0;
+        open_bed(&mut ir);
+
+        let path = prime_tower_glue_path(&ir);
+        assert!(path.len() > 3, "路径没生成：{path:?}");
+        assert!(
+            path[1].ends_with("F42000.0"),
+            "飞到塔心是空驶，该跟机型移动速度：{}",
+            path[1]
+        );
+        assert!(
+            path.iter().filter(|l| l.contains("F42000.0")).count() >= 2,
+            "抬 Z 与飞过去都用空驶速度：{path:?}"
+        );
+        assert!(
+            path.iter().any(|l| l.contains("F1200.0")),
+            "走笔那几行仍是预涂胶速度：{path:?}"
+        );
+        assert!(
+            path.last().is_some_and(|l| l.ends_with("F1200.0")),
+            "落了笔之后笔贴着胶面走，收尾那 3mm 也按涂胶速度：{:?}",
+            path.last()
+        );
+    }
+
     /// 「所有模型首层也涂」的第一段同样要先抬再飞：它前面笔还停在塔心的写胶高度上。
     #[test]
     fn all_models_path_lifts_before_the_first_segment() {
         let content = lines(&[
             ";LAYER:0",
-            "G1 X10 Y10 E0.5",
-            "G1 X20 Y10 E0.5",
+            "G1 X100 Y100 E0.5",
+            "G1 X120 Y100 E0.5",
             ";LAYER:1",
-            "G1 X30 Y30 E0.5",
+            "G1 X130 Y130 E0.5",
         ]);
         let mut ir = Ir::default();
+        open_bed(&mut ir);
         ir.machine.travel_speed = 300.0;
         ir.toolhead.z_offset = 4.0;
         ir.glue.z_offset = -0.05;
 
         let out = all_models_glue_path(&ir, &content);
-        /* 段内那几行会被 `process_gcode_offset` 过一遍（空机的默认参数下会被剔掉），
-        这里只咬这一段的开门三步。 */
         assert!(out.len() >= 3, "路径没生成：{out:?}");
-        assert_eq!(out[0], "G1 Z5.95 F18000.0");
+        assert_eq!(out[0], "G1 Z7.95 F18000.0", "写胶高度 3.95 + 段间抬升 4");
         assert!(
-            out[1].contains("X10") && out[1].contains("Y10"),
+            out[1].contains("X100") && out[1].contains("Y100"),
             "{}",
             out[1]
         );
         assert_eq!(out[2], "G1 Z3.95 F18000.0");
+    }
+
+    /// **段间落笔点要跟着笔偏移走**：平飞线从前用手拼的原始坐标，比段内第一句少一个
+    /// `toolhead.x/y_offset`（本机 Y 差 23mm）—— 落笔后再贴着板拖 23mm 才到真正的起点。
+    #[test]
+    fn all_models_lands_on_the_offset_start() {
+        let content = lines(&[
+            ";LAYER:0",
+            "G1 X100 Y100",
+            "G1 X110 Y100 E0.5",
+            "G1 X110 Y110 E0.5",
+            ";LAYER:1",
+        ]);
+        let mut ir = Ir::default();
+        open_bed(&mut ir);
+        ir.machine.travel_speed = 700.0; // F42000
+        ir.toolhead.z_offset = 4.0;
+        ir.toolhead.max_speed = 1200.0; // 涂胶速度 20mm/s
+        ir.glue.z_offset = -0.05;
+        ir.glue.bed_glue_speed_mode = "glue".to_owned();
+        /* 本机那一组笔偏移 */
+        ir.toolhead.x_offset = -0.9;
+        ir.toolhead.y_offset = 23.0;
+
+        let out = all_models_glue_path(&ir, &content);
+        assert_eq!(out.len(), 5, "落笔之后直接走笔，不再多一句：{out:?}");
+        assert_eq!(
+            out[1], "G1 X99.1 Y123.0 F42000.0",
+            "平飞终点必须是**加过偏移**的那个起点：{out:?}"
+        );
+        assert_eq!(out[2], "G1 Z3.95 F42000.0", "到了起点才落笔：{out:?}");
+        assert_eq!(
+            out[3], "G1 X109.1 Y123.0 F1200.0",
+            "落笔后第一句就是走笔，不再贴板横移：{out:?}"
+        );
+    }
+
+    /// 首层里的擦料塔不该被当成模型再涂一遍（它已经有 `prime_tower_glue_path` 那一条）。
+    #[test]
+    fn all_models_skips_the_tower_footprint() {
+        let content = lines(&[
+            ";LAYER:0",
+            /* 塔首层：整段落在足迹里（默认 IR：`wiper=(0,0)`、足迹 0..19.58） */
+            "G1 X5 Y5",
+            "G1 X15 Y5 E0.5",
+            "G1 X15 Y15 E0.5",
+            /* 模型首层：足迹之外 */
+            "G1 X100 Y100",
+            "G1 X120 Y100 E0.5",
+            /* 只有空驶、一句挤出都没有：没有胶可涂，不该为它抬一次 */
+            "G1 X200 Y200",
+            ";LAYER:1",
+        ]);
+        let mut ir = Ir::default();
+        open_bed(&mut ir);
+        ir.machine.travel_speed = 300.0;
+
+        let out = all_models_glue_path(&ir, &content);
+        assert_eq!(
+            out.iter().filter(|l| l.starts_with("G1 Z4.0")).count(),
+            1,
+            "塔那一段该被跳过，只剩模型那一段：{out:?}"
+        );
+        assert!(
+            !out.iter()
+                .any(|l| l.contains("X15.0") || l.contains("X5.0")),
+            "塔的坐标一句都不该出现：{out:?}"
+        );
+        assert!(
+            !out.iter().any(|l| l.contains("X200.0")),
+            "只有空驶的段不该白飞一趟：{out:?}"
+        );
+        assert!(
+            out.last().is_some_and(|l| l.contains("X120.0")),
+            "模型那一段照涂：{out:?}"
+        );
+    }
+
+    /// 同一个进给连着出现时只留第一句（固件里 F 是模态的）。
+    #[test]
+    fn repeated_feeds_are_written_once() {
+        let out = compact_feeds(lines(&[
+            "G1 Z10.0 F42000.0",
+            "G1 X1 Y1 F600.0",
+            "G1 X2 Y2 F600.0 ; 注释",
+            "G1 X3 Y3 F42000.0",
+            "G1 X4 Y4 F42000.0",
+            "G1 F30000",
+        ]));
+        assert_eq!(out[1], "G1 X1 Y1 F600.0");
+        assert_eq!(out[2], "G1 X2 Y2 ; 注释", "同一个 F 不再重复写：{:?}", out);
+        assert_eq!(out[3], "G1 X3 Y3 F42000.0", "换了的 F 要写：{:?}", out);
+        assert_eq!(out[4], "G1 X4 Y4", "变了之后的第二句也省掉：{:?}", out);
+        assert_eq!(
+            out[5], "G1 F30000",
+            "只剩一句指令时不能把 F 也删了（会变成光秃秃的 G1）：{:?}",
+            out
+        );
     }
 
     /// `CONFIG_BLOCK` 里那句 `machine_start_gcode = "..."` 内嵌着

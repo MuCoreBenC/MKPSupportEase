@@ -180,6 +180,19 @@ fn default_swap_hop_height() -> f64 {
 #[serde(rename_all = "PascalCase")]
 pub struct GlueIr {
     pub z_offset: f64,
+    /// **边缘带**的宽度：这张涂胶面里**最靠外的几条**涂胶线。`0` = 关。
+    ///
+    /// 带宽 = 条数 × **这一层实测的线距**（并排涂胶线的垂直间距），最多半张面。
+    /// 用条数而不是面尺寸的百分比：要防的是 XY/Z 偏差，那是绝对量，跟面多大无关；
+    /// 而线距会随喷嘴与稀疏比变，所以换机器靠各自的预设给条数。
+    #[serde(default)]
+    pub edge_lines: i64,
+    /// 边缘带上那条涂胶段的**落笔抬高**（mm）。`0` = 关（不抬）。
+    ///
+    /// 作用不是"少涂"，而是让笔在贴近边界时离面更高 —— XY/Z 校准有偏差时，
+    /// 笔跑出支撑面再回来不会刮到模型。见 `postproc::pass1::edge_band`。
+    #[serde(default)]
+    pub edge_lift: f64,
     pub sparse_ratio: f64,
     pub pass_count: i64,
     pub z_lift_height: f64,
@@ -275,16 +288,55 @@ pub struct MachineIr {
     pub forbidden_zones: Vec<Polygon>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+/// 回抽 / 回填的默认进给速度（mm/s）。25 等于原来那句硬编码的 `F1500`。
+pub const DEFAULT_E_SPEED_MM_PER_S: f64 = 25.0;
+
+fn default_e_speed_mm_per_s() -> f64 {
+    DEFAULT_E_SPEED_MM_PER_S
+}
+
+fn default_retract_at() -> String {
+    "model".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct GCodeIr {
     #[serde(rename = "MKPRetract")]
     pub mkp_retract: f64,
     #[serde(rename = "MKPExtrude")]
     pub mkp_extrude: f64,
+    /// 回抽那一笔的进给速度（mm/s）。鼠标点在轴上：太快挤出机会咬料，太慢会挂丝。
+    #[serde(rename = "MKPRetractSpeed", default = "default_e_speed_mm_per_s")]
+    pub mkp_retract_speed: f64,
+    /// 回填那一笔的进给速度（mm/s）。
+    #[serde(rename = "MKPExtrudeSpeed", default = "default_e_speed_mm_per_s")]
+    pub mkp_extrude_speed: f64,
+    /// 回抽插在换笔的哪一刻：`model`（起飞前）/ `wait`（到达等待位、推入之前）/ `after_dock`。
+    #[serde(rename = "MKPRetractAt", default = "default_retract_at")]
+    pub mkp_retract_at: String,
+    /// 回填量分摊到塔上的擦料移动里（一次挤完 vs 分摊）。
+    #[serde(rename = "MKPExtrudeSpread", default)]
+    pub mkp_extrude_spread: bool,
     pub refill_extrude_command: String,
     pub wait_for_drying_command: String,
     pub custom_gcode_e_ownership: bool,
+}
+
+impl Default for GCodeIr {
+    fn default() -> Self {
+        Self {
+            mkp_retract: 0.0,
+            mkp_extrude: 0.0,
+            mkp_retract_speed: DEFAULT_E_SPEED_MM_PER_S,
+            mkp_extrude_speed: DEFAULT_E_SPEED_MM_PER_S,
+            mkp_retract_at: default_retract_at(),
+            mkp_extrude_spread: false,
+            refill_extrude_command: String::new(),
+            wait_for_drying_command: String::new(),
+            custom_gcode_e_ownership: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -485,6 +537,12 @@ pub struct DebugIr {
 pub struct PrefsIr {
     /// 支撑面下方一层也涂胶。
     pub glue_bottom_enabled: bool,
+    /// **下方支撑余量（实验）**：涂胶段离笔下方支撑边界够远时就不抬高。
+    #[serde(default)]
+    pub under_support_enabled: bool,
+    /// 下方支撑余量的阈值（mm），量程 0–2、出厂 0.5。
+    #[serde(default)]
+    pub under_support_mm: f64,
     /// 跳过 G-code 里的震动补偿校准检测（M970/M974）。
     pub skip_vibration_calibration: bool,
     /// 开头插入收笔序列。
@@ -518,24 +576,35 @@ pub struct PrefsIr {
 }
 
 impl Default for PrefsIr {
-    /// 出厂档 —— **与 `runtime::app_state::ResolvedPostprocPrefs` 的默认值必须一致**
-    /// （判据 `crates/postprocess` 里那条 `default_prefs_match_the_client_defaults` 咬着）。
+    /// 出厂档 —— 来自 [`client_prefs_default`]（`presets/client-defaults.toml`）。
     ///
-    /// 为什么两边各写一份而不是共用：`postprocess` 是独立 crate，**不许**回头依赖
-    /// 客户端（那是"内核知道界面"的反向依赖）。所以两份 + 一条判据，判据是唯一防线。
+    /// 客户端 `runtime::app_state` 读的是同一份，所以两处不会再各写一套字面量；
+    /// 判据 `default_prefs_match_the_client_defaults` 仍留着，咬住「别有人又写回去」。
     fn default() -> Self {
-        Self {
-            glue_bottom_enabled: false,
-            skip_vibration_calibration: false,
-            begin_stage_retract_enabled: true,
-            begin_stage_retract_z_lift_mm: 5,
-            z_calibration_dwell_sec: 2,
-            xy_calibration_dwell_sec: 3,
-            bed_glue_enabled: false,
-            bed_glue_all_models: false,
-            auto_tower_position: TowerRelocateModeIr::Ask,
-        }
+        *client_prefs_default()
     }
+}
+
+/// `presets/client-defaults.toml` → 出厂偏好（进程内只解析一次）。
+///
+/// 缺字段 / 语法错直接 panic：出厂值读不出来时**不许**拿别的值顶上 ——
+/// 那会让「设置页写着 A、切出来是 B」变成没人能解释的事。
+///
+/// 文件随源码进二进制（`include_str!`），改了重编即可生效。
+pub fn client_prefs_default() -> &'static PrefsIr {
+    static CELL: std::sync::OnceLock<PrefsIr> = std::sync::OnceLock::new();
+    CELL.get_or_init(|| {
+        /// 配置文件外形（`[Prefs]` 段与 `mkpse-pp` 的配置同一套键名）
+        #[derive(Deserialize)]
+        struct DefaultsFile {
+            #[serde(rename = "Prefs")]
+            prefs: PrefsIr,
+        }
+        const RAW: &str = include_str!("../../../../presets/client-defaults.toml");
+        let file: DefaultsFile = toml::from_str(RAW)
+            .expect("presets/client-defaults.toml 必须能解析（客户端偏好出厂值的唯一源）");
+        file.prefs
+    })
 }
 
 /// 「模型与擦料塔相撞时怎么办」三档 —— 内核这一侧的镜像。

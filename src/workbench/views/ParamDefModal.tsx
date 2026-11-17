@@ -32,13 +32,18 @@
  * 保存本身走 `onCommit` 交给页面：落盘、把「改前/改后」整包压进外壳的撤销栈
  * （状态栏那颗「撤销」管得到它），然后关框。
  *
- * # 分组下拉是自己画的（2026-11-01）
+ * # 所有下拉都是模态框（2026-11-14）
  *
- * 作者：「我希望在这里能加上新增的按钮」—— 原生 `<select>` 里没地方挂按钮，
- * 页签也只能当 `optgroup` 的死标签，所以「所属分组」换成 `SectionPicker`：
- * 每个页签那一行右边一颗「＋ 新增分组」。新建的那一组**先只进草稿**，保存那一趟
- * 才跟定义一起落盘（`payloadOf` 的 `newSection`）—— 建了又取消，数据里不会多出
- * 一个空组（这里没有删分组的入口，留下的就再也删不掉了）。
+ * 作者：「能不能不只是这种上下箭头的，难用……还有其他的下拉菜单也是出模态框」。
+ * 原来这一框里满是自绘**浮层下拉**（`GroupPicker` / `SectionPicker`）：名单一长就顶到
+ * 屏幕外，排序还只能挪自己一条。现在统一成 `pick/` 那一族：
+ *
+ *   单选分层列表  属于 / 前置条件 / 档位 / 值类型 / 控件 / 出厂默认 / 前置条件的值
+ *   分组管理      所属分组（`SectionList` 整块搬进框里：新建 / 改名 / 组上下移）
+ *   组内排序      `SortModal`（拖拽 + 输位次 + 撤销重做 + 恢复，单独一笔落盘）
+ *
+ * 「组内顺序」**不在这份草稿里**：它走自己的命令（`wb_set_section_order`），
+ * 否则这一框的「确认」会拿旧位次把刚排好的次序顶回去。
  *
  * 校验的权威在后端（`registry::set_param_meta`）；这里先拦一道只是少挨一次错。
  */
@@ -61,10 +66,11 @@ import ModalC14 from '../c14/ModalC14'
 import { toasts } from '../c14/toast'
 import MachinePicker from '../components/MachinePicker'
 import { machineSummary } from '../components/machineSummary'
-import GroupPicker from './GroupPicker'
-import type { GroupedGroup, GroupedOption } from './GroupPicker'
-import SectionPicker from './SectionPicker'
-import type { SectionGroup } from './SectionPicker'
+import type { GroupedGroup, GroupedOption } from './pick/types'
+import SectionList from './SectionList'
+import type { SectionGroup } from './SectionList'
+import PickerModal from './pick/PickerModal'
+import SortOrderButton from './pick/SortModal'
 /* 新分组的 id 规则：与分组抽屉的「＋ 新增分组」共用同一份实现，见那个文件的头注 */
 import { nextSectionId } from './sectionId'
 /* 上移 / 下移那两颗箭头：客户端共享那一颗（同一颗 chevronDown，朝上的翻 180°），
@@ -102,6 +108,13 @@ interface Props {
    * 改动」并重取派生数据 —— 这一笔同样是草稿，右上角「保存」才落盘。
    */
   onStaleCleared: (next: RegistryView, key: string) => void
+  /**
+   * **组内顺序排完了**（`pick/SortModal` 自己落盘，回来的新注册表交给页面）。
+   *
+   * 它跟上面两条不是一路：排序能挪到别人的位置，塞进这一框的草稿的话，
+   * 「确认」会把那条旧 order 顶回去。所以它当场生效、单独一条撤销。
+   */
+  onOrderApplied: (next: RegistryView) => void
 }
 
 /** 值类型的中文注脚 —— 选项写原词（后端给什么就存什么），括号里说人话 */
@@ -221,8 +234,12 @@ interface Draft {
   sectionLabelEdits: Record<string, string>
   /** 分组候选清单的次序（上下箭头的效果）。空 = 用注册表给的次序 */
   sectionOrder: string[]
-  /** 组内顺序（`[params.layout].order`）—— 上下箭头改它，客户端按它排 */
-  order: number
+  /*
+   * **这里刻意没有「组内顺序」**（2026-11-14）：排序走自己的模态框、
+   * `wb_set_section_order` 单独一笔落盘（见 `pick/SortModal`）。
+   * 把它塞进这份草稿的话，用户排完序再点这一框的「确认」，
+   * 那条旧 order 会把刚排好的次序顶回去 —— 一次点击悄悄撤掉一次排序。
+   */
 }
 
 /** 在一份 id 次序表里把 `id` 挪一位；表里还没有它就什么都不做 */
@@ -271,6 +288,15 @@ function cloneDraft(d: Draft): Draft {
   }
 }
 
+/** 在候选表里查出当前值的显示名（选择器触发器上要写它） */
+function pickLabelOf(groups: GroupedGroup[], value: string): string {
+  for (const g of groups) {
+    const hit = g.options.find((o) => o.value === value)
+    if (hit !== undefined) return hit.label
+  }
+  return value === '' ? '——' : value
+}
+
 const numOf = (t: string): number | null => {
   const s = t.trim()
   if (s === '') return null
@@ -315,7 +341,6 @@ const initOf = (p: ParamView): Draft => ({
   newSection: null,
   sectionLabelEdits: {},
   sectionOrder: [],
-  order: p.order,
 })
 
 /** 草稿 → 后端载荷。归位口径与 `writeValue` 同一套：bool 归 bool、数字归数字 */
@@ -389,8 +414,13 @@ function payloadOf(d: Draft, param: ParamView, params: ParamView[]): ParamMetaEd
      */
     sectionId: pending === null ? d.sectionId : null,
     newSection: pending,
-    /* 顺序是**数据**（客户端按它排同一组），所以整包带上；后端见值没变就不动 */
-    order: d.order,
+    /*
+     * **组内顺序不在这份载荷里**（2026-11-14）：它有自己的模态框与命令
+     * （`wb_set_section_order`，一次写完整组）。搬组时后端自己把它放到目标组末尾
+     * —— 见 `registry::set_param_meta` 的 `moved_order`。带上的话，这一框的「确认」
+     * 会拿打开那一刻的旧位次把刚排好的次序顶回去。
+     */
+    order: null,
   }
 }
 
@@ -402,7 +432,7 @@ function errorOf(d: Draft): string | null {
     ['最大', d.max],
     ['步进', d.step],
   ] as const) {
-    if (t.trim() !== '' && !Number.isFinite(Number(t))) return `${name}值得是个数字`
+    if (t.trim() !== '' && !Number.isFinite(Number(t))) return `${name} 得是个数字`
   }
   const min = numOf(d.min)
   const max = numOf(d.max)
@@ -458,6 +488,7 @@ export default function ParamDefModal({
   onClose,
   onCommit,
   onStaleCleared,
+  onOrderApplied,
 }: Props) {
   const [form, setForm] = useState<FormState | null>(null)
   const [busy, setBusy] = useState(false)
@@ -547,7 +578,7 @@ export default function ParamDefModal({
     setBusy(true)
     try {
       onStaleCleared(await wb.clearStaleTranslations(paramKey, [...staleList]), paramKey)
-      toasts.push(`已清掉 ${staleList.length} 个译文标记 —— 记得右上角「保存」才写文件`)
+      toasts.push(`已清掉 ${staleList.length} 个译文标记，保存后写入。`)
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
     } finally {
@@ -713,92 +744,26 @@ export default function ParamDefModal({
   const herePending = draft.newSection !== null && draft.newSection.id === draft.sectionId
 
   /*
-   * 组内顺序（2026-10-20 作者：「客户端到时候也要消费到这个排序」）——
-   * 它不是界面状态：同一把尺子还决定客户端那一列从上到下的先后，所以存进
-   * `[params.layout].order`，并让后端把 `layout_schema` 的 items 一起重排。
+   * 这一组的同级清单（**已按盘上 order 排好**，含自己）—— 排序模态框的行。
    *
-   * 排序时用**草稿里的 order**（不是注册表那份）：连按两次箭头，第二次要基于刚挪过的位置。
+   * 用注册表那份 order、不用草稿：排序是**独立一笔**（见 `pick/SortModal`），
+   * 它落完盘页面会把新的 `params` 交回来，这里自然就是新次序。
    */
-  const siblings = [
-    ...params
-      .filter((p) => p.sectionId === draft.sectionId && p.key !== param.key)
-      .map((p) => ({ key: p.key, order: p.order })),
-    /* 自己那一条用**草稿**里的顺序：判的是「马上要存成什么样」，不是盘上那份 */
-    { key: param.key, order: draft.order },
-  ].sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
-  const myAt = siblings.findIndex((p) => p.key === param.key)
-
-  /** 上/下移一位：取两个邻居之间的中点（到头就往外扩 1），不动别人的 order */
-  const moveOrder = (dir: -1 | 1) => {
-    if (myAt < 0) return
-    const other = dir < 0 ? siblings[myAt - 1] : siblings[myAt + 1]
-    if (other === undefined) return
-    const outer = dir < 0 ? siblings[myAt - 2] : siblings[myAt + 2]
-    edit('order', (d) => {
-      d.order =
-        outer === undefined
-          ? other.order + dir /* 到头：往外扩一格 */
-          : (other.order + outer.order) / 2
-    })
-  }
-
-  /**
-   * 「组内顺序」下拉里的那张表（2026-11-02）：**这一组的所有参数按当下顺序排**，
-   * 每行右边常驻上下箭头（`GroupedOption.move`），在下拉里直接调序。
-   *
-   * 三条约束：
-   *
-   *   · 行序 = `siblings`（已按草稿里的 order 排好），**不另算一遍** ——
-   *     两处各排一次迟早会不一致，而这一框的全部意义就是"看到的就是要存的"；
-   *   · 箭头只对**当前这一条**有效：`moveOrder` 改的是草稿里 `d.order`，
-   *     挪别人需要先选中它、再开这一框 —— 那是另一件事，这里不做；
-   *     所以别的行箭头置灰并给出理由（别让人点了没反应）；
-   *   · 触发器上写「第 N / 共 M 位」，收起也不丢位置信息。
-   */
-  const orderGroups: GroupedGroup[] = [
-    {
-      title: null,
-      options: siblings.map((sib, i) => {
-        const isSelf = sib.key === param.key
-        const p = params.find((x) => x.key === sib.key)
-        return {
-          value: sib.key,
-          label: p?.label ?? sib.key,
-          by: `第 ${i + 1} / ${siblings.length} 位`,
-          ...(isSelf
-            ? {
-                move: {
-                  up: myAt > 0,
-                  down: myAt >= 0 && myAt < siblings.length - 1,
-                  onMove: moveOrder,
-                },
-              }
-            : {
-                /* 挪别人得先选它 —— 这里点了也不该"看起来能动" */
-                move: { up: false, down: false, onMove: () => undefined },
-                note: '只能挪这一条',
-              }),
-        }
-      }),
-    },
-  ]
+  const sectionRows = params
+    .filter((p) => p.sectionId === draft.sectionId)
+    .sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+    .map((p) => ({ key: p.key, label: p.label, by: p.key }))
 
   /**
    * 换分组：顺序跟着落到目标组末尾（与后端「不给顺序就放末尾」同一条口径）。
    *
-   * 改选了别的组 ⇒ 草稿里那个新分组**作废**（下拉里随之消失）：那一行写着「待保存」，
-   * 留着却不会落盘才是撒谎。
+   * 改选了别的组时，草稿里那个新分组**留着但标「不保存」**（见 `payloadOf`：只有
+   * 选中的那一份才进载荷）。整个抹掉的话，人只是点错一行、想选回来，那个组就没了。
    */
   const onSection = (id: string) =>
     edit('sectionId', (d) => {
-      if (d.newSection !== null && d.newSection.id !== id) d.newSection = null
       d.sectionId = id
-      let max: number | null = null
-      for (const p of params) {
-        if (p.sectionId !== id || p.key === param.key) continue
-        max = max === null ? p.order : Math.max(max, p.order)
-      }
-      d.order = max === null ? 1 : max + 1
+      /* 落到目标组末尾这件事由后端算（`payloadOf` 不带 order），这里不排一遍 */
     })
 
   /**
@@ -814,7 +779,6 @@ export default function ParamDefModal({
       const id = nextSectionId(d.newSection === null ? sections : [...sections, d.newSection])
       d.newSection = { id, tabId, label }
       d.sectionId = id
-      d.order = 1
     })
 
   /**
@@ -836,15 +800,19 @@ export default function ParamDefModal({
   /**
    * 组间换位（面板里那两颗 ↑↓）。
    *
-   * 这一框里只挪**草稿那份候选清单的次序**（`sectionOrder`）—— 它决定保存后
+   * 这一框里只挪**草稿那份候选清单的次序**（`sectionOrder`）：它决定保存后
    * 「所属分组」里读到的先后。真要把一组的次序写进注册表，用参数台卡片抽屉里的
-   * 那颗：那里是一条独立命令、一次写完两份文件，撤销栈也认得出它在改什么。
+   * 那颗（独立一条命令、一次写完两份文件，撤销栈认得出它在改什么）。
    *
-   * 还只在草稿里的新分组没有盘上的位置可挪（它排在它那个页签的末尾）。
+   * 次序表空着时先按面板现在的次序**种满**再挪 —— 只种不挪的话，第一次点箭头
+   * 等于什么都没发生；草稿里的新组也在这一表里，所以 ↑↓ 对它同样有效。
    */
   const onMoveSection = (id: string, dir: -1 | 1) =>
     edit('section-move', (d) => {
-      if (d.newSection !== null && d.newSection.id === id) return
+      if (d.sectionOrder.length === 0) {
+        d.sectionOrder = sectionGroups.flatMap((g) => g.sections.map((x) => x.id))
+      }
+      if (!d.sectionOrder.includes(id)) d.sectionOrder.push(id)
       d.sectionOrder = moveInList(d.sectionOrder, id, dir)
     })
 
@@ -1001,8 +969,10 @@ export default function ParamDefModal({
   const defaultField = (() => {
     if (draft.valueType === 'bool') {
       return (
-        <GroupPicker
+        <PickerModal
           label="出厂默认"
+          title={`选择出厂默认 · ${param.label}`}
+          subtitle="新机型 / 新版本没写这一项时用它"
           groups={[
             {
               title: null,
@@ -1013,8 +983,8 @@ export default function ParamDefModal({
             },
           ]}
           value={draft.defaultText}
-          onChange={(v) => edit('defaultText', (d) => (d.defaultText = v))}
-          width={200}
+          summary={draft.defaultText === 'true' ? '开启' : '关闭'}
+          onPick={(v) => edit('defaultText', (d) => (d.defaultText = v))}
         />
       )
     }
@@ -1024,15 +994,17 @@ export default function ParamDefModal({
           className={s.txt}
           value={draft.defaultText}
           inputMode="decimal"
-          aria-label="出厂默认 (defaultValue)"
+          aria-label="出厂默认"
           onChange={(e) => edit('defaultText', (d) => (d.defaultText = e.target.value))}
         />
       )
     }
     if (draft.choices.length > 0) {
       return (
-        <GroupPicker
+        <PickerModal
           label="出厂默认"
+          title={`选择出厂默认 · ${param.label}`}
+          subtitle="只能是选项之一"
           groups={[
             {
               title: null,
@@ -1044,8 +1016,8 @@ export default function ParamDefModal({
             },
           ]}
           value={draft.defaultText}
-          onChange={(v) => edit('defaultText', (d) => (d.defaultText = v))}
-          width={260}
+          summary={draft.choices.find((c) => c.value === draft.defaultText)?.label ?? draft.defaultText}
+          onPick={(v) => edit('defaultText', (d) => (d.defaultText = v))}
         />
       )
     }
@@ -1053,7 +1025,7 @@ export default function ParamDefModal({
       <input
         className={s.txt}
         value={draft.defaultText}
-        aria-label="出厂默认 (defaultValue)"
+        aria-label="出厂默认"
         onChange={(e) => edit('defaultText', (d) => (d.defaultText = e.target.value))}
       />
     )
@@ -1064,8 +1036,10 @@ export default function ParamDefModal({
     if (whenParam === null) return null
     if (whenParam.valueType === 'bool') {
       return (
-        <GroupPicker
+        <PickerModal
           label="前置条件的值"
+          title={`选择前置条件的值 · ${param.label}`}
+          subtitle={`条件是「${whenParam.label}」等于这个值`}
           groups={[
             {
               title: null,
@@ -1076,15 +1050,17 @@ export default function ParamDefModal({
             },
           ]}
           value={draft.whenValue}
-          onChange={(v) => edit('whenValue', (d) => (d.whenValue = v))}
-          width={200}
+          summary={draft.whenValue === 'true' ? '开启' : '关闭'}
+          onPick={(v) => edit('whenValue', (d) => (d.whenValue = v))}
         />
       )
     }
     if (whenParam.choices.length > 0) {
       return (
-        <GroupPicker
+        <PickerModal
           label="前置条件的值"
+          title={`选择前置条件的值 · ${param.label}`}
+          subtitle={`条件是「${whenParam.label}」等于这个值`}
           groups={[
             {
               title: null,
@@ -1096,8 +1072,10 @@ export default function ParamDefModal({
             },
           ]}
           value={draft.whenValue}
-          onChange={(v) => edit('whenValue', (d) => (d.whenValue = v))}
-          width={260}
+          summary={
+            whenParam.choices.find((c) => String(c.value) === draft.whenValue)?.label ?? draft.whenValue
+          }
+          onPick={(v) => edit('whenValue', (d) => (d.whenValue = v))}
         />
       )
     }
@@ -1106,7 +1084,7 @@ export default function ParamDefModal({
         className={s.txt}
         value={draft.whenValue}
         inputMode={whenParam.valueType === 'float' || whenParam.valueType === 'int' ? 'decimal' : undefined}
-        aria-label="前置条件的值 (showWhen.value)"
+        aria-label="前置条件的值"
         onChange={(e) => edit('whenValue', (d) => (d.whenValue = e.target.value))}
       />
     )
@@ -1121,7 +1099,7 @@ export default function ParamDefModal({
        * 「确认」——把框里的改动收进草稿。所以副标题不再写"写回…才落盘"，
        * 按钮也不叫「确认保存」：它确实不保存。
        */
-      subtitle={`改的是 presets/registry/param_registry.toml 的 [[params]] —— 确认只进草稿，右上角「保存」才写文件；Cmd+Z 撤框里的改动；注册键 ${param.key}`}
+      subtitle="改定义，保存后写入。Cmd+Z 撤销框里的改动。"
       size="lg"
       closeOnScrim={false}
       onClose={onClose}
@@ -1171,7 +1149,7 @@ export default function ParamDefModal({
             <input
               className={s.txt}
               value={draft.label}
-              aria-label="名称 (label)"
+              aria-label="名称"
               onChange={(e) => edit('label', (d) => (d.label = e.target.value))}
             />
           </label>
@@ -1182,7 +1160,7 @@ export default function ParamDefModal({
             <input
               className={s.txt}
               value={draft.desc}
-              aria-label="说明 (desc)"
+              aria-label="说明"
               onChange={(e) => edit('desc', (d) => (d.desc = e.target.value))}
             />
           </label>
@@ -1219,7 +1197,7 @@ export default function ParamDefModal({
         */}
         {staleList.length > 0 && (
           <p className={s.staleNote}>
-            {`中文改过之后，这几格还是旧译：${staleList.join(' · ')} —— 重写它们（内容变了）再确认，标记就摘掉。`}
+            {`这几格还是旧译文，重写后点确认。`}
             {/*
               逃生通道（2026-11-02）：译文可能是从别的路写的（直接改文件、或按
               `scripts/stale-translations.mjs` 的清单整批改），那种"改"后端看不见，
@@ -1242,7 +1220,7 @@ export default function ParamDefModal({
                     <input
                       className={staleList.includes(f.labelKey) ? `${s.txt} ${s.txtStale}` : s.txt}
                       value={draft[f.labelKey]}
-                      aria-label={`${f.title} 名称 (${f.labelKey})`}
+                      aria-label={`${f.title} 名称`}
                       onChange={(e) => edit(f.labelKey, (d) => (d[f.labelKey] = e.target.value))}
                     />
                   </label>
@@ -1251,7 +1229,7 @@ export default function ParamDefModal({
                     <input
                       className={staleList.includes(f.descKey) ? `${s.txt} ${s.txtStale}` : s.txt}
                       value={draft[f.descKey]}
-                      aria-label={`${f.title} 说明 (${f.descKey})`}
+                      aria-label={`${f.title} 说明`}
                       onChange={(e) => edit(f.descKey, (d) => (d[f.descKey] = e.target.value))}
                     />
                   </label>
@@ -1269,8 +1247,10 @@ export default function ParamDefModal({
             <span className={s.fieldLabel}>
               值类型
             </span>
-            <GroupPicker
+            <PickerModal
               label="值类型"
+              title={`选择值类型 · ${param.label}`}
+              subtitle="改类型不会搬已有的取值。"
               groups={[
                 {
                   title: null,
@@ -1281,16 +1261,18 @@ export default function ParamDefModal({
                 },
               ]}
               value={draft.valueType}
-              onChange={(v) => onValueType(v as ValueType)}
-              width={220}
+              summary={VT_LABEL[draft.valueType]}
+              onPick={(v) => onValueType(v as ValueType)}
             />
           </label>
           <label className={s.field}>
             <span className={s.fieldLabel}>
               控件
             </span>
-            <GroupPicker
+            <PickerModal
               label="控件"
+              title={`选择控件 · ${param.label}`}
+              subtitle="只列能画出来的控件。"
               groups={[
                 {
                   title: null,
@@ -1298,8 +1280,8 @@ export default function ParamDefModal({
                 },
               ]}
               value={draft.uiComponent}
-              onChange={(v) => edit('uiComponent', (d) => (d.uiComponent = v as UiComponent))}
-              width={220}
+              summary={UC_LABEL[draft.uiComponent]}
+              onPick={(v) => edit('uiComponent', (d) => (d.uiComponent = v as UiComponent))}
             />
           </label>
           <label className={s.field}>
@@ -1310,7 +1292,7 @@ export default function ParamDefModal({
               className={s.txt}
               value={draft.unit}
               placeholder="空 = 无单位"
-              aria-label="单位 (unit)"
+              aria-label="单位"
               onChange={(e) => edit('unit', (d) => (d.unit = e.target.value))}
             />
           </label>
@@ -1323,7 +1305,7 @@ export default function ParamDefModal({
               value={draft.step}
               placeholder="空 = 不限"
               inputMode="decimal"
-              aria-label="步进 (step)"
+              aria-label="步进"
               onChange={(e) => edit('step', (d) => (d.step = e.target.value))}
             />
           </label>
@@ -1342,7 +1324,7 @@ export default function ParamDefModal({
               value={draft.min}
               placeholder="空 = 不限"
               inputMode="decimal"
-              aria-label="最小 (min)"
+              aria-label="最小"
               onChange={(e) => edit('min', (d) => (d.min = e.target.value))}
             />
           </label>
@@ -1355,7 +1337,7 @@ export default function ParamDefModal({
               value={draft.max}
               placeholder="空 = 不限"
               inputMode="decimal"
-              aria-label="最大 (max)"
+              aria-label="最大"
               onChange={(e) => edit('max', (d) => (d.max = e.target.value))}
             />
           </label>
@@ -1382,7 +1364,7 @@ export default function ParamDefModal({
               <input
                 className={s.txt}
                 value={c.value}
-                placeholder="值（原词）"
+                placeholder="原词"
                 aria-label={`第 ${i + 1} 条可选项的值`}
                 onChange={(e) =>
                   edit(`choice.value.${i}`, (d) => {
@@ -1441,7 +1423,7 @@ export default function ParamDefModal({
                 type="button"
                 className={s.choiceMachines}
                 aria-haspopup="dialog"
-                title="只在这些机型上弃用这一档（与全局那一勾叠加）"
+                title="这些机型上弃用这一档。"
                 onClick={() => setPick({ kind: 'choiceDep', index: i })}
               >
                 {c.deprecatedMachines.length === 0 ? '机型…' : `机型 ${c.deprecatedMachines.length}`}
@@ -1497,74 +1479,100 @@ export default function ParamDefModal({
         <div className={s.grid}>
           {/*
             所属分组（2026-10-20，作者：「这个里面根本就没有看到它属于哪个 tab」）。
-            **搬到别的页签 = 两份文件一起改**：注册表的 `[params.layout].sectionId`
+            **搬到别的页签 = 两份文件一起改**：注册表的 `layout.sectionId`
             与 `layout_schema.toml` 的 items。后端在同一个事务里写，前端只管选。
 
-            2026-11-01 换成自绘下拉（`SectionPicker`）：原生 `<select>` 里没地方
-            挂「＋ 新增分组」，而页签只能当 `optgroup` 的死标签。新增的那一组先
-            只进草稿 —— 建了又取消的话，数据里不会多出一个删不掉的空组。
+            2026-11-14 从浮层下拉搬进模态框：面板还是 `SectionList` 那一块
+            （新建 / 改名 / 组上下移都还在），只是多了能滚动的一整屏。
           */}
           <div className={`${s.field} ${s.wide}`}>
             <span className={s.fieldLabel}>
               所属分组
             </span>
-            <SectionPicker
-              groups={sectionGroups}
-              value={draft.sectionId}
-              onPick={onSection}
-              onAdd={onAddSection}
-              isPending={(id) => draft.newSection !== null && draft.newSection.id === id}
-              onRename={onRenameSection}
-              onMove={onMoveSection}
-            />
+            <PickerModal
+              label="所属分组"
+              title={`选择所属分组 · ${param.label}`}
+              subtitle="换页签会同时改两份文件。"
+              summary={
+                hereSection === null ? (
+                  '选一个分组'
+                ) : (
+                  <>
+                    {sectionGroups.find((g) => g.sections.some((x) => x.id === hereSection.id))?.tabLabel ?? hereSection.tabId}
+                    {' · '}
+                    {hereSection.label}
+                    {herePending && <span className={s.pendingBadge}>待保存</span>}
+                  </>
+                )
+              }
+            >
+              <SectionList
+                groups={sectionGroups}
+                value={draft.sectionId}
+                selectable
+                onPick={onSection}
+                onRename={onRenameSection}
+                onMove={onMoveSection}
+                onAdd={onAddSection}
+                isPending={(id) =>
+                  draft.newSection !== null && draft.newSection.id === id && draft.sectionId === id
+                }
+                isDropped={(id) =>
+                  draft.newSection !== null && draft.newSection.id === id && draft.sectionId !== id
+                }
+                hint="新分组跟这次保存一起写入。"
+              />
+            </PickerModal>
           </div>
           {/*
             组内顺序：客户端按同一个 `layout.order` 排同一组里的参数 ——
             所以这不是「界面上的小偏好」，而是数据。后端保存时会把 items 一起重排。
 
-            ★ 2026-11-02 作者：「我希望也是下拉菜单然后可以右侧常驻复用箭头，
-            上下点击切换排序，就在下拉菜单里面操作」——
-            原来是一格「↑ 第 2 / 3 位 ↓」的小控件，箭头只能挪**自己**一位；
-            现在是一座下拉：**整组参数按当下的顺序排在里面，每行右边常驻上下箭头**，
-            在下拉里直接调。触发器仍然显示「第 N / 共 M 位」，收起后照样读得出位置。
-
-            选中行 = 这一条参数自己；点别的行**不改选中**（这一框只编辑这一条），
-            点箭头只挪位置、不关面板 —— 连着调几位不用反复开合。
+            ★ 2026-11-14 作者：「不只是改自己的……不只是上下箭头，难用」——
+            下拉里那套行尾 ↑↓（还只能挪自己）换成排序模态框：拖任意一行、直接输位次、
+            撤销 / 重做、恢复。它**单独一笔落盘**，不等这一框的「确认」（见 `pick/SortModal`）。
           */}
           <label className={s.field}>
             <span className={s.fieldLabel}>
               组内顺序
             </span>
-            <GroupPicker
-              label="组内顺序"
-              groups={orderGroups}
-              value={param.key}
-              onChange={() => undefined}
-              width={320}
+            <SortOrderButton
+              sectionId={draft.sectionId}
+              sectionLabel={hereSection?.label ?? draft.sectionId}
+              rows={sectionRows}
+              currentKey={param.key}
+              emptyHint={herePending ? '保存后才能排这一组' : undefined}
+              onApplied={onOrderApplied}
             />
           </label>
           <label className={s.field}>
             <span className={s.fieldLabel}>
               属于
             </span>
-            <GroupPicker
+            <PickerModal
               label="属于"
+              title={`选择「属于」· ${param.label}`}
+              subtitle="挂在哪个父参数下，只支持两层。"
               groups={parentGroups}
               value={draft.parentKey}
-              onChange={(v) => edit('parentKey', (d) => (d.parentKey = v))}
-              width={420}
+              summary={pickLabelOf(parentGroups, draft.parentKey)}
+              searchable
+              onPick={(v) => edit('parentKey', (d) => (d.parentKey = v))}
             />
           </label>
           <label className={s.field}>
             <span className={s.fieldLabel}>
               前置条件
             </span>
-            <GroupPicker
+            <PickerModal
               label="前置条件"
+              title={`选择「前置条件」· ${param.label}`}
+              subtitle="条件不成立时只读；不选就是无条件。"
               groups={whenGroups}
               value={draft.whenKey}
-              onChange={onWhenKey}
-              width={420}
+              summary={pickLabelOf(whenGroups, draft.whenKey)}
+              searchable
+              onPick={onWhenKey}
             />
           </label>
           {whenParam !== null && (
@@ -1573,8 +1581,10 @@ export default function ParamDefModal({
                 <span className={s.fieldLabel}>
                   档位
                 </span>
-                <GroupPicker
+                <PickerModal
                   label="档位"
+                  title={`选择「档位」· ${param.label}`}
+                  subtitle="这一条在什么条件下才成立"
                   groups={[
                     {
                       title: null,
@@ -1585,8 +1595,8 @@ export default function ParamDefModal({
                     },
                   ]}
                   value={draft.whenOp}
-                  onChange={(v) => edit('whenOp', (d) => (d.whenOp = v as ShowOp))}
-                  width={200}
+                  summary={OP_LABEL[draft.whenOp]}
+                  onPick={(v) => edit('whenOp', (d) => (d.whenOp = v as ShowOp))}
                 />
               </label>
               <label className={s.field}>
@@ -1607,8 +1617,8 @@ export default function ParamDefModal({
         {(herePending || hereSection === null) && (
           <p className={s.note}>
             {herePending && draft.newSection !== null
-              ? `这一组还没落盘：保存时一并建立，取消保存就不会留下。`
-              : '这一组在布局里找不到了 —— 保存前先在上面选一个分组。'}
+              ? '这一组还没保存，取消就没了。'
+              : '找不到这一组，保存前先选一个。'}
           </p>
         )}
       </div>
@@ -1641,7 +1651,7 @@ export default function ParamDefModal({
               type="button"
               className={s.pickerBtn}
               aria-haspopup="dialog"
-              title="点开挑机型 —— 可多选，按住拖过去整批勾上/摘掉"
+              title="点开挑机型，可多选、可拖动整批勾选。"
               onClick={() => setPick({ kind: 'filter' })}
             >
               <span className={s.pickerText}>{machineSummary(draft.machineFilter, machineList)}</span>
@@ -1658,12 +1668,12 @@ export default function ParamDefModal({
               type="button"
               className={s.pickerBtn}
               aria-haspopup="dialog"
-              title="只在这些机型上不许改（与「全局弃用」叠加：全局勾了就不用再挑）"
+              title="这些机型上不许改；全局已弃用就不用挑。"
               onClick={() => setPick({ kind: 'paramDep' })}
             >
               <span className={s.pickerText}>
                 {draft.deprecated
-                  ? '全局已弃用（这里只是留档）'
+                  ? '全局已弃用，这里只留档。'
                   : machineSummary(draft.deprecatedMachines, machineList)}
               </span>
               <span className={s.pickerCaret} aria-hidden>
@@ -1673,13 +1683,13 @@ export default function ParamDefModal({
               </span>
             </button>
           </label>
-          <label className={s.field} title="勾上 = 所有机型、所有版本都不许再改它">
+          <label className={s.field} title="所有机型、所有版本都不许再改。">
             <span className={s.fieldLabel}>全局弃用</span>
             <input
               className={s.check}
               type="checkbox"
               checked={draft.deprecated}
-              aria-label="全局弃用 (deprecated)"
+              aria-label="全局弃用"
               onChange={(e) => edit('deprecated', (d) => (d.deprecated = e.target.checked))}
             />
           </label>
@@ -1710,8 +1720,8 @@ export default function ParamDefModal({
         }
         subtitle={
           pick !== null && pick.kind === 'filter'
-            ? '点一下勾/摘；按住拖过去整批刷。一个都不选 = 全部机型'
-            : '点一下勾/摘；按住拖过去整批刷。一个都不选 = 不限机型'
+            ? '点选或拖选；都不选 = 全部机型。'
+            : '点选或拖选；都不选 = 不限机型。'
         }
         machines={machineList}
         selected={pickedMachines}
@@ -1727,7 +1737,7 @@ export default function ParamDefModal({
       <ModalC14
         open={confirmText !== null}
         title={`确认全局弃用 · ${param.label}`}
-        subtitle="这一步影响的是定义，不是某一台机型上的值 —— 确认后立即写回注册表"
+        subtitle="影响所有机型和版本，确认后写回。"
         size="md"
         closeOnScrim={false}
         onClose={() => setConfirmText(null)}

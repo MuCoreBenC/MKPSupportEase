@@ -14,7 +14,9 @@
  * 判据很具体：**这个文件里不该出现任何 `if` 判状态词、不该拼中文句子**。
  * 需要一句话的时候，那句话应该已经在返回值里了（`reason` / `explain` / `need`）。
  */
-import { invoke } from '@tauri-apps/api/core'
+import { invoke as tauriInvoke } from '@tauri-apps/api/core'
+
+import { track } from '../app/log/track'
 
 /* 主题档位的字面量与客户端是同一份契约（三个值的 id 由 Rust 那边的 ThemePref 钉着） */
 import type { ThemePref } from '../api/contract'
@@ -43,6 +45,24 @@ export interface AppError {
 /** Tauri 把 `Err(AppError)` 原样序列化过来，所以 catch 到的就是它 */
 export function isAppError(e: unknown): e is AppError {
   return typeof e === 'object' && e !== null && 'code' in e && 'message' in e
+}
+
+/* 命令成败进 ui.log：只记命令名与错误码，不记参数（参数里可能有名字 / 路径）。
+   高频轮询与日志搬运自己不记，省得成功刷屏。 */
+const SILENT_OK = new Set([
+  'log_ui_events', 'wb_txn_state', 'wb_book', 'wb_desk', 'wb_ui', 'wb_app_version',
+])
+
+async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    const out = await tauriInvoke<T>(command, args)
+    if (!SILENT_OK.has(command)) track('api.ok', command)
+    return out
+  } catch (e) {
+    const app = isAppError(e) ? e : null
+    track('api.fail', `${command} ${app?.code ?? 'UNKNOWN'} ${app?.traceId ?? ''}`.trim())
+    throw e
+  }
 }
 
 /* ---------- 枚举。与 Rust 的变体一一对应 ---------- */
@@ -75,6 +95,26 @@ export type UiComponent = 'number' | 'switch' | 'segmented' | 'select' | 'gcode'
 export type BlockScope = 'field' | 'section'
 /** `preview::BulkKind` */
 export type BulkKind = 'detaching' | 'changing' | 'noChange'
+
+/* ---------- 默认配置（客户端偏好出厂值） ---------- */
+
+/**
+ * `workbench::app::defaults::DefaultsField` —— 一行默认值。
+ *
+ * `value` 只有三种形态：开关（boolean）、数字（number）、枚举（string）——
+ * 后端也只认这三种，多一种就会在写盘前被拒。
+ */
+export interface DefaultsField {
+  key: string
+  label: string
+  value: string | number | boolean
+}
+
+/** `workbench::app::defaults::DefaultsView` —— 整页：文件路径 + 11 行 `[Prefs]` */
+export interface DefaultsView {
+  path: string
+  fields: DefaultsField[]
+}
 
 /* ---------- 启动 ---------- */
 
@@ -409,6 +449,41 @@ export interface SectionMetaEdit {
    * 按「确保它在」处理）。分组抽屉那颗「＋ 新增分组」走这条。
    */
   newSection?: NewSection | null
+}
+
+/**
+ * `registry::TabMetaEdit` —— 页签自己那一笔（`wb_set_tab_meta`）。
+ *
+ * 与分组的 `SectionMetaEdit` 平行但**不同层**：页签的次序在 `[[tabs]]` 的数组里，
+ * 分组的次序在 `[[tabs.sections]]` 的数组里。
+ */
+export interface TabMetaEdit {
+  /** 新名字（`null` = 不动）。只写中文那一册 */
+  label: string | null
+  /** 往哪边挪一格（`null` = 不动） */
+  move: 'up' | 'down' | null
+}
+
+/**
+ * `registry::GroupMembersEdit` —— 一次**成员编辑**的载荷。
+ *
+ * 只交最终成员序列与一个名字：改名、归类、移出由后端一次算差集写完，
+ * 不逐条重抄 `ParamMetaEdit` 整包定义，也是一次写盘一条撤销。
+ */
+export interface GroupMembersEdit {
+  /** 分组层 = section id；页签层 = tab id */
+  scope: 'section' | 'tab'
+  id: string
+  /** 新名字；null = 不动 */
+  label: string | null
+  /** 成员最终落到的分组 */
+  sectionId: string
+  /** 该组最终成员 key 序列；顺序值沿用这一组原有的槽位 */
+  keys: string[]
+  /** 这一笔顺手新建的分组（幂等） */
+  newSections?: NewSection[]
+  /** 该页签里分组的最终次序；界面给全量 id，后端规范化后重排 */
+  sectionOrder?: string[]
 }
 
 /* ---------- 矩阵 ---------- */
@@ -923,6 +998,25 @@ export interface TopOp {
   label: string
   /** 这一笔改了几处字段（同一格合并之后的条数） */
   fields: number
+  /**
+   * 这一笔属于哪几份（`A1` / `A1:STANDARD` / `bundles`…，2026-11-14）。
+   * 空 = 说不清（崩溃恢复那条合成 op）—— 界面不拿它拦。
+   */
+  owners: string[]
+}
+
+/**
+ * `app::UndoOutcome` —— 撤销 / 重做的结果（2026-11-14）。
+ *
+ * 只回 `TxnState` 的话，界面说不清「撤了哪一条」与「为什么没撤」；
+ * 而右下角那条提示与拒绝说明要的正是这两句。
+ */
+export interface UndoOutcome {
+  state: TxnState
+  /** 真撤 / 真重做了哪一条；`null` = 栈空或被拒 */
+  done: TopOp | null
+  /** 被作用域闸拦下时，栈顶那一笔（界面指名道姓说"是它的"） */
+  refused: TopOp | null
 }
 
 export interface SaveResult {
@@ -1037,6 +1131,21 @@ export interface GenerationReceipt {
   baseline: ReceiptCounts
   files: string[]
   error: string | null
+  /** 生成时**沿用**的发布线（`null` = 账本读不出来 / 老回执） */
+  catalogId?: string | null
+  /** 生成时**沿用**的序号 —— 生成不分配号（`null` = 同上） */
+  publishSerial?: number | null
+}
+
+/** `build::PublishSerialView` —— 当前发布序号（只读，不分配） */
+export interface PublishSerialView {
+  catalogId: string
+  /** 已经发出去的号；`null` = 这条线还没发布过 */
+  serial: number | null
+  /** 下一次发布会拿到的号 */
+  nextSerial: number
+  /** 账本与盘上目录是不是同一代 */
+  inSync: boolean
 }
 
 /** `build::GenerateReport` */
@@ -2097,6 +2206,11 @@ export interface VersionView {
   image: string | null
   /** 参数正文已补（14.4）。false = 纯继承基底，界面标「参数源待补」，**不隐藏该版本** */
   hasRecipe: boolean
+  /**
+   * 哪几册译文跟着中文一起过期了（2026-11-14，形如 `nameEn` / `tagJa`）。
+   * 空 = 一册都不欠 —— 多语言框按它给那几格标「与中文不一致」。
+   */
+  staleTranslations?: string[]
 }
 
 /*
@@ -2822,6 +2936,18 @@ export const wb = {
     }),
   words: () => invoke<Words>('wb_words'),
 
+  /** 默认配置：读 `presets/client-defaults.toml` 的 `[Prefs]` 段（影子树优先） */
+  defaultsView: () => invoke<DefaultsView>('wb_defaults_view'),
+
+  /**
+   * 默认配置：改一格。
+   *
+   * 写的是**影子树**里的那一份（草稿），右上角「保存改动」才进真仓库；
+   * 撤销 / 重做走结构编辑那条栈，与改机型显示名同一套。
+   */
+  defaultsApply: (key: string, value: string | number | boolean) =>
+    invoke<DefaultsView>('wb_defaults_apply', { key, value }),
+
   /**
    * 界面偏好：**主题档位**（`light` / `dark` / `system`）。`null` = 还没选过 ⇒ 跟随系统。
    *
@@ -2842,6 +2968,21 @@ export const wb = {
   setParamMeta: (key: string, edit: ParamMetaEdit) =>
     invoke<RegistryView>('wb_set_param_meta', { key, edit }),
   /**
+   * **整组重排**：提交这一组参数的最终次序（key 数组），顺序值由后端算。
+   *
+   * 与 `setParamMeta` 分开是刻意的：那条改的是「这条参数是什么」，载荷是整包定义，
+   * 拿它挪别人的位次就得把别人的定义原样重抄一遍。这条只回答「按什么次序摆」，
+   * 一次写盘、一条撤销。`keys` 必须与该分组现有的参数**完全相等**（少/多/重复一律拒）。
+   */
+  setSectionOrder: (sectionId: string, keys: string[]) =>
+    invoke<RegistryView>('wb_set_section_order', { sectionId, keys }),
+  /**
+   * **一次成员编辑**：改名 + 把别处参数归类进来 / 把本组参数移出去。
+   * 只交最终成员序列，差集与搬运由后端算；确认只进草稿，右上角「保存」才落盘。
+   */
+  editGroup: (edit: GroupMembersEdit) =>
+    invoke<RegistryView>('wb_edit_group', { edit }),
+  /**
    * **清掉译文台账里的几格**（逃生通道，2026-11-02）。
    *
    * 台账平日的摘法只有一条：`setParamMeta` 里"这一笔把值改了"。可译文也能从别的
@@ -2857,11 +2998,24 @@ export const wb = {
   setSectionMeta: (sectionId: string, edit: SectionMetaEdit) =>
     invoke<RegistryView>('wb_set_section_meta', { sectionId, edit }),
   /**
-   * **删掉一个空分组**。后端把三道门（还有参数 / 是组件卡 / 带条件）挡完才动手，
-   * 只删没有参数归它的组；同样是编辑事务里的一笔 —— 进草稿，等右上角「保存」。
+   * **删掉一个分组**。组里的参数不会被删：后端先落到同一页签末尾的「未归类」再删组，
+   * 组件卡与条件分组仍然拒收。同样是编辑事务里的一笔 —— 进草稿，等右上角「保存」。
    */
   removeSection: (sectionId: string) =>
     invoke<RegistryView>('wb_remove_section', { sectionId }),
+  /**
+   * **新建一个页签**。两份 TOML 各加一段 `[[tabs]]`，顺手在那下面建一个空分组
+   * （否则点进去是一屏空白，参数没处放）。同样只进草稿，等右上角「保存」。
+   */
+  addTab: (tabId: string, label: string) =>
+    invoke<RegistryView>('wb_add_tab', { tabId, label }),
+  /** 页签自己的那一笔（改名 / 上下移一格） */
+  setTabMeta: (tabId: string, edit: TabMetaEdit) =>
+    invoke<RegistryView>('wb_set_tab_meta', { tabId, edit }),
+  /**
+   * **删掉一个空页签**。带参数或带功能卡的拒收 —— 参数没有第二个去处，只能先搬走。
+   */
+  removeTab: (tabId: string) => invoke<RegistryView>('wb_remove_tab', { tabId }),
   matrix: (cols: ColRef[], tab: string | null, query: string, baseMachineId?: string | null) =>
     invoke<Matrix>('wb_matrix', { cols, tab, query, baseMachineId: baseMachineId ?? null }),
   trash: () => invoke<TrashEntry[]>('wb_trash'),
@@ -3152,8 +3306,16 @@ export const wb = {
   discard: () => invoke<BookView>('wb_discard'),
   /* —— 统一编辑事务（2026-10-31）：撤销/重做/状态在服务器侧，前端只按结果重取 —— */
   txnState: () => invoke<TxnState>('wb_txn_state'),
-  txnUndo: () => invoke<TxnState>('wb_txn_undo'),
-  txnRedo: () => invoke<TxnState>('wb_txn_redo'),
+  /*
+   * 撤销 / 重做（2026-11-14）。
+   *
+   * `scope` = 当前页面认的归属 token（`A1` / `A1:FAST261111` / `bundles`…）。
+   * 给了就**只撤属于它的一条**：栈顶不是它 ⇒ 一格不动，回 `refused` 让界面说清楚
+   * （作者：「我点了我当前这个版本，我撤销它可以撤销到我其他版本的」）。
+   * 不给 = 不看作用域（命令行 / 老调用）。
+   */
+  txnUndo: (scope?: string[]) => invoke<UndoOutcome>('wb_txn_undo', { scope: scope ?? null }),
+  txnRedo: (scope?: string[]) => invoke<UndoOutcome>('wb_txn_redo', { scope: scope ?? null }),
 
   preflight: () => invoke<IssueReport>('wb_preflight'),
   /**
@@ -3170,6 +3332,11 @@ export const wb = {
   /** 历次生成的回执（新的在前；应用数据目录，按份数自动清理） */
   receipts: (limit?: number) =>
     invoke<GenerationReceipt[]>('wb_receipts', { limit: limit ?? null }),
+  /**
+   * **当前发布序号**（只读）：页头常驻显示，不用点进发布闸。
+   * 取账本与 `catalog.json` 的最大值；不写盘、不分配号。
+   */
+  publishSerial: () => invoke<PublishSerialView>('wb_publish_serial'),
   revertPreview: (uid: string) => invoke<RevertPreview>('wb_revert_preview', { uid }),
   /**
    * **发布闸**（第二刀）：十五项逐项结果。
@@ -3447,4 +3614,12 @@ export const wb = {
    * 不提交 Git。交付集合没收敛 / 目录不是当前代时后端**整笔拒绝**，一个字节都不写。
    */
   updatePublishCredentials: () => invoke<CredentialUpdate>('wb_update_publish_credentials'),
+
+  /**
+   * 写系统剪贴板：与客户端同一条 Rust 命令（`copy_text`）。
+   *
+   * ★ 不用 `navigator.clipboard`：它要看用户手势，先 await 过 IPC 的按钮会被拒
+   *   （见 `ipc::copy_text` 的头注）。
+   */
+  copyText: (text: string) => invoke<void>('copy_text', { text }),
 }

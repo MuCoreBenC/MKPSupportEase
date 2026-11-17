@@ -36,6 +36,7 @@
     "support_top_z_distance": "0",
     "support_type": "normal(auto)",
     "tree_support_wall_count": "1",
+    "type": "process",
     "version": "2.0.0.83",
     "z_direction_outwall_speed_continuous": "1"
 }

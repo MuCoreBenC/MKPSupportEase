@@ -17,22 +17,37 @@
 
 mod classifier;
 mod delete_wipe;
+mod edge_band;
 mod glue_block;
+mod ironing_facts;
 mod metadata;
 mod model_iface;
 mod scan;
 mod stages;
 mod validity;
 
+pub use ironing_facts::IroningFacts;
+use ironing_facts::IroningLayerPath;
+
+/// 边缘带调试转储的落点（`MKP_EDGE_DEBUG=1` 时用）。
+///
+/// 管线自己会在每次运行开始时把它设成**产物所在目录**；钩子那条路是原地处理、
+/// 手里没有产物路径，所以在开跑前自己设成这一天的存档目录（见 `hook.rs`）。
+pub fn set_edge_dump_root(dir: Option<std::path::PathBuf>) {
+    edge_band::set_dump_root(dir);
+}
+
 pub(crate) use glue_block::{
-    calc_glue_z, custom_unmount_gcode_has_extrude, mount_toolhead, restore_fan_state,
-    unmount_toolhead,
+    RetractAt, calc_glue_z, custom_unmount_gcode_has_extrude, mount_toolhead, restore_fan_state,
+    retract_at, swap_retract, unmount_toolhead,
 };
 
 use std::collections::HashMap;
 
 use crate::diag::PostprocError;
-use crate::gcode::{format_e, has_slicer_comment_prefix, match_slicer_comment, math_round};
+use crate::gcode::{
+    extract_coord, format_e, has_slicer_comment_prefix, match_slicer_comment, math_round,
+};
 use crate::ir::{Ir, num_strip};
 
 use classifier::{LineClass, classify_line};
@@ -152,6 +167,13 @@ pub struct ProcessStats {
     pub slicer_version: String,
     #[serde(rename = "towerLayerHeightWarnings")]
     pub tower_layer_height_warnings: Vec<TowerLayerHeightWarning>,
+    /// **熨烫判据的事后事实**（2026-11-15）：判据本身不读它，只随记录出门给报告页看。
+    ///
+    /// 为什么要有：一张看着远超上限的熨烫面没被删掉，追查才发现判据按**切片器打的
+    /// 一小块**各自的挤出合计算（见 [`IroningFacts`] 的文件头）。`default` 是给
+    /// 老记录留的：那时序列化出来的 `stats` 里没有这一格。
+    #[serde(rename = "ironingFacts", default)]
+    pub ironing: IroningFacts,
 }
 
 /// pass1 产物：行序列 + 统计 + 层索引（11.6：不落 temp，按值交给 pass2）。
@@ -159,6 +181,27 @@ pub struct Pass1Output {
     pub lines: Vec<String>,
     pub stats: ProcessStats,
     pub layer_index: HashMap<ZKey, LayerHeightIndex>,
+}
+
+/// 笔从 `pen` 走到一条 `G0/G1` 的落点，返回（起点, 终点）。
+///
+/// 起点是**笔当场所在的位置**，空走也算 —— 空走不落料，但它确实把笔挪过去了。
+/// 拿上一条挤出移动的终点当起点，会在覆盖图上连出一条并不存在的线，把两块
+/// 相隔很远的支撑焊成一片（2026-11-17 实测：6.68 层 29 条，最长 27.30mm）。
+///
+/// 层首没有笔位时起点取终点本身（零长度）：不编造「从床原点走来」的那一段。
+/// 两个轴都给不出坐标时返回 `None`（这条移动不参与覆盖）。
+fn step_pen(
+    pen: Option<(f64, f64)>,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Option<((f64, f64), (f64, f64))> {
+    if x.is_none() && y.is_none() {
+        return None;
+    }
+    let from = pen.unwrap_or((x.unwrap_or(0.0), y.unwrap_or(0.0)));
+    let to = (x.unwrap_or(from.0), y.unwrap_or(from.1));
+    Some((from, to))
 }
 
 /// `FirstPass`：第一遍扫描（pass1.go:41）。
@@ -182,6 +225,11 @@ pub fn first_pass(
     let mut layer_height_index: HashMap<ZKey, LayerHeightIndex> = HashMap::new();
     let mut layer_feature_map: HashMap<ZKey, bool> = HashMap::new();
     let mut stats = ProcessStats::default();
+    /* 熨烫判据的事后事实：只累加，判据一个字节都不看它（见 `ironing_facts` 文件头） */
+    let mut ironing_facts = IroningFacts::default();
+    /* 这一张面判过了没有（`None` = 还没起段）：同一段里后面的 `M1031` 块沿用同一个结论，
+    不再各自合计（切片器会把一张面拆成几十块，见 `sum_ironing_run_e_sum`） */
+    let mut ironing_run_decided: Option<bool> = None;
     let mut sink = LineSink::default();
     let mut cancel_checker = crate::postproc::cancel::CancelChecker::with_interval(
         std::time::Instant::now(),
@@ -197,6 +245,18 @@ pub fn first_pass(
     let mut current_layer_height = 0.0f64;
     let mut last_layer_height = 0.0f64;
     let mut layer_thickness = 0.0f64;
+    /*
+     * 下方支撑余量（实验，2026-11-17）：攒每一层支撑材料的挤出移动。
+     * 涂胶块写在层的开头，笔落下去时托着它的是**上一层** —— Z_HEIGHT 切换时
+     * 把刚攒的收进 `prev_support`，本层重新攒。
+     */
+    /* 第五个数：这一条是不是支撑材料（真 = 支撑，假 = 零件本体）。
+     * 零件本体不铺覆盖区，只用来回答「孔里有没有料」。 */
+    let mut layer_moves: Vec<(f64, f64, f64, f64, bool)> = Vec::new();
+    let mut prev_moves: Vec<(f64, f64, f64, f64, bool)> = Vec::new();
+    let mut in_support = false;
+    /* 笔当前所在的位置：空走也推进（见 [`step_pen`]），层切时清空 */
+    let mut pen_xy: Option<(f64, f64)> = None;
     let mut last_xy_command = String::new();
     let mut last_xy_command_fe_flag = true;
     let mut start_idx = 0usize;
@@ -217,7 +277,6 @@ pub fn first_pass(
     let mut has_ironing_feature = false;
     let mut has_ironing_data = false;
     let mut in_support_ironing_section = false;
-    let mut e_sum: f64;
     let mut this_layer_too_low = false;
     let mut valid_count = 0i64;
     let mut invalid_count = 0i64;
@@ -276,6 +335,118 @@ pub fn first_pass(
         0
     }
 
+    /// 一段熨烫的挤出总量：从 `start` 之后扫到 `IRONING_EXTRUSIONS_END`（或下一处
+    /// 非 Support ironing 的 `FEATURE:`），累加带 XY 的 `G1` 行的 |E|。
+    ///
+    /// 与 `FEATURE: Support ironing` 分支里的同口径扫描共用，避免两处算法漂移。
+    fn sum_ironing_segment_e_sum(content: &[String], start: usize) -> f64 {
+        let mut e_sum = 0.0;
+        for temp_line in content.iter().skip(start + 1) {
+            let temp_line = temp_line.trim();
+            if temp_line.contains("IRONING_EXTRUSIONS_END") {
+                break;
+            }
+            if has_slicer_comment_prefix(temp_line, "FEATURE:")
+                && !has_slicer_comment_prefix(temp_line, "FEATURE: Support ironing")
+            {
+                break;
+            }
+            if (temp_line.contains("G1 X") || temp_line.contains("G1 Y")) && temp_line.contains('E')
+            {
+                if let Some(e_idx) = temp_line.find('E') {
+                    if e_idx + 1 < temp_line.len() {
+                        let e_char = temp_line.as_bytes()[e_idx + 1];
+                        let e_num_str = if e_char.is_ascii_digit() {
+                            temp_line[e_idx + 1..].to_string()
+                        } else if e_char == b'.' {
+                            format!("0{}", &temp_line[e_idx + 1..])
+                        } else {
+                            String::new()
+                        };
+                        if !e_num_str.is_empty() {
+                            let nums = num_strip(&e_num_str);
+                            if let Some(&n) = nums.first() {
+                                e_sum += n.abs();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        math_round(e_sum, 3)
+    }
+
+    /// **一整段熨烫（作者口径：一张面）**的挤出总量。
+    ///
+    /// # 为什么不按 `M1031` 块判（2026-11-15 作者实测）
+    ///
+    /// 切片器会把**同一张面**拆成几十个 `M1031` 块 —— 每块之间只隔一条空走和一句 `M204`
+    /// （打印时必须抬笔跳过去）。作者原话：「打印的时候它得跳起来，那个算拆分，
+    /// 但是判断的时候又不需要」。按块判的话，一张 11mm 的面会被拆成 38 个 0.5mm 的小块，
+    /// 任何阈值都比不出来（实测中位 0.05mm）。
+    ///
+    /// 所以这里**从第一块起把相邻的块连起来累加**，直到出现别的特征（`FEATURE:` 不是
+    /// 熨烫族）或换层 —— 那才是"一张面"。
+    fn sum_ironing_run_e_sum(content: &[String], start: usize) -> f64 {
+        let mut e_sum = 0.0;
+        let mut in_block = false;
+        for line in content.iter().skip(start) {
+            let t = line.trim();
+            if t.starts_with("M1031 S1") && t.contains("IRONING_EXTRUSIONS_START") {
+                in_block = true;
+                continue;
+            }
+            if t.contains("IRONING_EXTRUSIONS_END") {
+                in_block = false;
+                continue;
+            }
+            /* 换了别的特征 / 换层 ⇒ 这一段到此为止（与 `ironing_run_decided` 的复位同一判据） */
+            if has_slicer_comment_prefix(t, "FEATURE:")
+                && !has_slicer_comment_prefix(t, "FEATURE: Support ironing")
+                && !has_slicer_comment_prefix(t, "FEATURE: Ironing")
+            {
+                break;
+            }
+            if t.contains("; layer num/total_layer_count") {
+                break;
+            }
+            if in_block && (t.contains("G1 X") || t.contains("G1 Y")) && t.contains('E') {
+                if let Some(e_idx) = t.find('E') {
+                    if e_idx + 1 < t.len() {
+                        let e_char = t.as_bytes()[e_idx + 1];
+                        let e_num_str = if e_char.is_ascii_digit() {
+                            t[e_idx + 1..].to_string()
+                        } else if e_char == b'.' {
+                            format!("0{}", &t[e_idx + 1..])
+                        } else {
+                            String::new()
+                        };
+                        if !e_num_str.is_empty() {
+                            let nums = num_strip(&e_num_str);
+                            if let Some(&n) = nums.first() {
+                                e_sum += n.abs();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        math_round(e_sum, 3)
+    }
+
+    /// 这一张面要不要移除：`off` 恒移除；`auto` 按**整张面**的挤出总量判；
+    /// `on` 恒保留。
+    ///
+    /// `e_sum` 由调用方**先算好**再传进来：判定与事后统计用同一个数，
+    /// 不为"记录"多扫一遍（见 `ironing_facts`）。
+    fn should_remove_ironing_segment(ir: &Ir, e_sum: f64) -> bool {
+        match ir.ironing.mode.as_str() {
+            "off" => true,
+            "auto" => e_sum > ir.ironing.e_sum_threshold,
+            _ => false,
+        }
+    }
+
     for i in 0..content_len {
         // 协作取消（Task 17.2）：100ms 时间基节流，未取消时是一次时间比较
         cancel_checker.check(cancel, std::time::Instant::now())?;
@@ -319,6 +490,9 @@ pub fn first_pass(
 
         if match_slicer_comment(trimmed, "Z_HEIGHT: ") {
             last_layer_height = current_layer_height;
+            /* 上一层的支撑收口：它才是这一层涂胶笔下的承托面 */
+            prev_moves = std::mem::take(&mut layer_moves);
+            pen_xy = None;
             let nums = num_strip(trimmed);
             if let Some(&n) = nums.first() {
                 current_layer_height = n;
@@ -327,6 +501,34 @@ pub fn first_pass(
             layer_thickness = current_layer_height - last_layer_height;
             ir_data.state.inconsistent_count += 1;
             stats.total_z_height_layers += 1;
+        }
+
+        /* ---- 下方支撑：按层攒「支撑 + 零件本体」的挤出移动（实验判据的数据源） ----
+         * 开关关着就一行不攒：产物与旧版逐字节一致，也不付这份内存。
+         * 支撑铺覆盖区；零件本体只用于判「孔里有没有料」（填内孔的条件）。 */
+        if ir_data.prefs.under_support_enabled && class == LineClass::Feature {
+            in_support = crate::gcode::is_support_material_feature(trimmed);
+        }
+        if ir_data.prefs.under_support_enabled
+            && class == LineClass::Motion
+            && !trimmed.contains("G1 F")
+        {
+            let bytes = trimmed.as_bytes();
+            let x = extract_coord(bytes, b'X');
+            let y = extract_coord(bytes, b'Y');
+            let e = extract_coord(bytes, b'E');
+            /*
+             * 笔位每一条移动都推进（含空走）；只有挤出（E>0）才铺覆盖。
+             *
+             * 两件事必须分开：位置记录的是「笔在哪」，覆盖记录的是「哪里落过料」。
+             * 合在一起就会拿空走之前的旧位置当下一段的起点，凭空连出并不存在的覆盖。
+             */
+            if let Some((from, to)) = step_pen(pen_xy, x, y) {
+                if e.is_some_and(|v| v > 0.0) {
+                    layer_moves.push((from.0, from.1, to.0, to.1, in_support));
+                }
+                pen_xy = Some(to);
+            }
         }
 
         if trimmed.contains("; model printing time:") {
@@ -708,56 +910,11 @@ pub fn first_pass(
             start_idx_ironing = i;
             start_pos_cmd_ironing = find_prev_position_cmd(content, i);
             last_xy_command_fe_flag = false;
-            e_sum = 0.0;
-            for temp_line in content.iter().skip(i + 1) {
-                if has_slicer_comment_prefix(temp_line, "FEATURE:")
-                    && !has_slicer_comment_prefix(temp_line, "FEATURE: Ironing")
-                {
-                    break;
-                }
-                if (temp_line.contains("G1 X") || temp_line.contains("G1 Y"))
-                    && temp_line.contains('E')
-                {
-                    if let Some(e_idx) = temp_line.find('E') {
-                        if e_idx + 1 < temp_line.len() {
-                            let e_char = temp_line.as_bytes()[e_idx + 1];
-                            let e_num_str = if e_char.is_ascii_digit() {
-                                temp_line[e_idx + 1..].to_string()
-                            } else if e_char == b'.' {
-                                format!("0{}", &temp_line[e_idx + 1..])
-                            } else {
-                                String::new()
-                            };
-                            if !e_num_str.is_empty() {
-                                let nums = num_strip(&e_num_str);
-                                if let Some(&n) = nums.first() {
-                                    e_sum += n.abs();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            e_sum = math_round(e_sum, 3);
-            if ir_data.ironing.mode != "off" && e_sum < 0.1 {
-                this_layer_too_low = true;
-            }
-            if this_layer_too_low && e_sum > 0.15 {
-                this_layer_too_low = false;
-            }
-            if ir_data.ironing.mode == "off" {
-                ironing_removal_flag = true;
-                sink.push_str(&format!(
-                    "G1 E-{}",
-                    format_e(ir_data.machine.retract_length)
-                ));
-            } else if ir_data.ironing.mode == "auto" && e_sum > ir_data.ironing.e_sum_threshold {
-                ironing_removal_flag = true;
-                sink.push_str(&format!(
-                    "G1 E-{}",
-                    format_e(ir_data.machine.retract_length)
-                ));
-            }
+            ironing_removal_flag = true;
+            sink.push_str(&format!(
+                "G1 E-{}",
+                format_e(ir_data.machine.retract_length)
+            ));
         }
 
         // M1031 S1 ;IRONING_EXTRUSIONS_START：前瞻 1-5 行确认是否支撑面熨平
@@ -774,15 +931,28 @@ pub fn first_pass(
                     break;
                 }
             }
-            if !is_support_ironing && in_support_ironing_section && ir_data.ironing.mode == "off" {
+            if !is_support_ironing && in_support_ironing_section && ir_data.ironing.mode != "on" {
                 is_support_ironing = true;
             }
-            if is_support_ironing && ir_data.ironing.mode == "off" {
-                drop_pending_after_last_wipe_end(&mut pending_lines);
-                ironing_removal_flag = true;
-                // 跳过当前 M1031 S1 行（不进 pendingLines；Go 的 continue 同时
-                // 跳过本行末尾的刷新阈值检查，这里以真实 continue 复刻）
-                continue;
+            if is_support_ironing {
+                /* 一段（一张面）只合计、只判一次；后面的块沿用结论，不重复计数 */
+                let remove = match ironing_run_decided {
+                    Some(v) => v,
+                    None => {
+                        let e_sum = sum_ironing_run_e_sum(content, i);
+                        let v = should_remove_ironing_segment(ir_data, e_sum);
+                        ironing_facts.record_block(e_sum, v);
+                        ironing_run_decided = Some(v);
+                        v
+                    }
+                };
+                if remove {
+                    drop_pending_after_last_wipe_end(&mut pending_lines);
+                    ironing_removal_flag = true;
+                    // 跳过当前 M1031 S1 行（不进 pendingLines；Go 的 continue 同时
+                    // 跳过本行末尾的刷新阈值检查，这里以真实 continue 复刻）
+                    continue;
+                }
             }
         }
 
@@ -825,42 +995,16 @@ pub fn first_pass(
                 start_pos_cmd_ironing = find_prev_position_cmd(content, i);
                 last_xy_command_fe_flag = false;
             }
-            e_sum = 0.0;
-            for temp_line in content.iter().skip(i + 1) {
-                if has_slicer_comment_prefix(temp_line, "FEATURE:")
-                    && !has_slicer_comment_prefix(temp_line, "FEATURE: Support ironing")
-                {
-                    break;
+            // 挤出过低就改走支撑面路径的防呆只在「开启」下保留：
+            // 「自动」完全由用户设的挤出上限决定，两套判据不许同时说话。
+            if ir_data.ironing.mode == "on" {
+                let e_sum = sum_ironing_segment_e_sum(content, i);
+                if e_sum < 0.1 {
+                    this_layer_too_low = true;
                 }
-                if (temp_line.contains("G1 X") || temp_line.contains("G1 Y"))
-                    && temp_line.contains('E')
-                {
-                    if let Some(e_idx) = temp_line.find('E') {
-                        if e_idx + 1 < temp_line.len() {
-                            let e_char = temp_line.as_bytes()[e_idx + 1];
-                            let e_num_str = if e_char.is_ascii_digit() {
-                                temp_line[e_idx + 1..].to_string()
-                            } else if e_char == b'.' {
-                                format!("0{}", &temp_line[e_idx + 1..])
-                            } else {
-                                String::new()
-                            };
-                            if !e_num_str.is_empty() {
-                                let nums = num_strip(&e_num_str);
-                                if let Some(&n) = nums.first() {
-                                    e_sum += n.abs();
-                                }
-                            }
-                        }
-                    }
+                if this_layer_too_low && e_sum > 0.15 {
+                    this_layer_too_low = false;
                 }
-            }
-            e_sum = math_round(e_sum, 3);
-            if e_sum < 0.1 {
-                this_layer_too_low = true;
-            }
-            if this_layer_too_low && e_sum > 0.15 {
-                this_layer_too_low = false;
             }
         }
 
@@ -981,6 +1125,11 @@ pub fn first_pass(
             // 涂胶块前先刷新 pendingLines，避免上一层末尾特征被劈开
             flush_pending(&mut pending_lines, &mut sink, 0);
 
+            /* 这一层的涂胶路径最终从哪儿来 —— 下面各分支各记一次，收口处统一落账 */
+            let mut layer_path = IroningLayerPath::None;
+            /* 换层也意味着上一段熨烫结束（正常由 `FEATURE:` 复位，这里兜一道） */
+            ironing_run_decided = None;
+
             ir_data.state.this_layer_revitalization = false;
             let saved_inconsistent_count = ir_data.state.inconsistent_count;
             if !ir_data.prime.enabled {
@@ -998,6 +1147,7 @@ pub fn first_pass(
                 if !has_ironing_data || iface_ironing.is_empty() {
                     if !iface_moisture.is_empty() {
                         iface = iface_moisture.clone();
+                        layer_path = IroningLayerPath::Moisture;
                         if !xy_moisture_command.is_empty() {
                             last_xy_command = xy_moisture_command.clone();
                         }
@@ -1005,39 +1155,47 @@ pub fn first_pass(
                     tracing::info!("无熨烫特征数据，使用支撑面路径");
                 } else if ir_data.ironing.coverage_threshold == 0.0 {
                     if !iface_moisture.is_empty() {
-                        iface = model_iface::build_per_model_iface(
+                        let (lines, merge) = model_iface::build_per_model_iface(
                             &iface_ironing,
                             &iface_moisture,
                             0.0,
                             ir_data.ironing.suppress_expand,
                             &ir_data.ironing.suppress_expand_mode,
                         );
+                        iface = lines;
+                        ironing_facts.record_merge(merge);
                         tracing::info!("熨烫覆盖阈值=0，按区域混合熨烫/支撑面");
                     } else {
                         iface = model_iface::convert_internal_jumps(&iface_ironing);
                         tracing::info!("熨烫覆盖阈值=0，无支撑面数据，直接使用熨烫面");
                     }
+                    layer_path = IroningLayerPath::Ironing;
                     if !xy_moisture_command.is_empty() {
                         last_xy_command = xy_moisture_command.clone();
                     }
                 } else {
                     if !iface_moisture.is_empty() {
-                        iface = model_iface::build_per_model_iface(
+                        let (lines, merge) = model_iface::build_per_model_iface(
                             &iface_ironing,
                             &iface_moisture,
                             ir_data.ironing.coverage_threshold,
                             ir_data.ironing.suppress_expand,
                             &ir_data.ironing.suppress_expand_mode,
                         );
+                        iface = lines;
+                        ironing_facts.record_merge(merge);
+                        layer_path = IroningLayerPath::Ironing;
                         tracing::info!(
                             threshold = ir_data.ironing.coverage_threshold,
                             "按区域混合熨烫/支撑面"
                         );
                     } else if has_fallback_data {
                         iface = iface_fallback.clone();
+                        layer_path = IroningLayerPath::Fallback;
                         tracing::info!("无支撑面数据但有回退数据，使用回退路径");
                     } else {
                         iface = model_iface::convert_internal_jumps(&iface_ironing);
+                        layer_path = IroningLayerPath::Ironing;
                         tracing::info!("无支撑面数据且无回退数据，使用熨烫面");
                     }
                     if !xy_moisture_command.is_empty() {
@@ -1050,6 +1208,7 @@ pub fn first_pass(
             } else if has_ironing_feature && ir_data.ironing.mode == "off" {
                 if !iface_moisture.is_empty() {
                     iface = iface_moisture.clone();
+                    layer_path = IroningLayerPath::Moisture;
                 }
                 iface_moisture.clear();
                 if !xy_moisture_command.is_empty() {
@@ -1063,32 +1222,40 @@ pub fn first_pass(
             {
                 if ir_data.ironing.coverage_threshold == 0.0 {
                     if !iface_moisture.is_empty() {
-                        iface = model_iface::build_per_model_iface(
+                        let (lines, merge) = model_iface::build_per_model_iface(
                             &iface_ironing,
                             &iface_moisture,
                             0.0,
                             ir_data.ironing.suppress_expand,
                             &ir_data.ironing.suppress_expand_mode,
                         );
+                        iface = lines;
+                        ironing_facts.record_merge(merge);
                     } else {
                         iface = model_iface::convert_internal_jumps(&iface_ironing);
                     }
+                    layer_path = IroningLayerPath::Ironing;
                     if !xy_moisture_command.is_empty() {
                         last_xy_command = xy_moisture_command.clone();
                     }
                 } else {
                     if !iface_moisture.is_empty() {
-                        iface = model_iface::build_per_model_iface(
+                        let (lines, merge) = model_iface::build_per_model_iface(
                             &iface_ironing,
                             &iface_moisture,
                             ir_data.ironing.coverage_threshold,
                             ir_data.ironing.suppress_expand,
                             &ir_data.ironing.suppress_expand_mode,
                         );
+                        iface = lines;
+                        ironing_facts.record_merge(merge);
+                        layer_path = IroningLayerPath::Ironing;
                     } else if has_fallback_data {
                         iface = iface_fallback.clone();
+                        layer_path = IroningLayerPath::Fallback;
                     } else {
                         iface = model_iface::convert_internal_jumps(&iface_ironing);
+                        layer_path = IroningLayerPath::Ironing;
                     }
                     if !xy_moisture_command.is_empty() {
                         last_xy_command = xy_moisture_command.clone();
@@ -1098,6 +1265,7 @@ pub fn first_pass(
             } else if !ir_data.ironing.use_path && has_ironing_feature {
                 if !iface_moisture.is_empty() {
                     iface = iface_moisture.clone();
+                    layer_path = IroningLayerPath::Moisture;
                 }
                 iface_moisture.clear();
                 if !xy_moisture_command.is_empty() {
@@ -1107,6 +1275,7 @@ pub fn first_pass(
             } else if ir_data.ironing.mode != "off" && saved_inconsistent_count > 5 {
                 if !iface_moisture.is_empty() {
                     iface = iface_moisture.clone();
+                    layer_path = IroningLayerPath::Moisture;
                 }
                 iface_moisture.clear();
                 if !xy_moisture_command.is_empty() {
@@ -1117,6 +1286,7 @@ pub fn first_pass(
                 sink.push_str(";Warning, Too low extrusion for ironing segment.");
                 if !iface_moisture.is_empty() {
                     iface = iface_moisture.clone();
+                    layer_path = IroningLayerPath::Moisture;
                 }
                 if !xy_moisture_command.is_empty() {
                     last_xy_command = xy_moisture_command.clone();
@@ -1125,6 +1295,7 @@ pub fn first_pass(
             } else {
                 if !iface_moisture.is_empty() {
                     iface = iface_moisture.clone();
+                    layer_path = IroningLayerPath::Moisture;
                     if !xy_moisture_command.is_empty() {
                         last_xy_command = xy_moisture_command.clone();
                     }
@@ -1137,6 +1308,7 @@ pub fn first_pass(
                 && (ir_data.ironing.mode != "off" || has_ironing_feature)
             {
                 iface = iface_fallback.clone();
+                layer_path = IroningLayerPath::Fallback;
                 if !xy_moisture_command.is_empty() {
                     last_xy_command = xy_moisture_command.clone();
                 }
@@ -1146,11 +1318,49 @@ pub fn first_pass(
                 has_fallback_data = false;
                 iface_fallback.clear();
             }
+            /* 这一层的路径归属：一层只记一次（各分支只置标记，收口处落账） */
+            ironing_facts.record_layer(layer_path);
             this_layer_too_low = false;
             has_ironing_data = false;
             iface_ironing.clear();
             copy_flag_moisture = false;
             copy_flag_fallback = false;
+
+            /*
+             * 涂胶边缘带：只处理「本层要发射的这一份」，不写回 `iface` ——
+             * 有些层没有新的支撑面数据会沿用上一层的 iface，写回会一层层叠加。
+             *
+             * 它带回来的是**带标记的同一份路径**（边缘段插 `;EDGE_RAISE`），一段不删；
+             * 两个参数都是 0 时原样返回，输出逐字节不变。
+             */
+            /*
+             * 下方支撑余量（实验）：上一层支撑铺一张填过孔的覆盖图，
+             * 余量够的段不让它抬。开关关着 / 没攒到支撑 ⇒ `None`，输出与旧版一致。
+             */
+            let under_cfg = if ir_data.prefs.under_support_enabled && !prev_moves.is_empty() {
+                let support: Vec<(f64, f64, f64, f64)> = prev_moves
+                    .iter()
+                    .filter(|m| m.4)
+                    .map(|m| (m.0, m.1, m.2, m.3))
+                    .collect();
+                let all: Vec<(f64, f64, f64, f64)> =
+                    prev_moves.iter().map(|m| (m.0, m.1, m.2, m.3)).collect();
+                edge_band::UnderGrid::build(&support, &all)
+                    .map(|grid| (grid, ir_data.prefs.under_support_mm.max(0.0)))
+            } else {
+                None
+            };
+            let banded: Option<Vec<String>> = if iface.is_empty() {
+                None
+            } else {
+                Some(edge_band::apply(
+                    &iface,
+                    ir_data.glue.edge_lines,
+                    ir_data.glue.edge_lift,
+                    under_cfg.as_ref().map(|(grid, mm)| (grid, *mm)),
+                ))
+            };
+            let layer_iface: &[String] = banded.as_deref().unwrap_or(&iface);
 
             // 底面涂胶：主涂胶前深拷贝 iface（write_glue_lines 会改输入）
             let mut bottom_glue_iface_copy: Option<Vec<String>> = None;
@@ -1161,14 +1371,14 @@ pub fn first_pass(
                         .support_layer_z_set
                         .contains_key(&layer_key(last_layer_height - layer_thickness));
                 if !skip {
-                    bottom_glue_iface_copy = Some(iface.clone());
+                    bottom_glue_iface_copy = Some(layer_iface.to_vec());
                 }
             }
 
             // 主涂胶
             emit_glue_block(
                 &mut sink,
-                &iface,
+                layer_iface,
                 ir_data,
                 current_layer_height,
                 last_layer_height,
@@ -1229,6 +1439,20 @@ pub fn first_pass(
             last_xy_command_fe_flag = true;
         }
 
+        /*
+         * 换了一个特征 ⇒ 上一段连续熨烫到此为止。
+         *
+         * ★ **不带 `ironing_removal_flag` 这个条件**：那一位说的是"这一段正在被删"，
+         *   而这里要复位的是"这一段判完了没有"—— 保留的那一段同样要复位，
+         *   否则下一张面会沿用上一张面的结论（`sum_ironing_run_e_sum` 用的是同一判据）。
+         */
+        if has_slicer_comment_prefix(trimmed, "FEATURE:")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Ironing")
+            && !has_slicer_comment_prefix(trimmed, "FEATURE: Support ironing")
+        {
+            ironing_run_decided = None;
+        }
+
         if has_slicer_comment_prefix(trimmed, "FEATURE:")
             && !has_slicer_comment_prefix(trimmed, "FEATURE: Ironing")
             && !has_slicer_comment_prefix(trimmed, "FEATURE: Support ironing")
@@ -1284,6 +1508,7 @@ pub fn first_pass(
 
     flush_pending(&mut pending_lines, &mut sink, 0);
     crate::ir::fill_defaults(ir_data);
+    stats.ironing = ironing_facts;
     tracing::info!(valid = valid_count, invalid = invalid_count, "Pass1完成");
     stats.variable_layer_height = detect_variable_layer_height(&z_height_values);
     /* 层高范围（界面那一格）：可变层高时摆 `min – max`，见 `layer_height_range` 的窗口口径 */
@@ -1326,4 +1551,69 @@ fn format_g_shortest(v: f64) -> String {
     // （0~1000）两种表示一致，直接用十进制最短表示。
     let s = format!("{v}");
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::step_pen;
+
+    /// 空走推进笔位：下一段挤出的起点必须是空走落点，不能是上一段挤出的终点。
+    ///
+    /// 这一条就是「两块支撑中间隔着空气，却被连成一片」的现场：
+    /// 支撑 A 打印完 → 空走到支撑 B → 打印 B，B 的第一条不能从 A 的终点起笔。
+    #[test]
+    fn travel_moves_the_pen_so_next_extrusion_starts_at_the_travel_end() {
+        let mut pen = None;
+
+        /* 层首第一条：零长度，不编造起点 */
+        let (from, to) = step_pen(pen, Some(10.0), Some(10.0)).expect("有坐标");
+        assert_eq!(from, to);
+        pen = Some(to);
+
+        /* 支撑 A 的第二条，首尾相接 */
+        let (from, to) = step_pen(pen, Some(20.0), Some(10.0)).expect("有坐标");
+        assert_eq!(from, (10.0, 10.0));
+        pen = Some(to);
+
+        /* 空走到支撑 B 的落点：不落料，但笔到了 */
+        let (_, to) = step_pen(pen, Some(60.0), Some(40.0)).expect("有坐标");
+        pen = Some(to);
+
+        /* 支撑 B 的第一条：起点是空走落点，不是 A 的终点 */
+        let (from, _) = step_pen(pen, Some(70.0), Some(40.0)).expect("有坐标");
+        assert_eq!(from, (60.0, 40.0));
+    }
+
+    /// 反向：连续挤出仍然首尾相接，不能因为改成跟踪笔位就断开。
+    #[test]
+    fn consecutive_extrusions_stay_connected() {
+        let mut pen = None;
+        let mut prev_to: Option<(f64, f64)> = None;
+        for (x, y) in [(1.0, 2.0), (3.0, 2.0), (3.0, 4.0), (1.0, 4.0)] {
+            let (from, to) = step_pen(pen, Some(x), Some(y)).expect("有坐标");
+            if let Some(p) = prev_to {
+                assert_eq!(from, p, "相邻挤出必须首尾相接");
+            }
+            prev_to = Some(to);
+            pen = Some(to);
+        }
+    }
+
+    /// 只给一个轴：另一个轴沿用笔位，不能当 0。
+    #[test]
+    fn single_axis_move_keeps_the_other_coordinate() {
+        let (from, to) = step_pen(Some((5.0, 7.0)), Some(9.0), None).expect("有坐标");
+        assert_eq!(from, (5.0, 7.0));
+        assert_eq!(to, (9.0, 7.0));
+
+        let (_, to) = step_pen(Some((5.0, 7.0)), None, Some(1.0)).expect("有坐标");
+        assert_eq!(to, (5.0, 1.0));
+    }
+
+    /// 两个轴都没有坐标：这条行不参与覆盖，也不改写笔位。
+    #[test]
+    fn move_without_xy_is_ignored() {
+        assert!(step_pen(Some((5.0, 7.0)), None, None).is_none());
+        assert!(step_pen(None, None, None).is_none());
+    }
 }

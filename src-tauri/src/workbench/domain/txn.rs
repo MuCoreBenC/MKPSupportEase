@@ -185,6 +185,22 @@ struct Payload {
 }
 
 impl Payload {
+    /// **这一笔碰过哪些「归属」**（2026-11-14，撤销作用域用）。
+    ///
+    /// 与 `history::owners_of` 同一套来源：字段账里的 `owner` ∪ 文件路径反推。
+    /// 空 = 说不清（老的合成 op），调用方**不拿它拦**。
+    fn owners(&self) -> Vec<String> {
+        let mut out: Vec<String> = self.fields.values().map(|f| f.owner.clone()).collect();
+        out.extend(
+            self.files
+                .iter()
+                .filter_map(|(rel, _, _)| super::scopes::owner_of_rel(rel)),
+        );
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// 把这一笔并进自己：**`before` 保留最初那份**，`after` 换成最新那份。
     ///
     /// 于是「撤一次」回的是"我开始动手之前"，而不是"上一步"。这也正是合并的意义 ——
@@ -1160,12 +1176,19 @@ impl Txn {
     ///
     /// `recovered` 那条合成 op 没有逐条字段（它是"影子树里有一笔说不清的改动"），
     /// 记 0 处照实说不出来。
-    pub fn undo_top(&self) -> Option<(String, usize)> {
+    pub fn undo_top(&self) -> Option<(String, usize, Vec<String>)> {
         if self.recovered {
-            return Some(("上次会话未保存的改动".to_owned(), 0));
+            /* 合成 op：没有逐条字段 ⇒ 归属也说不清（空 = 不拦，见 `scopes` 头注） */
+            return Some(("上次会话未保存的改动".to_owned(), 0, Vec::new()));
         }
         let p = self.payloads.last()?;
-        Some((p.label.clone(), p.fields.len()))
+        Some((p.label.clone(), p.fields.len(), p.owners()))
+    }
+
+    /// 重做栈顶那一条（形状同 [`Self::undo_top`]）—— 重做同样过作用域闸。
+    pub fn redo_top(&self) -> Option<(String, usize, Vec<String>)> {
+        let p = self.redo.last()?;
+        Some((p.label.clone(), p.fields.len(), p.owners()))
     }
 
     /// **唯一统计来源**：所有 payload 的字段变化并集（去重键 `层, 归属, 键`）。

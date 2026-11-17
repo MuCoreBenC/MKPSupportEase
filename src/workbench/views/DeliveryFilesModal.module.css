@@ -86,8 +86,8 @@
 
 .itemOn,
 .itemOn:hover {
-  background: var(--w-primary-soft);
-  box-shadow: inset 2px 0 0 var(--w-primary);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 /* 文件名是主信息，状态与大小是右侧辅助格 —— 与生成页同一套布局 */
@@ -221,9 +221,9 @@
 
 .viewBtnOn,
 .viewBtnOn:hover {
-  background: var(--w-primary-soft);
+  background: var(--accent-soft);
   font-weight: 500;
-  color: var(--w-primary);
+  color: var(--accent);
 }
 
 /* 漂移详情：目录 / 盘上 / 原因三行 */

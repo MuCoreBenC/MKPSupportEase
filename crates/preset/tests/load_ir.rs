@@ -233,8 +233,15 @@ fn paint_block_z(output: &str) -> Vec<f64> {
 fn changing_offset_z_shifts_every_paint_block_by_the_same_amount() {
     let _seq = lock_sequence();
     let parsed: toml::Value = toml::from_str(&live_text()).expect("夹具不是合法 TOML");
+    /* 整数值在 TOML 里是 integer（`offset_z = 4` 不是 `4.0`）——
+    `as_float()` 对整数返回 None，这里两种形态都认，判据本身只看差值。 */
     let base_z = parsed["toolhead"]["offset_z"]
         .as_float()
+        .or_else(|| {
+            parsed["toolhead"]["offset_z"]
+                .as_integer()
+                .map(|i| i as f64)
+        })
         .expect("夹具里必须有 toolhead.offset_z");
     let bumped = live_preset_with(|v| {
         v["toolhead"]["offset_z"] = toml::Value::Float(base_z + 0.5);

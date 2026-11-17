@@ -51,8 +51,8 @@
 
 .itemOn,
 .itemOn:hover {
-  background: var(--w-primary-soft);
-  box-shadow: inset 2px 0 0 var(--w-primary);
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 /* 路径可能很长（`registry/param_registry.toml`）—— 省略号，完整路径在悬停说明里 */
@@ -306,8 +306,8 @@
 }
 
 .whyUser {
-  border-color: var(--w-primary);
-  color: var(--w-primary);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .whyWarn {
@@ -372,9 +372,9 @@
 
 .viewBtnOn,
 .viewBtnOn:hover {
-  background: var(--w-primary-soft);
+  background: var(--accent-soft);
   font-weight: 500;
-  color: var(--w-primary);
+  color: var(--accent);
 }
 
 /* ---------- 窄框：两栏退成一栏 ---------- */

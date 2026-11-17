@@ -28,6 +28,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
+import { useScope } from '../scopeState'
 import type { AssetInspectView, AssetList, AssetView, Words } from '../api'
 import { assetsBus } from '../assetsBus'
 import GroupManagerModal from './GroupManagerModal'
@@ -108,18 +109,15 @@ function formatStamp(iso: string | null): string | null {
 function hashCheckNote(v: AssetInspectView): string {
   switch (v.hashCheck) {
     case 'match':
-      return '一致 —— 目录记的就是盘上这份'
-    case 'mismatch': {
-      const was = v.registeredSize !== null ? formatBytes(v.registeredSize) : '—'
-      const now = v.bytes !== null ? formatBytes(v.bytes) : '—'
-      return `不一致 —— 目录记 ${was}，盘上现在 ${now}；重新生成 / 发布会改写登记`
-    }
+      return '与目录登记一致。'
+    case 'mismatch':
+      return '与目录登记不一致，重新生成后更新。'
     case 'notRegistered':
-      return '目录里还没这一条 —— 生成或发布后才有'
+      return '还没登记，生成后才有。'
     case 'notInDelivery':
-      return '不进交付目录（随包 / 图片类），目录不登记哈希'
+      return '随包或图片类，不登记哈希。'
     case 'missing':
-      return '文件不在，无从比对'
+      return '文件不在，无法比对。'
   }
 }
 
@@ -163,6 +161,8 @@ export default function AssetsPage({
   /** 检查面板（第四刀）：盘上那个文件的样子 —— 选中一条才问（重字段要读真实字节） */
   const [inspect, setInspect] = useState<AssetInspectView | null>(null)
   const [sel, setSel] = useState<string | null>(initialSel ?? null)
+  /* 撤销作用域：资产那一页认 assets.toml（2026-11-14） */
+  useScope(['assets'])
   /**
    * 「校准身份」那一栏的选择框展开与否（2026-10-19）。
    *
@@ -317,7 +317,7 @@ export default function AssetsPage({
       [{ kind: 'setVisibility', fileId: id, visibility: v }],
       { quiet: true },
     )
-    toasts.push(`已把 ${id} 设为${v === 'menu' ? '可选' : '仅归档'}（改了先进草稿，保存才落盘）`)
+    toasts.push(`已设为${v === 'menu' ? '可选' : '仅归档'}，保存后写入。`)
     /* 可见性连着四态与页脚计数 —— 重新读一遍（草稿态在会话里，重取就看得见） */
     load(kind, assign, slicer, nozzle, layer, q, group)
   }
@@ -362,8 +362,8 @@ export default function AssetsPage({
       onBookRefresh()
       toasts.push(
         v === 'bundled'
-          ? `已把 ${id} 设为随包（构建期打进客户端，客户端不再单独下载）`
-          : `已把 ${id} 改回按需下载（客户端预设页看得到、可手动下）`,
+          ? `已把 ${id} 设为随包，客户端不再下载。`
+          : `已把 ${id} 改回按需下载。`,
       )
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
@@ -385,7 +385,7 @@ export default function AssetsPage({
       const next = await wb.removeAsset(id)
       setList(next)
       assetsBus.bump()
-      toasts.push(`已删除 ${id}（登记条目没了，文件本体还在资产目录里）`)
+      toasts.push(`已删除 ${id}，文件还在资产目录。`)
       setConfirm(null)
       setSel(null)
     } catch (e) {
@@ -428,7 +428,7 @@ export default function AssetsPage({
 
   if (!list) {
     if (pageErr) return <p className="wb-todo">{pageErr}</p>
-    return <p className="wb-todo">正在读资产定义……</p>
+    return <p className="wb-todo">正在读资产…</p>
   }
 
   const listeds = list.assets
@@ -439,7 +439,7 @@ export default function AssetsPage({
         <div className={s.topRow}>
           <input
             className={s.inp}
-            placeholder="搜索名称 / id"
+            placeholder="搜名称或 id"
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -508,7 +508,7 @@ export default function AssetsPage({
               type="button"
               className={`${s.btn} ${s.btnSm} ${group === UNGROUPED ? s.btnOn : ''}`}
               onClick={() => setGroup(UNGROUPED)}
-              title="没进任何组的那些 —— 先筛出来，再一起拉进一个新建的组"
+              title="未分组的文件。"
             >
               未分组
             </button>
@@ -536,7 +536,7 @@ export default function AssetsPage({
                   .then((l) => setMgrAssets(l.assets))
                   .catch(() => undefined)
               }}
-              title="建组 / 改名 / 拉图进出 / 删组 —— 分组登记在台账 `[[groups]]`，跟仓库走"
+              title="建组、改名、拉图进出、删组。"
             >
               管理分组…
             </button>
@@ -708,10 +708,10 @@ export default function AssetsPage({
                 disabled={insp === null || !insp.exists}
                 data-tip={
                   insp === null
-                    ? '正在读文件信息……'
+                    ? '正在读文件…'
                     : insp.exists
-                      ? '打开系统文件管理器并选中这个文件'
-                      : '文件不在，没什么可显示的（期望路径在「资产检查」里）'
+                      ? '在文件管理器里显示。'
+                      : '文件不在，看下方「资产检查」。'
                 }
                 onClick={() => {
                   void (async () => {
@@ -749,7 +749,7 @@ export default function AssetsPage({
                             key: null,
                           })
                         }
-                        title="去「机型与版本」页改这一版的名字（资产库显示的是同一个值）"
+                        title="名字在机型页改。"
                       >
                         在版本页改
                       </button>
@@ -761,7 +761,7 @@ export default function AssetsPage({
                 )}
                 <span className={s.kvKey}>台账路径</span>
                 <span className={`${s.kvVal} ${s.mono}`}>
-                  {cur.path || <span className={s.kvDim}>（生成产物，没有源 path —— 看下面的「产物路径」）</span>}
+                  {cur.path || <span className={s.kvDim}>（生成产物，看下面「产物路径」）</span>}
                 </span>
                 <span className={s.kvKey}>适用机型</span>
                 <span className={s.kvVal}>
@@ -777,21 +777,21 @@ export default function AssetsPage({
                     <span className={s.kvVal}>
                       {(cur.slicer ?? 'bbs') === 'orca' ? 'Orca' : 'BBS'} · 喷嘴{' '}
                       {cur.nozzle ?? '—'} · 层高 {cur.layer ?? '—'}
-                      <span className={s.cardNote}>（从路径与文件名读出）</span>
+                      <span className={s.cardNote}>从路径读出。</span>
                     </span>
                   </>
                 )}
                 <span className={s.kvKey}>文件</span>
                 <span className={s.kvVal}>
                   {!cur.present ? (
-                    <span className={s.kvDim}>登记了，文件还没搬进来</span>
+                    <span className={s.kvDim}>已登记，文件未到。</span>
                   ) : cur.kind === 'image' || cur.kind === 'icon' || cur.kind === 'guide' ? (
                     /* 点一下放大看（作者 2026-10-16：「资产库的话，大部分图片的话，
                        我希望都可以点击把它放大之类的」）—— 缩略图 200×120 看不清细节 */
                     <button
                       type="button"
                       className={s.shotBtn}
-                      title="点一下放大看"
+                      title="点击放大"
                       onClick={() => setZoom(cur)}
                     >
                       <img
@@ -868,7 +868,7 @@ export default function AssetsPage({
                     className={`${s.btn} ${s.btnSm}`}
                     onClick={() => void rereadInspect()}
                     disabled={sel === null}
-                    title="改了盘上那个文件之后点它重读 —— 大小 / 时间 / SHA-256 都按现在的文件重算，并与交付目录登记的值核对"
+                    title="重读这个文件，核对大小、时间与指纹。"
                   >
                     重读
                   </button>
@@ -883,14 +883,14 @@ export default function AssetsPage({
                     <span className={`${s.kvVal} ${s.mono}`}>
                       {insp.fileName}
                       {cur.kind === 'mkPreset' && (
-                        <span className={s.cardNote}>（产物名，命名规则算出）</span>
+                        <span className={s.cardNote}>（产物名，自动算出）</span>
                       )}
                     </span>
                     <span className={s.kvKey}>{insp.exists ? '源文件路径' : '期望路径'}</span>
                     <span className={`${s.kvVal} ${s.mono}`}>
                       {insp.absPath}
                       {!insp.exists && (
-                        <span className={s.cardNote}>（文件不在，这就是它该在的地方）</span>
+                        <span className={s.cardNote}>（文件不在，这是它该在的位置）</span>
                       )}
                     </span>
                     {insp.productPath !== null && (
@@ -913,7 +913,7 @@ export default function AssetsPage({
                           {insp.width} × {insp.height}
                         </span>
                       ) : (
-                        <span className={s.kvDim}>不是图片 / 读不出</span>
+                        <span className={s.kvDim}>不是图片 / 读不到</span>
                       )}
                     </span>
                     <span className={s.kvKey}>大小</span>
@@ -926,11 +926,11 @@ export default function AssetsPage({
                     </span>
                     <span className={s.kvKey}>修改时间</span>
                     <span className={`${s.kvVal} ${s.mono}`}>
-                      {formatStamp(insp.modified) ?? <span className={s.kvDim}>读不出</span>}
+                      {formatStamp(insp.modified) ?? <span className={s.kvDim}>读不到</span>}
                     </span>
                     <span className={s.kvKey}>创建时间</span>
                     <span className={`${s.kvVal} ${s.mono}`}>
-                      {formatStamp(insp.created) ?? <span className={s.kvDim}>读不出</span>}
+                      {formatStamp(insp.created) ?? <span className={s.kvDim}>读不到</span>}
                     </span>
                     <span className={s.kvKey}>登记 SHA-256</span>
                     <span className={`${s.kvVal} ${s.mono}`}>
@@ -1029,7 +1029,7 @@ export default function AssetsPage({
                           className={`${s.btn} ${s.btnSm}`}
                           onClick={() => setCalibPick(true)}
                           disabled={!cur.present}
-                          data-tip={cur.present ? undefined : '文件不在，先把它放回来'}
+                          data-tip={cur.present ? undefined : '文件不在，先放回去。'}
                         >
                           {cur.calibration.actual == null ? '补标记' : '改写'}
                         </button>
@@ -1074,7 +1074,7 @@ export default function AssetsPage({
                       className={`${s.btn} ${s.btnSm}`}
                       onClick={() => onGoto('bundles', { machineId: null, uid: usage?.bundles[0] ?? null, key: null })}
                       disabled={!usage?.bundles.length}
-                      data-tip={usage?.bundles.length ? undefined : '反查还没回来'}
+                      data-tip={usage?.bundles.length ? undefined : '还没读到引用。'}
                     >
                       去套餐页看谁装着它
                     </button>
@@ -1106,8 +1106,8 @@ export default function AssetsPage({
                     }}
                     data-tip={
                       cur.delivery === 'bundled'
-                        ? '改回按需下载：客户端预设页看得到、可手动下'
-                        : '解除归档：回到可选'
+                        ? '改回按需下载。'
+                        : '解除归档。'
                     }
                   >
                     {cur.delivery === 'bundled' ? '改回按需下载' : '改回可选'}
@@ -1260,8 +1260,8 @@ export default function AssetsPage({
         ) : (
           <p className={s.note} style={{ margin: 0 }}>
             {confirm === 'archive'
-              ? '设为「仅归档」后客户端完全看不到它。而它现在还在套餐里 —— 那正是那条静默漏洞：客户看得到套餐、拿不到文件、还不报错。'
-              : '没有套餐装它，也没有机型引用它。删掉之后这份登记就没了（文件本体留在资产目录里，发布也不会再带上它）。'}
+              ? '归档后客户端看不到它，但套餐还在用它。'
+              : '删除只去登记，文件还在资产目录，发布不再带上它。'}
           </p>
         )}
       </ModalC14>

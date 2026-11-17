@@ -346,6 +346,15 @@ pub struct ResultFacts {
     /// 到底跑去了哪几个坐标。正常那一趟是 `null`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug: Option<postprocess::ir::types::DebugIr>,
+    /// **这一趟开着热床预涂胶**：产物里插了涂胶块，打印时那支笔会真的在板面上走一圈。
+    ///
+    /// 界面据此在结果屏上先摆一句"盯住开头涂胶那一段"—— 涂胶那一段没人看着就可能
+    /// 划伤打印板，那不归文件管，只能由人当场叫停。
+    ///
+    /// 判据与内核插块的条件同源：`ir.prefs.bed_glue_enabled` 且这一盘**不是校准件**
+    /// （`apply_bed_glue` 对校准件直接返回，什么都不插）。
+    #[serde(default)]
+    pub bed_glue: bool,
 }
 
 /// 钩子 → 界面。

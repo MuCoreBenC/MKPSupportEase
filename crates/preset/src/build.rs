@@ -31,6 +31,11 @@ use postprocess::ir::num_strip;
 use postprocess::postproc::pen_template::{PenVars, render};
 use std::collections::HashMap;
 
+/// 旧口径（`glue_edge_percent`）开着、新键又没写时接过来的条数。
+///
+/// 0.8mm 左右（按 0.4 线距算），与作者当时用的 10% 在常见面上是同一个量级。
+const DEFAULT_EDGE_LINES: i64 = 2;
+
 /// 把「骨架 + 字段」渲染成最终 G-code。
 ///
 /// 结构不对（未知占位符、没闭合、行首不是 G/M/L）就是预设内容非法，硬错误 ——
@@ -213,14 +218,11 @@ pub fn build(
     if ir.ironing.coverage_threshold > 0.0 && ir.ironing.coverage_threshold <= 1.0 {
         ir.ironing.coverage_threshold *= 100.0;
     }
-    ir.ironing.suppress_expand = cfg.wiping.ironing_suppress_expand;
+    ir.ironing.suppress_expand = cfg.wiping.ironing_keepout;
     ir.ironing.suppress_expand_mode =
-        normalize_ironing_suppress_expand_mode(&cfg.wiping.ironing_suppress_expand_mode)
-            .to_string();
-    ir.ironing.e_sum_threshold = cfg.wiping.ironing_e_sum_threshold;
-    if ir.ironing.e_sum_threshold == 0.0 {
-        ir.ironing.e_sum_threshold = reg_float(&defaults, "IroningESumThreshold", 7.9);
-    }
+        normalize_ironing_keepout_mode(&cfg.wiping.ironing_keepout_mode).to_string();
+    // 缺键已在 serde 侧回落默认值，这里原样传：填 0 就是 0（任何挤出都算超过上限）。
+    ir.ironing.e_sum_threshold = cfg.wiping.ironing_e_sum_limit;
     ir.ironing.extrude_ratio = 0.0;
 
     // ---- Outer structure SSOT ----
@@ -247,6 +249,20 @@ pub fn build(
 
     // ---- Glue ----
     ir.glue.z_offset = cfg.toolhead.glue_z_offset;
+    /*
+     * 边缘带：新键是「靠外几条」，旧键是「占短边的百分比」，已退役。
+     *
+     * 旧键在用户手上那份预设里可能正开着（10%）—— 直接丢掉等于把人家的功能悄悄关掉，
+     * 所以「新键没写而旧键开着」时按默认条数接过来；两个都是 0 才算关。
+     */
+    ir.glue.edge_lines = if cfg.wiping.glue_edge_lines > 0 {
+        cfg.wiping.glue_edge_lines
+    } else if cfg.wiping.glue_edge_percent > 0.0 {
+        DEFAULT_EDGE_LINES
+    } else {
+        0
+    };
+    ir.glue.edge_lift = cfg.wiping.glue_edge_lift;
     ir.glue.sparse_ratio = cfg.wiping.glue_sparse_ratio;
     ir.glue.pass_count = cfg.wiping.glue_pass_count;
     if ir.glue.pass_count == 0 {
@@ -414,6 +430,34 @@ pub fn build(
         }
     }
     ir.gcode.mkp_extrude = mkp_extrude;
+
+    /* 回抽 / 回填的速度与位置（2026-11-13）。
+     *
+     * 速度为 0 = 老预设没有这一格 ⇒ 用默认 25 mm/s（正好是原来硬编码的 F1500），
+     * 所以老文件出来的字节不变。位置只认三档：认不出就报错，不拿默认值把它圆过去。 */
+    ir.gcode.mkp_retract_speed = if cfg.toolhead.mkp_retract_speed > 0.0 {
+        cfg.toolhead.mkp_retract_speed
+    } else {
+        DEFAULT_E_SPEED_MM_PER_S
+    };
+    ir.gcode.mkp_extrude_speed = if cfg.toolhead.mkp_extrude_speed > 0.0 {
+        cfg.toolhead.mkp_extrude_speed
+    } else {
+        DEFAULT_E_SPEED_MM_PER_S
+    };
+    let retract_at = cfg.toolhead.mkp_retract_at.trim();
+    ir.gcode.mkp_retract_at = match retract_at {
+        "" => "model".to_string(),
+        "model" | "wait" | "after_dock" => retract_at.to_string(),
+        other => {
+            return Err(PostprocError::InvalidConfig {
+                message: format!(
+                    "参数 toolhead.MKP_retract_at 的值 {other} 认不出：只能是 model / wait / after_dock"
+                ),
+            });
+        }
+    };
+    ir.gcode.mkp_extrude_spread = cfg.toolhead.mkp_extrude_spread;
 
     for line in &ir.toolhead.custom_unmount_gcode {
         if line.contains("G1 E") && !line.contains("Wipe") {
@@ -627,10 +671,10 @@ fn validate_ranges(ir: &Ir, registry: Option<&Registry>) -> Result<(), PostprocE
     }
     let float_checks: Vec<FloatCheck> = vec![
         FloatCheck {
-            name: "IroningESumThreshold",
+            name: "IroningESumLimit",
             val: ir.ironing.e_sum_threshold,
-            config_key: "IroningESumThreshold",
-            hard_min: 0.1,
+            config_key: "IroningESumLimit",
+            hard_min: 0.0,
             hard_max: 100.0,
         },
         FloatCheck {
@@ -641,9 +685,16 @@ fn validate_ranges(ir: &Ir, registry: Option<&Registry>) -> Result<(), PostprocE
             hard_max: 100.0,
         },
         FloatCheck {
-            name: "IroningSuppressExpand",
+            name: "IroningKeepout",
             val: ir.ironing.suppress_expand,
-            config_key: "IroningSuppressExpand",
+            config_key: "IroningKeepout",
+            hard_min: 0.0,
+            hard_max: 20.0,
+        },
+        FloatCheck {
+            name: "GlueEdgeLift",
+            val: ir.glue.edge_lift,
+            config_key: "GlueEdgeLift",
             hard_min: 0.0,
             hard_max: 20.0,
         },
@@ -896,6 +947,13 @@ fn validate_ranges(ir: &Ir, registry: Option<&Registry>) -> Result<(), PostprocE
             hard_max: 10,
         },
         IntCheck {
+            name: "GlueEdgeLines",
+            val: ir.glue.edge_lines,
+            config_key: "GlueEdgeLines",
+            hard_min: 0,
+            hard_max: 6,
+        },
+        IntCheck {
             name: "UserDryTime",
             val: ir.wiping.user_dry_time,
             config_key: "UserDryTime",
@@ -1000,7 +1058,7 @@ pub(crate) fn normalize_disk_stagger_swing_mode(v: &str) -> &str {
     if v.is_empty() { "spiral" } else { v }
 }
 
-pub(crate) fn normalize_ironing_suppress_expand_mode(v: &str) -> &str {
+pub(crate) fn normalize_ironing_keepout_mode(v: &str) -> &str {
     if v.is_empty() { "bbox" } else { v }
 }
 
@@ -1080,7 +1138,8 @@ mod tests {
         assert!((ir.tower.first_layer_flow - 1.0).abs() < f64::EPSILON);
         assert!((ir.disk.stagger_angle - 5.0).abs() < f64::EPSILON);
         assert!((ir.disk.stagger_max_angle - 45.0).abs() < f64::EPSILON);
-        assert!((ir.ironing.e_sum_threshold - 7.9).abs() < f64::EPSILON);
+        // 这一项不参与零值兜底：0 就是「任何挤出都算超上限」，缺键才回落 7.9。
+        assert_eq!(ir.ironing.e_sum_threshold, 0.0);
         assert!((ir.sheath.base_expand - 5.0).abs() < f64::EPSILON);
         assert!((ir.sheath.wall_width - 0.8).abs() < f64::EPSILON);
         assert_eq!(ir.glue.pass_count, 1);
@@ -1092,6 +1151,53 @@ mod tests {
             (ir.glue.z_lift_height - 5.0).abs() < f64::EPSILON,
             "B 类零值兜底 clamp 0→5"
         );
+    }
+
+    #[test]
+    fn glue_edge_band_reaches_ir() {
+        let cfg: TomlConfig =
+            toml::from_str("[wiping]\nglue_edge_lines = 3\nglue_edge_lift = 1.5\n").unwrap();
+        let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
+        assert_eq!(ir.glue.edge_lines, 3);
+        assert!((ir.glue.edge_lift - 1.5).abs() < f64::EPSILON);
+    }
+
+    /// 旧口径开着（10%）而新键没写：按默认条数接过来，不许把人家正开着的功能悄悄关掉。
+    #[test]
+    fn retired_percent_carries_over_to_default_lines() {
+        let cfg: TomlConfig =
+            toml::from_str("[wiping]\nglue_edge_percent = 10\nglue_edge_lift = 0.5\n").unwrap();
+        let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
+        assert_eq!(ir.glue.edge_lines, DEFAULT_EDGE_LINES);
+        assert!((ir.glue.edge_lift - 0.5).abs() < f64::EPSILON);
+    }
+
+    /// 两个都是 0（出厂那 9 份预设就是这样）：关。
+    #[test]
+    fn both_edge_keys_zero_stays_off() {
+        let cfg: TomlConfig =
+            toml::from_str("[wiping]\nglue_edge_percent = 0\nglue_edge_lift = 0\n").unwrap();
+        let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
+        assert_eq!(ir.glue.edge_lines, 0);
+    }
+
+    /// 老预设文件里还带着已退役的 `glue_inset`：读得进来、**不再影响任何 IR 值**。
+    #[test]
+    fn retired_glue_inset_is_accepted_but_ignored() {
+        let cfg: TomlConfig = toml::from_str("[wiping]\nglue_inset = 5\n").unwrap();
+        let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
+        assert_eq!(ir.glue.edge_lines, 0);
+        assert!((ir.glue.edge_lift).abs() < f64::EPSILON);
+    }
+
+    /// 缺键回落注册表默认值，填 0 就是 0：两者不许再被同一段兜底揉在一起。
+    #[test]
+    fn e_sum_limit_distinguishes_missing_from_zero() {
+        let missing: TomlConfig = toml::from_str("[toolhead]\n[wiping]\n\n").unwrap();
+        assert!((missing.wiping.ironing_e_sum_limit - 7.9).abs() < f64::EPSILON);
+
+        let zero: TomlConfig = toml::from_str("[wiping]\nironing_e_sum_limit = 0\n").unwrap();
+        assert_eq!(zero.wiping.ironing_e_sum_limit, 0.0);
     }
 
     /// tower_wipe_speed 兼容迁移（int/float 双形态 → SheathSpeed/RibSpeedValue/RibMode）。

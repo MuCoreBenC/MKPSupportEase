@@ -227,6 +227,8 @@
   font-size: var(--fs-body);
   color: var(--text-1);
   cursor: pointer;
+  /* 触发器的 max-width（分支名可能很长）要能真的收住内部文字 */
+  min-width: 0;
 }
 
 .filterBtn:hover {
@@ -273,6 +275,10 @@
 .filterName {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  /* 长分支名在 `.filterBtn` 的 max-width 内省略，不把这一排撑开 */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /*

@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import { alignDiff, fieldOf, fmtNum, placeholders, placeholderName, render, validate } from './penTemplate'
+import {
+  alignDiff,
+  fieldOf,
+  fmtNum,
+  inlineSegs,
+  placeholders,
+  placeholderName,
+  render,
+  validate,
+} from './penTemplate'
 
 /** 与 Rust 侧 `pen_template::tests` 同一批骨架 —— 两边规则必须逐条对上。 */
 const A1_MOUNT =
@@ -80,11 +89,54 @@ describe('alignDiff', () => {
     expect(alignDiff('a\nc', 'a\nb\nc')[1]).toEqual({ left: null, right: 'b', kind: 'added' })
   })
 
-  it('毫无交集时仍是左边全删 + 右边全加，两栏行数相同', () => {
-    const rows = alignDiff('a\nb', 'x\ny\nz')
-    expect(rows.length).toBe(5)
-    expect(rows.every((r) => r.kind !== 'same')).toBe(true)
-    expect(rows.filter((r) => r.kind === 'removed').length).toBe(2)
-    expect(rows.filter((r) => r.kind === 'added').length).toBe(3)
+  it('一行改了半句：两栏并排成一条 changed，不是一删一加两条', () => {
+    const rows = alignDiff('a\nG1 X1 F300;推到X8\nc', 'a\nG1 X1 F300;推到底\nc')
+    expect(rows.map((r) => r.kind)).toEqual(['same', 'changed', 'same'])
+    expect(rows[1].left).toBe('G1 X1 F300;推到X8')
+    expect(rows[1].right).toBe('G1 X1 F300;推到底')
+  })
+
+  it('行尾有换行不算多一行', () => {
+    expect(alignDiff('a\nb\n', 'a\nb').map((r) => r.kind)).toEqual(['same', 'same'])
+  })
+
+  it('配不上的多出来那几个：照旧单边成行', () => {
+    const rows = alignDiff('a\nb\nc\nd', 'x\nd')
+    expect(rows.map((r) => r.kind)).toEqual(['changed', 'removed', 'removed', 'same'])
+    expect(rows[1]).toEqual({ left: 'b', right: null, kind: 'removed' })
+  })
+})
+
+describe('inlineSegs', () => {
+  it('只掐出分号后面变的那几个字', () => {
+    const segs = inlineSegs('G1 X1 F300;推到X8,笔尖下落', 'G1 X1 F300;推到底')
+    expect(segs.left).toEqual([
+      { text: 'G1 X1 F300;推到', hit: false },
+      { text: 'X8,笔尖下落', hit: true },
+    ])
+    expect(segs.right).toEqual([
+      { text: 'G1 X1 F300;推到', hit: false },
+      { text: '底', hit: true },
+    ])
+  })
+
+  it('共同的尾巴不算变：向左离开 → 离开 只标「向左」', () => {
+    const segs = inlineSegs('G1 X20 Y7 F30000;向左离开', 'G1 X20 Y7 F30000;离开')
+    expect(segs.left).toEqual([
+      { text: 'G1 X20 Y7 F30000;', hit: false },
+      { text: '向左', hit: true },
+      { text: '离开', hit: false },
+    ])
+    expect(segs.right).toEqual([
+      { text: 'G1 X20 Y7 F30000;', hit: false },
+      { text: '离开', hit: false },
+    ])
+  })
+
+  it('两侧都能拼回原文', () => {
+    const pair = ['G1 X1 F300;推到X8', 'G1 X2 F600;退到底']
+    const segs = inlineSegs(pair[0], pair[1])
+    expect(segs.left.map((s) => s.text).join('')).toBe(pair[0])
+    expect(segs.right.map((s) => s.text).join('')).toBe(pair[1])
   })
 })

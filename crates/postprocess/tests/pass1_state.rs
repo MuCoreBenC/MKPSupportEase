@@ -472,3 +472,132 @@ fn restore_fan_state_single_fan_restores_correctly() {
     assert!(contains_line(&output, "M106 S124.95"));
     assert!(!contains_line(&output, "M106 P1 S124.95"), "单风扇不用 P1");
 }
+// ---- 熨烫判据的事后事实（2026-11-15）----
+//
+// 判的**不是** `M1031` 块：切片器会把同一张面拆成几十块（每块之间只隔一条空走 +
+// 一句 `M204`，打印时必须抬笔跳过去），判定按「一整段连续熨烫 = 一张面」合计。
+// 这几条钉住：相邻块连起来算一次、被别的特征隔开的两张面各算各的。
+
+/// 同一张面被拆成两块 ⇒ 合计后判**一次**（作者口径：一张面）。
+#[test]
+fn ironing_facts_merge_adjacent_blocks_into_one_face() {
+    let gcode = lines(&[
+        "; BambuStudio 02.07.01.62",
+        "; enable_support_ironing = 1",
+        "; Z_HEIGHT: 0.5",
+        /* 第一块：0.02 */
+        "M1031 S1 ;IRONING_EXTRUSIONS_START",
+        "; FEATURE: Support ironing",
+        "G1 X90.0 Y90.0 E0.02",
+        "M1031 S0 ;IRONING_EXTRUSIONS_END",
+        /* 中间只有空走 + 速度切换 —— 打印时要抬笔，判断时还是同一张面 */
+        "M204 S10000",
+        "G1 X95.0 Y95.0 F42000",
+        "M1031 S1 ;IRONING_EXTRUSIONS_START",
+        "G1 F4200",
+        "M204 S6000",
+        "G1 X95.0 Y96.0 E0.5",
+        "M1031 S0 ;IRONING_EXTRUSIONS_END",
+        "; FEATURE: Outer wall",
+        "G1 X100.0 Y100.0 E0.1",
+    ]);
+    let mut ir = fixture_ir();
+    ir.ironing.mode = "auto".to_string();
+    /* 单块都在阈值内（0.02 / 0.5），合计 0.52 超过 ⇒ 整张面判掉 */
+    ir.ironing.e_sum_threshold = 0.1;
+    let mut progress = |_, _: String| {};
+    let out = postprocess::postproc::pass1::first_pass(
+        &gcode,
+        &mut ir,
+        "",
+        &mut progress,
+        &postprocess::diag::CancelToken::new(),
+        postprocess::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL,
+    )
+    .expect("first_pass 失败");
+
+    let f = &out.stats.ironing;
+    assert_eq!(f.blocks, 1, "两块连着的算一张面（不是 2）");
+    assert_eq!(f.removed, 1, "合计超阈值 ⇒ 整张面删掉");
+    assert_eq!(f.max_e_sum, Some(0.52), "记的是整张面的合计");
+    assert!(
+        !out.lines.iter().any(|l| l.contains("X90.0 Y90.0 E0.02")),
+        "第一块也要跟着删（同一张面一个结论）"
+    );
+    assert!(!out.lines.iter().any(|l| l.contains("X95.0 Y96.0 E0.5")));
+}
+
+/// 两张面之间隔着别的特征 ⇒ 各算各的（一块留、一块删）。
+#[test]
+fn ironing_facts_split_faces_at_feature_boundary() {
+    let gcode = lines(&[
+        "; BambuStudio 02.07.01.62",
+        "; enable_support_ironing = 1",
+        "; Z_HEIGHT: 0.5",
+        "M1031 S1 ;IRONING_EXTRUSIONS_START",
+        "; FEATURE: Support ironing",
+        "G1 X90.0 Y90.0 E0.02",
+        "M1031 S0 ;IRONING_EXTRUSIONS_END",
+        "; FEATURE: Outer wall",
+        "G1 X100.0 Y100.0 E0.1",
+        "M1031 S1 ;IRONING_EXTRUSIONS_START",
+        "; FEATURE: Support ironing",
+        "G1 X95.0 Y95.0 E0.5",
+        "M1031 S0 ;IRONING_EXTRUSIONS_END",
+        "; FEATURE: Outer wall",
+        "G1 X101.0 Y101.0 E0.1",
+    ]);
+    let mut ir = fixture_ir();
+    ir.ironing.mode = "auto".to_string();
+    ir.ironing.e_sum_threshold = 0.1;
+    let mut progress = |_, _: String| {};
+    let out = postprocess::postproc::pass1::first_pass(
+        &gcode,
+        &mut ir,
+        "",
+        &mut progress,
+        &postprocess::diag::CancelToken::new(),
+        postprocess::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL,
+    )
+    .expect("first_pass 失败");
+
+    let f = &out.stats.ironing;
+    assert_eq!(f.blocks, 2, "中间隔了 Outer wall ⇒ 两张面");
+    assert_eq!(f.removed, 1, "只有 0.5 那张超阈值");
+    assert_eq!(f.max_e_sum, Some(0.5));
+    assert!(out.lines.iter().any(|l| l.contains("X90.0 Y90.0 E0.02")));
+    assert!(!out.lines.iter().any(|l| l.contains("X95.0 Y95.0 E")));
+}
+
+/// `on` 档恒保留：面照样记，removed 恒 0（判据不看阈值）。
+#[test]
+fn ironing_facts_on_mode_never_removes() {
+    let gcode = lines(&[
+        "; BambuStudio 02.07.01.62",
+        "; enable_support_ironing = 1",
+        "; Z_HEIGHT: 0.5",
+        "M1031 S1 ;IRONING_EXTRUSIONS_START",
+        "; FEATURE: Support ironing",
+        "G1 X90.0 Y90.0 E9.9",
+        "M1031 S0 ;IRONING_EXTRUSIONS_END",
+        "; FEATURE: Outer wall",
+        "G1 X100.0 Y100.0 E0.1",
+    ]);
+    let mut ir = fixture_ir();
+    ir.ironing.mode = "on".to_string();
+    ir.ironing.e_sum_threshold = 0.1;
+    let mut progress = |_, _: String| {};
+    let out = postprocess::postproc::pass1::first_pass(
+        &gcode,
+        &mut ir,
+        "",
+        &mut progress,
+        &postprocess::diag::CancelToken::new(),
+        postprocess::postproc::cancel::DEFAULT_CANCEL_CHECK_INTERVAL,
+    )
+    .expect("first_pass 失败");
+
+    assert_eq!(out.stats.ironing.blocks, 1);
+    assert_eq!(out.stats.ironing.removed, 0);
+    assert_eq!(out.stats.ironing.max_e_sum, Some(9.9));
+}

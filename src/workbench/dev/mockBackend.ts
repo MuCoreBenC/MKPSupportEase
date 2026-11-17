@@ -316,6 +316,9 @@ const TABS = [
 /** 分组自己的名字（**不含页签**）—— 与真后端 `row.sectionLabel` 同口径 */
 const SECTION_LABEL = new Map(TABS.flatMap((t) => t.sections.map((s) => [s.id, s.label])))
 
+/** 整块组件卡：真机认 `layout.component`，桩里只有这一张。重排时它留在原槽位 */
+const COMPONENT_CARDS = new Set(['tower_position'])
+
 /*
  * 「放弃 = 影子树整个拉回磁盘原状」在演示桩里的对应物（2026-11-01）。
  *
@@ -365,7 +368,8 @@ let mockFields: Array<{
 const SHADOW_MUTATORS = new Set([
   'wb_set_brand_field', 'wb_add_brand', 'wb_move_machine_to_brand',
   'wb_set_machine_dimensions', 'wb_set_section_meta', 'wb_set_param_meta', 'wb_remove_section',
-  'wb_clear_stale_translations',
+  'wb_set_section_order', 'wb_edit_group', 'wb_clear_stale_translations',
+  'wb_add_tab', 'wb_set_tab_meta', 'wb_remove_tab',
   'wb_set_machine_zones', 'wb_set_bundle_refs', 'wb_add_bundle',
   'wb_rename_bundle', 'wb_copy_bundle', 'wb_assign_bundle_versions',
   'wb_remove_bundle', 'wb_set_calibration_identity', 'wb_set_asset_delivery',
@@ -1476,6 +1480,29 @@ function buildDesk(machineId: string, uid: string | null, tab: string | null, qu
     const y = secKey(b.sectionId)
     return x[0] - y[0] || x[1] - y[1]
   })
+  /*
+   * 空组也占一张卡（与真后端 `derive::desk` 同口径）：只在限定了页签、且没在
+   * 搜索时补 —— 「全部」下塞一堆空卡会撑满页面，搜索结果里也不该混进空组。
+   */
+  if (tab !== null && !q) {
+    const order = TABS.find((t) => t.id === tab)?.sections.map((sec) => sec.id) ?? []
+    const at = (id: string) => {
+      const i = order.indexOf(id)
+      return i < 0 ? Number.MAX_SAFE_INTEGER : i
+    }
+    for (const id of order) {
+      if (groups.some((g) => g.sectionId === id)) continue
+      const here = at(id)
+      const idx = groups.findIndex((g) => at(g.sectionId) > here)
+      groups.splice(idx < 0 ? groups.length : idx, 0, {
+        sectionId: id,
+        label: groupLabelOf(id),
+        count: 0,
+        offNote: null,
+        items: [],
+      })
+    }
+  }
   const nav = TABS.map((t) => ({
     id: t.id,
     label: t.label,
@@ -1760,6 +1787,13 @@ function buildRegistry(): Json {
       machineFilter: pdef.machineFilter ?? [],
       deprecated: pdef.deprecated,
       deprecatedMachines: pdef.deprecatedMachines ?? [],
+      /*
+       * ★ 这一格**必须给**（2026-11-14）：`ParamView.staleTranslations` 是必填，
+       * 真机那边总有（没有就是 `[]`）。桩里漏了它，浏览器一开「编辑定义」
+       * 就 `Cannot read properties of undefined (reading 'length')` ——
+       * 桩不像真后端，探针就测不到真的东西。
+       */
+      staleTranslations: pdef.staleTranslations ?? [],
     })),
     sections: TABS.flatMap((t) =>
       t.sections.map((sec) => ({
@@ -1768,7 +1802,7 @@ function buildRegistry(): Json {
         tabId: t.id,
         tabLabel: t.label,
         /* 桩里只有塔位那一组是真的组件卡（真数据里它带 component = 'tower-map'） */
-        component: sec.id === 'tower_position' ? 'tower-map' : null,
+        component: COMPONENT_CARDS.has(sec.id) ? 'tower-map' : null,
         standalone: false,
       })),
     ),
@@ -1807,6 +1841,9 @@ export function installMockBackend() {
         return Promise.resolve(buildBook())
       case 'wb_registry':
         return Promise.resolve(buildRegistry())
+      /* 工作台 ui.log 搬运：演示桩不写文件，收下就行 */
+      case 'log_ui_events':
+        return Promise.resolve(null)
       case 'wb_desk':
         return Promise.resolve(buildDesk(machineId, (args?.uid as string | null) ?? null, (args?.tab as string | null) ?? null, (args?.query as string) ?? ''))
       case 'wb_matrix':
@@ -1910,6 +1947,78 @@ export function installMockBackend() {
         m.hasDimensions = true
         return Promise.resolve(machineListOf())
       }
+      case 'wb_add_tab': {
+        /*
+         * 新建页签（真机 `ensure_tab`）：`TABS` 末尾追加一段，顺手在它下面建一个
+         * 空分组 —— 一个页签没有任何分组时点进去是一屏空白，参数没处放。
+         */
+        const tabId = args?.tabId as string
+        const label = ((args?.label as string) ?? '').trim()
+        if (TABS.some((t) => t.id === tabId)) return Promise.resolve(buildRegistry())
+        if (label === '') {
+          return Promise.reject({ code: 'INVALID', message: '页签名不能为空', traceId: 'mock' })
+        }
+        const order = TABS.reduce((n, t) => Math.max(n, t.order), 0) + 10
+        const secId = `${tabId}_g1`
+        TABS.push({
+          id: tabId,
+          label,
+          order,
+          sections: [{ id: secId, label: '未分组', order: 0 }],
+        })
+        SECTION_LABEL.set(secId, '未分组')
+        return Promise.resolve(buildRegistry())
+      }
+      case 'wb_set_tab_meta': {
+        /* 页签自己的那一笔：名字 / 上下位置（次序与 `order` 一起换，与真机同一条） */
+        const e = args?.edit as { label?: string | null; move?: 'up' | 'down' | null }
+        const tabId = args?.tabId as string
+        const at = TABS.findIndex((t) => t.id === tabId)
+        if (at < 0) {
+          return Promise.reject({ code: 'NOT_FOUND', message: `演示桩里没有页签 ${tabId}`, traceId: 'mock' })
+        }
+        if (e.label !== null && e.label !== undefined) {
+          const name = e.label.trim()
+          if (name === '') {
+            return Promise.reject({ code: 'INVALID', message: '页签名不能为空', traceId: 'mock' })
+          }
+          TABS[at]!.label = name
+        }
+        const dir = e.move ?? null
+        if (dir !== null) {
+          const to = dir === 'up' ? at - 1 : at + 1
+          if (to < 0 || to >= TABS.length) {
+            return Promise.reject({ code: 'INVALID', message: '页签已经在这一排的边上了', traceId: 'mock' })
+          }
+          const moved = TABS[at]!
+          TABS[at] = TABS[to]!
+          TABS[to] = moved
+          const o = TABS[at]!.order
+          TABS[at]!.order = TABS[to]!.order
+          TABS[to]!.order = o
+        }
+        return Promise.resolve(buildRegistry())
+      }
+      case 'wb_remove_tab': {
+        /* 只有空页签能删：参数没有第二个去处（页签之间没有「未归类页签」） */
+        const tabId = args?.tabId as string
+        const at = TABS.findIndex((t) => t.id === tabId)
+        if (at < 0) {
+          return Promise.reject({ code: 'NOT_FOUND', message: `演示桩里没有页签 ${tabId}`, traceId: 'mock' })
+        }
+        const secs = new Set(TABS[at]!.sections.map((x) => x.id))
+        const used = PARAMS.filter((p) => secs.has(p.sectionId))
+        if (used.length > 0) {
+          return Promise.reject({
+            code: 'INVALID',
+            message: `页签「${TABS[at]!.label}」里还有 ${used.length} 条参数，先把它们搬到别的页签再删`,
+            traceId: 'mock',
+          })
+        }
+        TABS.splice(at, 1)
+        for (const id of secs) SECTION_LABEL.delete(id)
+        return Promise.resolve(buildRegistry())
+      }
       case 'wb_set_section_meta': {
         /*
          * 分组自己的那一笔（名字 / 上下位置）。真机里位置有两个真理（注册表数组次序
@@ -1979,9 +2088,9 @@ export function installMockBackend() {
       }
       case 'wb_remove_section': {
         /*
-         * 删一个空分组。真机的三道门（还有参数 / 组件卡 / 带 showWhen）在
-         * `ParamRegistry::remove_section`；桩里把**第一条**也挡上（它才是最容易被
-         * 误删的那一种），另外两道这堆夹具里本来就没有对应数据。
+         * 删一个分组。真机的两道门（组件卡 / 带 showWhen）这堆夹具里没有对应数据；
+         * 组里的参数不跟着删 —— 先落到同一页签末尾的「未归类」（与真机
+         * `ensure_section` 同语义，幂等），再删组。
          */
         const id = args?.sectionId as string
         let hit: { tab: (typeof TABS)[number]; at: number } | null = null
@@ -1995,11 +2104,20 @@ export function installMockBackend() {
         if (hit === null) {
           return Promise.reject({ code: 'NOT_FOUND', message: `演示桩里没有分组 ${id}`, traceId: 'mock' })
         }
-        const used = PARAMS.filter((p) => p.sectionId === id).length
-        if (used > 0) {
-          return Promise.reject({ code: 'INVALID', message: `这一组里还有 ${used} 条参数，不能删`, traceId: 'mock' })
+        const fid = `uncategorized_${hit.tab.id}`
+        const used = PARAMS.filter((p) => p.sectionId === id)
+        if (used.length > 0) {
+          if (fid === id) {
+            return Promise.reject({ code: 'INVALID', message: '「未归类」里的参数没有第二个去处', traceId: 'mock' })
+          }
+          if (!hit.tab.sections.some((s) => s.id === fid)) {
+            hit.tab.sections.push({ id: fid, label: '未归类', order: hit.tab.sections.length })
+            SECTION_LABEL.set(fid, '未归类')
+          }
+          for (const pdef of used) pdef.sectionId = fid
         }
-        hit.tab.sections.splice(hit.at, 1)
+        const at = hit.tab.sections.findIndex((s) => s.id === id)
+        hit.tab.sections.splice(at, 1)
         SECTION_LABEL.delete(id)
         hit.tab.sections.forEach((sec, i) => {
           sec.order = i + 1
@@ -2054,6 +2172,146 @@ export function installMockBackend() {
         Object.assign(target, e)
         /* 新分组是这一笔的目标：真机把参数搬进去，桩里也照办（`sectionId: null` 别盖上去） */
         if (fresh !== null) target.sectionId = fresh.id
+        return Promise.resolve(buildRegistry())
+      }
+      case 'wb_edit_group': {
+        /*
+         * 成员编辑的演示桩：与真机同一套「交最终成员序列、后端算差集」，
+         * 移出的落到同一页签下懒建的「未归类」组，没移出就不多添一张卡。
+         */
+        const e = args?.edit as {
+          scope?: 'section' | 'tab'
+          id?: string
+          label?: string | null
+          sectionId?: string
+          keys?: string[]
+          newSections?: { id: string; tabId: string; label: string }[]
+          sectionOrder?: string[]
+        } | undefined
+        /* 新建分组先落地：目标 sectionId 可能正指向其中一个 */
+        for (const ns of e?.newSections ?? []) {
+          const t = TABS.find((x) => x.id === ns.tabId)
+          if (t === undefined) {
+            return Promise.reject({ code: 'INVALID', message: `演示桩里没有页签 ${ns.tabId}`, traceId: 'mock' })
+          }
+          if (!t.sections.some((s) => s.id === ns.id)) {
+            t.sections.push({ id: ns.id, label: ns.label, order: t.sections.length + 1 })
+            SECTION_LABEL.set(ns.id, ns.label)
+          }
+        }
+        const sectionId = e?.sectionId ?? ''
+        const keys = e?.keys ?? []
+        const tab = TABS.find((t) => t.sections.some((s) => s.id === sectionId))
+        if (tab === undefined) {
+          return Promise.reject({ code: 'INVALID', message: `演示桩里没有分组 ${sectionId}`, traceId: 'mock' })
+        }
+        const seen = new Set<string>()
+        for (const k of keys) {
+          if (seen.has(k) || !PARAMS.some((p) => p.key === k)) {
+            return Promise.reject({ code: 'INVALID', message: `成员清单对不上：${k}`, traceId: 'mock' })
+          }
+          seen.add(k)
+        }
+        const want = new Set(keys)
+        const here = PARAMS.filter((p) => p.sectionId === sectionId).map((p) => p.key)
+        const joined = keys.filter((k) => !here.includes(k))
+        const left = here.filter((k) => !want.has(k))
+        const label = e?.label ?? null
+        if (label !== null && e?.scope === 'section') {
+          const sec = tab.sections.find((s) => s.id === sectionId)
+          if (sec !== undefined) sec.label = label
+          SECTION_LABEL.set(sectionId, label)
+        } else if (label !== null && e?.scope === 'tab') {
+          tab.label = label
+        }
+        let dest = sectionId
+        if (left.length > 0) {
+          dest = `uncategorized_${tab.id}`
+          if (!tab.sections.some((s) => s.id === dest)) {
+            tab.sections.push({ id: dest, label: '未归类', order: tab.sections.length + 1 })
+            SECTION_LABEL.set(dest, '未归类')
+          }
+        }
+        const maxOrder = (sid: string) =>
+          PARAMS.filter((p) => p.sectionId === sid).reduce((m, p) => Math.max(m, p.order), 0)
+        for (const k of joined) {
+          const p = PARAMS.find((x) => x.key === k)
+          if (p !== undefined) {
+            p.sectionId = sectionId
+            p.tabId = tab.id
+            p.order = maxOrder(sectionId) + 1
+          }
+        }
+        for (const k of left) {
+          const p = PARAMS.find((x) => x.key === k)
+          if (p !== undefined) {
+            p.sectionId = dest
+            p.tabId = tab.id
+            p.order = maxOrder(dest) + 1
+          }
+        }
+        /* 最终次序就是提交的那一串：位次按它重排 */
+        keys.forEach((k, i) => {
+          const p = PARAMS.find((x) => x.key === k)
+          if (p !== undefined) p.order = i + 1
+        })
+        /* 分组最终次序：忽略查不到的 id、缺的按原序补齐，组件卡留原槽位，与真机同一套规范化 */
+        const order = e?.sectionOrder ?? []
+        if (order.length > 0) {
+          const t = TABS.find((x) => x.sections.some((s) => s.id === sectionId))
+          if (t !== undefined) {
+            const cur = t.sections.map((s) => s.id)
+            const sortable = cur.filter((id) => !COMPONENT_CARDS.has(id))
+            const known = new Set(sortable)
+            const norm = order.filter((id, i) => known.has(id) && order.indexOf(id) === i)
+            for (const id of sortable) if (!norm.includes(id)) norm.push(id)
+            let slot = 0
+            const target = cur.map((id) =>
+              COMPONENT_CARDS.has(id) ? id : (norm[slot++] ?? id),
+            )
+            const byId = new Map(t.sections.map((s) => [s.id, s]))
+            t.sections.length = 0
+            for (const id of target) {
+              const sec = byId.get(id)
+              if (sec !== undefined) t.sections.push(sec)
+            }
+            t.sections.forEach((sec, i) => { sec.order = i + 1 })
+          }
+        }
+        return Promise.resolve(buildRegistry())
+      }
+      case 'wb_set_section_order': {
+        /*
+         * 整组重排的演示桩：只改 `order`（与真机同一套「沿用旧槽位」几何），
+         * 校验只做「集合必须完全相等」那一条 —— 真机的其余判据在 registry::set_section_order。
+         */
+        const sectionId = args?.sectionId as string
+        const keys = (args?.keys as string[]) ?? []
+        const here = PARAMS.filter((p) => p.sectionId === sectionId)
+        if (here.length === 0) {
+          return Promise.reject({ code: 'INVALID', message: `分组 ${sectionId} 里一个参数都没有`, traceId: 'mock' })
+        }
+        const hereKeys = here.map((p) => p.key)
+        const missing = hereKeys.filter((k) => !keys.includes(k))
+        const extra = keys.filter((k) => !hereKeys.includes(k))
+        const dup = keys.filter((k, i) => keys.indexOf(k) !== i)
+        if (missing.length > 0 || extra.length > 0 || dup.length > 0) {
+          const why = [
+            dup.length > 0 ? `重复：${dup.join(', ')}` : '',
+            missing.length > 0 ? `缺：${missing.join(', ')}` : '',
+            extra.length > 0 ? `多：${extra.join(', ')}` : '',
+          ]
+            .filter((s) => s !== '')
+            .join('；')
+          return Promise.reject({ code: 'INVALID', message: `排序清单与分组 ${sectionId} 的参数对不上（${why}）`, traceId: 'mock' })
+        }
+        const slots = here.map((p) => p.order).sort((a, b) => a - b)
+        const distinct = slots.every((v, i) => i === 0 || slots[i - 1] < v)
+        const use = distinct ? slots : slots.map((_, i) => i + 1)
+        keys.forEach((k, i) => {
+          const p = PARAMS.find((x) => x.key === k)
+          if (p) p.order = use[i]
+        })
         return Promise.resolve(buildRegistry())
       }
       case 'wb_set_machine_zones': {
@@ -3060,6 +3318,26 @@ export function installMockBackend() {
         structDirty = 0
         mockFields = []
         return Promise.resolve(buildBook())
+      case 'wb_txn_undo':
+      case 'wb_txn_redo':
+        /*
+         * 浏览器桩**没有撤销栈**（结构改动在桩里是 pending 覆盖表，没有逐条 op）。
+         * 如实回「什么都没撤」，不编一个假的 done 出来 —— 真机才有那条栈。
+         * 形状与 `app::UndoOutcome` 对齐，免得 UI 在浏览器里读到 undefined。
+         */
+        return Promise.resolve({
+          state: {
+            dirty: structDirty > 0,
+            dirtyCount: structDirty,
+            canUndo: false,
+            canRedo: false,
+            ops: [],
+            topOp: null,
+            receipt: null,
+          },
+          done: null,
+          refused: null,
+        })
       case 'wb_txn_state':
         /*
          * 结构类改动（分组 / 参数定义 / 机器档案 / 套餐…）桩里没有逐条撤销栈，

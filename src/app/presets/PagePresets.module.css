@@ -324,25 +324,41 @@
  * （作者 2026-11-11：「3 个字和 4 个字就差一点点的宽度，它还要变，我不喜欢这种」）。
  * 做法与 `PresetScopeBar.module.css` 的 `.optText` 同一套。
  */
+/*
+ * 四句候选叠在一处，但**只有当前那句参与布局** —— 胶囊宽度贴着此刻这句话。
+ *
+ * 早先四句都占着格子（`inline-grid` + `min-content`），格子取最长那句，
+ * 于是显示「已是最新」时左边永远空着「刷新失败」多出来的那截
+ * （作者 2026-11-17：「文字离胶囊左边的空」）。
+ *
+ * 现在：当前句 `static` 撑宽，其余三句 `absolute` 叠在右线上（`right: 0`）。
+ * 换档那一帧宽度立刻变成新句的宽 ⇒ `useLayoutEffect` 量到并动画过去，
+ * 交叉淡化照样工作（旧句脱离布局后仍停在原位，`opacity` 由 WAAPI 演）。
+ */
 .tbRefreshLabel {
-  display: inline-grid;
-  grid-template-columns: min-content;
+  position: relative;
+  /* flex 而不是 inline-block：当前那句回到常规流之后，靠 `align-items` 在 26px 高的
+     按钮里垂直居中。`inline-block` + `line-height: 1` 会把字压在行盒的基线上（偏低） */
+  display: flex;
   align-items: center;
   flex: none;
 }
 
 .tbRefreshLabel > * {
-  grid-area: 1 / 1;
-  /* 靠右对齐：字右缘挨着图标（不动），长出来的那半截往左伸 —— 换文案时右缘纹丝不动 */
-  justify-self: end;
+  /* 靠右：字右缘挨着图标（不动），长出来的那半截往左伸 —— 换文案时右缘纹丝不动 */
+  position: absolute;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
   font-size: var(--fs-label);
   white-space: nowrap;
-  /* 四条都占着格子（宽度取最长那句），只有当前那条不透明 —— 换档走交叉淡化
-     （WAAPI 演，见 layout effect），这里只是"平时谁看得见" */
   opacity: 0;
 }
 
+/* 当前那句回到常规流：它有多宽，胶囊就有多宽 */
 .tbRefreshLabel > [data-on='true'] {
+  position: static;
+  transform: none;
   opacity: 1;
 }
 
@@ -731,7 +747,7 @@
 .archItem {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 2px 10px;
+  gap: 4px 12px;
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
@@ -763,28 +779,33 @@
   color: var(--text-3);
 }
 
-/* 两个时间一行（云端发布 · 替换时间）：标签是事件的名字，值查不到照实「未知」 */
-.archWhen {
+/*
+ * 第二行：机型 · 云端发布 … · 替换时间 …（一条最多两行）。
+ * 认得出就是"机型 · 版本"，认不出**照实说认不出**（不猜）。
+ */
+.archWho {
   grid-column: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 4px;
   margin: 0;
   font-size: var(--fs-label);
   color: var(--text-3);
 }
 
-/* 认人那一行：认得出就是"机型 · 版本"，认不出**照实说认不出**（不猜） */
-.archWho {
-  grid-column: 1;
-  margin: 0;
-  font-size: var(--fs-label);
-  color: var(--text-2);
+/* 句子里那个分隔点（不用裸的 `·`：换行时它会孤零零掉到行首） */
+.archDot {
+  font-style: normal;
+  color: var(--text-3);
+  opacity: 0.7;
 }
 
-/* 两个按钮竖排（看正文 / 删除）：归档条目现在有三次行（名字 / 时间 / 认人），跨满 */
+/* 三颗按钮**横排**在右侧（看正文 / 用回这版 / 删除），跨满两行 */
 .archBtns {
   grid-column: 2;
-  grid-row: 1 / span 3;
+  grid-row: 1 / span 2;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 6px;
   align-self: center;
   flex-shrink: 0;
@@ -826,6 +847,12 @@
 
 .archBtn:focus-visible {
   outline: none;
+}
+
+/* 「用回这版」的第二下（确认态）：可逆动作，走 accent 不走红 */
+.archBtnAsk {
+  border-color: var(--accent);
+  color: var(--accent-deep);
 }
 
 .archBody {
@@ -870,6 +897,87 @@
   font-size: var(--fs-label);
   line-height: 1.7;
   color: var(--text-3);
+}
+
+/* 正文区上面那排档位：这一版 / 正在用的 / 对比（只在选中归档那一条时出现） */
+.archTabs {
+  display: flex;
+  gap: 6px;
+}
+
+.archTab {
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.archTab:hover {
+  color: var(--text-1);
+}
+
+.archTab:focus-visible {
+  outline: none;
+}
+
+.archTabOn {
+  border-color: var(--line-strong);
+  background: var(--surface-solid);
+  color: var(--text-1);
+}
+
+/* 对比：一行一个（前缀 + 行号 + 原文），与正文同样滚 */
+.archDiff {
+  max-height: 46vh;
+  padding: 8px 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+}
+
+.archDiffRow {
+  display: flex;
+  gap: 8px;
+  padding: 0 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.archDiffRow[data-kind='add'] {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.archDiffRow[data-kind='del'] {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.archDiffRow[data-kind='change'] {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+}
+
+.archDiffNo {
+  flex-shrink: 0;
+  width: 3ch;
+  color: var(--text-3);
+  text-align: right;
+  user-select: none;
+}
+
+.archDiffSign {
+  flex-shrink: 0;
+  width: 1ch;
+  color: var(--text-2);
+  user-select: none;
 }
 
 /* ---------- 编辑器抽屉（临时编辑那条链） ---------- */

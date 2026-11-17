@@ -639,6 +639,9 @@ fn result_facts(done: &postprocess::pipeline::ProcessResult) -> crate::hook_ipc:
             .then_some(done.stats.pass1.layer_height_max),
         /* 调试那一趟的坐标概要：结果页要摆，正常那一趟是 `None`（那一行不出现） */
         debug: done.debug.clone(),
+        /* 热床预涂胶：结果屏要拿它提醒"盯住首层"。校准件那一趟内核不插涂胶块
+        （`bed_glue::apply_bed_glue` 直接返回），所以这里也不报 —— 报了就是假警报 */
+        bed_glue: ir.prefs.bed_glue_enabled && !ir.safety.is_calibration_mode,
     }
 }
 
@@ -1239,6 +1242,27 @@ pub fn run(
      * 抄的是一份克隆，**不重读预设**：这一趟跑的确实是这一份。
      */
     let ir_before = ir.clone();
+    /*
+     * 边缘带调试转储（`MKP_EDGE_DEBUG=1`）：钩子是**原地处理**、手里没有产物路径，
+     * 所以开跑前把落点设成这一天的存档目录 —— 跑完打开那个文件夹就在那儿，
+     * 不用去别处翻。没设这个变量时一个字节都不写。
+     */
+    /*
+     * ★ 钩子这个进程是**切片器拉起来的**（BBS → SupportEase），终端里 export 的 env
+     *   根本传不进来。所以除了环境变量，还认数据根下的一个哨兵文件：
+     *   `<user>/edge-debug.on` —— `touch` 一下就开，删掉就关，与谁拉起进程无关。
+     */
+    let dump_wanted = std::env::var_os("MKP_EDGE_DEBUG").is_some()
+        || crate::fsx::paths::user_root_headless()
+            .map(|r| r.join("edge-debug.on").exists())
+            .unwrap_or(false);
+    let dump_dir = if dump_wanted {
+        crate::archive::history_root()
+            .map(|root| root.join(crate::archive::day_dir(crate::archive::now_local())))
+    } else {
+        None
+    };
+    postprocess::postproc::pass1::set_edge_dump_root(dump_dir);
     let outcome = if defer_print_time {
         pipeline::process_with_ir_deferred_print_time_with_tower_ask(
             IrProcessRequest {
@@ -1601,6 +1625,7 @@ fn archive_success(
         },
         estimated_print_seconds: done.print_time.as_ref().map(|pt| pt.total_seconds),
         glue: Some(facts.glue(&done.stats.pass1)),
+        ironing: Some(facts.ironing(&done.stats.pass1)),
         tower: Some(facts.tower()),
         slicer: Some(facts.slicer()),
         // 证据链：**成功那一趟也写**（原来这些值在 `resolve_profile` 之后就被消费掉了，
@@ -1875,6 +1900,7 @@ fn archive_failure(
             // 失败 / 取消没有 IR 终态 ⇒ 这两组整组不写（页面口径：没给就不摆）。
             // ★ 它们要的是**跑完才有的数**（涂胶总长 / 塔层数），失败那趟本来就没有。
             glue: None,
+            ironing: None,
             tower: None,
             /*
              * 切片这一组**照写**（2026-11-04）：耗材 / 喷嘴 / 层高 / 切片软件 / 熨烫 /
@@ -3123,12 +3149,22 @@ mod tests {
     /// 进程级只设一次（测试多线程，`Once` 保不竞态）；临时目录故意 `forget` ——
     /// drop 会在别的测试还在用时删根，进程退出时由 OS 收拾。
     fn isolate_data_root() {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| {
-            let dir = tempfile::tempdir().expect("测试数据根临时目录");
-            std::env::set_var(crate::fsx::paths::DATA_ROOT_ENV, dir.path());
-            std::mem::forget(dir);
+        /*
+         * 每次调用都把它**按回去**，不只第一次。
+         *
+         * 环境变量是整个测试进程共用的，而 `fsx::paths` 那条用例会设完再 `remove_var`。
+         * 两条测试并发时，这里设好的值可能被删掉 ⇒ `run` 读到别处的根 ⇒ 产物只剩
+         * 一小截（实测 561363 → 43702，报的就是"后处理只能让文件变长"那条）。
+         * 原来用 `Once` 只设一次，被删掉之后再也补不回来。
+         */
+        static ROOT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+        let dir = ROOT.get_or_init(|| {
+            let d = tempfile::tempdir().expect("测试数据根临时目录");
+            let p = d.path().to_path_buf();
+            std::mem::forget(d);
+            p
         });
+        unsafe { std::env::set_var(crate::fsx::paths::DATA_ROOT_ENV, dir) };
     }
 
     fn run_headless(toml: &std::path::Path, gcode: &std::path::Path) -> Result<Outcome, HookError> {
@@ -3329,6 +3365,13 @@ mod tests {
         assert!(
             out.result.print_time_seconds.is_some(),
             "这一条没延后（headless），打印时间该在车上：{:?}",
+            out.result
+        );
+        /* 热床预涂胶出厂是关的 ⇒ 这趟**不许**报"开了"（报了就是假警报，
+        界面会拿它让用户盯着首层）。开了那一趟由 `result_facts` 的判据另一支管。 */
+        assert!(
+            !out.result.bed_glue,
+            "出厂档没开热床预涂胶：{:?}",
             out.result
         );
         let after = std::fs::read(&gcode).expect("读产物");

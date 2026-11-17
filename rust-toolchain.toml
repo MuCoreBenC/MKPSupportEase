@@ -1,0 +1,14 @@
+[toolchain]
+# 版本锁在这里，**本地与 CI 必须是同一个 clippy**。
+#
+# 为什么不跟 `stable`：clippy 的 lint 集随版本增长。不锁的话，「本地绿、CI 红」
+# 是必然事件，不是偶发 —— 2026-11-18 就是这么红的：`printtime.rs` 一段
+# `for a in 0..3` 在本地 clippy 1.97.1 下干净，CI 的新版直接
+# `needless_range_loop` + `-D warnings` 编译失败，推前闸（跑的是本地 clippy）
+# 拦不住，只能等 CI 报。
+#
+# 升级流程：改这里的版本 → 本地 `rustup show` 装新的 → 跑一遍 `npm run check:rust`
+# 与 `cargo test` → 提交。**一次只动这一个文件**，别让 CI 自己飘。
+channel = "1.97.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

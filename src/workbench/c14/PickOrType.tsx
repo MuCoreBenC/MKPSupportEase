@@ -69,7 +69,7 @@ export default function PickOrType({
       options={[
         ...(value ? [] : [{ value: '', label: emptyLabel ?? '未填' }]),
         ...rich.map((o) => ({ value: o.value, label: o.label, note: o.note })),
-        ...(allowCustom ? [{ value: CUSTOM, label: '自定义…', note: '打一个新的' }] : []),
+        ...(allowCustom ? [{ value: CUSTOM, label: '自定义…', note: '新建一项' }] : []),
       ]}
       onChange={(next) => {
         if (next === CUSTOM) {

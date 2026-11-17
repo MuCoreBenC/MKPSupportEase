@@ -17,7 +17,7 @@
  *   node scripts/probes/pp-modal-height.mjs        # 需要 dev server（默认 5321）
  *
  * 靠 `src/api/mock.ts` 的 `devPostProcessRun()`（只在 dev + URL 带 `?pp=` 时给假快照）：
- *   `?pp=result` / `?pp=relocate` / `?pp=mismatch`
+ *   `?pp=result` / `?pp=warn` / `?pp=glue` / `?pp=relocate` / `?pp=mismatch`
  * 截图落 `tmp-shots/`（该目录已 gitignore）。
  */
 import fs from 'node:fs'
@@ -34,6 +34,8 @@ const SCREENS = [
    * （下面还是那两栏事实）⇒ 框高必须与普通结果一模一样。
    */
   { name: 'warn', query: '?pp=warn', title: '后处理结果' },
+  /* 开了热床预涂胶那一屏：同一套"警告 ↔ 信息"，框高也不许变 */
+  { name: 'glue', query: '?pp=glue', title: '后处理结果' },
   { name: 'relocate', query: '?pp=relocate', title: '后处理进度' },
   { name: 'mismatch', query: '?pp=mismatch', title: '后处理进度' },
 ]
@@ -101,7 +103,7 @@ for (const env of THEMES) {
      * 「关闭预览」，翻不了页 —— 但两页是**叠在同一格里**的，信息页的高度可以直接量：
      * 槽高必须等于两栏事实的自然高度（多出来那截就是作者说的"留空太多"）。
      */
-    if (s.name === 'relocate' || s.name === 'warn') {
+    if (s.name === 'relocate' || s.name === 'warn' || s.name === 'glue') {
       const slot = await page.evaluate(() => {
         const box = document.querySelector('[class*="relocateSlot"]')
         const groups = box?.querySelector('[class*="groups"]')
@@ -115,12 +117,12 @@ for (const env of THEMES) {
      * 警告那一屏有**两页**（警告 ↔ 信息，左下角那颗小钮翻）：翻一下再量 —— 上面那张
      * hero 换了，框一个像素都不许动（作者 2026-11-08：「我这模态框也不会被撑得很开」）。
      */
-    if (s.name === 'warn') {
+    if (s.name === 'warn' || s.name === 'glue') {
       await page.locator('[class*="footLead"] button').first().click()
       await page.waitForTimeout(250)
-      await page.screenshot({ path: `${SHOTS}/pp-${env.name}-warn-info.png` })
+      await page.screenshot({ path: `${SHOTS}/pp-${env.name}-${s.name}-info.png` })
       const flipped = await boxEl.boundingBox()
-      flips.push({ env: env.name, d: Math.round(flipped.height - box.height) })
+      flips.push({ env: env.name, name: s.name, d: Math.round(flipped.height - box.height) })
     }
   }
   await page.close()

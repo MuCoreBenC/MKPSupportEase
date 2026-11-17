@@ -131,6 +131,12 @@ export default function GenHistoryModal({ onClose }: Props) {
                   ))}
                 </div>
                 <div className={h.meta}>
+                  {/* 生成**不分配号**：这一格是当时沿用的那一号（老回执没有 ⇒ 照实写未记录） */}
+                  <span>
+                    {r.publishSerial != null && r.publishSerial > 0
+                      ? `序号沿用第 ${r.publishSerial} 号`
+                      : '序号未记录'}
+                  </span>
                   交付 <b>写 {r.delivery.written}</b> / 未变 {r.delivery.unchanged}
                   {r.delivery.failed > 0 && <b style={{ color: '#dc2626' }}> / 失败 {r.delivery.failed}</b>}
                   {' · '}内核 <b>写 {r.assets.written}</b> / 未变 {r.assets.unchanged}

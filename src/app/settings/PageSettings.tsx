@@ -122,7 +122,9 @@ import GuideImageModal from '../guide/GuideImage'
 /* 后处理偏好那几块（2026-10-17）：各自一个文件，迁页时整块搬走即可 */
 import PostprocModeSection from './PostprocModeSection'
 import CalibSection from './CalibSection'
+import UnderSupportSection from './UnderSupportSection'
 import BedGlueSection from './BedGlueSection'
+import ResetPostprocDefaults from './ResetPostprocDefaults'
 import DataSection from './DataSection'
 /* 预设那一块（2026-10-20）：与上面同一条规矩（自己一个文件、只管自己那一行） */
 import PresetsSection from './PresetsSection'
@@ -1859,6 +1861,7 @@ export default function PageSettings({
       <div id="postproc" data-sec className={s.group}>
         <PostprocModeSection />
         <CalibSection nested />
+        <UnderSupportSection nested />
         <BedGlueSection nested />
       </div>
 
@@ -2072,6 +2075,9 @@ export default function PageSettings({
           </p>
         )}
       </section>
+
+      {/* 恢复默认：正文最后一块 —— 一次改 11 项，不属于任何一组 */}
+      <ResetPostprocDefaults host={pageEl} />
           </div>
         </main>
       </div>

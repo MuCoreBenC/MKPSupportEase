@@ -306,7 +306,7 @@ mod tests {
         let user = tempfile::tempdir().unwrap();
         let rel = "presets-local/A1.toml";
         put(user.path(), rel, "# mine\n");
-        super::super::baseline::ensure_origin_copy(internal.path(), user.path(), rel).unwrap();
+        super::super::baseline::refresh_origin_copy(internal.path(), user.path(), rel).unwrap();
 
         let entry = create(internal.path(), user.path(), rel, None).unwrap();
         assert!(!crate::fsx::paths::resolve_in(user.path(), rel)

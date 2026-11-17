@@ -19,7 +19,7 @@
  */
 
 import { useEffect, useState } from 'react'
-import type { AppError } from '../api'
+import { wb, type AppError } from '../api'
 import ModalC14 from './ModalC14'
 import s from '../c14.module.css'
 
@@ -67,18 +67,14 @@ export default function ErrorDialog({ open, title, lead, error, onClose }: Props
     .join('\n')
 
   const copy = () => {
-    /* 非安全上下文里 `clipboard` 可能是 undefined —— 不许把它变成一次未捕获的异常 */
-    const writing = navigator.clipboard?.writeText(raw)
-    if (writing === undefined) {
-      setLabel('复制失败')
-      return
-    }
-    writing
-      .then(() => {
+    /* 写剪贴板是 Rust 的事（`copy_text`）：webview 那套要看用户手势 */
+    void wb.copyText(raw).then(
+      () => {
         setLabel('已复制')
         window.setTimeout(() => setLabel('复制详情'), 2000)
-      })
-      .catch(() => setLabel('复制失败'))
+      },
+      () => setLabel('复制失败'),
+    )
   }
 
   return (

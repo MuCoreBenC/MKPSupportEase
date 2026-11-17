@@ -680,9 +680,9 @@ function SquareMark() {
  *   （机型与切片基础 / 擦料与胶水消耗）—— 跑着、普通成功都只有这一页
  * - `note` ：说明页。挪塔那一问是"要不要挪"的问句；**碰撞失败是陈述句**（见 `CollisionNote`）
  * - `fail` ：红卡 + 两栏事实（碰撞失败那一屏的默认页）
- * - `warn` ：警告页。**上面换成警告卡**（`NoticeHero`），下面仍是那两栏事实 ——
- *   作者 2026-11-08：「出错的就显示在 HERO 里面……下面的那些内容不用变，
- *   变的是上面的 hero 那一个卡片」
+ * - `warn` ：警告页。**上面换成警告卡**（`NoticeHero`，热床预涂胶 / 内核警告），
+ *   下面仍是那两栏事实 —— 作者 2026-11-08：「出错的就显示在 HERO 里面……
+ *   下面的那些内容不用变，变的是上面的 hero 那一个卡片」
  */
 type PageTab = 'note' | 'fail' | 'facts' | 'warn'
 
@@ -907,7 +907,8 @@ export default function PostProcessModal({
    */
   const [answering, setAnswering] = useState<{
     kind: string
-    deadline: number
+    /** 这一问的自动终止时刻（与问句上那一格同一个值；老钩子没有 ⇒ `undefined`） */
+    deadline: number | undefined
     /** 点下去那一刻进度条停在的百分比（见下面 `shownPercent`） */
     from: number
   } | null>(null)
@@ -944,6 +945,14 @@ export default function PostProcessModal({
    * ★ 可能有好几条（一条一个段落），也可能一条都没有；`?? []` 兜老一侧不带这个字段。
    */
   const warnings = finished?.warnings ?? []
+  /**
+   * **这一趟开着热床预涂胶**：产物里插了涂胶块，打印时那支笔真的会在板面上走一圈。
+   *
+   * 它和内核警告走**同一张 hero 卡**（`NoticeHero` 警告页）：都是"开打之前要你看一眼"
+   * 的事 —— 这一屏一换 hero、下面那两栏事实不动，框也不会被撑高。
+   * 只认**成功**那一趟：失败 / 已停止时没有要开始的打印，提它等于喊狼来了。
+   */
+  const glueCaution = finished?.ok === true && finished.result?.bedGlue === true
   /*
    * ★★ 正在等用户作答（2026-10-17）。**要不要问，看的是"问句还在不在"**：
    * 钩子那边推完问句就在原地等，直到有人答 / 按停止 / 超时 —— 这一整段时间界面上
@@ -1203,7 +1212,7 @@ export default function PostProcessModal({
    *   `facts` = 这一趟的结果 hero（四格读数 / 红卡）+ 两栏事实
    *   `note`  = 挪塔说明 / 碰撞说明（说什么、为什么、下一步怎么办）
    *   `fail`  = 「处理失败」那张红卡 + 两栏事实（碰撞失败那一屏的默认页）
-   *   `warn`  = **警告卡** + 两栏事实（只在有警告的结果屏有）
+   *   `warn`  = **警告卡** + 两栏事实（在有内核警告或开了热床预涂胶的结果屏有）
    *
    * 几页**叠在同一格里**（`.relocateSlot`），页高 = 较高那一页 ⇒ 翻页不跳、框不变大。
    * 左下角那颗小钮切（共用件 `PageToggle`，挂在页脚那块 `footLead` 上）。
@@ -1215,7 +1224,7 @@ export default function PostProcessModal({
    *
    * **默认落在"信息"那一页**（2026-11-04 作者：「默认显示信息呀，不要默认显示说明」）：
    * 初值曾是 `'note'`（挪塔那一问的合理默认），但它同时让失败 / 成功那两屏一进来就停在
-   * 说明页 ⇒ 现在统一以"信息"开场，`warn` 由下面那条 effect 在有警告时顶上来。
+   * 说明页 ⇒ 现在统一以"信息"开场，`warn` 由下面那条 effect 在有话要说时顶上来。
    */
   const [pageTab, setPageTab] = useState<PageTab>('facts')
   const questionKind = run?.question?.questionKind
@@ -1224,19 +1233,23 @@ export default function PostProcessModal({
     setPageTab('note')
   }, [questionKind])
   /*
-   * **成功但带警告 ⇒ 翻到警告页**：那条警告是这一趟要紧的结论，藏在钮后面等于没说。
+   * **成功但有事要说 ⇒ 翻到警告页**：热床预涂胶、内核警告都是这一趟要紧的话，
+   * 藏在钮后面等于没说。
    *
-   * ★ 只认**成功**那一趟：失败 / 已停止的头等事是"没成"（红卡），警告只挂在那几屏的
-   *   第二页（见下面 `pages`）—— 默认页不许被它顶掉。
-   * ★ 依赖是**警告本身**（拼成一个串），不是 `finished` 对象：「预估打印时间」是后补的，
+   * ★ 只认**成功**那一趟：失败 / 已停止的头等事是"没成"（红卡），这些话只挂在那几屏的
+   *   第二页（见下面 `pages`）—— 默认页不许被它们顶掉。
+   * ★ 依赖是**这几句本身**（拼成一个串），不是 `finished` 对象：「预估打印时间」是后补的，
    *   补进来时 `usePostProcessRun` 会换一个新对象（同一个结论）—— 拿对象当键就会平白
    *   重翻一次页，人刚点去看信息就被弹回警告页。
    * ★ 新一趟开跑（`finished` 变 null）⇒ 串变空 ⇒ 回到"信息"。
    */
-  const warnKey = finished?.ok === true ? warnings.join('\u0000') : ''
+  const noticeKey =
+    finished?.ok === true
+      ? [...(glueCaution ? ['glue'] : []), ...warnings].join('\u0000')
+      : ''
   useEffect(() => {
-    setPageTab(warnKey === '' ? 'facts' : 'warn')
-  }, [warnKey])
+    setPageTab(noticeKey === '' ? 'facts' : 'warn')
+  }, [noticeKey])
 
   if (run === null || view.dismissed) return null
 
@@ -1316,8 +1329,10 @@ export default function PostProcessModal({
     onOpenSettings(target)
   }
 
-  /** 这一趟带警告 ⇒ 结果屏多一页「警告」（见下面那张表） */
+  /** 这一趟有内核警告 ⇒ 结果屏多一页「警告」（见下面那张表） */
   const hasWarnings = warnings.length > 0
+  /** 这一趟有事要说（内核警告 / 热床预涂胶）⇒ 警告页在 */
+  const hasNotice = hasWarnings || glueCaution
 
   /**
    * 这一屏**有哪几页**（按翻页顺序；第一页 = 默认页）。
@@ -1328,20 +1343,20 @@ export default function PostProcessModal({
    * | **碰撞失败** | **红卡 + 信息（同一页） ↔ 碰撞说明**（有警告再挂一页警告） |
    * | 别的失败 | 不翻（红卡 + 信息，一颗钮都不摆）；有警告再挂一页警告 |
    * | 跑着 / 普通成功 | 只有信息 |
-   * | **成功但带警告** | **警告 ↔ 信息**（默认警告：那条警告先给人看） |
+   * | **成功但有警告或开了热床预涂胶** | **警告 ↔ 信息**（默认警告：那句话先给人看） |
    *
    * ★ 失败那屏的"失败"不是一个单独的页（2026-11-04 作者：「我不要 3 种切换」）：
    *   红卡与两栏事实本来就在**同一屏**上下摆着，是这块的"原样"——它就是**默认那一页**。
-   * ★ 默认页永远是 `pages[0]`：`warn` 只在**成功但带警告**那一屏排到最前（上面那条
+   * ★ 默认页永远是 `pages[0]`：`warn` 只在**成功但有话要说**那一屏排到最前（上面那条
    *   effect 把它翻上来）；失败 / 挪塔那几屏它排最后，红卡与图仍是第一眼看到的东西。
    */
   const pages: PageTab[] = isCollisionFail
-    ? hasWarnings ? ['fail', 'note', 'warn'] : ['fail', 'note']
+    ? hasNotice ? ['fail', 'note', 'warn'] : ['fail', 'note']
     : showsRelocateMaps
-      ? hasWarnings ? ['facts', 'note', 'warn'] : ['facts', 'note']
+      ? hasNotice ? ['facts', 'note', 'warn'] : ['facts', 'note']
       : finished !== null && !finished.ok
-        ? hasWarnings ? ['facts', 'warn'] : []
-        : hasWarnings
+        ? hasNotice ? ['facts', 'warn'] : []
+        : hasNotice
           ? ['warn', 'facts']
           : []
 
@@ -1420,6 +1435,23 @@ export default function PostProcessModal({
     return fn()
       .catch((e: unknown) => setErr(errorText(e)))
       .finally(() => setBusy(false))
+  }
+
+  /**
+   * **答这一问**：先记下"这一问正在办"，再把答复递出去（所有选项按钮的唯一出口）。
+   *
+   * `answer_post_process` 是投递即返回 —— 钩子那边要等它把剩下的步骤跑完（十几秒到几分钟）
+   * 才把问句收掉，这期间 `run.question` 一直挂着。不记这一笔，问句屏就一直是问句屏，
+   * 进度 hero 那一条永远出不来（作者：「点了之后没回到进度条的 hero」）。
+   *
+   * `from` 记下点下去那一刻的百分比：答复之后主线是从 0% 起跑的，条子不许倒车
+   * （见下面 `shownPercent`）。
+   */
+  const answer = (choiceId: string) => {
+    const q = run?.question ?? null
+    if (q === null) return
+    setAnswering({ kind: q.questionKind, deadline: q.deadlineUnixMs, from: percent })
+    void act(() => api.answerPostProcess(q.questionKind, choiceId))
   }
 
   /**
@@ -1518,19 +1550,26 @@ export default function PostProcessModal({
     )
   } else if (finished !== null) {
     /*
-     * **警告页**（2026-11-08）：上面这一块换成警告卡 —— 下面那两栏事实一点不动
+     * **警告页**：上面这一块换成警告卡 —— 下面那两栏事实一点不动
      * （作者：「下面的那些内容不用变，变的是上面的 hero 那一个卡片」）。
      *
-     * 警告一条一段（内核原话照抄），多了在卡里滚：卡高恒 104，模态框不跟着长。
-     * 这一页只在 `hasWarnings` 时才在页表里（见上面的 `pages`），所以不会空着。
+     * 卡里说两件事，都一条一段、多了在卡里滚（卡高恒 104，模态框不跟着长）：
+     *   · **热床预涂胶**：这一趟的产物里插了涂胶块，笔会真的贴板面走一圈 ——
+     *     题目就是这句话本身，正文是"盯住开头涂胶那一段"（划不划板只能靠人当场叫停）；
+     *   · **内核警告**：原话照抄，排在预涂胶后面。
+     * 这一页只在 `hasNotice` 时才在页表里（见上面的 `pages`），所以不会空着。
      */
     if (activeTab === 'warn') {
       lead = (
         <div ref={leadBoxRef} key="leadWarn">
           <NoticeHero
             tone="warn"
-            title={tr('postproc.warn.title', { n: warnings.length })}
-            lines={warnings}
+            title={
+              glueCaution
+                ? tr('postproc.glue.title')
+                : tr('postproc.warn.title', { n: warnings.length })
+            }
+            lines={glueCaution ? [tr('postproc.glue.watch'), ...warnings] : warnings}
           />
         </div>
       )
@@ -1721,9 +1760,7 @@ export default function PostProcessModal({
                       className={s.choiceBtn}
                       disabled={busy}
                       title={c.hint}
-                      onClick={() => {
-                        void act(() => api.answerPostProcess(run.question?.questionKind ?? '', c.id))
-                      }}
+                      onClick={() => answer(c.id)}
                     >
                       {c.label}
                     </Btn>
@@ -1735,21 +1772,10 @@ export default function PostProcessModal({
                * 这一趟只是去试位置，继续占强调位、放最右；停下退到左边、用普通皮肤。
                */
               <>
-                <Btn
-                  disabled={busy}
-                  onClick={() =>
-                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'stop'))
-                  }
-                >
+                <Btn disabled={busy} onClick={() => answer('stop')}>
                   {tr('postproc.choice.stop')}
                 </Btn>
-                <Btn
-                  variant="accent"
-                  disabled={busy}
-                  onClick={() =>
-                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'keep'))
-                  }
-                >
+                <Btn variant="accent" disabled={busy} onClick={() => answer('keep')}>
                   {tr('postproc.choice.keep')}
                 </Btn>
               </>
@@ -1759,21 +1785,10 @@ export default function PostProcessModal({
                * （第 9~11 轮定的：不匹配还硬跑会出事，强调位留给人先看清再决定）。
                */
               <>
-                <Btn
-                  disabled={busy}
-                  onClick={() =>
-                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'keep'))
-                  }
-                >
+                <Btn disabled={busy} onClick={() => answer('keep')}>
                   {tr('postproc.choice.keep')}
                 </Btn>
-                <Btn
-                  variant="accent"
-                  disabled={busy}
-                  onClick={() =>
-                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'stop'))
-                  }
-                >
+                <Btn variant="accent" disabled={busy} onClick={() => answer('stop')}>
                   {tr('postproc.choice.stop')}
                 </Btn>
               </>

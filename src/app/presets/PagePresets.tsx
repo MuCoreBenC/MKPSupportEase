@@ -220,7 +220,7 @@ import CompareModal from './CompareModal'
 import PlacementsModal from './PlacementsModal'
 import TextDiffModal from './TextDiffModal'
 import PresetScopeBar from './PresetScopeBar'
-import PresetStatusPill, { PresetSlicerPill } from './PresetStatusPill'
+import PresetStatusPill, { PresetBranchFilter, PresetSlicerPill } from './PresetStatusPill'
 import PresetTable from './PresetTable'
 import {
   ARCHIVE_DRAWER,
@@ -241,6 +241,7 @@ import {
   defaultNameOf,
   duplicateNameOf,
   isDetachedCopy,
+  isMainCopy,
   localUnreadableWhy,
   localCountOfAxis,
   treeCountOfAxis,
@@ -264,6 +265,7 @@ import type {
 import { usePresetData, usePresetPage } from './usePresetData'
 /* 正文的**语法着色**（自己写的词法，不引插件）—— 见那一份的文件头 */
 import { splitHeader, tomlTokens } from './tomlPaint'
+import { diffSummary, lineDiff } from './textDiff'
 /* 「滚到某一行」：全仓那一套（演 transform），见那个文件的头注 */
 import { locateIntoView } from '../../components/scroll/locate'
 import s from './PagePresets.module.css'
@@ -1016,6 +1018,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const [viewer, setViewer] = useState<
     | { kind: 'archive'; fileName: string; rows: ArchivedFile[] }
     | { kind: 'local'; fileName: string; path: string }
+    /* 已经下载到本机的那一份正文（切片器配置那一档，「更新信息」右侧那颗「查看」） */
+    | { kind: 'delivered'; fileName: string }
     | null
   >(null)
   /*
@@ -1029,6 +1033,25 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     error: string | null
     loading: boolean
   } | null>(null)
+  /*
+   * 归档正文区的三档（只对归档那一条有效）：
+   *   `old`      归档里这一版（`body`）
+   *   `current`  本机正在用的那一版（`readDownloadedText` —— 就是目录登记的那版）
+   *   `diff`     两者行级对比（`lineDiff`，与「与默认值对比」同一个纯函数）
+   * 「看正文」进来默认第一档，三档都只读。
+   */
+  const [previewTab, setPreviewTab] = useState<'old' | 'current' | 'diff'>('old')
+  /*
+   * 「正在用的」那份正文。`null` = 还没读过（按需读，打开抽屉不预取 ——
+   * 这一份可能根本没下载，读不出来要照实说）。
+   */
+  const [currentBody, setCurrentBody] = useState<{
+    text: string | null
+    error: string | null
+    loading: boolean
+  } | null>(null)
+  /* 「用回这版」的两段式：第一下变字，第二下才真做（与删除同一形态） */
+  const [confirmingRestore, setConfirmingRestore] = useState<string | null>(null)
 
   /*
    * **编辑器**（「编辑文件」那条链）。`null` = 没在改。
@@ -1614,6 +1637,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     page.setKind('mkp')
     page.setScope('local')
     data.pickMachine('')
+    /* 在用的那份可能来自别的分支 —— 不放开分支筛选就找不到它 */
+    page.setBranchFilter('all')
     window.setTimeout(() => {
       const row = rootRef.current?.querySelector('tr[data-live="true"]') as HTMLElement | null
       if (row !== null) flashRow(row)
@@ -1652,6 +1677,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     if (target.kind !== null) page.setKind(target.kind)
     data.pickMachine('')
     page.setQuery('')
+    /* 目标行可能在另一个分支下 —— 同上，放开分支筛选才送得到 */
+    page.setBranchFilter('all')
     /* `expandedKey` **一个字都不动** —— 见上面那段：只滚 + 闪，不动他手上那张卡 */
     window.setTimeout(() => {
       const row = rootRef.current?.querySelector(
@@ -1734,15 +1761,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /**
    * **复制链接**（2026-10-09 接通）：交付预设下载链接由后端按**当前数据源**算 ——
    * 与下载管道同一个寻址出口，复制到的链接就是下载时取的那个地址。
-   * 拿到就进剪贴板；没配数据源 / 算不出来照实说，不编一个假 URL。
+   * 拿到就进剪贴板（`api.copyText` → Rust 那一侧写）；没配数据源 / 算不出来照实说，
+   * 不编一个假 URL。
    */
   const copyLink = (row: PresetTableRow) => {
     api.getFileUrl(row.fileName).then(
       (url) => {
-        void navigator.clipboard.writeText(url).then(
+        void api.copyText(url).then(
           () => setNote({ text: msg('presets.page.link.copied', { name: row.fileName }), bad: false }),
-          (e: unknown) =>
-            setNote({ text: msg('presets.page.link.clipFailed', { detail: errorText(e) }), bad: true }),
+          () => setNote({ text: msg('presets.page.link.clipFailed'), bad: true }),
         )
       },
       (e: unknown) => setNote({ text: msg('presets.page.link.fetchFailed', { detail: errorText(e) }), bad: true }),
@@ -1927,6 +1954,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           const entry = indexByPath.get(f.path)
           return (
             f.kind === 'mkp_preset' &&
+            /* 只动**下载建的主份**：副本各有各的更新，不被这一下波及 */
+            isMainCopy(f) &&
             entry !== undefined &&
             entry.cloudSource === fileName &&
             f.basedOn !== 'current'
@@ -2145,13 +2174,20 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
 
   /**
-   * 读一份正文（只读）。**两边共用这一个口子**，只是问的命令不同：
-   * 归档区那份走 `readArchivedText`，用户自己那份走 `readLocalPresetText`。
+   * 读一份正文（只读）。**三个抽屉共用这一个口子**，只是问的命令不同：
+   * 归档区那份走 `readArchivedText`（入参是归档路径），用户自己那份走
+   * `readLocalPresetText`（入参是文件路径），已经下载到本机的那份走
+   * `readDownloadedText`（入参是**文件名**，落点由目录给）。
    * 失败照实说（与下载 / 应用同一条规矩：不吞、不装）。
    */
-  const readBody = (path: string, which: 'archive' | 'user') => {
+  const readBody = (path: string, which: 'archive' | 'user' | 'delivered') => {
     setBody({ path, text: null, error: null, loading: true })
-    const ask = which === 'user' ? api.readLocalPresetText(path) : api.readArchivedText(path)
+    const ask =
+      which === 'user'
+        ? api.readLocalPresetText(path)
+        : which === 'delivered'
+          ? api.readDownloadedText(path)
+          : api.readArchivedText(path)
     ask.then(
       (text) => setBody({ path, text, error: null, loading: false }),
       (e: unknown) =>
@@ -2165,6 +2201,26 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
 
   /**
+   * 读**本机正在用的那一版**（旧版本抽屉里「正在用的」与「对比」两档要用）。
+   *
+   * 按需读、读一次就够：一次抽屉打开期间本机这一版不会变（要变也是经这里的那两颗
+   * 按钮，它们会把它清掉重读）。读不出来照实说 —— 这一份可能压根没下载。
+   */
+  const refreshCurrentBody = (fileName: string) => {
+    setCurrentBody({ text: null, error: null, loading: true })
+    api.readDownloadedText(fileName).then(
+      (text) => setCurrentBody({ text, error: null, loading: false }),
+      (e: unknown) =>
+        setCurrentBody({ text: null, error: errorText(e), loading: false }),
+    )
+  }
+
+  const readCurrentBody = (fileName: string) => {
+    if (currentBody !== null && !currentBody.error) return
+    refreshCurrentBody(fileName)
+  }
+
+  /**
    * 打开「旧版本」抽屉：按**文件名**把归档里那一份的旧版本挑出来。
    *
    * 判据用文件名 —— 与下载 / 应用 / 读正文同一套口径（归档里那份与交付文件同名，
@@ -2175,6 +2231,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     /* 两个抽屉互斥（草稿已经在盘上，"接着改"能回来，所以关掉编辑器不丢东西） */
     setEditing(null)
     setBody(null)
+    setPreviewTab('old')
+    setCurrentBody(null)
+    setConfirmingRestore(null)
     setViewer({
       kind: 'archive',
       fileName: row.fileName,
@@ -2192,6 +2251,23 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     setEditing(null)
     setViewer({ kind: 'local', fileName: row.fileName, path: row.path })
     readBody(row.path, 'user')
+  }
+
+  /**
+   * 看**已经下载到本机的那一份**正文（「更新信息」右侧那颗「查看」）。
+   *
+   * 走 `readDownloadedText`：落点由目录给（`content/<sha>` 或 `assets/bbs/…`），
+   * 界面这侧只需要文件名 —— 与「是不是这一份」同一个判据，不必自己拼路径。
+   * 这一档没有归档列表、也没有"用回"，就是一张只读正文。
+   */
+  const openDelivered = (row: PresetTableRow) => {
+    menu.close()
+    setEditing(null)
+    setPreviewTab('old')
+    setCurrentBody(null)
+    setConfirmingRestore(null)
+    setViewer({ kind: 'delivered', fileName: row.fileName })
+    readBody(row.fileName, 'delivered')
   }
 
   /**
@@ -2899,6 +2975,38 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           bad: false,
         }),
       (e: unknown) => setNote({ text: msg('presets.page.remove.failed', { detail: errorText(e) }), bad: true }),
+    )
+  }
+
+  /**
+   * **用回归档里的这一版**（旧版本抽屉里那颗按钮）。
+   *
+   * 只换**本机这一版**：目录登记、版本链、事件账一个都不碰 —— 于是换完这一份会被
+   * 认成「旧版本」，下次点「下载」就能换回云端当前版。已经放入切片器的那份后端跟着换。
+   *
+   * 两段式确认（与删除同一形态）：这是"换掉本机正在用的这一版"，不是看一眼的事。
+   */
+  const runRestoreArchived = (a: ArchivedFile) => {
+    setConfirmingRestore(null)
+    setNote({
+      text: msg('presets.page.restore.running', { name: a.fileName }),
+      bad: false,
+    })
+    data.restoreArchived(a.path).then(
+      () => {
+        setNote({
+          text: msg('presets.page.restore.done', { name: a.fileName }),
+          bad: false,
+        })
+        /* 本机这一版换了 ⇒ 「正在用的」与「对比」两档当场重读（不重读就一直停在「正在读…」） */
+        if (previewTab === 'old') setCurrentBody(null)
+        else refreshCurrentBody(a.fileName)
+      },
+      (e: unknown) =>
+        setNote({
+          text: msg('presets.page.restore.failed', { detail: errorText(e) }),
+          bad: true,
+        }),
     )
   }
 
@@ -4187,6 +4295,20 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   machineId={data.machineId}
                   onPick={pickMachine}
                 />
+                {/*
+                 * **分支筛选**：只在本地表、且本机出现过两个以上分支时出现。
+                 *
+                 * 和机型筛选**同一颗件、同一张弹层**（`PresetBranchFilter`），只是
+                 * 默认档是「当前分支」—— 别的分支那几份仍在盘上，切到「全部来源」才看得见。
+                 * 只有一个分支的用户完全看不到这一格。
+                 */}
+                {page.scope === 'local' && page.branches.length >= 2 ? (
+                  <PresetBranchFilter
+                    current={page.currentBranch}
+                    value={page.branchFilter}
+                    onPick={page.setBranchFilter}
+                  />
+                ) : null}
                 {metaNode}
               </span>
             </>
@@ -4286,6 +4408,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   setKeepOpenPath(null)
                   setExpandedKey((k) => (k === rowKey ? null : rowKey))
                 }}
+                /* 行首图钉与右键「置顶」同一个出口 —— 提示条、落库都在 `togglePin` 里 */
+                onPin={togglePin}
                 /*
                  * 操作列常驻：本地表那一颗按钮的字随类型变（应用 / 复制），云端表是下载。
                  * 右键菜单**照旧全在**，操作列只是把最常用的那一个摆到明面上。
@@ -4297,6 +4421,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 archiveCountOf={archiveCountOf}
                 onOpenArchive={openArchive}
                 onOpenLocal={openLocal}
+                onView={openDelivered}
                 /* 「在文件夹中打开」= 右键菜单那颗（详情卡「文件位置」那一行右侧同一动作） */
                 onReveal={runReveal}
                 /*
@@ -4366,18 +4491,27 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             size="lg"
             /* 遮罩铺满"标题栏以下整块"（见 `pageEl` 的注释）：挂到页面根那一层 */
             host={pageEl}
-            title={tr(viewer?.kind === 'local' ? LOCAL_DRAWER.title : ARCHIVE_DRAWER.title)}
+            title={tr(
+              viewer?.kind === 'local'
+                ? LOCAL_DRAWER.title
+                : viewer?.kind === 'delivered'
+                  ? ARCHIVE_DRAWER.bodyTitle
+                  : ARCHIVE_DRAWER.title,
+            )}
             subtitle={
               viewer === null
                 ? undefined
                 : viewer.kind === 'local'
                   ? tr('presets.page.viewer.localSubtitle', { name: viewer.fileName })
-                  : tr('presets.page.viewer.archiveSubtitle', { name: viewer.fileName, count: viewer.rows.length })
+                  : viewer.kind === 'delivered'
+                    ? viewer.fileName
+                    : tr('presets.page.viewer.archiveSubtitle', { name: viewer.fileName, count: viewer.rows.length })
             }
             onClose={() => {
               setViewer(null)
               setBody(null)
               setConfirmingArchive(null)
+              setConfirmingRestore(null)
             }}
           >
             {viewer !== null && (
@@ -4399,24 +4533,40 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                              * （替换事件）。以前只有一个 mtime 顶在唯一时间位上，用户看到的
                              * 就是"我动它的时刻" —— 那正是「旧版本的时间居然是现在」的根子。
                              */}
-                            <p className={s.archWhen}>
+                            {/*
+                             * 第二行：机型 · 云端发布 … · 替换时间 …（一条最多两行）。
+                             *
+                             * 两个时间**各是各，永不互相顶替**（2026-10-06 事件时间模型）：
+                             * 云端发布 = 这一版发布时的时刻；替换时间 = 它被换下来那一刻。
+                             * 以前只有一个 mtime 顶在唯一时间位上，用户看到的就是"我动它的时刻"。
+                             */}
+                            <p className={s.archWho}>
+                              {a.machineId === null ? null : (
+                                <>
+                                  {a.versionId === null
+                                    ? a.machineId
+                                    : `${a.machineId} · ${a.versionId}`}
+                                  <i className={s.archDot} aria-hidden>
+                                    ·
+                                  </i>
+                                </>
+                              )}
                               {`${tr(ARCHIVE_TIME.published)} ${
                                 a.publishedAt === null
                                   ? tr(ARCHIVE_TIME.publishedUnknown)
                                   : (longStatText(a.publishedAt) ??
                                     tr(ARCHIVE_TIME.publishedUnknown))
-                              } · ${tr(ARCHIVE_TIME.replaced)} ${
+                              }`}
+                              <i className={s.archDot} aria-hidden>
+                                ·
+                              </i>
+                              {`${tr(ARCHIVE_TIME.replaced)} ${
                                 a.replacedUnix === null
                                   ? tr(ARCHIVE_TIME.replacedUnknown)
                                   : (longStatText(
                                       new Date(a.replacedUnix * 1000).toISOString(),
                                     ) ?? tr(ARCHIVE_TIME.replacedUnknown))
                               }`}
-                            </p>
-                            <p className={s.archWho}>
-                              {a.machineId === null || a.versionId === null
-                                ? tr(ARCHIVE_DRAWER.unknown)
-                                : `${a.machineId} · ${a.versionId}`}
                             </p>
                             {/*
                              * 删除（2026-10-06 一切皆可删）：**两段式确认** —— 第一下变成
@@ -4429,10 +4579,30 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                                 className={s.archBtn}
                                 onClick={() => {
                                   setConfirmingArchive(null)
+                                  setConfirmingRestore(null)
+                                  setPreviewTab('old')
                                   readBody(a.path, 'archive')
                                 }}
                               >
                                 {tr(ARCHIVE_DRAWER.open)}
+                              </button>
+                              {/* 用回这一版：两段式（换掉的是本机正在用的那一版） */}
+                              <button
+                                type="button"
+                                className={
+                                  confirmingRestore === a.path
+                                    ? `${s.archBtn} ${s.archBtnAsk}`
+                                    : s.archBtn
+                                }
+                                onClick={() => {
+                                  setConfirmingArchive(null)
+                                  if (confirmingRestore === a.path) runRestoreArchived(a)
+                                  else setConfirmingRestore(a.path)
+                                }}
+                              >
+                                {confirmingRestore === a.path
+                                  ? tr(ARCHIVE_DRAWER.restoreAsk)
+                                  : tr(ARCHIVE_DRAWER.restore)}
                               </button>
                               <button
                                 type="button"
@@ -4460,27 +4630,108 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
 
                 {body !== null && (
                   <div className={s.archBody}>
-                    <p className={s.archBodyHead}>
-                      {tr(ARCHIVE_DRAWER.bodyTitle)} · {body.path}
-                    </p>
-                    {body.loading ? (
-                      <p className={s.archNote}>
-                        {tr(
-                          viewer.kind === 'local' ? LOCAL_DRAWER.reading : ARCHIVE_DRAWER.reading,
-                        )}
-                      </p>
-                    ) : body.error !== null ? (
-                      /* 读不出来就照实说：不许显示一段空正文假装它是空的 */
-                      <p className={s.archErr}>{tr('presets.page.viewer.readFailed', { detail: body.error })}</p>
-                    ) : (
-                      <pre className={s.archPre}>{body.text}</pre>
+                    {/* 归档那一条有三档：这一版 / 正在用的 / 对比（都只读） */}
+                    {viewer.kind === 'archive' && (
+                      <div className={s.archTabs}>
+                        {(['old', 'current', 'diff'] as const).map((tab) => (
+                          <button
+                            key={tab}
+                            type="button"
+                            className={
+                              previewTab === tab ? `${s.archTab} ${s.archTabOn}` : s.archTab
+                            }
+                            onClick={() => {
+                              setPreviewTab(tab)
+                              if (tab !== 'old') readCurrentBody(viewer.fileName)
+                            }}
+                          >
+                            {tr(
+                              tab === 'old'
+                                ? ARCHIVE_DRAWER.tabOld
+                                : tab === 'current'
+                                  ? ARCHIVE_DRAWER.tabCurrent
+                                  : ARCHIVE_DRAWER.tabDiff,
+                            )}
+                          </button>
+                        ))}
+                      </div>
                     )}
+                    <p className={s.archBodyHead}>
+                      {viewer.kind === 'archive' && previewTab === 'diff'
+                        ? `${tr(ARCHIVE_DRAWER.tabOld)} ⇄ ${tr(ARCHIVE_DRAWER.tabCurrent)}`
+                        : viewer.kind === 'archive' && previewTab === 'current'
+                          ? tr(ARCHIVE_DRAWER.tabCurrent)
+                          : `${tr(ARCHIVE_DRAWER.bodyTitle)} · ${body.path}`}
+                    </p>
+                    {(() => {
+                      /* 对比与「正在用的」两档只在归档那一条存在；本地副本就走原来的正文 */
+                      const readOnlyOld = viewer.kind !== 'archive' || previewTab === 'old'
+                      if (readOnlyOld) {
+                        return body.loading ? (
+                          <p className={s.archNote}>
+                            {tr(
+                              viewer.kind === 'local' ? LOCAL_DRAWER.reading : ARCHIVE_DRAWER.reading,
+                            )}
+                          </p>
+                        ) : body.error !== null ? (
+                          /* 读不出来就照实说：不许显示一段空正文假装它是空的 */
+                          <p className={s.archErr}>
+                            {tr('presets.page.viewer.readFailed', { detail: body.error })}
+                          </p>
+                        ) : (
+                          <pre className={s.archPre}>{body.text}</pre>
+                        )
+                      }
+                      const cur = currentBody
+                      if (body.loading || cur === null || cur.loading) {
+                        return <p className={s.archNote}>{tr(ARCHIVE_DRAWER.reading)}</p>
+                      }
+                      if (cur.error !== null) {
+                        return (
+                          <p className={s.archErr}>
+                            {tr('presets.page.viewer.currentFailed', { detail: cur.error })}
+                          </p>
+                        )
+                      }
+                      if (previewTab === 'current') {
+                        return <pre className={s.archPre}>{cur.text}</pre>
+                      }
+                      /* 对比：左 = 归档这一版，右 = 正在用的那一版 */
+                      if (body.text === null || cur.text === null) return null
+                      const rows = lineDiff(body.text, cur.text)
+                      const sum = diffSummary(rows)
+                      if (sum.changed + sum.added + sum.removed === 0) {
+                        return <p className={s.archNote}>{tr('presets.page.viewer.diffSame')}</p>
+                      }
+                      return (
+                        <div className={s.archDiff}>
+                          {rows.map((r, i) => (
+                            <div key={i} className={s.archDiffRow} data-kind={r.kind}>
+                              <span className={s.archDiffNo}>{r.rightNo ?? r.leftNo ?? ''}</span>
+                              <span className={s.archDiffSign}>
+                                {r.kind === 'add'
+                                  ? '+'
+                                  : r.kind === 'del'
+                                    ? '−'
+                                    : r.kind === 'change'
+                                      ? '~'
+                                      : ' '}
+                              </span>
+                              <span>{r.right ?? r.left}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    })()}
                   </div>
                 )}
 
-                <p className={s.archNote}>
-                  {tr(viewer.kind === 'local' ? LOCAL_DRAWER.note : ARCHIVE_WHY)}
-                </p>
+                {/* 「看正文」那一档只是正文本身，没有生命周期要交代 */}
+                {viewer.kind !== 'delivered' && (
+                  <p className={s.archNote}>
+                    {tr(viewer.kind === 'local' ? LOCAL_DRAWER.note : ARCHIVE_WHY)}
+                  </p>
+                )}
               </div>
             )}
           </Modal>

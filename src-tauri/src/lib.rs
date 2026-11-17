@@ -478,6 +478,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::open_automation_settings,
         // 「复制后处理脚本」那一整条命令：两段真值（本程序自己 + 预设真实落点）现拼
         ipc::get_post_process_command,
+        // 写系统剪贴板：前端所有「复制」的落地（webview 那套要看用户手势，状态事件里必被拒）
+        ipc::copy_text,
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
@@ -521,6 +523,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::local::get_preset_draft_summary,
         // 「恢复默认值」（编辑文件那颗）读的原文镜像
         ipc::local::read_local_origin_text,
+        // 「恢复默认值」要回到的那一版（参数页与编辑文件读同一份字节）
+        ipc::local::read_preset_baseline_values,
         // 身份账本（预设页判「我这边有没有一份跟云端对得上」的唯一依据）
         ipc::local::get_local_preset_index,
         // 第十层：用户文件管理（改名 / 删除 —— 只动名字或删掉，字节一个不动）
@@ -602,6 +606,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 删除（作者裁决 2026-10-06：一切皆可删 —— 删了可重下/代价讲清）
         ipc::catalog::delete_delivery_file,
         ipc::catalog::delete_archived_file,
+        // 用回旧版本：只换本机这一版（目录与事件账不动）
+        ipc::catalog::restore_archived_file,
         ipc::catalog::check_remote_update,
         ipc::catalog::apply_remote_update,
         // 软件更新（release.json）—— 与预设数据两条链：设置页「软件更新」块的两个口子
@@ -684,6 +690,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::open_automation_settings,
         // 「复制后处理脚本」那一整条命令：两段真值（本程序自己 + 预设真实落点）现拼
         ipc::get_post_process_command,
+        // 写系统剪贴板：前端所有「复制」的落地（webview 那套要看用户手势，状态事件里必被拒）
+        ipc::copy_text,
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
@@ -728,6 +736,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::local::get_preset_draft_summary,
         // 「恢复默认值」（编辑文件那颗）读的原文镜像
         ipc::local::read_local_origin_text,
+        // 「恢复默认值」要回到的那一版（参数页与编辑文件读同一份字节）
+        ipc::local::read_preset_baseline_values,
         // 身份账本（预设页判「我这边有没有一份跟云端对得上」的唯一依据）
         ipc::local::get_local_preset_index,
         // 第十层：用户文件管理（与上面那份清单一字不差）
@@ -802,6 +812,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 删除（作者裁决 2026-10-06：一切皆可删 —— 删了可重下/代价讲清）
         ipc::catalog::delete_delivery_file,
         ipc::catalog::delete_archived_file,
+        // 用回旧版本：与上面那份清单一字不差
+        ipc::catalog::restore_archived_file,
         ipc::catalog::check_remote_update,
         ipc::catalog::apply_remote_update,
         // 软件更新（release.json）—— 与上面那份清单一字不差
@@ -857,16 +869,29 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_set_bootstrap,
         app::wb_book,
         app::wb_registry,
+        // 默认配置（客户端偏好出厂值）：读写 `presets/client-defaults.toml`，
+        // 写入走结构编辑那条事务（影子树 + 撤销 + 保存改动）
+        app::defaults::wb_defaults_view,
+        app::defaults::wb_defaults_apply,
         // 参数定义编辑（2026-10-03 作者：「弃用是谁决定的？我没办法改」）：
         // 名称 / 单位 / 值类型 / 控件 / 范围 / 步进 / 出厂默认 / 属于 / 前置条件 / 弃用，
         // 就地写进 param_registry.toml 的 [[params]] 本体 —— 即时落盘，不走参数草稿
         app::wb_set_param_meta,
+        // 组内顺序（2026-11-14）：整组一次重排。与上一条分开 —— 那条改「是什么」，
+        // 这条只改「按什么次序摆」，能挪别人的位置而不用重抄别人的定义
+        app::wb_set_section_order,
+        app::wb_edit_group,
         // 分组本身（名字 / 上下位置，2026-11-01 作者：「这个标题这些能点击吧，
         // 点了就可以改名字……而且没办法去换它那个上下位置」）：
         // 名字写 `[[tabs.sections]].label`，位置 = 数组换位 + `order` 重排，
         // 布局文件那份数组同步换（「所属分组」下拉按它出）
         app::wb_set_section_meta,
         app::wb_remove_section,
+        // 页签本身（新建 / 改名 / 上下位置 / 删除）。与分组同一套事务：
+        // 两份 TOML 一次写完，删完只是进草稿
+        app::wb_add_tab,
+        app::wb_set_tab_meta,
+        app::wb_remove_tab,
         app::wb_clear_stale_translations,
         // 状态词的唯一出处。开场取一次，前端按枚举值查 ——
         // 不给它的话，同一个词会在 TSX 里再写一遍（doc §13）
@@ -980,6 +1005,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::build::wb_generate,
         // 历次生成的回执（应用数据目录，按份数自动清理）
         app::build::wb_receipts,
+        app::build::wb_publish_serial,
         app::build::wb_revert_preview,
         // 发布闸（第二刀）：逐项打勾的结果；`can_publish` 是"能不能往下走"的唯一答案
         app::build::wb_publish_audit,

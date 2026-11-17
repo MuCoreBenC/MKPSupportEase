@@ -5,31 +5,23 @@ id = 'offset'
 id = 'space_offset'
 
 [[tabs.sections.items]]
-id = 'item_0_0_1'
+id = 'item_toolhead_offset_x'
 paramKey = "toolhead.offset.x"
 
 [[tabs.sections.items]]
-id = 'item_0_0_0'
+id = 'item_toolhead_offset_y'
 paramKey = "toolhead.offset.y"
 
 [[tabs.sections.items]]
-id = 'item_0_0_2'
+id = 'item_toolhead_offset_z'
 paramKey = "toolhead.offset.z"
 
 [[tabs.sections]]
 id = 'motion'
 
 [[tabs.sections.items]]
-id = 'item_0_1_0'
+id = 'item_toolhead_speed_limit'
 paramKey = 'toolhead.speed_limit'
-
-[[tabs.sections.items]]
-id = 'item_0_1_1'
-paramKey = 'toolhead.MKP_retract'
-
-[[tabs.sections.items]]
-id = 'item_0_1_2'
-paramKey = 'toolhead.MKP_extrude'
 
 [[tabs]]
 id = 'wiping'
@@ -38,7 +30,7 @@ id = 'wiping'
 id = 'wiping_method'
 
 [[tabs.sections.items]]
-id = 'item_1_0_0'
+id = 'item_wiping_have_wiping_components'
 paramKey = 'wiping.have_wiping_components'
 
 [[tabs.sections]]
@@ -46,19 +38,19 @@ component = 'tower-map'
 id = 'tower_position'
 
 [[tabs.sections.items]]
-id = 'item_1_1_0'
+id = 'item_wiping_wiper_x'
 paramKey = 'wiping.wiper_x'
 
 [[tabs.sections.items]]
-id = 'item_1_1_1'
+id = 'item_wiping_wiper_y'
 paramKey = 'wiping.wiper_y'
 
 [[tabs.sections.items]]
-id = 'item_1_1_2'
+id = 'item_wiping_tower_extrude_ratio'
 paramKey = 'wiping.tower_extrude_ratio'
 
 [[tabs.sections.items]]
-id = 'item_1_1_3'
+id = 'item_wiping_tower_travel_speed'
 paramKey = 'wiping.tower_travel_speed'
 
 [tabs.sections.showWhen]
@@ -70,104 +62,104 @@ value = 'tower'
 id = 'safety_advanced'
 
 [[tabs.sections.items]]
-id = 'item_1_2_0'
+id = 'item_wiping_tower_first_layer_flow'
 paramKey = 'wiping.tower_first_layer_flow'
 
 [[tabs.sections.items]]
-id = 'item_1_2_1'
+id = 'item_wiping_fast_tower_mode'
 paramKey = 'wiping.fast_tower_mode'
 
 [[tabs.sections.items]]
-id = 'item_1_2_2'
+id = 'item_wiping_wipetower_speed'
 paramKey = 'wiping.wipetower_speed'
 
 [[tabs.sections.items]]
-id = 'item_1_2_3'
+id = 'item_wiping_tower_glue_layer_speed'
 paramKey = 'wiping.tower_glue_layer_speed'
 
 [[tabs.sections.items]]
-id = 'item_1_2_4'
+id = 'item_wiping_tower_custom_layer_height'
 paramKey = 'wiping.tower_custom_layer_height'
 
 [[tabs.sections.items]]
-id = 'item_1_2_5'
+id = 'item_wiping_tower_wipe_mode'
 paramKey = 'wiping.tower_wipe_mode'
 
 [[tabs.sections.items]]
-id = 'item_1_2_6'
+id = 'item_wiping_tower_safe_z_offset'
 paramKey = 'wiping.tower_safe_z_offset'
 
 [[tabs.sections]]
 id = 'tower_structure'
 
 [[tabs.sections.items]]
-id = 'item_1_3_0'
+id = 'item_wiping_outer_structure'
 paramKey = 'wiping.outer_structure'
 
 [[tabs.sections.items]]
-id = 'item_1_3_1'
+id = 'item_wiping_tower_rib_speed'
 paramKey = 'wiping.tower_rib_speed'
 
 [[tabs.sections.items]]
-id = 'item_1_3_2'
+id = 'item_wiping_tower_rib_speed_value'
 paramKey = 'wiping.tower_rib_speed_value'
 
 [[tabs.sections.items]]
-id = 'item_1_3_3'
+id = 'item_wiping_rib_extra_length'
 paramKey = 'wiping.rib_extra_length'
 
 [[tabs.sections.items]]
-id = 'item_1_3_4'
+id = 'item_wiping_rib_width'
 paramKey = 'wiping.rib_width'
 
 [[tabs.sections.items]]
-id = 'item_1_3_5'
+id = 'item_wiping_rib_fillet_wall'
 paramKey = 'wiping.rib_fillet_wall'
 
 [[tabs.sections.items]]
-id = 'item_1_3_6'
+id = 'item_wiping_tower_sheath_speed'
 paramKey = 'wiping.tower_sheath_speed'
 
 [[tabs.sections.items]]
-id = 'item_1_3_7'
+id = 'item_wiping_sheath_enable_height'
 paramKey = 'wiping.sheath_enable_height'
 
 [[tabs.sections.items]]
-id = 'item_1_3_8'
+id = 'item_wiping_sheath_base_expand'
 paramKey = 'wiping.sheath_base_expand'
 
 [[tabs.sections.items]]
-id = 'item_1_3_9'
+id = 'item_wiping_sheath_wall_width'
 paramKey = 'wiping.sheath_wall_width'
 
 [[tabs.sections.items]]
-id = 'item_1_3_10'
+id = 'item_wiping_sheath_converge_layers'
 paramKey = 'wiping.sheath_converge_layers'
 
 [[tabs.sections]]
 id = 'custom_1'
 
 [[tabs.sections.items]]
-id = 'item_custom_1_support_extrusion_multiplier'
+id = 'item_wiping_support_extrusion_multiplier'
 paramKey = 'wiping.support_extrusion_multiplier'
 
 [[tabs.sections]]
 id = 'disk_action'
 
 [[tabs.sections.items]]
-id = 'item_1_4_0'
+id = 'item_wiping_disk_stagger_mode'
 paramKey = 'wiping.disk_stagger_mode'
 
 [[tabs.sections.items]]
-id = 'item_1_4_1'
+id = 'item_wiping_disk_stagger_angle'
 paramKey = 'wiping.disk_stagger_angle'
 
 [[tabs.sections.items]]
-id = 'item_1_4_2'
+id = 'item_wiping_disk_stagger_max_angle'
 paramKey = 'wiping.disk_stagger_max_angle'
 
 [[tabs.sections.items]]
-id = 'item_1_4_3'
+id = 'item_wiping_disk_stagger_swing_mode'
 paramKey = 'wiping.disk_stagger_swing_mode'
 
 [[tabs]]
@@ -177,15 +169,15 @@ id = 'fan'
 id = 'fan_control'
 
 [[tabs.sections.items]]
-id = 'item_2_0_0'
+id = 'item_wiping_nozzle_cooling_flag'
 paramKey = 'wiping.nozzle_cooling_flag'
 
 [[tabs.sections.items]]
-id = 'item_2_0_1'
+id = 'item_wiping_fan_speed'
 paramKey = 'wiping.fan_speed'
 
 [[tabs.sections.items]]
-id = 'item_2_0_2'
+id = 'item_wiping_user_dry_time'
 paramKey = 'wiping.user_dry_time'
 
 [[tabs]]
@@ -195,78 +187,86 @@ id = 'glue'
 id = 'glue_ironing'
 
 [[tabs.sections.items]]
-id = 'item_3_1_0'
+id = 'item_wiping_ironing_mode'
 paramKey = 'wiping.ironing_mode'
 
 [[tabs.sections.items]]
-id = 'item_3_1_1'
-paramKey = 'wiping.ironing_e_sum_threshold'
+id = 'item_wiping_ironing_e_sum_limit'
+paramKey = 'wiping.ironing_e_sum_limit'
 
 [[tabs.sections.items]]
-id = 'item_3_1_2'
+id = 'item_wiping_use_ironing_path'
 paramKey = 'wiping.use_ironing_path'
 
 [[tabs.sections.items]]
-id = 'item_3_1_3'
+id = 'item_wiping_ironing_coverage_threshold'
 paramKey = 'wiping.ironing_coverage_threshold'
 
 [[tabs.sections.items]]
-id = 'item_3_1_4'
-paramKey = 'wiping.ironing_suppress_expand'
+id = 'item_wiping_ironing_keepout'
+paramKey = 'wiping.ironing_keepout'
 
 [[tabs.sections.items]]
-id = 'item_3_1_5'
-paramKey = 'wiping.ironing_suppress_expand_mode'
+id = 'item_wiping_ironing_keepout_mode'
+paramKey = 'wiping.ironing_keepout_mode'
 
 [[tabs.sections.items]]
-id = 'item_3_1_6'
+id = 'item_wiping_glue_edge_lines'
+paramKey = 'wiping.glue_edge_lines'
+
+[[tabs.sections.items]]
+id = 'item_wiping_glue_edge_lift'
+paramKey = 'wiping.glue_edge_lift'
+
+[[tabs.sections.items]]
+id = 'item_wiping_min_support_interface_enabled'
 paramKey = 'wiping.min_support_interface_enabled'
 
 [[tabs.sections.items]]
-id = 'item_3_1_7'
+id = 'item_wiping_glue_sparse_ratio'
 paramKey = 'wiping.glue_sparse_ratio'
 
 [[tabs.sections]]
 id = 'glue_z_compensation'
 
 [[tabs.sections.items]]
-id = 'item_3_2_0'
+id = 'item_wiping_glue_z_compensation_enabled'
 paramKey = 'wiping.glue_z_compensation_enabled'
 
 [[tabs.sections.items]]
-id = 'item_3_2_1'
+id = 'item_wiping_glue_z_compensation_mode'
 paramKey = 'wiping.glue_z_compensation_mode'
 
 [[tabs.sections.items]]
-id = 'item_3_2_2'
+id = 'item_wiping_glue_z_compensation_bed_fl'
 paramKey = 'wiping.glue_z_compensation_bed_fl'
 
 [[tabs.sections.items]]
-id = 'item_3_2_3'
+id = 'item_wiping_glue_z_compensation_bed_fr'
 paramKey = 'wiping.glue_z_compensation_bed_fr'
 
 [[tabs.sections.items]]
-id = 'item_3_2_4'
+id = 'item_wiping_glue_z_compensation_bed_bl'
 paramKey = 'wiping.glue_z_compensation_bed_bl'
 
 [[tabs.sections.items]]
-id = 'item_3_2_5'
+id = 'item_wiping_glue_z_compensation_bed_br'
 paramKey = 'wiping.glue_z_compensation_bed_br'
 
 [[tabs.sections.items]]
-id = 'item_3_2_6'
+id = 'item_wiping_glue_z_compensation_patch_fl'
 paramKey = 'wiping.glue_z_compensation_patch_fl'
 
 [[tabs.sections.items]]
-id = 'item_3_2_7'
+id = 'item_wiping_glue_z_compensation_patch_fr'
 paramKey = 'wiping.glue_z_compensation_patch_fr'
 
 [[tabs.sections.items]]
-id = 'item_3_2_8'
+id = 'item_wiping_glue_z_compensation_patch_bl'
 paramKey = 'wiping.glue_z_compensation_patch_bl'
 
 [[tabs.sections.items]]
-id = 'item_3_2_9'
+id = 'item_wiping_glue_z_compensation_patch_br'
 paramKey = 'wiping.glue_z_compensation_patch_br'
 
 [[tabs]]
@@ -276,44 +276,68 @@ id = 'gcode'
 id = 'custom_gcode'
 
 [[tabs.sections.items]]
-id = 'item_4_0_0'
-paramKey = 'toolhead.custom_mount_gcode'
+id = 'item_toolhead_MKP_retract_at'
+paramKey = "toolhead.MKP_retract_at"
 
 [[tabs.sections.items]]
-id = 'item_4_0_2'
-paramKey = 'toolhead.pen_mount_wait_x'
+id = 'item_toolhead_custom_mount_gcode'
+paramKey = "toolhead.custom_mount_gcode"
 
 [[tabs.sections.items]]
-id = 'item_4_0_3'
-paramKey = 'toolhead.pen_mount_wait_y'
+id = 'item_toolhead_pen_mount_x'
+paramKey = "toolhead.pen_mount_x"
 
 [[tabs.sections.items]]
-id = 'item_4_0_4'
-paramKey = 'toolhead.pen_mount_x'
+id = 'item_toolhead_pen_mount_speed'
+paramKey = "toolhead.pen_mount_speed"
 
 [[tabs.sections.items]]
-id = 'item_4_0_5'
-paramKey = 'toolhead.pen_mount_speed'
+id = 'item_toolhead_MKP_retract'
+paramKey = "toolhead.MKP_retract"
 
 [[tabs.sections.items]]
-id = 'item_4_0_1'
-paramKey = 'toolhead.custom_unmount_gcode'
+id = 'item_toolhead_MKP_retract_speed'
+paramKey = "toolhead.MKP_retract_speed"
 
 [[tabs.sections.items]]
-id = 'item_4_0_6'
-paramKey = 'toolhead.pen_unmount_wait_x'
+id = 'item_toolhead_pen_mount_wait_x'
+paramKey = "toolhead.pen_mount_wait_x"
 
 [[tabs.sections.items]]
-id = 'item_4_0_7'
-paramKey = 'toolhead.pen_unmount_wait_y'
+id = 'item_toolhead_pen_mount_wait_y'
+paramKey = "toolhead.pen_mount_wait_y"
 
 [[tabs.sections.items]]
-id = 'item_4_0_8'
-paramKey = 'toolhead.pen_unmount_x'
+id = 'item_toolhead_custom_unmount_gcode'
+paramKey = "toolhead.custom_unmount_gcode"
 
 [[tabs.sections.items]]
-id = 'item_4_0_9'
-paramKey = 'toolhead.pen_unmount_speed'
+id = 'item_toolhead_pen_unmount_x'
+paramKey = "toolhead.pen_unmount_x"
+
+[[tabs.sections.items]]
+id = 'item_toolhead_pen_unmount_speed'
+paramKey = "toolhead.pen_unmount_speed"
+
+[[tabs.sections.items]]
+id = "item_toolhead_MKP_extrude"
+paramKey = "toolhead.MKP_extrude"
+
+[[tabs.sections.items]]
+id = "item_toolhead_MKP_extrude_speed"
+paramKey = "toolhead.MKP_extrude_speed"
+
+[[tabs.sections.items]]
+id = "item_toolhead_MKP_extrude_spread"
+paramKey = "toolhead.MKP_extrude_spread"
+
+[[tabs.sections.items]]
+id = "item_toolhead_pen_unmount_wait_x"
+paramKey = "toolhead.pen_unmount_wait_x"
+
+[[tabs.sections.items]]
+id = "item_toolhead_pen_unmount_wait_y"
+paramKey = "toolhead.pen_unmount_wait_y"
 
 [[tabs]]
 id = 'advanced'
@@ -322,123 +346,123 @@ id = 'advanced'
 id = 'pen_revitalization'
 
 [[tabs.sections.items]]
-id = 'item_5_0_0'
+id = 'item_toolhead_first_pen_revitalization_flag'
 paramKey = 'toolhead.first_pen_revitalization_flag'
 
 [[tabs.sections.items]]
-id = 'item_5_0_1'
+id = 'item_wiping_prime_enabled'
 paramKey = 'wiping.prime_enabled'
 
 [[tabs.sections.items]]
-id = 'item_5_0_2'
+id = 'item_toolhead_prime_length'
 paramKey = 'toolhead.prime_length'
 
 [[tabs.sections.items]]
-id = 'item_5_0_3'
+id = 'item_wiping_prime_min_path_length'
 paramKey = 'wiping.prime_min_path_length'
 
 [[tabs.sections.items]]
-id = 'item_5_0_4'
+id = 'item_wiping_prime_trigger_layers'
 paramKey = 'wiping.prime_trigger_layers'
 
 [[tabs.sections.items]]
-id = 'item_5_0_5'
+id = 'item_wiping_prime_per_model'
 paramKey = 'wiping.prime_per_model'
 
 [[tabs.sections.items]]
-id = 'item_5_0_6'
+id = 'item_wiping_prime_every_layer'
 paramKey = 'wiping.prime_every_layer'
 
 [[tabs.sections]]
 id = 'glue_params'
 
 [[tabs.sections.items]]
-id = 'item_5_1_0'
+id = 'item_wiping_small_feature_factor'
 paramKey = 'wiping.small_feature_factor'
 
 [[tabs.sections.items]]
-id = 'item_5_1_1'
+id = 'item_toolhead_glue_z_offset'
 paramKey = 'toolhead.glue_z_offset'
 
 [[tabs.sections.items]]
-id = 'item_5_1_2'
+id = 'item_wiping_glue_pass_count'
 paramKey = 'wiping.glue_pass_count'
 
 [[tabs.sections.items]]
-id = 'item_5_1_3'
+id = 'item_wiping_bed_glue_speed_mode'
 paramKey = 'wiping.bed_glue_speed_mode'
 
 [[tabs.sections.items]]
-id = 'item_5_1_4'
+id = 'item_wiping_bed_glue_speed'
 paramKey = 'wiping.bed_glue_speed'
 
 [[tabs.sections.items]]
-id = 'item_5_1_5'
+id = 'item_wiping_glue_travel_speed_mode'
 paramKey = 'wiping.glue_travel_speed_mode'
 
 [[tabs.sections.items]]
-id = 'item_5_1_6'
+id = 'item_wiping_glue_travel_speed'
 paramKey = 'wiping.glue_travel_speed'
 
 [[tabs.sections.items]]
-id = 'item_5_1_7'
+id = 'item_wiping_bed_glue_preheat_temp'
 paramKey = 'wiping.bed_glue_preheat_temp'
 
 [[tabs.sections.items]]
-id = 'item_5_1_8'
+id = 'item_wiping_bed_glue_wait_seconds'
 paramKey = 'wiping.bed_glue_wait_seconds'
 
 [[tabs.sections.items]]
-id = 'item_5_1_9'
+id = 'item_wiping_tower_pen_wipe_mode'
 paramKey = 'wiping.tower_pen_wipe_mode'
 
 [[tabs.sections.items]]
-id = 'item_5_1_10'
+id = 'item_wiping_tower_pen_wipe_interval'
 paramKey = 'wiping.tower_pen_wipe_interval'
 
 [[tabs.sections]]
 id = 'z_lift'
 
 [[tabs.sections.items]]
-id = 'item_5_2_0'
+id = 'item_wiping_glue_z_lift_height'
 paramKey = 'wiping.glue_z_lift_height'
 
 [[tabs.sections.items]]
-id = 'item_5_2_1'
+id = 'item_wiping_glue_z_lift_height_first_layers'
 paramKey = 'wiping.glue_z_lift_height_first_layers'
 
 [[tabs.sections.items]]
-id = 'item_5_2_2'
+id = 'item_wiping_glue_inter_model_lift_height'
 paramKey = 'wiping.glue_inter_model_lift_height'
 
 [[tabs.sections.items]]
-id = 'item_5_2_3'
+id = 'item_wiping_swap_hop_height'
 paramKey = 'wiping.swap_hop_height'
 
 [[tabs.sections]]
 id = 'calibration'
 
 [[tabs.sections.items]]
-id = 'item_5_3_3'
+id = 'item_wiping_xy_calibration_mode'
 paramKey = 'wiping.xy_calibration_mode'
 
 [[tabs.sections.items]]
-id = 'item_5_3_4'
+id = 'item_wiping_z_calibration_mode'
 paramKey = 'wiping.z_calibration_mode'
 
 [[tabs.sections]]
 id = 'machine_specific'
 
 [[tabs.sections.items]]
-id = 'item_5_3_0'
+id = 'item_wiping_disable_front_cover_alarm'
 paramKey = 'wiping.disable_front_cover_alarm'
 
 [[tabs.sections.items]]
-id = 'item_5_3_1'
+id = 'item_wiping_disable_3rd_layer_clog_detect'
 paramKey = 'wiping.disable_3rd_layer_clog_detect'
 
 [[tabs.sections.items]]
-id = 'item_5_3_2'
+id = 'item_wiping_disable_timelapse'
 paramKey = 'wiping.disable_timelapse'
 
 [[tabs]]

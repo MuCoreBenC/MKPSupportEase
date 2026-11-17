@@ -676,6 +676,47 @@ pub fn delete_archived(internal_root: &Path, path: &str) -> Result<(), AppError>
     remove_file_idempotent(&target, path)
 }
 
+/// **用回这一版**：把归档区里那份旧字节重新变成"本机手上这一版"。
+///
+/// 只改本机的"手上这一版"（预设走内容仓库 + 索引；其余按目录落点直接覆盖），
+/// **不碰**目录登记、版本链与事件账 —— 云端只有最新版，所以换回来之后这一份会被
+/// 认成「旧版本」，点「下载」就能换回当前版。这就是"用回旧版"的全部含义。
+///
+/// 已经是这一版 ⇒ 幂等直接成功（索引 / 字一个字都不动）。
+pub fn restore_archived(
+    internal_root: &Path,
+    catalog: &super::Catalog,
+    path: &str,
+) -> Result<(), AppError> {
+    let prefix = format!("{}/", super::paths::ARCHIVE_DIR);
+    if !path.starts_with(&prefix) {
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.delivery.385",
+            &[("prefix", &prefix.to_string())],
+        )));
+    }
+    let rel = &path[prefix.len()..];
+    let Some(file) = catalog.files.iter().find(|f| f.path == rel) else {
+        return Err(AppError::not_found(messages::text(
+            "ui.ipc.catalog.056",
+            &[("file_name", rel)],
+        )));
+    };
+    let source = resolve_in(internal_root, path)?;
+    let bytes = std::fs::read(&source)
+        .map_err(|_| AppError::not_found(messages::text("ui.ipc.catalog.069", &[("rel", path)])))?;
+    let sha = hex(&Sha256::digest(&bytes));
+    if !is_preset(file) {
+        let target = resolve_in(internal_root, &file.path)?;
+        return atomic_write(&target, &bytes);
+    }
+    if delivery_index::entry(internal_root, &file.path).is_some_and(|e| e.sha256 == sha) {
+        return Ok(());
+    }
+    content::ensure(internal_root, &sha, &bytes)?;
+    delivery_index::record_file(internal_root, &file.path, &sha, Some(bytes.len() as u64))
+}
+
 /// 删一个文件；不存在 = 已是目标状态，照实成功（幂等）
 fn remove_file_idempotent(target: &Path, what: &str) -> Result<(), AppError> {
     match std::fs::remove_file(target) {
@@ -1006,6 +1047,12 @@ pub struct OnDiskEntry {
     pub downloaded_unix: Option<u64>,
     pub replaced_unix: Option<u64>,
     pub published_at: Option<String>,
+    /// **盘上这份的指纹**（预设 = 索引里那版；其余 = 现场算）。
+    /// 界面上「下载」那一格就是它 —— 答的是"我手上这份是哪一版"，与目录登记的 SHA 是两回事
+    pub sha256: String,
+    /// 盘上那份文件的 mtime（epoch 秒）。**只当「本地修改时间」**，
+    /// 不许拿去顶「云端发布时刻」（AGENTS §6）；读不到就是 `None`，不编 0
+    pub local_modified_unix: Option<u64>,
 }
 
 /// [`downloaded_files`] 带时间的那一版（界面预设页本地表的「时间」列）。
@@ -1030,7 +1077,7 @@ fn entries_in_status(
         .files
         .iter()
         .filter_map(|f| {
-            let (sha, status) = if is_preset(f) {
+            let (sha, status, at) = if is_preset(f) {
                 let entry = delivery_index::entry(internal_root, &f.path)?;
                 /* 内容丢了 / 坏了 ⇒ 这份不算"在" */
                 content::read_bytes(internal_root, &entry.sha256)?;
@@ -1038,10 +1085,12 @@ fn entries_in_status(
                     Some(w) if entry.sha256 != w => FileOnDisk::Stale,
                     _ => FileOnDisk::Current,
                 };
-                (entry.sha256, status)
+                let at = content::content_path(internal_root, &entry.sha256);
+                (entry.sha256, status, at)
             } else {
-                let bytes = std::fs::read(internal_root.join(&f.path)).ok()?;
-                (sha_hex(&bytes), status_of(f, &bytes))
+                let at = internal_root.join(&f.path);
+                let bytes = std::fs::read(&at).ok()?;
+                (sha_hex(&bytes), status_of(f, &bytes), at)
             };
             if status != want {
                 return None;
@@ -1058,6 +1107,8 @@ fn entries_in_status(
                     _ => None,
                 },
                 published_at: generations.get(&sha).and_then(|g| g.published_at.clone()),
+                local_modified_unix: modified_unix_of(&at),
+                sha256: sha,
             })
         })
         .collect()
@@ -1075,6 +1126,9 @@ fn modified_unix_of(path: &Path) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    /* 造测试素材就得直接写文件：这一条与 `ipc/presets.rs` 的 tests 同一个口径 */
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
     use crate::runtime::catalog::Catalog;
 
@@ -2180,6 +2234,96 @@ mod tests {
                 .sha256,
             file.expected_sha().unwrap()
         );
+    }
+
+    /// **用回旧版**：索引指回归档那一版（字节搬进内容仓库），归档与目录一个都不动
+    #[test]
+    fn restore_archived_makes_the_old_bytes_the_local_copy_again() {
+        let root = tempfile::tempdir().unwrap();
+        let v1 = preset_entry("A1.toml", b"# v1\n");
+        let v2 = preset_entry("A1.toml", b"# v2\n");
+
+        deliver(root.path(), &v1, &MemorySource(b"# v1\n".to_vec())).unwrap();
+        deliver(root.path(), &v2, &MemorySource(b"# v2\n".to_vec())).unwrap();
+        /* 换代时旧字节进归档 —— 这里手动摆一份，与写侧同形 */
+        let archived = root.path().join("archive").join(&v1.path);
+        std::fs::create_dir_all(archived.parent().unwrap()).unwrap();
+        std::fs::write(&archived, b"# v1\n").unwrap();
+
+        let catalog = catalog_with(vec![v2.clone()]);
+        assert_eq!(stored_bytes(root.path(), &v2).unwrap(), b"# v2\n");
+
+        restore_archived(
+            root.path(),
+            &catalog,
+            "archive/delivery/mkp/presets/A1.toml",
+        )
+        .unwrap();
+
+        assert_eq!(
+            stored_bytes(root.path(), &v2).unwrap(),
+            b"# v1\n",
+            "本机这一版换成归档那份"
+        );
+        assert_eq!(
+            file_status(root.path(), &v2),
+            FileOnDisk::Stale,
+            "与目录登记不一致 ⇒ 界面照实标「旧版本」"
+        );
+        assert!(archived.is_file(), "用回不消耗归档那份");
+    }
+
+    /// 只认 `archive/` 里的路径；别的（下载区、绝对路径）一概拒绝
+    #[test]
+    fn restore_archived_only_accepts_the_archive_area() {
+        let root = tempfile::tempdir().unwrap();
+        let v1 = preset_entry("A1.toml", b"# v1\n");
+        let catalog = catalog_with(vec![v1.clone()]);
+        for bad in [
+            "delivery/mkp/presets/A1.toml",
+            "/etc/passwd",
+            "../archive/x",
+        ] {
+            assert!(
+                restore_archived(root.path(), &catalog, bad).is_err(),
+                "{bad} 不该被当成归档路径"
+            );
+        }
+        assert!(stored_bytes(root.path(), &v1).is_none(), "一次都没写盘");
+    }
+
+    /// 盘上那份的事实：**指纹与 mtime 对非预设也给**（切片器配置那两格不再写"未知"）
+    #[test]
+    fn on_disk_entries_carry_the_fingerprint_and_mtime_for_plain_files() {
+        let root = tempfile::tempdir().unwrap();
+        let content = b"{\"type\":\"process\"}";
+        let file = entry("bbs.json", content);
+        let at = root.path().join(&file.path);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        std::fs::write(&at, content).unwrap();
+
+        let catalog = catalog_with(vec![file]);
+        let got = downloaded_entries(root.path(), &catalog);
+
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].sha256, sha_hex(content), "指纹按盘上字节现算");
+        assert!(
+            got[0].local_modified_unix.is_some(),
+            "盘上有这一份就该给得出 mtime"
+        );
+        assert_eq!(
+            got[0].local_modified_unix,
+            modified_unix_of(&at),
+            "mtime 与那一份文件对得上"
+        );
+    }
+
+    /// 盘上没有这一份：不返回（更不会编一个 mtime 出来）
+    #[test]
+    fn on_disk_entries_skip_files_that_are_not_there() {
+        let root = tempfile::tempdir().unwrap();
+        let catalog = catalog_with(vec![entry("bbs.json", b"{}")]);
+        assert!(downloaded_entries(root.path(), &catalog).is_empty());
     }
 
     #[test]

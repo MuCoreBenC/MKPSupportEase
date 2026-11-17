@@ -19,7 +19,11 @@ Type = "PETG"
 [GCode]
 CustomGcodeEOwnership = true
 MKPExtrude = 5.5
+MKPExtrudeSpeed = 25.0
+MKPExtrudeSpread = false
 MKPRetract = -5.0
+MKPRetractAt = "model"
+MKPRetractSpeed = 25.0
 RefillExtrudeCommand = "G1 E5.5 F1000"
 WaitForDryingCommand = ""
 
@@ -28,6 +32,8 @@ BedGluePreheatTemp = 0.0
 BedGlueSpeed = 0.0
 BedGlueSpeedMode = ""
 BedGlueWaitSeconds = 0.0
+EdgeLift = 0.0
+EdgeLines = 0
 GlueTravelSpeed = 0.0
 GlueTravelSpeedMode = ""
 InterModelLiftHeight = 2.0
@@ -106,7 +112,9 @@ BedGlueEnabled = false
 BeginStageRetractEnabled = true
 BeginStageRetractZLiftMm = 5
 GlueBottomEnabled = false
-SkipVibrationCalibration = false
+SkipVibrationCalibration = true
+UnderSupportEnabled = true
+UnderSupportMm = 0.5
 XyCalibrationDwellSec = 3
 ZCalibrationDwellSec = 2
 

@@ -109,6 +109,12 @@ pub struct LocalFile {
     /// 用不了时的一句人话原因（可直接显示，比如"TOML 语法不对（第 3 行第 1 列）"）；
     /// 能用 / 不适用时是 `None`
     pub state_detail: Option<String>,
+    /// **盘上这份自己的指纹**（整份字节，SHA-256）。
+    ///
+    /// 与 `source` 里那两格（来源那一版 / 下载那一刻）不是一回事：那两个是**云端原文**的摘要，
+    /// 这个是**我手上这份**的 —— 用户下载后改过、另存过，它就与云端那个不同。
+    /// 读不出来（不是 UTF-8）⇒ `None`，界面照实不给。
+    pub sha256: Option<String>,
 }
 
 /// 这份用户文件**基于的云端版本**现在怎么样了。
@@ -209,6 +215,11 @@ pub struct VerdictFacts {
     pub source_version_at: Option<String>,
     /// 来源那一版云端**原文**的 SHA-256（不是本地文件此刻的字节）
     pub source_sha256: Option<String>,
+    /// **下载那一刻**云端原文的 SHA-256（记录里的 `origin.sha256`）。
+    ///
+    /// 与 [`source_sha256`]（履历末条）分开：没更新过时两者相同，更新过才分叉 ——
+    /// 界面上「下载」与「这份基于」是两个时间，各自配一个摘要。
+    pub download_sha256: Option<String>,
     /// 当前生效的源身份
     pub cloud_source: Option<String>,
     /// 当前这份目录的发布时刻（随包 bootstrap 目录没有）
@@ -348,6 +359,7 @@ fn judge_against(
         /* ★ 「来源版本时间」只认履历里那一格；没有就是未知（不拿写盘记录顶） */
         source_version_at: version.and_then(|v| v.at.clone()),
         source_sha256: version.and_then(|v| v.sha256.clone()),
+        download_sha256: origin.and_then(|o| o.sha256.clone()),
         cloud_source: judge.cloud.map(SourceIdentity::key),
         cloud_published_at: judge.catalog.published_at.clone(),
         cloud_sha256: None,
@@ -710,7 +722,7 @@ pub fn local_files(user_root: &Path) -> Vec<LocalFile> {
              * 符号链接指向用户根外面的，在这里拦下，**一个字节都不读**（来源记录也一样不读）。
              * 只对预设候选暴露状态：别的文件本来就没有"能不能当预设用"这一档。
              */
-            let (head, source, state, state_detail) =
+            let (head, source, state, state_detail, full) =
                 match crate::fsx::paths::resolve_in(user_root, &rel) {
                     Err(_) => (
                         None,
@@ -719,6 +731,7 @@ pub fn local_files(user_root: &Path) -> Vec<LocalFile> {
                         (kind == Some(PRESET)).then(|| {
                             "它指向 presets-local/ 外面 —— 程序不读用户根外面的东西".to_owned()
                         }),
+                        None,
                     ),
                     Ok(real) => {
                         let (state, detail) = if kind == Some(PRESET) {
@@ -730,7 +743,7 @@ pub fn local_files(user_root: &Path) -> Vec<LocalFile> {
                         一次读整份文本，两处各取所需，不许为省一次 IO 抄成两份事实 */
                         let full = std::fs::read_to_string(&real).ok();
                         let source = full.as_deref().and_then(source_record::parse);
-                        (head_text(&real), source, state, detail)
+                        (head_text(&real), source, state, detail, full)
                     }
                 };
             let machine = head
@@ -754,6 +767,11 @@ pub fn local_files(user_root: &Path) -> Vec<LocalFile> {
                     .ok()
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs()),
+                /* 整份字节的摘要（`read_to_string` 读到的就是全部字节，不做换行转换） */
+                sha256: full.as_deref().map(|t| {
+                    use sha2::Digest;
+                    super::catalog::hex(&sha2::Sha256::digest(t.as_bytes()))
+                }),
             });
         }
     }
@@ -811,8 +829,22 @@ pub fn commit_draft(
     based_on: &str,
     text: &str,
 ) -> Result<Committed, AppError> {
+    commit_draft_in(user_root, None, source_file_name, based_on, text)
+}
+
+/// 同 [`commit_draft`]，但可以落进**当前分支的文件夹**（从云端另存的那一份跟着这一支走）。
+pub fn commit_draft_in(
+    user_root: &Path,
+    subdir: Option<&str>,
+    source_file_name: &str,
+    based_on: &str,
+    text: &str,
+) -> Result<Committed, AppError> {
     let file_name = edited_name(source_file_name);
-    let rel = format!("{LOCAL_DIR}/{file_name}");
+    let rel = match subdir.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(dir) => format!("{LOCAL_DIR}/{dir}/{file_name}"),
+        None => format!("{LOCAL_DIR}/{file_name}"),
+    };
     /* 名字是从目录里的文件名派生的，但仍然过一遍防穿越闸 */
     let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
     let replaced = target.exists();
@@ -1381,6 +1413,21 @@ pub fn save_cloud_as_new(
     new_name: &str,
     line: Option<&CatalogLine>,
 ) -> Result<FileIdentity, AppError> {
+    save_cloud_as_new_in(user_root, None, file, cloud_text, new_name, line)
+}
+
+/// 同 [`save_cloud_as_new`]，但可以落到**分支文件夹**里（`presets-local/<subdir>/`）。
+///
+/// 分支隔离靠目录：不同分支的同名文件各占一格，谁也不会把对方顶成"已经有一份"。
+/// `None` = 这个源没有分支概念（或这是导入的无来源文件），仍落平铺。
+pub fn save_cloud_as_new_in(
+    user_root: &Path,
+    subdir: Option<&str>,
+    file: &CatalogFile,
+    cloud_text: &str,
+    new_name: &str,
+    line: Option<&CatalogLine>,
+) -> Result<FileIdentity, AppError> {
     if file.kind != PRESET {
         return Err(AppError::invalid_argument(messages::text(
             "ui.runtime.local.411",
@@ -1389,7 +1436,10 @@ pub fn save_cloud_as_new(
     }
     /* 这一路的名字一般是调用方照云端原名起的，与改名 / 复制同一套门槛（能修的修好） */
     let (name, adjusted) = normalize_new_name(&file.file_name, new_name)?;
-    let rel = format!("{LOCAL_DIR}/{name}");
+    let rel = match subdir.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(dir) => format!("{LOCAL_DIR}/{dir}/{name}"),
+        None => format!("{LOCAL_DIR}/{name}"),
+    };
     let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
     if target.exists() {
         return Err(AppError::invalid_argument(messages::text(
@@ -3107,6 +3157,50 @@ mod tests {
             .unwrap();
         assert_eq!(done.file_name, "..外面.toml", "剔掉那两个分隔符");
         assert!(done.adjusted);
+    }
+
+    /// **分支隔离**：落子目录时文件真的在 `presets-local/<分支>/` 里；
+    /// 两个分支的同名文件互不冲突（各自一份，谁也没盖掉谁）
+    #[test]
+    fn saving_official_as_new_can_land_in_a_branch_folder() {
+        let user = tempfile::tempdir().unwrap();
+        let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
+
+        let main = save_cloud_as_new_in(
+            user.path(),
+            Some("main"),
+            &file,
+            "涂胶宽度 = 1.0\n",
+            "A1-standard.toml",
+            None,
+        )
+        .unwrap();
+        assert_eq!(main.path, "presets-local/main/A1-standard.toml");
+        assert!(user.path().join(&main.path).is_file());
+
+        /* 另一支放同名的那一份：不该被判成"已经有这份" */
+        let delivery = save_cloud_as_new_in(
+            user.path(),
+            Some("delivery"),
+            &file,
+            "涂胶宽度 = 1.0\n",
+            "A1-standard.toml",
+            None,
+        )
+        .unwrap();
+        assert_eq!(delivery.path, "presets-local/delivery/A1-standard.toml");
+        assert!(user.path().join(&delivery.path).is_file());
+
+        /* 同一支里再放一份同名 ⇒ 拒（分支内部的撞名规矩不变） */
+        assert!(save_cloud_as_new_in(
+            user.path(),
+            Some("main"),
+            &file,
+            "涂胶宽度 = 1.0\n",
+            "A1-standard.toml",
+            None,
+        )
+        .is_err());
     }
 
     /// 只有 MKP 预设能另存成本地这份：切片器 profile（json）那类拒

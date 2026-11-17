@@ -47,7 +47,7 @@
 }
 
 .addBtn:hover {
-  color: var(--wb-primary);
+  color: var(--accent);
   background: var(--accent-soft);
   border-color: var(--line);
 }
@@ -80,7 +80,7 @@
   bottom: 4px;
   left: 2px;
   width: 2px;
-  background: var(--wb-primary);
+  background: var(--accent);
   border-radius: 2px;
 }
 
@@ -108,7 +108,7 @@
 }
 
 .sec:focus-visible {
-  outline: 1px solid var(--wb-primary-deep);
+  outline: 1px solid var(--accent-deep);
   outline-offset: -1px;
 }
 
@@ -129,7 +129,7 @@
   border-radius: 999px;
 }
 
-/* 选中那一颗：只是个指示（用的是 `--wb-primary` 实心 + 外环），不再单独可点 */
+/* 选中那一颗：只是个指示（用的是 `--accent` 实心 + 外环），不再单独可点 */
 .dot {
   flex: none;
   width: 9px;
@@ -139,8 +139,8 @@
 }
 
 .secOn .dot {
-  background: var(--wb-primary);
-  border-color: var(--wb-primary);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 /*
@@ -219,7 +219,7 @@
   font-size: var(--fs-label);
   color: var(--text-1);
   background: var(--surface-solid);
-  border: 1px solid var(--wb-primary);
+  border: 1px solid var(--accent);
   border-radius: var(--r-sm);
 }
 
@@ -255,7 +255,7 @@
 
 .addInput:focus {
   outline: none;
-  border-color: var(--wb-primary);
+  border-color: var(--accent);
 }
 
 .addOk,
@@ -273,8 +273,8 @@
 
 .addOk {
   color: var(--surface-solid);
-  background: var(--wb-primary);
-  border-color: var(--wb-primary);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .addOk:disabled {

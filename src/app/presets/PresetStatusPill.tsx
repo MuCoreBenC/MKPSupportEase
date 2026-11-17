@@ -73,6 +73,7 @@ import { useRef, useState } from 'react'
 import { useT } from '../../i18n'
 import { FieldPopover } from '../../components/field'
 import type { ActivePreset, Machine } from '../../api'
+import type { BranchFilter } from './presetTree'
 import s from './PresetStatusPill.module.css'
 
 interface FilterOption {
@@ -80,6 +81,12 @@ interface FilterOption {
   label: string
   /** 行尾那截灰色小字（机型的 id；喷嘴 / 层高没有这一格） */
   meta?: string
+  /**
+   * **触发器上显示的短标签**（菜单里仍用 `label`）。
+   *
+   * 给分支筛选用：「当前分支 · feat/x」在菜单里说得清，挤在胶囊里就太长了。
+   */
+  trigger?: string
 }
 
 /**
@@ -111,6 +118,18 @@ interface PresetFilterProps {
   options: FilterOption[]
   value: string
   onPick: (value: string) => void
+  /**
+   * 漏斗要不要转绿（「筛上了」的信号）。默认看 `value !== ''` —— 机型那一档
+   * 「全部」是空串，所以成立；分支筛选的默认档不是"不筛"，由调用方显式给。
+   */
+  active?: boolean
+  /** 菜单第一档「全部」要不要画。分支筛选三档都是实选，没有"全部"这一档 */
+  withAllOption?: boolean
+  /**
+   * 触发器最宽多少像素。默认不限（机型名都很短）；
+   * 分支名可以很长（`feat/postproc-fold-inline-diff`），超了省略，别把台账挤出去。
+   */
+  maxWidth?: number
 }
 
 export function PresetFilter({
@@ -121,6 +140,9 @@ export function PresetFilter({
   options,
   value,
   onPick,
+  active,
+  withAllOption = true,
+  maxWidth,
 }: PresetFilterProps) {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -132,36 +154,39 @@ export function PresetFilter({
         type="button"
         ref={triggerRef}
         className={s.filterBtn}
-        data-filt={value !== ''}
+        data-filt={active ?? value !== ''}
+        style={maxWidth !== undefined ? { maxWidth } : undefined}
         aria-haspopup="true"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
         <FunnelIcon />
         {prefix !== undefined && <span className={s.filterPrefix}>{prefix}</span>}
-        <b className={s.filterName}>{current?.label ?? allText}</b>
+        <b className={s.filterName}>{current?.trigger ?? current?.label ?? allText}</b>
         {/* 箭头是 CSS 画的两条边（见 .caret）：不排「▼」字形，免得它自带一套基线 */}
         <i className={s.caret} aria-hidden />
       </button>
       {open && (
         <FieldPopover anchor={triggerRef.current} align="end" onClose={() => setOpen(false)}>
           <div className={s.menu}>
-            {/* 第一档恒是「全部」（那一档的值是空串，与原来的下拉同一个值） */}
-            <button
-              type="button"
-              className={s.item}
-              data-on={value === ''}
-              onClick={() => {
-                setOpen(false)
-                onPick('')
-              }}
-            >
-              <span className={s.check} aria-hidden>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              </span>
-              {allMenuText}
-              {allMeta !== undefined && <span className={s.mid}>{allMeta}</span>}
-            </button>
+            {/* 第一档是「全部」（那一档的值是空串，与原来的下拉同一个值）；三档实选的筛选不画它 */}
+            {withAllOption && (
+              <button
+                type="button"
+                className={s.item}
+                data-on={value === ''}
+                onClick={() => {
+                  setOpen(false)
+                  onPick('')
+                }}
+              >
+                <span className={s.check} aria-hidden>
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </span>
+                {allMenuText}
+                {allMeta !== undefined && <span className={s.mid}>{allMeta}</span>}
+              </button>
+            )}
             {options.map((o) => (
               <button
                 key={o.value}
@@ -228,6 +253,44 @@ export function PresetMachineFilter({ machines, machineId, onPick, prefix }: Fil
       options={machines.map((m) => ({ value: m.id, label: m.display, meta: m.id }))}
       value={machineId}
       onPick={onPick}
+    />
+  )
+}
+
+interface BranchFilterProps {
+  /** 当前源的分支名；自建源没有 ⇒ `null` */
+  current: string | null
+  value: BranchFilter
+  onPick: (value: BranchFilter) => void
+}
+
+/**
+ * 分支筛选：`PresetFilter` 的分支版 —— **与机型筛选同一颗件、同一张弹层**。
+ *
+ * 三档都是实选（没有"全部 = 不筛"那一档），所以菜单不画第一档的「全部」；
+ * 漏斗只在离开默认档（当前分支）时转绿。触发器上只写分支名，整句放在菜单里。
+ */
+export function PresetBranchFilter({ current, value, onPick }: BranchFilterProps) {
+  const tr = useT()
+  return (
+    <PresetFilter
+      withAllOption={false}
+      active={value !== 'current'}
+      maxWidth={220}
+      allText={tr('presets.branch.current')}
+      allMenuText={tr('presets.branch.current')}
+      options={[
+        {
+          value: 'current',
+          label: tr('presets.branch.current'),
+          meta: current ?? undefined,
+          trigger: current ?? tr('presets.branch.current'),
+        },
+        { value: 'all', label: tr('presets.branch.all') },
+        { value: 'unfiled', label: tr('presets.branch.unfiled') },
+      ]}
+      value={value}
+      onPick={(next) => onPick(next as BranchFilter)}
     />
   )
 }

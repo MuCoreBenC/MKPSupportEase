@@ -46,7 +46,7 @@ import FieldControl from '../../components/field/FieldControl'
 import { Tip } from '../../components/tooltip'
 import Highlight from './highlight'
 import RestoreChip from './RestoreChip'
-import { valueText } from './useParams'
+import { autoLabel, autoNumber, valueText } from './useParams'
 import type { BlockedBy, ParamDef } from './useParams'
 import s from './ParamRow.module.css'
 
@@ -62,8 +62,6 @@ interface Props {
    * `null` = 没记录过（从没保存过它的改动 / 清过历史）—— 那就什么也不画。
    */
   prevSavedValue?: string | null
-  /** 默认值（点「恢复默认值」回到的那个数）—— 只在展开的行详情里显示 */
-  factoryValue: string
   dirty: boolean
   /**
    * 这一项上的**云端更新账**（我 / 云端旧值 / 云端新值）。
@@ -121,6 +119,11 @@ interface Props {
    * 不搜索时是空串 —— `Highlight` 收到空串原样返回，不白包一层。
    */
   query?: string
+  /**
+   * 按 key 取**当前显示值**（草稿优先）。只给「自动」那类字段算数用：
+   * 注册表的 `autoValue.from` 指的是同一张表里的另一条，行自己手里没有它。
+   */
+  valueOf?: (key: string) => string
 }
 
 /**
@@ -163,7 +166,6 @@ export default function ParamRow({
   value,
   savedValue,
   prevSavedValue = null,
-  factoryValue,
   dirty,
   sync,
   syncDraft = null,
@@ -180,6 +182,7 @@ export default function ParamRow({
   onRevertToSaved,
   readonly = false,
   query = '',
+  valueOf,
 }: Props) {
   /* 这一行的话术入口：语言一变整行重渲染（`t` 那个模块级出口不订阅语言） */
   const tr = useT()
@@ -189,7 +192,20 @@ export default function ParamRow({
   /* 改不动：条件关着，或已弃用 —— 两者控件都是 disabled，但文案与长相分开 */
   const locked = blocked || dep
   const savedText = valueText(def, savedValue, tr)
-  const factoryText = valueText(def, factoryValue, tr)
+
+  /*
+   * **0 = 自动**（注册表 `zeroMeansAuto`）：框里那个字不是 `0.00`，而是这一格
+   * 此刻等于多少（`自动 5.50`）。这串**只进那一格**，不另挂徽章 —— 徽章挂在框
+   * 右边会把这一格从右对齐那条竖线上推开，而且和框里的 `0.00` 摆在一起时，
+   * 人只看到两个数、看不出哪个是结果。
+   * 不是这种字段 ⇒ `undefined`，框里照常显示原值。
+   */
+  const autoText = autoLabel(def, tr, { lookup: valueOf }) ?? undefined
+  /*
+   * 同一个数，为了步进再给一份数值：自动态里点一下箭头从**这一格现在等于多少**
+   * 往前一步（`6.50 → 6.60`），不是从 0 步到 `0.10`（见 `NumberField` 的 `autoValue`）。
+   */
+  const autoValue = autoText === undefined ? undefined : (autoNumber(def, valueOf) ?? undefined)
 
   /*
    * **打字不合法也要有「还原」出口**（2026-10-20，作者：「这个时候就可以显示
@@ -209,11 +225,15 @@ export default function ParamRow({
    *   还没表态   云端已更新 · 云端 18.6 → 19.0          [用新值] [保持原样]
    *   已采用     已采用云端新值 · 我的 18.6 → 云端 19.0   （点这一行展开，右栏能「用回我的值」）
    *   已保持     保持原样 · 云端 18.6 → 19.0            [改用新值]
-   *   保存过了   已采用云端新值 / 保持原样（一枚淡徽章，说明云端这一版已经处理过）
+   *   保存过了·采用  已采用 · 我的 18.6 → 云端 19.0（灰字记录）
+   *   保存过了·保持  **一个字都不留** —— 行回到平常样子（作者：留着就在提醒"还有新值"）
    */
   const syncPending = sync?.pending === true
-  /** 草稿层的表态只对**还在待处理**的项有意义（保存过之后归 `sync.decided` 管） */
-  const syncDraftKind = syncPending ? syncDraft : null
+  /**
+   * 草稿层的表态：待处理项上有意义；保存过的项上也可能有（在「云端更新」那一屏里
+   * 点了「改用新值」）—— 那一笔保存之前就该画成采用态。没再动过 ⇒ `null`。
+   */
+  const syncDraftKind = syncDraft ?? null
   const syncDecided = sync?.decided ?? null
   /**
    * 「上次云端」那一格 —— **滚动记录优先**（2026-10-31）。
@@ -251,6 +271,7 @@ export default function ParamRow({
           after: valueText(def, sync.cloudNew, tr),
         })
       : diffText
+
 
   return (
     <div
@@ -343,14 +364,27 @@ export default function ParamRow({
                 {diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
               </span>
             )}
-            {!syncPending && syncDecided !== null && (
+            {/* 保存过的「保持原样」行上又点了「改用新值」：当场画成还没保存的采用（绿章） */}
+            {!syncPending && syncDraftKind === 'adopt' && (
+              <span className={s.syncNote}>
+                <span className={s.syncBadgeAdopted}>{t('params.syncAdopted')}</span>
+                {mineToCloud !== null && <span className={s.syncDiff}>{mineToCloud}</span>}
+              </span>
+            )}
+            {/*
+              保存过的**采用**留一行灰字记录（这个值是从云端来的）；保存过的**保持**
+              **一个字都不留** —— 留着就在提醒"还有云端新值"，而用户刚刚明确说了不要。
+              想改用新值的，去「云端更新」那一屏（「更多」末尾的入口），那里还列着这一版。
+            */}
+            {!syncPending && syncDraftKind === null && syncDecided === 'adopt' && (
               <span className={s.syncDecided}>
-                {syncDecided === 'adopt' ? t('params.syncAdopted') : t('params.syncHold')}
-                {/* 保存过的那一版也把数字留着（2026-10-21）：
-                    采用 =「我的旧值 → 云端新值」，保持 =「云端旧值 → 云端新值」 */}
-                {syncDecided === 'adopt'
-                  ? mineToCloud !== null && <span className={s.syncDiff}>{mineToCloud}</span>
-                  : diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
+                {t('params.sync.adoptedShort')}
+                {mineToCloud !== null && (
+                  <>
+                    {' · '}
+                    <span className={s.syncDiff}>{mineToCloud}</span>
+                  </>
+                )}
               </span>
             )}
           </span>
@@ -358,8 +392,12 @@ export default function ParamRow({
 
         <span className={s.right}>
           {/*
-           * 云端更新那两个动作。**只有待处理的项才画它们** —— 处理过的项显示一枚淡徽章
-           * （在上面名字那一格），不再给按钮：已经处理完的事不该留着可点的入口。
+           * 云端更新的动作：**只在它还能改变结果、而且这一笔还没结束时出现**。
+           *
+           *   待处理                两个都能改变结果 ⇒ 两颗
+           *   已保持·还没保存       「改用新值」仍能改变结果 ⇒ 留这一颗
+           *   已保持·保存过了       整行回到平常样子 ⇒ 一颗都不给（改用新值去「云端更新」那一屏）
+           *   已采用                文件值已经等于云端值 ⇒ 一颗都不给
            *
            * 「用新值」在云端当前版字节还没取回来时是灰的（新值不知道是哪来的，点下去
            * 只会得到一个错），原因写在 title 里 —— 灰一颗按钮不说为什么，用户只会以为坏了。
@@ -404,11 +442,16 @@ export default function ParamRow({
               {tr('params.row.adoptShort')}
             </button>
           )}
+          {/*
+           * 保存过的「保持原样」**行上一颗按钮都不留**：那一笔已经结束，留着任何东西
+           * 都会让人以为"还有云端新值等着我"。要改用新值的去「云端更新」那一屏 ——
+           * 这一版仍列在那里，点那颗「改用新值」再保存即可。
+           */}
           {/* 弃用的行不许写新值 → 不摆「还原」chip（它的值本来就等于已保存值/无值）。
               打字不合法（未提交）时也摆 —— 那是失焦闸困住之后的可见出口（见上面 badTyping 注） */}
           {(dirty || badTyping) && !locked && !readonly && (
             <RestoreChip
-              title={tr('params.row.revertTitle', { saved: savedText, factory: factoryText })}
+              title={tr('params.row.revertTitle', { saved: savedText })}
               onClick={() => {
                 onRevertToSaved(def.key)
                 setResetNonce((n) => n + 1)
@@ -425,7 +468,7 @@ export default function ParamRow({
           )}
           {readonly ? (
             /* 只读态：纯文本值（编辑模式之外的那一态，见 Props.readonly） */
-            <span className={s.roVal}>{valueText(def, value, tr)}</span>
+            <span className={s.roVal}>{valueText(def, value, tr, valueOf)}</span>
           ) : def.field.control === 'number' ? (
             /*
              * 数字步进器包一层同款的 `.edNum`（作者：「我专门调整过的，应该可以复用」）：
@@ -445,6 +488,9 @@ export default function ParamRow({
                 focusOnBoxClick
                 onInvalidTyping={onInvalidTyping}
                 resetSignal={resetNonce}
+                autoText={autoText}
+                autoValue={autoValue}
+                autoTip={autoText !== undefined ? tr('params.row.auto.tip') : undefined}
                 onChange={(next) => onEdit(def.key, next)}
               />
             </span>
@@ -536,17 +582,6 @@ export default function ParamRow({
               </dd>
             </>
           )}
-          {/*
-            这一格 = **点「恢复默认值」会回到的那个数**（`factoryByKey`）。
-            来源是**当前云端目录**里这个机型·版本的基准：被版本盖过的项取机型基底，
-            其余取版本有效值。它既不是安装包里的字节，也不是你那份文件里的数 ——
-            所以不能叫「包里的值」（作者 2026-10-31 指出：包里根本没有这份预设）。
-            标签定成「默认值」：与底栏那颗「恢复默认值」是同一个词，用户自己就能对上。
-          */}
-          <dt className={s.dt}>{tr('params.row.dt.package')}</dt>
-          <dd className={s.dd}>
-            <Highlight text={factoryText} query={query} />
-          </dd>
           <dt className={s.dt}>{tr('params.row.dt.scope')}</dt>
           <dd className={s.dd}>
             <Highlight

@@ -1,0 +1,494 @@
+/*
+ * 两列成员编辑框：左候选、右本组。两列各自滚动，一屏看更多。
+ * 颜色一律走工作台 C14 变量，不另立一套配色。
+ */
+
+/* 名字、搜索、分组标题都在滚动容器之外 */
+.head {
+  flex: none;
+}
+
+.fixed {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.addRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.addConfirm {
+  flex: none;
+  padding: 3px 8px;
+  font-size: var(--fs-label);
+  color: var(--surface-solid);
+  cursor: pointer;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+}
+
+.addConfirm:hover {
+  border-color: var(--line-strong);
+}
+
+.nameRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+/* 页签自己的两件事（第几页 / ↑↓ / 删除）—— 与名字同一行，先说"我在哪一页" */
+.tabOps {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.tabAt {
+  margin-right: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.confirmText {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.6;
+  color: var(--text-1);
+}
+
+.nameLabel {
+  flex: none;
+  width: 32px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.nameInput {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-sunken-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  outline: none;
+}
+
+.nameInput:focus {
+  border-color: var(--accent);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.wrap {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 12px;
+  /* 固定高度才会把受限高度传给两列；只写 max-height 会让整个框一起滚 */
+  height: 56vh;
+  min-height: 260px;
+  overflow: hidden;
+}
+
+.left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+  padding-right: 10px;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+}
+
+.right {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.search {
+  flex: none;
+  height: 26px;
+  padding: 0 8px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-sunken-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  outline: none;
+}
+
+.search:focus {
+  border-color: var(--accent);
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* 左右各一个，互不联动；到头不把滚动链传给另一列或外壳 */
+.scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.group {
+  margin-bottom: 8px;
+}
+
+.groupHead {
+  padding: 3px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  background: var(--surface-sunken-solid);
+  border-radius: var(--r-sm);
+}
+
+.sectionHead {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 6px 2px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+}
+
+.count {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 正在往哪一组里挑：通长色带铺到框边，左边一道竖轨（与右列选中行同一套语言） */
+.sectionHeadOn {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 6px 2px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface-solid));
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* 空组也占一块：位置本身有用，所以只说明它是空的，不整块藏掉 */
+.emptyBlock {
+  padding: 4px 6px 6px 10px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  height: 28px;
+  padding: 0 6px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.row:hover:not(:disabled) {
+  background: var(--hover-1);
+}
+
+/* 勾上的是通长绿带，不是圆角块 */
+.rowOn {
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface-solid));
+}
+
+.row:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.check {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 11px;
+  color: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+}
+
+.rowOn .check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.by {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupBar {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.groupBarHead {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.addBtn {
+  padding: 2px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.addBtn:hover {
+  color: var(--text-1);
+  border-color: var(--line-strong);
+}
+
+.addInput {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-sunken-solid);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  outline: none;
+}
+
+.targets {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.targetItem {
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.targetItem .target {
+  border: 0;
+  border-radius: 0;
+}
+
+.arrow {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 22px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-left: 1px solid var(--line);
+}
+
+.arrow:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--hover-1);
+}
+
+.arrow:disabled {
+  cursor: default;
+  opacity: 0.28;
+}
+
+.target {
+  padding: 3px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+  background: var(--surface-sunken-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.target:hover {
+  border-color: var(--line-strong);
+}
+
+.targetOn {
+  color: var(--surface-solid);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.rightHead {
+  flex: none;
+  padding: 3px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.member {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  height: 28px;
+  padding: 0 6px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  border-radius: 0;
+}
+
+.memberNew {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface-solid));
+}
+
+.memberOut {
+  color: var(--text-3);
+}
+
+.tag {
+  flex: none;
+  font-size: var(--fs-label);
+  color: var(--accent);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.mini {
+  flex: none;
+  padding: 2px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+}
+
+.mini:hover {
+  color: var(--text-1);
+  background: var(--hover-1);
+  border-color: var(--line);
+}
+
+.movedHead {
+  margin-top: 8px;
+  padding: 4px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  background: var(--surface-sunken-solid);
+  border-radius: var(--r-sm);
+}
+
+.empty {
+  padding: 12px 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.linkBtn {
+  padding: 4px 6px;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+}
+
+.linkBtn:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--hover-1);
+}
+
+.linkBtn:disabled {
+  color: var(--text-3);
+  cursor: default;
+  opacity: 0.6;
+}
+
+.footNote {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-right: 8px;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn {
+  flex: none;
+  padding: 5px 12px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  white-space: nowrap;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.btn:hover {
+  border-color: var(--line-strong);
+}
+
+.btnPrimary {
+  color: var(--surface-solid);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.btnPrimary:disabled {
+  opacity: 0.55;
+}

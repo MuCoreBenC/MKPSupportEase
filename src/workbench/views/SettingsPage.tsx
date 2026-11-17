@@ -63,8 +63,8 @@ import s from '../c14.module.css'
 
 /** 外观三档（与客户端「设置 → 外观」同一套说法、同一个 id —— 后端那边的 ThemePref 钉着） */
 const THEME_OPTS: { id: ThemePref; label: string; note: string }[] = [
-  { id: 'system', label: '跟随系统', note: '系统切深色就跟着深色 —— 没选过的时候就是这一档' },
-  { id: 'light', label: '浅色', note: '一直是浅色，不管系统怎么设' },
+  { id: 'system', label: '跟随系统', note: '系统切深色就跟着深色。' },
+  { id: 'light', label: '浅色', note: '不管系统，一直浅色。' },
   { id: 'dark', label: '深色', note: '一直是深色，不管系统怎么设' },
 ]
 
@@ -158,7 +158,7 @@ export default function SettingsPage({ boot }: Props) {
         [platform]: { ...prev[platform], token: '' },
       }))
       setAcctNote({
-        text: `已保存 ${platform} 发布账户${token !== '' ? '（Token 存进本机凭据文件）' : ''}`,
+        text: `已保存 ${platform} 发布账户。`,
         bad: false,
       })
       await loadAccount()
@@ -174,7 +174,7 @@ export default function SettingsPage({ boot }: Props) {
     setAcctNote(null)
     try {
       await wb.clearPublishAccount(platform)
-      setAcctNote({ text: `已清除 ${platform} 发布账户（配置 + 凭据）`, bad: false })
+      setAcctNote({ text: `已清除 ${platform} 发布账户。`, bad: false })
       await loadAccount()
     } catch (e) {
       setAcctNote({ text: isAppError(e) ? e.message : String(e), bad: true })
@@ -206,7 +206,7 @@ export default function SettingsPage({ boot }: Props) {
       const token = await wb.getPublishToken(platform)
       if (token === null || token === '') {
         setAcctNote({
-          text: `${PLATFORM_LABEL[platform]} 这会儿取不到 Token（可能已被清掉）`,
+          text: `取不到 ${PLATFORM_LABEL[platform]} 的 Token。`,
           bad: true,
         })
       } else {
@@ -224,10 +224,10 @@ export default function SettingsPage({ boot }: Props) {
     const token = revealed[platform]
     if (token === undefined) return
     try {
-      await navigator.clipboard.writeText(token)
+      await wb.copyText(token)
       setAcctNote({ text: `已复制 ${PLATFORM_LABEL[platform]} Token`, bad: false })
     } catch {
-      setAcctNote({ text: '剪贴板用不了 —— 请手动选中明文再复制', bad: true })
+      setAcctNote({ text: '剪贴板不可用，请手选复制。', bad: true })
     }
   }
 
@@ -284,7 +284,7 @@ export default function SettingsPage({ boot }: Props) {
     try {
       const next = await wb.devSourceStart()
       setDevSrc(next)
-      setDevNote({ text: `已启动 —— ${next.url}`, bad: false })
+      setDevNote({ text: `已启动：${next.url}`, bad: false })
     } catch (e) {
       /* 起不来时后端会把理由写进消息里（没生成 / 是谁占着那个端口），
          但状态也可能是旧的 —— 失败之后立刻重取一次，别让界面停在过期的读数上 */
@@ -302,7 +302,7 @@ export default function SettingsPage({ boot }: Props) {
     try {
       const next = await wb.devSourceStop()
       setDevSrc(next)
-      setDevNote({ text: next.note ?? '已停，服务端口也让出来了。', bad: false })
+      setDevNote({ text: next.note ?? '已停止，端口已释放。', bad: false })
     } catch (e) {
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
     } finally {
@@ -333,7 +333,7 @@ export default function SettingsPage({ boot }: Props) {
   const deliverPreview = async () => {
     if (previewBusy) return
     setPreviewBusy(true)
-    setPreviewNote({ text: '已开始编译并交付……（一两分钟）', bad: false })
+    setPreviewNote({ text: '开始编译并交付，约一两分钟。', bad: false })
     try {
       /* 后端把它派到后台线程，**立刻返回** —— 构建期间界面不转圈 */
       await wb.previewDeliver()
@@ -362,7 +362,7 @@ export default function SettingsPage({ boot }: Props) {
             setPreviewNote({
               text:
                 p.finished === 'rolled'
-                  ? '交付完成，开发版本已滚到下一版。'
+                  ? '已交付，开发版本进入下一版。'
                   : (p.error ?? `停在 ${p.finished ?? p.stage}`),
               bad: p.finished !== 'rolled',
             })
@@ -409,8 +409,8 @@ export default function SettingsPage({ boot }: Props) {
       setDevNote({
         text:
           left === 0
-            ? `${next.note ?? '占用者已停'} —— 现在可以点「启动」了。`
-            : `${next.note ?? '停是停了'}，但还有 ${left} 条占用没处理。`,
+            ? `${next.note ? `${next.note}，` : ''}可以启动。`
+            : `${next.note ? `${next.note}，` : ''}还有 ${left} 条占用没处理。`,
         bad: left > 0,
       })
     } catch (e) {
@@ -463,7 +463,7 @@ export default function SettingsPage({ boot }: Props) {
       setBootstrap(stored.bootstrapUrl)
       setGiteeSaved(stored.giteeBootstrapUrl ?? null)
       setGiteeBootstrap(stored.giteeBootstrapUrl ?? '')
-      setNote({ text: '已保存（重启 dev / 重打正式包后客户端才吃得到）', bad: false })
+      setNote({ text: '已保存，重启客户端后生效。', bad: false })
     } catch (e) {
       setNote({
         text: isAppError(e) ? e.message : e instanceof Error ? e.message : String(e),
@@ -490,12 +490,7 @@ export default function SettingsPage({ boot }: Props) {
       setGiteeSaved(fresh.giteeBootstrapUrl)
       setGiteeBootstrap(fresh.giteeBootstrapUrl ?? '')
       setNote({
-        text:
-          fresh.bootstrapUrl === null
-            ? '已从磁盘重读：还没配'
-            : fresh.giteeBootstrapUrl === null
-              ? '已从磁盘重读（Gitee 镜像没配）'
-              : '已从磁盘重读',
+        text: '已重新读取。',
         bad: false,
       })
     } catch (e) {
@@ -521,8 +516,7 @@ export default function SettingsPage({ boot }: Props) {
         <div className={s.cardBody}>
           <div className={s.vfield}>
             <p className={s.vhelp}>
-              工作台与客户端<b>各记各的一档</b>（两个应用的数据根是分开的，谁也不去读对方那棵树）
-              —— 这儿改的是<b>工作台这一窗</b>；客户端那扇窗在它自己的「设置 → 外观」里。
+              工作台与客户端<b>各记各的一档</b>；这里改的是工作台。
             </p>
             {THEME_OPTS.map((o) => (
               <label
@@ -576,13 +570,13 @@ export default function SettingsPage({ boot }: Props) {
               {account === null ? (
                 '读取中……'
               ) : account.remoteUrl === null ? (
-                '读不到 git remote（这台机器上取不到 git / 不是仓库）'
+                '读不到 git remote。'
               ) : (
                 <>
                   <span className={s.mono}>{account.remoteUrl}</span>
                   {account.remoteMatchesConfig
-                    ? ' —— 与已配置的发布账户一致 ✓'
-                    : ' —— 与已配置的发布账户不一致，发布前请确认'}
+                    ? '与发布账户一致。'
+                    : '与发布账户不一致，发布前请确认。'}
                   {account.branch !== null && ` · 分支 ${account.branch}`}
                 </>
               )}
@@ -657,7 +651,7 @@ export default function SettingsPage({ boot }: Props) {
                         className={`${s.inp} ${s.tokenMask}`}
                         onClick={() => setEditingToken((prev) => ({ ...prev, [p]: true }))}
                         aria-label={`${PLATFORM_LABEL[p]} Token 已配置，点击可修改`}
-                        title="已配置。点击可填入新的 Token（不改则保持原值）"
+                        title="点击换新的 Token。"
                       >
                         ••••••••••••
                       </button>
@@ -771,7 +765,7 @@ export default function SettingsPage({ boot }: Props) {
             <p className={s.vhelp}>
               发布出去的 <span className={s.mono}>presets/delivery/</span> 推到哪里 —— 客户端拿它那口
               <span className={s.mono}> source.json </span>找回目录与文件。
-              <b>填仓库地址就够</b>（仓库地址或 <span className={s.mono}>.git</span> 克隆地址）——
+              <b>填仓库地址即可。</b>
               我们会自动补成发布入口的 raw 直链（GitHub / Gitee 是同一座桥）。
               GitHub 是<b>主源</b>；Gitee 是<b>镜像</b>（国内直连），空着 = 不提供这一档。
               也收：指向 <span className={s.mono}>source.json</span> 的 blob / raw 直链、
@@ -835,13 +829,13 @@ export default function SettingsPage({ boot }: Props) {
             <p className={s.vhelp}>
               当前（磁盘 <span className={s.mono}>workbench/bootstrap.json</span> 里的那份）：
               {saved === null ? (
-                'GitHub 还没配 —— 客户端构建时不会注入默认源（下载会如实说「没配」）'
+                '还没配 GitHub，客户端构建时不会带默认源。'
               ) : (
                 <span className={s.mono}>{saved}</span>
               )}
               ；Gitee：
               {giteeSaved === null ? (
-                '没配（客户端不出现 Gitee 档）'
+                '没配，客户端不显示 Gitee。'
               ) : (
                 <span className={s.mono}>{giteeSaved}</span>
               )}
@@ -863,7 +857,7 @@ export default function SettingsPage({ boot }: Props) {
       <div className={s.card}>
         <div className={s.cardHead}>
           <b>本地测试源</b>
-          <span className={s.cardNote}>只读 —— 下面每一格都是盘上与运行时的真实读数</span>
+          <span className={s.cardNote}>只读，显示盘上与运行时的实际读数。</span>
         </div>
         <div className={s.cardBody}>
           <div className={s.vfield}>
@@ -988,7 +982,7 @@ export default function SettingsPage({ boot }: Props) {
               {devSrc?.lastDelivered !== null && devSrc?.lastDelivered !== undefined && (
                 <span className={`${s.vkey} ${s.mono}`}>
                   {devSrc.lastDelivered.tag}
-                  {devSrc.lastDelivered.recorded ? '' : '（账本缺记录，可补）'}
+                  {devSrc.lastDelivered.recorded ? '' : '（账本缺记录，可以补）'}
                 </span>
               )}
             </div>
@@ -1077,8 +1071,8 @@ export default function SettingsPage({ boot }: Props) {
                       disabled={devBusy || c.pid === null}
                       data-tip={
                         c.pid === null
-                          ? '认不出占着它的进程 —— 请在那个终端里自己停掉它'
-                          : '把它停掉（后端会先确认这个端口还是它的，再动手）'
+                          ? '认不出占用进程，请在终端里停掉。'
+                          : '停掉占用进程。'
                       }
                       onClick={() => void clearConflict(c)}
                     >
@@ -1111,7 +1105,7 @@ export default function SettingsPage({ boot }: Props) {
                 ))}
                 {previewPlan.strangers.length > 0 && (
                   <>
-                    <p className={s.vhelp}>以下文件尚未跟踪，无法确认是否属于本次构建：</p>
+                    <p className={s.vhelp}>这些文件还没提交，无法确认是否属于本次构建：</p>
                     {previewPlan.strangers.slice(0, 8).map((f) => (
                       <p key={f} className={`${s.vhelp} ${s.mono}`}>
                         · {f}
@@ -1134,23 +1128,15 @@ export default function SettingsPage({ boot }: Props) {
             )}
 
             <p className={s.vhelp}>
-              ★ 它<b>只起服务</b>，不碰你的客户端 —— 地址自己填一次：
-              <b>客户端</b>的「设置 → 高级设置 → 预设数据源 → 自定义地址」，把上面那一串贴进去
-              （保存即生效，不用重启客户端）。
+              ★ <b>只起服务</b>，客户端地址要手填：客户端的「设置 → 高级设置 → 预设数据源 → 自定义地址」，把上面那一串贴进去。
             </p>
 
             <p className={s.vhelp}>
-              想连客户端的 <span className={s.mono}>tauri dev</span> 一起起（它会自动把源指过来，
-              不用手填地址）：那在命令行里 ——{' '}
-              <span className={s.mono}>npm run dev:test-update</span>
-              。那条路靠 <span className={s.mono}>MKPSE_PRESET_SOURCE_URL</span> 注入，
-              所以它必须把客户端 dev 一起管起来；这里这颗按钮不干那件事。
+              想连客户端一起起，用命令行 <span className={s.mono}>npm run dev:test-update</span>（它会自动把源指过来）。
             </p>
 
             <p className={s.vhelp}>
-              ★ <b>端口被占着的话，上面会先把它摆出来</b>（谁占着、PID 多少），
-              点那颗「停掉它」就行 —— 后端会先确认那个端口还是它的才动手（PID 会被复用）。
-              不在跑的时候这里每 2 秒问一次，所以你在别的终端把它停了，界面也会跟上。
+              ★ 端口被占时会列出占用进程，点「停掉它」就行。
             </p>
           </div>
         </div>
@@ -1159,7 +1145,7 @@ export default function SettingsPage({ boot }: Props) {
       <div className={s.card}>
         <div className={s.cardHead}>
           <b>数据根</b>
-          <span className={s.cardNote}>唯一真相源 —— 没有第二候选、不 fallback</span>
+          <span className={s.cardNote}>唯一数据根。</span>
         </div>
         <div className={s.cardBody}>
           <div className={s.vfield}>
@@ -1180,7 +1166,7 @@ export default function SettingsPage({ boot }: Props) {
               <b>配方本</b>
               <span className={s.vkey}>workbench</span>
             </div>
-            <p className={s.vhelp}>开发源数据、草稿与回收站住的地方。</p>
+            <p className={s.vhelp}>开发数据、草稿与回收站。</p>
             <div className={s.vrow}>
               <span className={`${s.vstatic} ${s.mono}`}>{boot.roots.workbench}</span>
             </div>

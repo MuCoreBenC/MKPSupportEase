@@ -23,14 +23,14 @@
         {
           "id": "STANDARD",
           "name": "标准版",
-          "tag": "推荐",
+          "tag": "经典",
           "recommendedBundle": "A1_STANDARD",
           "mkpPresetAssetId": "A1-standard.toml"
         },
         {
           "id": "FAST260326",
           "name": "快拆版260326",
-          "tag": "旧版",
+          "tag": "旧版快拆",
           "recommendedBundle": "A1_FAST260326",
           "mkpPresetAssetId": "A1-fast260326.toml"
         },
@@ -62,14 +62,14 @@
         {
           "id": "STANDARD",
           "name": "标准版",
-          "tag": "推荐",
+          "tag": "经典",
           "recommendedBundle": "A1_MINI_STANDARD",
           "mkpPresetAssetId": "A1_MINI-standard.toml"
         },
         {
           "id": "FAST260326",
           "name": "快拆版260326",
-          "tag": "旧版",
+          "tag": "旧版快拆",
           "recommendedBundle": "A1_MINI_FAST260326",
           "mkpPresetAssetId": "A1_MINI-fast260326.toml"
         },

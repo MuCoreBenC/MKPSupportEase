@@ -1,0 +1,1111 @@
+/*
+ * 试验台的皮。颜色只承担一件事 —— 这条移动被抬了还是没抬。
+ * 抬 = 琥珀，正常 = 青，预测带宽 = 蓝紫，不一致 = 红。
+ *
+ * **跟着系统深浅色走**：`:root` 是深色那套，`prefers-color-scheme: light` 覆盖成浅色。
+ * `canvas`（2D / Z 阶梯带 / WebGL）的颜色也从这里取 —— 见 `theme.ts`，
+ * 别在 ts 里写死十六进制，否则切主题时画布不跟着走。
+ */
+
+:root {
+  color-scheme: dark;
+
+  --bg: #0e1116;
+  --bg-1: #151a21;
+  --bg-2: #1c232c;
+  --line: #232a33;
+  --text: #e6edf3;
+  --dim: #8b949e;
+  --amber: #f0a020;
+  --teal: #2bb6a8;
+  --blue: #4c8dff;
+  --red: #e5484d;
+  /* 支撑 / 熨烫：与切片器预览同一套语义 */
+  --green: #3fb950;
+  --violet: #a371f7;
+
+  /* canvas 专用的两个（带透明度，直接当 strokeStyle 用） */
+  --up: rgba(139, 148, 158, 0.3);
+  --grid: rgba(35, 42, 51, 0.9);
+  /* 分隔线 / 选中色带的淡底：深色下用白蓝提亮，浅色下用同一支蓝压重 */
+  --line-soft: rgba(35, 42, 51, 0.6);
+  --blue-weak: rgba(76, 141, 255, 0.06);
+  --blue-mid: rgba(76, 141, 255, 0.14);
+  /* 代码面板选中行：要当 sticky 列的不透明底，不能是半透明 */
+  --row-on: #1a2433;
+
+  /* 两处渐变的上端：顶栏与主区的辉光 */
+  --bar-top: #171d25;
+  --stage-glow: #18202a;
+  /* 视角立方体的面：比舞台亮一档，字才看得清 */
+  --cube: #2b3542;
+
+  --mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+
+    --bg: #f4f6f9;
+    --bg-1: #ffffff;
+    --bg-2: #eef1f6;
+    --line: #dde3ea;
+    --text: #16202b;
+    --dim: #67727f;
+    /* 浅底上这四个原色太浅，压深一档才够读 */
+    --amber: #b87400;
+    --teal: #0f8b81;
+    --blue: #2f6fe0;
+    --red: #cc2f36;
+    --green: #1a7f37;
+    --violet: #8250df;
+
+    --up: rgba(103, 114, 127, 0.26);
+    --grid: rgba(221, 227, 234, 0.95);
+    --line-soft: rgba(221, 227, 234, 0.85);
+    --blue-weak: rgba(47, 111, 224, 0.06);
+    --blue-mid: rgba(47, 111, 224, 0.12);
+    --row-on: #e8effc;
+
+    --bar-top: #ffffff;
+    --stage-glow: #e9eef5;
+    --cube: #ffffff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font: 12px/1.45 -apple-system, 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei', sans-serif;
+  overflow: hidden;
+}
+
+code,
+.ctl-val,
+.muted,
+.file,
+.num {
+  font-family: var(--mono);
+}
+
+/* ---------------- 顶栏 ---------------- */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  /* 装不下就整组换行：宁可顶栏高一行，也不要标签被挤成竖排 */
+  flex-wrap: wrap;
+  row-gap: 4px;
+  min-height: 56px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--bar-top), var(--bg-1));
+  flex: none;
+}
+
+.bar-left {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.brand {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.file {
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.bar-mid {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ctl-label {
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ctl-val {
+  color: var(--text);
+  font-size: 11px;
+  min-width: 34px;
+  font-variant-numeric: tabular-nums;
+}
+
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 108px;
+  height: 2px;
+  background: var(--line);
+  border-radius: 2px;
+  outline: none;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--amber);
+  border: 2px solid var(--bg-1);
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+input[type='range']:hover::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+.seg {
+  display: flex;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.seg button {
+  padding: 3px 12px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.seg button.on {
+  background: var(--bg-2);
+  color: var(--text);
+}
+
+.btn {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+
+.btn:hover {
+  color: var(--text);
+  border-color: var(--dim);
+}
+
+/* 开着的那一颗（爆炸） */
+.btn[aria-pressed='true'] {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+select.btn {
+  padding-right: 4px;
+  color: var(--text);
+  max-width: 86px;
+}
+
+/* ---------------- 三栏 ---------------- */
+
+.grid {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr) 312px;
+  min-height: 0;
+  flex: 1;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-1);
+}
+
+.panel-blocks {
+  border-right: 1px solid var(--line);
+}
+
+.panel-detail {
+  border-left: 1px solid var(--line);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  flex: none;
+}
+
+.muted {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.blocks {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.block-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line-soft);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms ease;
+}
+
+.block-row:hover {
+  background: var(--blue-weak);
+}
+
+/* 选中是通长色带，不是圆角块 */
+.block-row.on {
+  background: var(--blue-mid);
+  box-shadow: inset 2px 0 0 var(--blue);
+}
+
+.block-row .idx {
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.block-row .meta {
+  color: var(--dim);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.block-row .narrow {
+  width: 4px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--red);
+  opacity: 0.75;
+}
+
+/* ---------------- 画布 ---------------- */
+
+.stage {
+  position: relative;
+  min-width: 0;
+  background:
+    radial-gradient(1200px 700px at 30% 0%, var(--stage-glow) 0%, transparent 60%),
+    var(--bg);
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  /* 触屏双指不要被浏览器接管（后退手势 / 右键菜单） */
+  touch-action: none;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.scale {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.badge {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-1);
+  color: var(--dim);
+  font-size: 10px;
+  pointer-events: none;
+}
+
+/* ---------------- 3D 显示开关 ---------------- */
+
+/* 竖排一列眼睛：可以按住往下拖、一路扫过去（Blender 大纲视图那种手感） */
+.layers {
+  position: absolute;
+  left: 12px;
+  top: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-1);
+  user-select: none;
+  touch-action: none;
+}
+
+.layers-title {
+  padding: 0 6px 3px;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.eye {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.eye svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.eye:hover {
+  background: var(--bg-2);
+}
+
+.eye[aria-pressed='false'] {
+  color: var(--dim);
+}
+
+.eye[aria-pressed='false'] svg {
+  opacity: 0.55;
+}
+
+/* symbol 定义用的，不占位 */
+.icons {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+/* ---------------- 涂胶偏移 ---------------- */
+
+/*
+ * 默认贴在左下（2D 时左侧没有别的卡）。切到 3D 由 `placeOffset()` 挪到
+ * 「显示」面板右侧那一列，两张卡各让一步、谁也不压谁。
+ */
+.offset {
+  position: absolute;
+  left: 10px;
+  bottom: 158px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-1);
+  font-size: 11px;
+}
+
+/* 标题与「归零」同一行：四格数字排两排，卡高从 135 压到 75 左右，塞得进竖槽 */
+.offset-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 1px;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.offset-head .btn {
+  margin-left: auto;
+  padding: 1px 6px;
+  font-size: 10px;
+}
+
+.offset label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+}
+
+.offset input {
+  width: 56px;
+  padding: 1px 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* ---------------- 视角立方体 ---------------- */
+
+.viewcube {
+  position: absolute;
+  left: 10px;
+  bottom: 34px;
+  width: 112px;
+  height: 112px;
+  touch-action: none;
+}
+
+/* ---------------- 右侧两条竖滑杆 ---------------- */
+
+.side {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  height: min(420px, 62%);
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.side-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+.side-val {
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/*
+ * 竖向 range。
+ * 用 `input.vslider` 这个选择器是必须的：上面那条 `input[type='range']`（108×2px）
+ * 的优先级比单个类高，不这么写宽度会被它按回去。
+ */
+input.vslider {
+  flex: 1;
+  width: 16px;
+  height: auto;
+  min-height: 80px;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  /* WebKit 自带旋转（Chrome / Safari 都认）；别再用 `writing-mode` 套一层 */
+  -webkit-appearance: slider-vertical;
+  appearance: slider-vertical;
+  accent-color: var(--teal);
+  cursor: pointer;
+}
+
+input.vslider:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---------------- 右栏 ---------------- */
+
+.faces {
+  padding: 10px 12px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.face-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 11px;
+}
+
+.face-line .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blue);
+  opacity: 0.8;
+}
+
+.face-line .short {
+  font-family: var(--mono);
+  color: var(--text);
+}
+
+.face-line .band {
+  font-family: var(--mono);
+  color: var(--dim);
+}
+
+.face-line.narrow .short {
+  color: var(--amber);
+}
+
+.detail {
+  overflow-y: auto;
+  padding: 8px 12px 16px;
+  flex: 1;
+  /* 代码面板固定在右栏底部，诊断区先收缩再滚动 */
+  min-height: 96px;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 2px 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 11px;
+}
+
+.kv dt {
+  color: var(--dim);
+}
+
+.kv dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.kv dd.bad {
+  color: var(--red);
+}
+
+/* 「建议」与实际档一致时用的正向色；判据说该抬、产物真抬了，就不该是红的 */
+.kv dd.good {
+  color: var(--green);
+}
+
+.summary {
+  padding: 8px 0 10px;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.summary b {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.empty {
+  padding: 16px 0;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+/* ---------------- 右栏底部：G-code ---------------- */
+
+.code {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  max-height: 46vh;
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+}
+
+.code [hidden] {
+  display: none;
+}
+
+.code-head,
+.code-tools {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.code-head {
+  height: 30px;
+}
+
+.code-tools {
+  /* 312px 一栏装不下时换行，面板跟着长高，不许把按钮挤出去 */
+  min-height: 27px;
+  padding: 2px 6px;
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+
+.code-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.code-line {
+  margin-left: 6px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.code-gap {
+  flex: 1;
+}
+
+.code-btn {
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    background 120ms ease;
+}
+
+.code-btn:hover {
+  color: var(--text);
+  background: var(--bg-2);
+}
+
+.code-bad {
+  color: var(--red);
+}
+
+.code-fold {
+  padding: 1px 4px;
+  font-size: 12px;
+}
+
+.code-side {
+  display: flex;
+  padding: 1px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+}
+
+.code-side button {
+  padding: 1px 7px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.code-side button.on {
+  background: var(--bg-2);
+  color: var(--text);
+}
+
+.code-body {
+  overflow: auto;
+  padding: 4px 0 6px;
+  min-height: 0;
+}
+
+.code-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 18px;
+  padding-right: 8px;
+  border-left: 2px solid transparent;
+  background: var(--bg-1);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: pre;
+}
+
+.code-row.on {
+  border-left-color: var(--blue);
+  background: var(--row-on);
+  animation: code-pulse 600ms ease-out;
+}
+
+.code-row.hover {
+  border-left-color: var(--dim);
+}
+
+.code-ln,
+.code-ref,
+.code-mark,
+.code-tag,
+.code-text,
+.code-note {
+  flex: none;
+}
+
+.code-ln,
+.code-ref {
+  background: inherit;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.code-ln {
+  position: sticky;
+  left: 0;
+  width: 40px;
+  padding-right: 4px;
+}
+
+.code-ref {
+  position: sticky;
+  left: 40px;
+  width: 40px;
+  opacity: 0.6;
+}
+
+.code-row.on .code-ln,
+.code-row.on .code-ref {
+  color: var(--text);
+  opacity: 1;
+}
+
+.code-mark {
+  width: 12px;
+  text-align: center;
+  font-size: 10px;
+}
+
+/* 没有原件时省掉两列，312px 里多出 52px 给原文 */
+.code:not(.has-diff) .code-ref,
+.code:not(.has-diff) .code-mark {
+  display: none;
+}
+
+.code-mark.add {
+  color: var(--green);
+}
+
+.code-mark.del {
+  color: var(--red);
+}
+
+.code-mark.chg {
+  color: var(--amber);
+}
+
+.code-tag {
+  position: relative;
+  width: 14px;
+  text-align: center;
+  color: var(--dim);
+  font-size: 10px;
+}
+
+.code-tag.ok {
+  color: var(--teal);
+}
+
+.code-tag.raised {
+  color: var(--amber);
+}
+
+.code-tag.up {
+  opacity: 0.6;
+}
+
+.code-row.on .code-tag {
+  color: var(--blue);
+}
+
+.code-dot {
+  position: absolute;
+  top: 3px;
+  right: -2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--red);
+}
+
+.code-text {
+  color: var(--text);
+}
+
+.code-note {
+  margin-left: 8px;
+  color: var(--dim);
+  font-size: 10px;
+  opacity: 0.55;
+}
+
+.code-empty {
+  padding: 10px 12px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.code.folded .code-tools,
+.code.folded .code-body,
+.code.folded .code-head .code-ctx,
+.code.folded .code-head .code-btn:not(.code-fold) {
+  display: none;
+}
+
+@keyframes code-pulse {
+  from {
+    background: var(--blue-mid);
+  }
+
+  to {
+    background: var(--row-on);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .code-row.on {
+    animation: none;
+  }
+}
+
+/* ---------------- 底部 Z 阶梯 ---------------- */
+
+.strip {
+  height: 132px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+  flex: none;
+}
+
+.strip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 26px;
+  padding: 0 12px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+}
+
+.sw {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.sw-normal {
+  background: var(--teal);
+}
+
+.sw-raised {
+  background: var(--amber);
+}
+
+.sw-bad {
+  background: var(--red);
+}
+
+.sw + .sw {
+  margin-left: 6px;
+}
+
+.strip-canvas {
+  display: block;
+  width: 100%;
+  height: 106px;
+}
+
+/* ---------------- 加载中 ---------------- */
+
+.busy {
+  position: fixed;
+  inset: 0;
+  z-index: 21;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.busy-card {
+  min-width: 220px;
+  padding: 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-1);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35);
+}
+
+.busy-text {
+  margin-bottom: 12px;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.busy-bar {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--line);
+}
+
+.busy-bar i {
+  display: block;
+  width: 36%;
+  height: 100%;
+  background: var(--teal);
+  animation: busy-slide 1s ease-in-out infinite;
+}
+
+@keyframes busy-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(280%); }
+}
+
+/* 底部台阶带：一段一块，选中那条描边 */
+.strip-canvas {
+  cursor: crosshair;
+}
+
+/* ---------------- 拖入遮罩 ---------------- */
+
+.drop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: var(--bg-1);
+  backdrop-filter: blur(6px);
+  transition: opacity 220ms ease;
+}
+
+.drop.off {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.drop-card {
+  padding: 28px 36px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  text-align: center;
+}
+
+.drop-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.drop-hint {
+  margin-top: 6px;
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.fade-in {
+  animation: fade 120ms ease;
+}
+
+@keyframes fade {
+  from {
+    opacity: 0.25;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 1280px) {
+  .grid {
+    grid-template-columns: 208px minmax(0, 1fr) 280px;
+  }
+}

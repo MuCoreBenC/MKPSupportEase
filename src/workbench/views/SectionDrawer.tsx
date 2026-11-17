@@ -5,8 +5,9 @@
  * 上下的话，很容易不小心点到的就是排序。我希望都在抽屉里面，而且抽屉里面可以
  * 展示更多的信息，把所有能展示的信息都展示出来。」
  *
- * 所以卡片头只剩「点它开抽屉」一件事：改名、上下移、看这一组里都有什么参数，
- * 全在这里。抽屉里**不直接落盘** —— 每一次改动都进草稿（服务器侧那条撤销栈认得出），
+ * 所以卡片头只剩「点它开抽屉」一件事：上下移、看这一组里都有什么参数留在抽屉，
+ * 改名与成员归类在标题那支笔打开的编辑框里。抽屉里**不直接落盘** —— 每一次改动
+ * 都进草稿（服务器侧那条撤销栈认得出），
  * 真正写盘仍然只归右上角那颗「保存」，点了「放弃」才是真的放弃。
  *
  * # 它住在页面里，**不再 portal 到 `FieldLayer`**（2026-11-02 重做）
@@ -28,10 +29,17 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import type { RegistryView, SectionMetaEdit, SectionTarget } from '../api'
+import type {
+  GroupMembersEdit,
+  ParamView,
+  RegistryView,
+  SectionMetaEdit,
+  SectionTarget,
+} from '../api'
 import ModalC14 from '../c14/ModalC14'
 import c from '../c14.module.css'
 import SectionList from './SectionList'
+import SectionMembersModal from './SectionMembersModal'
 import type { SectionGroup } from './SectionList'
 import s from './SectionDrawer.module.css'
 
@@ -54,6 +62,10 @@ interface Props {
   registry: RegistryView | null
   /** 这一组里的参数（卡片头那颗计数点开看的就是它们） */
   rows: { key: string; label: string }[]
+  /** 全量参数：成员编辑框左列的候选 */
+  params: ParamView[]
+  /** 成员编辑框确认：一次应用进草稿，右上角「保存」才落盘 */
+  onEditMembers: (edit: GroupMembersEdit) => Promise<void>
   onClose: () => void
   /** 改名字 / 换位：都只是应用（进草稿），不落盘 */
   onApply: (id: string, edit: SectionMetaEdit) => void
@@ -91,6 +103,8 @@ export default function SectionDrawer({
   markId,
   registry,
   rows,
+  params,
+  onEditMembers,
   onClose,
   onApply,
   onPickParam,
@@ -102,12 +116,8 @@ export default function SectionDrawer({
   onShowSection,
   fallbackLabel,
 }: Props) {
-  /*
-   * 标题那支笔（作者 2026-11-01：「要加也可以，顺手的事情」）—— 与每行的笔同一个
-   * 语义：点笔才改名，点标题本身不动作。
-   */
-  const [renaming, setRenaming] = useState(false)
-  const [titleDraft, setTitleDraft] = useState('')
+  /* 标题那支笔：开成员编辑框。名字、归类、移出都在框里，确认才应用 */
+  const [membersOpen, setMembersOpen] = useState(false)
 
   const groups: SectionGroup[] = useMemo(() => {
     const out: SectionGroup[] = []
@@ -163,13 +173,15 @@ export default function SectionDrawer({
   const at = here === null ? -1 : sibs.findIndex((x) => x.id === here.id)
 
   /*
-   * 「这一组现在能不能删」。三个条件与后端 `remove_section` 那三道门一一对应 ——
-   * 这里只负责**要不要把按钮画出来**，拒的理由仍由后端给（它读到的是同一份数据）。
+   * 「这一组现在能不能删」。判据只认注册表那一份（`SectionTarget`），**不数这一屏
+   * 画出来的行**：`rows` 跟着页签 / 搜索变，切个领域就会让有参数的组长出垃圾桶。
    *
-   * 没参数才叫空：`rows` 是这一组的参数清单（页面派生来的），空 + 注册表里查得到
-   * （组件卡在注册表里查不到，天然被 `here !== null` 挡掉）。
+   * 组里的参数不用搬空 —— 后端 `remove_section` 会先把它们落到这一页末尾的
+   * 「未归类」；整块组件卡与条件分组仍然拒收（那两道门在后端，这里只藏按钮）。
    */
-  const canRemove = here !== null && rows.length === 0
+  const canRemove = here !== null && here.component === null && !here.standalone
+  /** 这一组名下真正有多少条参数（注册表口径，与页面上画了几行无关） */
+  const members = params.filter((p) => p.sectionId === (mark ?? '')).length
 
   /*
    * 删除**先问一句**（作者 2026-11-02：「我要模态框」）。
@@ -187,13 +199,14 @@ export default function SectionDrawer({
 
   /* Esc 关抽屉 —— 与其余浮层一致 */
   useEffect(() => {
-    if (sectionId === null) return
+    /* 成员编辑框开着时 Esc 归它，别顺手把抽屉也关了 */
+    if (sectionId === null || membersOpen) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [sectionId, onClose])
+  }, [sectionId, onClose, membersOpen])
 
   /* 查不到也画：宁可用卡片自己的名字兜底，也不要点下去没反应 */
   if (sectionId === null) return null
@@ -211,47 +224,20 @@ export default function SectionDrawer({
       <aside className={s.drawer} role="dialog" aria-label={`分组 ${title}`}>
         <header className={s.head}>
           <div className={s.titleRow}>
-            {renaming ? (
-              <input
-                className={s.titleInput}
-                value={titleDraft}
-                autoFocus
-                maxLength={24}
-                aria-label="分组名"
-                onChange={(e) => setTitleDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    const next = titleDraft.trim()
-                    setRenaming(false)
-                    if (next !== '' && next !== title && mark !== null) {
-                      onApply(mark, { label: next, move: null })
-                    }
-                  } else if (e.key === 'Escape') {
-                    setRenaming(false)
-                  }
-                }}
-                onBlur={() => setRenaming(false)}
-              />
-            ) : (
-              <>
-                <h3 className={s.title}>{title}</h3>
-                <button
-                  type="button"
-                  className={s.titlePen}
-                  title="改这一组的名字（回车确定 · Esc 撤回）"
-                  aria-label="改分组名"
-                  onClick={() => {
-                    setTitleDraft(title)
-                    setRenaming(true)
-                  }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M12 20h9" />
-                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                  </svg>
-                </button>
-              </>
-            )}
+            <h3 className={s.title}>{title}</h3>
+            <button
+              type="button"
+              className={s.titlePen}
+              title="编辑这一组的名字与成员"
+              aria-label="编辑分组成员"
+              disabled={mark === null}
+              onClick={() => setMembersOpen(true)}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+            </button>
             {/*
                * 「删除这一组」—— 只在**空组**上出现（作者 2026-11-01：「空的时候可以删除，
                * 比如说我建了一个新的，不小心建多了也可以删除」）。
@@ -266,7 +252,7 @@ export default function SectionDrawer({
               <button
                 type="button"
                 className={s.trash}
-                title="删掉这个空分组（进草稿；右上角「保存」才落盘）"
+                title="删除后，组里参数回到「未归类」。"
                 aria-label="删除分组"
                 onClick={() => setAsking(true)}
               >
@@ -304,10 +290,10 @@ export default function SectionDrawer({
                */
               <p className={s.empty}>
                 {pageTotal === 0
-                  ? '这一页还没有读到参数（正在加载，或者还没选机型与版本）。'
+                  ? '还没读到参数。'
                   : pageDrawn === 0
-                    ? `这一页现在一行都没画出来：${pageTotal} 条参数这会儿都被收起或被条件关着。`
-                    : '这一组眼下没有参数 —— 它在注册表里没有认领的条目（客户端也不会画它）。'}
+                    ? '这一页的参数都被条件关着。'
+                    : '这一组没有参数。'}
               </p>
             ) : (
               <ul className={s.rows}>
@@ -353,11 +339,23 @@ export default function SectionDrawer({
               onMove={(id, dir) => onApply(id, { label: null, move: dir < 0 ? 'up' : 'down' })}
               /* 「＋ 新增分组」：只进草稿，建完切到新组上（见参数台 `addSection`） */
               onAdd={onAddSection}
-              hint="位置只在自己的页签里挪：客户端按这一页的顺序排，卡片也跟着它。"
+              hint="只在这一页内调顺序，客户端照此排列。"
             />
           </section>
         </div>
       </aside>
+
+      {membersOpen && mark !== null && (
+        <SectionMembersModal
+          scope="section"
+          id={mark}
+          label={title}
+          params={params}
+          sections={registry?.sections ?? []}
+          onApply={onEditMembers}
+          onClose={() => setMembersOpen(false)}
+        />
+      )}
 
       {/*
         删除前那句问话（2026-11-02 作者：「我要模态框」）。
@@ -372,7 +370,11 @@ export default function SectionDrawer({
       <ModalC14
         open={asking && canRemove && onRemove !== undefined}
         title="删除这个分组？"
-        subtitle="只删这一条分组声明；它名下没有任何参数（有参数的组这里删不了）。"
+        subtitle={
+          members === 0
+            ? '这一组没有参数。'
+            : `${members} 条参数移到「未归类」。`
+        }
         size="sm"
         onClose={() => setAsking(false)}
         /*
@@ -380,7 +382,7 @@ export default function SectionDrawer({
          * 一条竖窄条（作者截图里「这一笔也只进 / 草稿 —— 右上 / 角「保存」才 /
          * 落盘」四行高、按钮还斜着排）。`footLead` 自己吃掉左侧余量。
          */
-        footLead="这一笔也只进草稿 —— 右上角「保存」才落盘，「放弃」就退回来"
+        footLead="先进草稿，保存后写入。"
         footer={
           <>
             <button
@@ -412,7 +414,7 @@ export default function SectionDrawer({
           <dt>位置</dt>
           <dd>{here === null ? '（注册表里查不到）' : `${here.tabLabel} · 第 ${at + 1} / ${sibs.length} 组`}</dd>
           <dt>参数</dt>
-          <dd>0 条（空的才删得掉）</dd>
+          <dd>{members === 0 ? '0 条' : `${members} 条 → 「未归类」`}</dd>
         </dl>
       </ModalC14>
     </>

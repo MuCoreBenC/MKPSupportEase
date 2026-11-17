@@ -192,6 +192,10 @@ fn is_false(b: &bool) -> bool {
     !*b
 }
 
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
+}
+
 /* ---------- getMachines ---------- */
 
 #[derive(Debug, Clone, Serialize)]
@@ -631,6 +635,17 @@ pub struct ShowWhenDto {
     pub value: String,
 }
 
+/// 「这一格的自动值怎么算」—— 注册表 `autoValue` 原样过给界面。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoValueDto {
+    pub from: String,
+    #[serde(skip_serializing_if = "is_false")]
+    pub abs: bool,
+    #[serde(skip_serializing_if = "is_zero")]
+    pub offset: f64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParamMetaDto {
@@ -663,6 +678,12 @@ pub struct ParamMetaDto {
     pub machine_filter: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub show_when: Option<ShowWhenDto>,
+    /// 「值为 0 时读作自动」（注册表 `zeroMeansAuto`）。缺省 = 0 就是 0
+    #[serde(skip_serializing_if = "is_false")]
+    pub zero_means_auto: bool,
+    /// 「那个自动值怎么算」（注册表 `autoValue`）。缺省 = 算不出数，只说「自动」
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_value: Option<AutoValueDto>,
 }
 
 /// 全部参数的元信息。**不过滤** —— 界面要能看到废弃的参数为什么不显示
@@ -694,6 +715,12 @@ fn param_meta_dto(catalog: &runtime::Catalog) -> Vec<ParamMetaDto> {
                 key: s.key.clone(),
                 op: s.op,
                 value: to_text(&s.value),
+            }),
+            zero_means_auto: p.zero_means_auto,
+            auto_value: p.auto_value.as_ref().map(|a| AutoValueDto {
+                from: a.from.clone(),
+                abs: a.abs,
+                offset: a.offset,
             }),
         })
         .collect()
@@ -769,9 +796,6 @@ pub struct RecipeParamDto {
     /// **一律字符串** —— 单位换算与小数位数不该由界面再做一遍
     pub value: String,
     pub origin: &'static str,
-    /// 只有 `origin === "variant"` 时有：基础配方里的那个值
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub base_value: Option<String>,
     /// **字段级弃用**（`ParamDef.deprecated`）：这一整项在真上游里标了废弃。
     ///
     /// 与 [`ParamMetaDto::deprecated`] **同一个值、同一处出处**（`ParamDef.deprecated`）——
@@ -880,8 +904,6 @@ fn machine_params_dto(
             step: p.step,
             value: to_text(eff.value),
             origin: if is_variant { "variant" } else { "base" },
-            // 被版本盖过才带「还原成」的那个值：先看机型层有没有钉着，没有才是出厂默认
-            base_value: is_variant.then(|| to_text(base.get(key).unwrap_or(&p.default_value))),
             // 字段级弃用：与 [`ParamMetaDto::deprecated`] 同源同值（`ParamDef.deprecated`）
             deprecated: p.deprecated,
         });
@@ -1062,7 +1084,7 @@ fn user_base_of(slicer: &str) -> Option<PathBuf> {
 /// 一种资产只进一个切片器：BBS 的工艺预设放进 Orca 的目录里，Orca 的字段表对不上它
 /// （与「去工艺页面查看」那条判据同源）。所以「放入」不带参数时只写它自己那一档 ——
 /// 想往别的切片器放，得在框里那一行上自己点。
-fn slicer_of_kind(kind: &str) -> Option<&'static str> {
+pub(crate) fn slicer_of_kind(kind: &str) -> Option<&'static str> {
     match kind {
         "bbs_config" => Some("bambu"),
         _ => None,
@@ -1107,7 +1129,7 @@ fn copy_targets_in(user_base: &Path, dirs: Vec<PathBuf>) -> Vec<PathBuf> {
 }
 
 /// 某个切片器「放入会写到哪里」的那一组目录（`user/` 一层都没有 ⇒ `None`）。
-fn process_dirs_of(slicer: &str) -> Option<Vec<PathBuf>> {
+pub(crate) fn process_dirs_of(slicer: &str) -> Option<Vec<PathBuf>> {
     let user_base = user_base_of(slicer)?;
     let dirs = process_dirs_in(&user_base);
     Some(copy_targets_in(&user_base, dirs))
@@ -1435,6 +1457,45 @@ pub fn copy_to_slicer(
     })
 }
 
+/// **跟着换**：本机这一版变了（下载到新版 / 用回旧版）之后，把切片器目录里那份也换掉。
+///
+/// 判据只看「目标目录里有没有同名文件」（与 [`get_slicer_copied`] 同一套）：
+/// **没放入的一个都不建** —— 换版本不该替用户往切片器里塞东西。
+/// 返回真正被换掉的目录数；写失败只记日志，不拦调用方（换版本本身已经成功了）。
+pub(crate) fn replace_placed_copies(slicer: &str, file_name: &str, bytes: &[u8]) -> usize {
+    let Some(dirs) = process_dirs_of(slicer) else {
+        return 0;
+    };
+    let done = replace_placed_in(&dirs, file_name, bytes);
+    if done > 0 {
+        tracing::info!(file = %file_name, targets = done, "切片器目录已跟着换成这一版");
+    }
+    done
+}
+
+/// [`replace_placed_copies`] 的判据本体：**只换已经存在的那几份，一份都不新建**。
+///
+/// 目录从外面递进来（真机上由 `process_dirs_of` 枚举），判据因此能被单测钉住。
+fn replace_placed_in(dirs: &[PathBuf], file_name: &str, bytes: &[u8]) -> usize {
+    let mut done = 0usize;
+    for dir in dirs {
+        let target = dir.join(file_name);
+        if !target.is_file() {
+            continue;
+        }
+        match crate::fsx::atomic::atomic_write(&target, bytes) {
+            Ok(()) => done += 1,
+            Err(e) => tracing::warn!(
+                file = %file_name,
+                at = %target.display(),
+                "已放入的那份没跟上新版：{}",
+                e.message
+            ),
+        }
+    }
+    done
+}
+
 #[cfg(test)]
 mod tests {
     // 判据要造一棵真实形状的目录树 —— 生产代码的写盘走 `fsx::atomic` 那一个洞。
@@ -1573,9 +1634,9 @@ mod tests {
             ("nameEn", "Standard"),
             ("nameTw", "標準版"),
             ("nameJa", "スタンダード版"),
-            ("tagEn", "Recommended"),
-            ("tagTw", "推薦"),
-            ("tagJa", "おすすめ"),
+            ("tagEn", "Classic"),
+            ("tagTw", "經典"),
+            ("tagJa", "クラシック"),
         ] {
             assert_eq!(
                 std_v[key].as_str(),
@@ -1719,9 +1780,9 @@ mod tests {
             "bundled 档不进客户端菜单"
         );
 
-        // —— 参数元信息：全部 83 条，含废弃 ——
+        // —— 参数元信息：全部 96 条，含废弃 ——
         let meta = param_meta_dto(&catalog);
-        assert_eq!(meta.len(), 92, "实测 92 条字段定义，一条不少");
+        assert_eq!(meta.len(), 98, "实测 98 条字段定义，一条不少");
         let offset_x = meta
             .iter()
             .find(|p| p.key == "toolhead.offset.x")
@@ -1775,12 +1836,38 @@ mod tests {
             .expect("偏移 X 在配方里");
         assert_eq!(vx.origin, "variant", "{vm}/{vv} 这一版在版本层覆盖了它");
         assert!(!vx.value.is_empty(), "值来自那一层");
-        // 机型层没写 → 「还原成」给的是出厂默认 0
-        assert_eq!(vx.base_value.as_deref(), Some("0"));
 
         // 机型不存在的报错要说出是谁
         let err = machine_params_dto(&catalog, "NOPE", None).unwrap_err();
         assert!(err.message.contains("NOPE"));
+    }
+
+    /// **「0 = 自动」与「自动值怎么算」都要穿过 definition 通道**。
+    ///
+    /// 这两格是参数格上的一个补丁（`MKP_extrude = 0` 不能读成"不挤出"），
+    /// 少传一格界面就退回 `0.00` 或只剩「自动」两个字 —— 两种都静默，
+    /// 没有一处会报错，所以只能在这里钉住。
+    #[test]
+    fn auto_display_flags_travel_through_definition_channel() {
+        let catalog = catalog();
+        let meta = param_meta_dto(&catalog);
+        let p = meta
+            .iter()
+            .find(|p| p.key == "toolhead.MKP_extrude")
+            .expect("挤出长度必须在");
+        assert!(p.zero_means_auto, "0 该读作自动");
+        let link = p.auto_value.as_ref().expect("自动值的来源该跟下来");
+        assert_eq!(link.from, "toolhead.MKP_retract");
+        assert!(link.abs, "回抽是负数，回填量要的是长度");
+        assert_eq!(link.offset, 0.5);
+
+        // 没标这两格的字段不许凭空长出它们（缺省 = 0 就是 0）
+        let q = meta
+            .iter()
+            .find(|p| p.key == "toolhead.offset.x")
+            .expect("偏移 X 在");
+        assert!(!q.zero_means_auto);
+        assert!(q.auto_value.is_none());
     }
 
     /// **弃用标记要真的穿过整条链，但两条通道的语义各自保持不动**（① 的判据）。
@@ -1868,6 +1955,26 @@ mod tests {
         assert_eq!(dep, vec!["sheath"], "选项级弃用只有护套那一档");
         // 其余选项一个都不许被误标（这是「选项级」而不是「参数级」的钉子）
         assert!(choices.iter().filter(|c| c.deprecated).count() < choices.len());
+    }
+
+    /// 跟着换：**只换已经放入的那几份**，没放入的不新建（换代不该往切片器里塞东西）
+    #[test]
+    fn replace_placed_only_touches_copies_that_are_already_there() {
+        let root = tempfile::tempdir().unwrap();
+        let placed = root.path().join("placed");
+        let empty = root.path().join("empty");
+        std::fs::create_dir_all(&placed).unwrap();
+        std::fs::create_dir_all(&empty).unwrap();
+        std::fs::write(placed.join("A.json"), b"old").unwrap();
+
+        let done = replace_placed_in(&[placed.clone(), empty.clone()], "A.json", b"new");
+
+        assert_eq!(done, 1);
+        assert_eq!(std::fs::read(placed.join("A.json")).unwrap(), b"new");
+        assert!(
+            !empty.join("A.json").exists(),
+            "没放入的目录一个文件都不该多出来"
+        );
     }
 
     /// 缓存按字节配对：同一份字节复用解析结果，字节变了自动 miss。

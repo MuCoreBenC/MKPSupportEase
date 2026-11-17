@@ -349,6 +349,10 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
         let root = internal_root(&app)?;
         let raw = runtime::app_state::postproc_prefs(&root)?;
         let r = raw.resolved();
+        /* 出厂档：全 `null` 解析出来的那一份（与 `resolved()` 同一个函数，不另算一套） */
+        let f = serde_json::from_str::<runtime::app_state::PostprocPrefs>("{}")
+            .map_err(|e| AppError::internal(format!("出厂偏好解析不了：{e}")))?
+            .resolved();
         Ok(serde_json::json!({
             /* 原样那一格（界面用来判断"这一项动过没有"） */
             "raw": raw,
@@ -356,7 +360,12 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
             "resolved": {
                 "notifyOnFinish": r.notify_on_finish,
                 "uiMode": r.ui_mode.wire(),
+                /* 等回答时置顶（2026-11-17）：只影响窗口层级，不进 IR */
+                "autoTopOnAsk": r.auto_top_on_ask,
                 "glueBottomEnabled": r.glue_bottom_enabled,
+                /* 下方支撑余量（实验，2026-11-17）：余量够的涂胶段不抬高 */
+                "underSupportEnabled": r.under_support_enabled,
+                "underSupportMm": r.under_support_mm,
                 "skipVibrationCalibration": r.skip_vibration_calibration,
                 "beginStageRetractEnabled": r.begin_stage_retract_enabled,
                 "beginStageRetractZLiftMm": r.begin_stage_retract_z_lift_mm,
@@ -388,6 +397,26 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "debugRepeat": r.debug_repeat,
                 "debugMoveY": r.debug_move_y,
             },
+            /*
+             * 出厂档 = 全 `null` 解析出来的那一份。
+             *
+             * 恢复默认的对比要用它：只写「出厂」两个字，用户看不出点完会变成开还是关、
+             * 数字是多少。这里只给那 11 项（`PrefsIr` 的全部），与 `resetDefaults` 的
+             * 补丁一一对应；调试动作那组有自己那颗恢复，不在这里。
+             */
+            "factory": {
+                "skipVibrationCalibration": f.skip_vibration_calibration,
+                "beginStageRetractEnabled": f.begin_stage_retract_enabled,
+                "beginStageRetractZLiftMm": f.begin_stage_retract_z_lift_mm,
+                "zCalibrationDwellSec": f.z_calibration_dwell_sec,
+                "xyCalibrationDwellSec": f.xy_calibration_dwell_sec,
+                "underSupportEnabled": f.under_support_enabled,
+                "underSupportMm": f.under_support_mm,
+                "glueBottomEnabled": f.glue_bottom_enabled,
+                "bedGlueEnabled": f.bed_glue_enabled,
+                "bedGlueAllModels": f.bed_glue_all_models,
+                "autoTowerPosition": f.auto_tower_position.wire(),
+            },
             /* 量程（界面画数字框要用，**不另写一份**在 TS 里） */
             "limits": {
                 "zDwell": { "min": runtime::app_state::Z_DWELL_MIN, "max": runtime::app_state::Z_DWELL_MAX },
@@ -395,6 +424,10 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "zLift": {
                     "min": runtime::app_state::BEGIN_STAGE_RETRACT_Z_LIFT_MIN,
                     "max": runtime::app_state::BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
+                },
+                "underSupport": {
+                    "min": runtime::app_state::UNDER_SUPPORT_MM_MIN,
+                    "max": runtime::app_state::UNDER_SUPPORT_MM_MAX,
                 },
             },
         }))

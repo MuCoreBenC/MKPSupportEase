@@ -1,6 +1,6 @@
 [package]
 name = "mkp-support-ease"
-version = "0.0.11-preview.1"
+version = "0.0.11-preview.2"
 description = "SupportEase —— MKP 支撑辅助桌面端"
 authors = ["MuCoreBenC"]
 license = "AGPL-3.0-only"
@@ -101,6 +101,13 @@ tauri-plugin-dialog = "2.8"
 # **只在 Rust 侧调**（自己的命令体里），所以不需要给它开任何 capability：
 # 前端能调的只有我们那条 `reveal_in_folder`，路径先过用户根那两道闸。
 tauri-plugin-opener = "2"
+
+# 系统剪贴板（2026-11-15）：前端的「复制」不再走 webview 的 `navigator.clipboard` ——
+# macOS 的 WKWebView 只在**用户手势还活着**的上下文里放行写入，而「使用之后自动复制
+# 后处理脚本」那条链是从 AppState 广播里起的、手里没有手势 ⇒ 必被拒，拒的时候抛的还是
+# WebKit 的英文原话。写剪贴板是系统的事，三个平台那三套（NSPasteboard / Win32
+# clipboard / X11+Wayland）由它包掉。
+arboard = "3"
 # 下面这几个版本住 workspace 根 —— 后处理内核与这里共用它们，
 # 两边各写一份就会在依赖树里出现两次（见根 Cargo.toml 的说明）
 serde.workspace = true

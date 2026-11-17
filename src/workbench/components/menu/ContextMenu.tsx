@@ -222,7 +222,7 @@ export default function ContextMenu({ at, entries, onClose }: Props) {
     >
       {/* 一个能点的都没有时说一句，别给一个空框 */}
       {confirming === null && enabled.length === 0 && items.length > 0 && (
-        <p className={s.none}>这一行没有可用的操作</p>
+        <p className={s.none}>没有可用的操作。</p>
       )}
       {body}
     </div>,

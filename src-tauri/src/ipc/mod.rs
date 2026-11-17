@@ -731,6 +731,32 @@ pub async fn get_post_process_command(
     })
 }
 
+/// **把一段文本写进系统剪贴板** —— 前端所有「复制」的唯一落地。
+///
+/// # 为什么不让前端自己写
+///
+/// macOS 的 WebView 只在**用户手势还活着**的上下文里放行 `navigator.clipboard`：
+/// 「使用之后自动复制后处理脚本」那条链是从 AppState 广播里起的，手里没有手势
+/// ⇒ 必被拒，而拒的时候抛的是 WebKit 那串英文原话（"The request is not allowed by
+/// the user agent or the platform in the current context…"）—— 一句会给用户看的英文。
+/// 写剪贴板本来就是系统的事，交给系统那一侧就没有这一层判定。
+///
+/// **同步命令**：Tauri 把同步命令放在主线程跑 —— macOS 那侧是 AppKit 的 NSPasteboard，
+/// 不去别的线程试。写一段文本是微秒级，卡不住界面。
+///
+/// 失败时给的是**给日志看**的一句（界面照自己的文案表说「没写进剪贴板」，
+/// 不把这句摆上去 —— 那是四个语言各说一遍的事，不归 Rust）。
+#[tauri::command]
+pub fn copy_text(text: String) -> Result<(), AppError> {
+    traced("copyText", |_| {
+        let mut board = arboard::Clipboard::new()
+            .map_err(|e| AppError::internal("剪贴板用不了").with_detail(e.to_string()))?;
+        board
+            .set_text(text)
+            .map_err(|e| AppError::internal("剪贴板没写进去").with_detail(e.to_string()))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,4 +1,4 @@
-{   
+{
     "bottom_shell_thickness": "0.6",
     "brim_object_gap": "0.05",
     "enable_arc_fitting": "0",
@@ -66,6 +66,7 @@
         "5000"
     ],
     "tree_support_wall_count": "1",
+    "type": "process",
     "version": "1.9.0.26",
     "z_direction_outwall_speed_continuous": "1"
 }

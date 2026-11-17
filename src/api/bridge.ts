@@ -245,11 +245,11 @@ export const bridgeApi: MkpApi = {
    * 两条都要挂一条 Channel（Rust 侧是必填参数，见 `withTick` 头注）—— 备份几百 MB
    * 时界面要的正是那条水位：`scan` → 一跳一跳的 `pack`。
    */
-  createBackup: (destDir, includePresets, onTick) =>
+  createBackup: (destDir, includePresets, includeHistory, onTick) =>
     call(
       'createBackup',
       'create_backup',
-      withTick({ destDir, includePresets }, onTick),
+      withTick({ destDir, includePresets, includeHistory }, onTick),
     ),
   restoreBackup: (zipPath, scope, onTick) =>
     call('restoreBackup', 'restore_backup', withTick({ zipPath, scope }, onTick)),
@@ -265,6 +265,9 @@ export const bridgeApi: MkpApi = {
   /* 「恢复默认值」（编辑文件那颗）读的原文镜像 —— `baseline-local/`，见 Rust `runtime::baseline` */
   readLocalOriginText: (path) =>
     call('readLocalOriginText', 'read_local_origin_text', { path }),
+  /* 「恢复默认值」要回到的那一版（参数页底栏；与上一行同一份字节） */
+  readPresetBaselineValues: (path) =>
+    call('readPresetBaselineValues', 'read_preset_baseline_values', { path }),
   putTextDraft: (text) => call('putTextDraft', 'put_text_draft', { text }),
   commitTextDraft: () => call('commitTextDraft', 'commit_text_draft'),
   /* 编辑框实时自检：语法 + 相对最初那份缺了哪些参数（红条跟着字走） */
@@ -339,6 +342,9 @@ export const bridgeApi: MkpApi = {
   readArchivedText: (path) => call('readArchivedText', 'read_archived_text', { path }),
   deleteArchivedFile: (path) =>
     call<void>('deleteArchivedFile', 'delete_archived_file', { path }),
+  /* 用回归档里那一版：只换本机这一版（云端目录与事件账不动，已放入切片器的那份跟着换） */
+  restoreArchivedFile: (path) =>
+    call<void>('restoreArchivedFile', 'restore_archived_file', { path }),
   /* 删除本机那份交付预设文件（一切皆可删：删了回到「未下载」，随时可从云端重下） */
   deleteDeliveryFile: (fileName) =>
     call<void>('deleteDeliveryFile', 'delete_delivery_file', { fileName }),
@@ -399,7 +405,7 @@ export const bridgeApi: MkpApi = {
      窗口几何的副作用全在 `ipc::window_layout`，前端只发意图、不碰 setSize */
   getWindowPrefs: () => call('getWindowPrefs', 'get_window_prefs'),
   setPin: (pin, onBbs) => call('setPin', 'set_pin', { pin, onBbs }),
-  applyPin: (onBbs) => call('applyPin', 'apply_pin', { onBbs }),
+  applyPin: (onBbs, askTop) => call('applyPin', 'apply_pin', { onBbs, askTop }),
   setCompact: (compact) => call('setCompact', 'set_compact', { compact }),
   /* 屏幕引导（2026-10-15）：改了参数之后指给用户看那一步 —— 只读坐标，不替用户点 */
   locateBedTypeControl: () => call('locateBedTypeControl', 'locate_bed_type_control'),
@@ -446,6 +452,9 @@ export const bridgeApi: MkpApi = {
   cancelUpdate: () => call('cancelUpdate', 'cancel_update'),
   installUpdate: () => call('installUpdate', 'install_update'),
   openUrl: (url) => call('openUrl', 'open_url', { url }),
+  /* 写剪贴板（2026-11-15）：界面所有「复制」走这一条 —— webview 那套要看用户手势，
+     状态事件推出来的那一趟必被拒，见 `ipc::copy_text` 的头注 */
+  copyText: (text) => call('copyText', 'copy_text', { text }),
 
   /* ——— 切片器目录（放进去才生效）+ 复制云端链接（2026-10-09 接通）——— */
   copyToSlicer: (fileName, slicer, account) =>

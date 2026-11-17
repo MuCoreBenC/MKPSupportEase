@@ -497,11 +497,11 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
   /**
    * 信息页那颗「复制路径」：复制的是**归档里那一份的绝对路径**。
    *
-   * 剪贴板失败（WKWebView 的权限 / 隐私模式）**不弹错**：路径正文本身就能拖选，
-   * 那才是兜底；为一句"没复制上"再顶一条红字不值得（与 `TraceTag` 同一条口径）。
+   * 剪贴板写不进去**不弹错**：路径正文本身就能拖选，那才是兜底；
+   * 为一句"没复制上"再顶一条红字不值得（与 `TraceTag` 同一条口径）。
    */
   const copyPath = (kind: ReportExportKind, text: string) => {
-    void navigator.clipboard?.writeText(text).then(
+    void api.copyText(text).then(
       () => {
         setCopied(kind)
         window.setTimeout(() => setCopied((now) => (now === kind ? null : now)), 1400)

@@ -151,6 +151,11 @@
   color: var(--text-1);
 }
 
+/* 本框自己管两列滚动，外壳不再滚 */
+.bodyNoScroll {
+  overflow: hidden;
+}
+
 /* 标题行右侧的工具位：吃掉标题与关闭按钮之间的空白，内容贴右排 */
 .headExtra {
   display: flex;

@@ -123,6 +123,9 @@ pub struct ReportDetail {
     pub estimated_print_seconds: Option<f64>,
     /// 涂胶组（`detail.glue`，键与旧版 `_meta.json` 同名）。
     pub glue: Option<serde_json::Value>,
+    /// 熨烫组（`detail.ironing`，2026-11-15）：判据的事后事实（块数 / 删了几块 /
+    /// 最大一块的挤出合计 / 各路径的层数 / 最小覆盖率）。旧记录没有 ⇒ `null` ⇒ 整组不摆。
+    pub ironing: Option<serde_json::Value>,
     /// 擦料塔组（`detail.tower`）。
     pub tower: Option<serde_json::Value>,
     /// 切片工艺组（`detail.slicer`）。
@@ -470,6 +473,7 @@ fn detail_of(summary: ReportSummary, meta: &serde_json::Value) -> ReportDetail {
             .and_then(|d| d.get("estimatedPrintSeconds"))
             .and_then(|v| v.as_f64()),
         glue: detail.and_then(|d| d.get("glue")).cloned(),
+        ironing: detail.and_then(|d| d.get("ironing")).cloned(),
         tower: detail.and_then(|d| d.get("tower")).cloned(),
         slicer: detail.and_then(|d| d.get("slicer")).cloned(),
         snapshot: detail.and_then(|d| d.get("snapshot")).cloned(),

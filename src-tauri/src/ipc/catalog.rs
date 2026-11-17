@@ -272,6 +272,20 @@ pub async fn read_downloaded_text(app: AppHandle, file_name: String) -> Result<S
     })?
 }
 
+/// **跟着换**：这一份本机换版之后，把切片器目录里那份也换掉（只换已经放入的）。
+///
+/// 与「放入」是两件事：这一手不会新建任何文件，只看目标目录里有没有同名的那一份。
+/// 判据在 [`crate::ipc::presets::replace_placed_copies`]，这里只负责把字节取出来。
+fn sync_placed_copy(root: &Path, file: &runtime::catalog::CatalogFile) {
+    let Some(slicer) = crate::ipc::presets::slicer_of_kind(&file.kind) else {
+        return;
+    };
+    let Some(bytes) = runtime::delivery::stored_bytes(root, file) else {
+        return;
+    };
+    crate::ipc::presets::replace_placed_copies(slicer, &file.file_name, &bytes);
+}
+
 /// 把 catalog 里登记的一份文件从数据源拉进**它自己的落点**。
 ///
 /// 落点 = `catalog.path`（唯一路径语义）—— 没有固定的"下载区根"，目录按需建。
@@ -337,6 +351,8 @@ pub async fn download_runtime_file(
             }
 
             outcome?;
+            /* 已经放入切片器的那一份跟着换 —— 没放入的一份都不建 */
+            sync_placed_copy(&root, file);
             /* 预设的真实落点是 `content/<sha>`，文件名一律报目录里的名字 */
             Ok(file.file_name.clone())
         })
@@ -461,6 +477,12 @@ pub async fn download_runtime_files(
             };
 
             let outcomes = runtime::delivery::deliver_all(&root, &wanted, &remote, &report);
+            /* 取到的那几份里，已经放入切片器的跟着换（没放入的不建） */
+            for outcome in outcomes.iter().filter(|o| o.ok) {
+                if let Some(file) = wanted.iter().find(|f| f.file_name == outcome.file_name) {
+                    sync_placed_copy(&root, file);
+                }
+            }
             Ok(outcomes
                 .into_iter()
                 .map(|o| DownloadOutcomeDto {
@@ -504,7 +526,7 @@ pub struct FetchCloudDto {
 /// 后缀保持原样（后缀决定它是哪一类文件）；名字空间是 `presets-local/`
 /// 内一圈一圈往后找一个没人占的。上限之后照原名返回 —— 那时由写盘那一层的
 /// "落点已存在"闸去说话，不在这一层编故事。
-fn untaken_name(user_root: &Path, wanted: &str) -> String {
+fn untaken_name(user_root: &Path, subdir: Option<&str>, wanted: &str) -> String {
     let path = std::path::Path::new(wanted);
     let stem = path
         .file_stem()
@@ -516,7 +538,11 @@ fn untaken_name(user_root: &Path, wanted: &str) -> String {
     };
     for n in 2..=999u32 {
         let candidate = with(n);
-        let rel = format!("{}/{candidate}", crate::fsx::paths::LOCAL_DIR);
+        /* 撞名只在**同一个分支文件夹**里算：别的分支有同名文件不关这一支的事 */
+        let rel = match subdir {
+            Some(dir) => format!("{}/{dir}/{candidate}", crate::fsx::paths::LOCAL_DIR),
+            None => format!("{}/{candidate}", crate::fsx::paths::LOCAL_DIR),
+        };
         let taken = crate::fsx::paths::resolve_in(user_root, &rel)
             .map(|p| p.exists())
             .unwrap_or(true);
@@ -603,23 +629,36 @@ pub async fn fetch_cloud_preset(
                 published_at: catalog.published_at.as_deref(),
             };
             let source_sha = file.expected_sha();
+            /*
+             * 落哪个文件夹：显式下载只跟**当前分支**有关（分支隔离）。
+             * 自建源没有 ref ⇒ `None` ⇒ 保持平铺布局。
+             */
+            let branch_dir = identity
+                .as_ref()
+                .map(|id| runtime::branch_dir::folder_for(&root, id))
+                .transpose()?
+                .flatten();
 
             /* 云端原件是**内部**数据：它只用来落"本地那份"，绝不进用户世界 */
-            let rel = format!("{}/{}", crate::fsx::paths::LOCAL_DIR, file.file_name);
+            let rel = match &branch_dir {
+                Some(dir) => format!("{}/{dir}/{}", crate::fsx::paths::LOCAL_DIR, file.file_name),
+                None => format!("{}/{}", crate::fsx::paths::LOCAL_DIR, file.file_name),
+            };
             let target = crate::fsx::paths::resolve_in(&user, &rel)?;
             let created = !target.is_file();
             let (file_name_here, path_here, taken_by, suggested_name) = if created {
                 let text = runtime::delivery::cloud_text(&root, file)?;
-                runtime::local::save_cloud_as_new(
+                runtime::local::save_cloud_as_new_in(
                     &user,
+                    branch_dir.as_deref(),
                     file,
                     &text,
                     &file.file_name,
                     line.as_ref(),
                 )?;
-                /* ★ 原文镜像：下载**落盘之后**存一份 —— 这份的"最初那样"= 云端当前版
-                落到我盘上那一刻（「恢复默认值」退的就是它） */
-                let _ = runtime::baseline::ensure_origin_copy(&root, &user, &rel);
+                /* ★ 原文镜像：下载**落盘之后**覆盖一份 —— 文件此刻就是云端那一版的原样，
+                「恢复默认值」退的就是它（见 `runtime::baseline` 模块头） */
+                let _ = runtime::baseline::refresh_origin_copy(&root, &user, &rel);
                 /* 来路账：记不上不影响下载本身（附加信息，与原文镜像同一条口径） */
                 let _ = runtime::source_ledger::record_download(
                     &root,
@@ -635,13 +674,23 @@ pub async fn fetch_cloud_preset(
                  * 用户已经点了"导入"：自动改一个**没被占的**名字落一份新的。
                  * 原来那份一个字节不动 —— 两份同名是不允许的，但两份内容并存是用户要的。
                  */
-                let name = untaken_name(&user, &file.file_name);
+                let name = untaken_name(&user, branch_dir.as_deref(), &file.file_name);
                 let text = runtime::delivery::cloud_text(&root, file)?;
                 let dir = crate::fsx::paths::LOCAL_DIR;
-                let rel = format!("{dir}/{name}");
-                runtime::local::save_cloud_as_new(&user, file, &text, &name, line.as_ref())?;
+                let rel = match &branch_dir {
+                    Some(sub) => format!("{dir}/{sub}/{name}"),
+                    None => format!("{dir}/{name}"),
+                };
+                runtime::local::save_cloud_as_new_in(
+                    &user,
+                    branch_dir.as_deref(),
+                    file,
+                    &text,
+                    &name,
+                    line.as_ref(),
+                )?;
                 /* 原文镜像同上一支 */
-                let _ = runtime::baseline::ensure_origin_copy(&root, &user, &rel);
+                let _ = runtime::baseline::refresh_origin_copy(&root, &user, &rel);
                 /* 撞名另存也是从云端下载来的，照样记（用户看到的仍不是"拷贝"） */
                 let _ = runtime::source_ledger::record_download(
                     &root,
@@ -658,7 +707,7 @@ pub async fn fetch_cloud_preset(
                     file.file_name.clone(),
                     rel.clone(),
                     Some(rel),
-                    Some(untaken_name(&user, &file.file_name)),
+                    Some(untaken_name(&user, branch_dir.as_deref(), &file.file_name)),
                 )
             };
             Ok(FetchCloudDto {
@@ -734,6 +783,10 @@ pub struct OnDiskFileDto {
     pub downloaded_unix: Option<u64>,
     pub replaced_unix: Option<u64>,
     pub published_at: Option<String>,
+    /// 盘上这份的指纹（「下载」那一格读它，答的是"我手上是哪一版"）
+    pub sha256: String,
+    /// 盘上那份文件的 mtime（「本地修改时间」那一格；读不到 = `null`，不编）
+    pub local_modified_unix: Option<u64>,
 }
 
 /// 已经下载到下载区的文件（盘就是底账：文件在且 SHA 对得上才算数），带它的事件时间
@@ -749,6 +802,8 @@ pub async fn get_downloaded_files(app: AppHandle) -> Result<Vec<OnDiskFileDto>, 
                 downloaded_unix: e.downloaded_unix,
                 replaced_unix: e.replaced_unix,
                 published_at: e.published_at,
+                sha256: e.sha256,
+                local_modified_unix: e.local_modified_unix,
             })
             .collect())
     })
@@ -768,6 +823,8 @@ pub async fn get_stale_files(app: AppHandle) -> Result<Vec<OnDiskFileDto>, AppEr
                 downloaded_unix: e.downloaded_unix,
                 replaced_unix: e.replaced_unix,
                 published_at: e.published_at,
+                sha256: e.sha256,
+                local_modified_unix: e.local_modified_unix,
             })
             .collect())
     })
@@ -990,6 +1047,32 @@ pub async fn delete_archived_file(app: AppHandle, path: String) -> Result<(), Ap
         let root = internal_root(&app)?;
         runtime::delivery::delete_archived(&root, &path)
     })
+}
+
+/// **用回这一版**（旧版本抽屉里那颗按钮）：把归档那份旧字节重新变成"本机这一版"。
+///
+/// 只动本机：目录登记、版本链、事件账一个都不碰 —— 于是换回来之后这一份会被认成
+/// 「旧版本」（`FileTrust::OldVersion`），界面上照实显示、点「下载」就能换回当前版。
+/// 已经放入切片器的那份跟着换（与下载新版同一条规矩：只换已放入的）。
+#[tauri::command]
+pub async fn restore_archived_file(app: AppHandle, path: String) -> Result<(), AppError> {
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        traced("restoreArchivedFile", |_| {
+            let root = internal_root(&app)?;
+            let catalog = runtime::load_released_catalog(&root)?;
+            runtime::delivery::restore_archived(&root, &catalog, &path)?;
+            let rel = path
+                .strip_prefix(&format!("{}/", runtime::paths::ARCHIVE_DIR))
+                .unwrap_or(&path);
+            if let Some(file) = catalog.files.iter().find(|f| f.path == rel) {
+                sync_placed_copy(&root, file);
+            }
+            Ok(())
+        })
+    });
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.513", &[])).with_detail(e.to_string())
+    })?
 }
 
 /* ---------- 使用中指针（第一圈 ⑤：用户状态的第一个真数据） ---------- */

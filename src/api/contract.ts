@@ -260,6 +260,33 @@ export interface ReportGlueFacts {
   primeTotalLength?: number
 }
 
+/**
+ * 熨烫组（`detail.ironing`，2026-11-15）—— **判据的事后事实**，不是参数。
+ *
+ * 为什么要有：一张看着远超「熨烫挤出上限」的熨烫面没被删掉，把上限改成 0.10 才消失。
+ * 切片器把同一张面拆成几十个 `M1031` 块，判据现在把它们**连成一整段（一张面）**再合计
+ * —— 这一组把那场判断如实摊出来（几张面 / 删了几张 / 最大一张多大 / 各路径的层数 /
+ * 最小覆盖率）。
+ *
+ * ★ 与判据同一份真值：前端**不重算**、也不拿这里的数与阈值比出结论（比法在内核）。
+ */
+export interface ReportIroningFacts {
+  /** 见到几段连续熨烫（= 几张面） */
+  blocks?: number
+  /** 被判掉、没进产物的段数 */
+  removed?: number
+  /** 所有段里最大的挤出合计（mm，耗材长度）；`null` = 一段都没有 */
+  maxESum?: number | null
+  /** 这一层最终用熨烫路径的层数（含与支撑面按区域混合） */
+  layersIroning?: number
+  /** 这一层整层用支撑面路径的层数 */
+  layersMoisture?: number
+  /** 这一层回退到支撑体（`iface_fallback`）的层数 */
+  layersFallback?: number
+  /** 参与过配对的覆盖率里最小的那个（%）；`null` = 一次都没配对 */
+  minCoverage?: number | null
+}
+
 /** 擦料塔组（`detail.tower`） */
 export interface ReportTowerFacts {
   towerLayers?: number
@@ -449,6 +476,8 @@ export interface ReportDetail {
   estimatedPrintSeconds?: number | null
   /** 涂胶组（旧记录 / 失败记录没有 ⇒ `null`，整组不摆） */
   glue?: ReportGlueFacts | null
+  /** 熨烫组（判据的事后事实；旧记录 / 失败记录没有 ⇒ `null`，整组不摆） */
+  ironing?: ReportIroningFacts | null
   /** 擦料塔组 */
   tower?: ReportTowerFacts | null
   /** 切片工艺组 */
@@ -635,8 +664,6 @@ export interface RecipeParam {
   /** 当前值。**一律字符串** —— 单位换算与小数位数不该由界面再做一遍 */
   value: string
   origin: ParamOrigin
-  /** 只有 origin === 'variant' 时有：基础配方里的那个值，用来显示「还原成」与对照 */
-  baseValue?: string
   /**
    * 字段级弃用（2026-10-02）：该字段已退出正常编辑 / 产物生成，但**仍属于已知参数**，
    * 所以参数页继续展示它的历史状态。
@@ -956,6 +983,16 @@ export interface ParamMeta {
   unit?: string
   /** 写进 TOML 的行尾注释 */
   tomlComment?: string
+  /**
+   * 值为 0 时读作「自动」（2026-11-13）。只对「0 有专门含义」的字段出现，
+   * 没标的字段不给这一格（不是 false，是 undefined）。
+   */
+  zeroMeansAuto?: boolean
+  /**
+   * 那个「自动」到底是多少（2026-11-13）：跟着 `from` 这条参数的当前值算。
+   * 缺这一格 = 只说得清"是自动"，说不清数（界面就只写「自动」）。
+   */
+  autoValue?: { from: string; abs?: boolean; offset?: number }
   mergeGroup?: string
   pinned?: boolean
   deprecated?: boolean
@@ -1120,6 +1157,8 @@ export interface BasedOnFacts {
   sourceVersionAt: string | null
   /** 来源那一版云端原文 SHA-256（不是本地文件此刻的字节） */
   sourceSha256: string | null
+  /** **下载那一刻**云端原文的摘要（记录里的 `origin.sha256`）；没更新过时与 `sourceSha256` 相同 */
+  downloadSha256: string | null
   /** 当前生效的源身份 */
   cloudSource: string | null
   /**
@@ -1173,6 +1212,13 @@ export interface LocalPresetFile {
   size: number
   /** 最后改动时刻（UTF **epoch 秒**）。界面自己转人话：默认构建不引时间库 */
   modifiedUnix: number | null
+  /**
+   * **盘上这份自己的指纹**（整份字节的 SHA-256）—— 详情「本机指纹」读它。
+   *
+   * 与 `basedOnFacts.sourceSha256`（来源那一版）/ `downloadSha256`（下载那一刻）
+   * 不是一回事：下载后改过、另存过，本机这份就与云端那个不同。读不出来 ⇒ `null`。
+   */
+  sha256: string | null
   /**
    * 认得出是哪一类就给；**认不出是 `null`**。
    *
@@ -1374,6 +1420,37 @@ export interface HistoryRecordItem {
   tab: string
   section: string
   unit: string | null
+}
+
+/**
+ * 「恢复默认值」要回到的那一版里的一格参数。
+ *
+ * 只含那一版真的写着的键：新增参数在老版里没有，恢复时保持现值不动。
+ */
+export interface BaselineValue {
+  key: string
+  value: string
+}
+
+/**
+ * 「恢复默认值」要回到的那一版：**最近一次与云端某一版逐字节一致落盘的原样**。
+ *
+ * 参数页底栏与「编辑文件」那颗读同一份字节 —— 不是两套。
+ * `origin` 只说这一版怎么来的：
+ * - `cloudSync` 最近一次云端落盘（下载 / 全采用更新 / 导入 / 另存）；
+ * - `migrated`  升级前的老档，按文件尾部末条 sha 从云端原文里取回；
+ * - `initial`   只有最初那份，没有可迁移的云端原文。
+ *
+ * 缺镜像且没有可迁移的云端原文 ⇒ `null`，界面把按钮禁用，
+ * **绝不回落到注册表的出厂值**（那是工作台内部口径）。
+ */
+export interface BaselineSnapshot {
+  values: BaselineValue[]
+  /** 这一版的发布时刻（目录 `publishedAt`） */
+  at: string | null
+  catalogId: string | null
+  serial: number | null
+  origin: 'cloudSync' | 'migrated' | 'initial'
 }
 
 /*
@@ -1726,6 +1803,18 @@ export interface OnDiskFile {
   downloadedUnix: number | null
   replacedUnix: number | null
   publishedAt: string | null
+  /**
+   * **盘上这份的指纹**（预设 = 索引里那版；其余 = 现场算）。
+   *
+   * 与目录登记的 SHA 是两回事：它答"我手上这份是哪一版"，界面上「下载」那一格读它。
+   * 认不出出身的旧字节也算得出（它就是字节本身），不是"未知"。
+   */
+  sha256: string
+  /**
+   * 盘上那份文件的 mtime（epoch 秒）。**只当「本地修改时间」** ——
+   * 不许拿去顶「云端发布时刻」（AGENTS §6）；读不到是 `null`，界面照实「未知」。
+   */
+  localModifiedUnix: number | null
 }
 
 /**
@@ -2288,7 +2377,18 @@ export type TowerRelocateMode = 'off' | 'auto' | 'ask'
 export interface ResolvedPostprocPrefs {
   notifyOnFinish: boolean
   uiMode: PostprocUiMode
+  /**
+   * **后处理那一屏在等回答时把主窗置顶**（出厂 = 开，2026-11-17）。
+   *
+   * 那一屏是切片器拉起来的：用户切回切片器看模型时它会被盖住，等到超时都没人看见。
+   * 只影响窗口层级，**不进 IR、不改产物**。
+   */
+  autoTopOnAsk: boolean
   glueBottomEnabled: boolean
+  /** **下方支撑余量（实验）**：涂胶段离笔下方支撑边界够远就不抬高 */
+  underSupportEnabled: boolean
+  /** 余量阈值（mm），量程见 `limits.underSupport` */
+  underSupportMm: number
   skipVibrationCalibration: boolean
   beginStageRetractEnabled: boolean
   beginStageRetractZLiftMm: number
@@ -2346,7 +2446,13 @@ export interface ResolvedPostprocPrefs {
 export interface PostprocPrefsWire {
   notifyOnFinish?: boolean | null
   uiMode?: PostprocUiMode | null
+  /** 等回答时置顶窗口：`null` = 回到出厂档（开） */
+  autoTopOnAsk?: boolean | null
   glueBottomEnabled?: boolean | null
+  /** **下方支撑余量（实验）**：`null` = 回到出厂档（关） */
+  underSupportEnabled?: boolean | null
+  /** 余量阈值（mm）：`null` = 回到出厂档（0.5） */
+  underSupportMm?: number | null
   skipVibrationCalibration?: boolean | null
   beginStageRetractEnabled?: boolean | null
   beginStageRetractZLiftMm?: number | null
@@ -2381,11 +2487,31 @@ export interface PostprocPrefsWire {
 export interface PostprocPrefsView {
   raw: PostprocPrefsWire
   resolved: ResolvedPostprocPrefs
+  /**
+   * **出厂档**（全 `null` 解析出来的那一份），只含 `PrefsIr` 那 11 项。
+   *
+   * 设置页「恢复默认」的对比要用它 —— 只写「出厂」两个字，用户看不出点完变成
+   * 开还是关、数字多少。调试动作那组不在这里（它有自己的恢复）。
+   */
+  factory: {
+    skipVibrationCalibration: boolean
+    beginStageRetractEnabled: boolean
+    beginStageRetractZLiftMm: number
+    zCalibrationDwellSec: number
+    xyCalibrationDwellSec: number
+    underSupportEnabled: boolean
+    underSupportMm: number
+    glueBottomEnabled: boolean
+    bedGlueEnabled: boolean
+    bedGlueAllModels: boolean
+    autoTowerPosition: string
+  }
   /** 量程来自后端，界面**不另写一份** */
   limits: {
     zDwell: { min: number; max: number }
     xyDwell: { min: number; max: number }
     zLift: { min: number; max: number }
+    underSupport: { min: number; max: number }
   }
 }
 
@@ -2784,6 +2910,13 @@ export interface PostProcessResult {
   glueLengthMm?: number
   /** 切片软件（`"BambuStudio 02.08.02.60"` —— pass1 从输入头行刮到的完整串） */
   slicer?: string
+  /**
+   * **这一趟开着热床预涂胶**：产物里插了涂胶块，打印时那支笔会真的在板面上走一圈。
+   *
+   * 结果屏拿它先摆一句"盯住首层"——涂胶那一段没人看着就可能划伤打印板。
+   * 缺 = 不知道（回放 / 老钩子）⇒ 不提示；`true` 才提示。
+   */
+  bedGlue?: boolean
   /**
    * 层厚的**最小 / 最大**（mm）—— 两个一样 = 固定层高。
    *
@@ -3371,12 +3504,17 @@ export interface MkpApi {
    * 原文备份 / 回收站）**不进包**（界面上那颗「连同预设一起备份」）—— 包里只剩设置与执行归档。
    * 这份包恢复时也不动它们 —— 判断依据记在说明书里，不靠调用方再传一次。
    *
+   * `includeHistory = false`：执行归档（`user/gcode_history`）**不进包**（界面上那颗
+   * 「连同执行记录一起备份」）—— 那是包里最大的一块，不带它能快很多。恢复时同样不动
+   * 现在那一棵，判据也在说明书里。
+   *
    * `onTick` 可选：给了就看过程（`scan` → 一跳一跳的 `pack`），不给就是"点了等结果"。
    * 命令本身跑在线程池里（几百 MB 的归档不会把窗口冻住），**进度只有这一条路**。
    */
   createBackup(
     destDir: string,
     includePresets: boolean,
+    includeHistory: boolean,
     onTick?: (tick: BackupTick) => void,
   ): Promise<BackupSummary>
 
@@ -3449,15 +3587,21 @@ export interface MkpApi {
   beginTextEdit(fileName: string, path: string): Promise<PresetTextDraft>
 
   /**
-   * **这份用户文件的原文**（它最初落到盘上时的那一份）——「编辑文件」模态框那颗
-   * **「恢复默认值」**读的就是它（2026-10-16 作者：「编辑文件这个也可以有个按钮……
-   * 恢复默认值……对于用户导进来的，可能需要你去做一种备份」）。
+   * **这份用户文件的默认原样** ——「编辑文件」模态框那颗「恢复默认值」读它。
    *
-   * 来源 = `baseline-local/` 的路径镜像：下载 / 导入 / 复制 / 另存的那几份在**落盘时**
-   * 存过；老文件在**第一次被我们改写**（编辑器保存 / 参数写回 / 校准 / 归属机型）之前补上。
+   * 来源 = `baseline-local/` 的路径镜像（与 [`readPresetBaselineValues`] 同一份字节）：
+   * 下载 / 导入 / 复制 / 另存落盘时写入；更新合并只在逐字节等于云端原文时刷新。
    * 都没有 ⇒ `null` —— 界面把那颗按钮禁用（不猜、不编一个"默认"出来）。
    */
   readLocalOriginText(path: string): Promise<string | null>
+
+  /**
+   * **「恢复默认值」要回到的那一版**（参数页底栏用；与 [`readLocalOriginText`] 同一份字节）。
+   *
+   * 返回那一版的参数值 + 发布时刻 + 序号；老档会按尾部末条 sha 从云端原文迁移。
+   * 没有可恢复的版本 ⇒ `null`，按钮禁用。**不回落到注册表的出厂值**。
+   */
+  readPresetBaselineValues(path: string): Promise<BaselineSnapshot | null>
 
   /**
    * 把改动写进临时文件（编辑框边改边存）。**只动正文**，[`beginTextEdit`] 那一刻的其它不变。
@@ -4017,8 +4161,12 @@ export interface MkpApi {
    *
    * 为什么与 `setPin` 分开：切页是高频动作、且档位没变 —— 走写盘那条会把前端
    * 绕回自己的 effect 里。这一条只把已经选好的档落到窗口上。
+   *
+   * `askTop` = 后处理那一屏**正在等回答**、且设置页「等回答时置顶」开着。
+   * 它与档位是**或**的关系：档位是 `off` 时它也能把窗浮上来；问句收掉之后
+   * 前端带着 `false` 再调一次，窗口落回档位算出来的那一层。
    */
-  applyPin(onBbs: boolean): Promise<boolean>
+  applyPin(onBbs: boolean, askTop: boolean): Promise<boolean>
 
   /**
    * 进 / 出窄窗：宽 600、高 = 当前屏可用高 90%、贴右缘。
@@ -4130,6 +4278,14 @@ export interface MkpApi {
    * 版本链与事件账不动：那是历史事实，不是这份文件的附属。
    */
   deleteArchivedFile(path: string): Promise<void>
+
+  /**
+   * **用回归档里那一版**：把本机这一份换成旧版字节（已放入切片器的那份跟着换）。
+   *
+   * 只动本机：目录登记、版本链、事件账一个都不碰 —— 换回来之后这一份会被认成
+   * 「旧版本」，点「下载」就能换回云端当前版。入参与 [`deleteArchivedFile`] 同一个。
+   */
+  restoreArchivedFile(path: string): Promise<void>
 
   /**
    * 当前使用的是哪一份（全局唯一）。null = 还没用任何一份，是合法状态不是错误。
@@ -4248,6 +4404,16 @@ export interface MkpApi {
    *   点了**什么都不发生**（0.0.2 的「查看更新」就是那样"点了没反应"的）。
    */
   openUrl(url: string): Promise<void>
+
+  /**
+   * **把一段文本写进系统剪贴板** —— 界面所有「复制」的落地。
+   *
+   * ★ 不走 `navigator.clipboard`：macOS 的 WebView 只在**用户手势还活着**的上下文里
+   *   放行写入。「使用之后自动复制后处理脚本」那条链是从 AppState 广播里起的，
+   *   手里没有手势 ⇒ 必被拒，而拒的时候抛的是 WebKit 的一串英文原话。
+   *   写剪贴板是系统的事，由 Rust 那一侧做（`ipc::copy_text`）。
+   */
+  copyText(text: string): Promise<void>
 
   /* ---------- baseline + 对比台（2026-10-08） ---------- */
 

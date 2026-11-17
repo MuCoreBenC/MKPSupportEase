@@ -15,7 +15,8 @@ const demoLanded = new Set<string>()
  *
  * 为什么要有：作者连着两轮说「模态框尺寸变化了」，而那一屏在浏览器里**根本到不了**
  * （钩子那一趟是切片器带参数把桌面版拉起来的）。于是给 dev 开一个口子：
- * 打开 `/?pp=result` 或 `/?pp=relocate`，快照就返回一份假的那一趟 —— 探针据此
+ * 打开 `/?pp=result` 或 `/?pp=relocate`（还有 `warn` / `glue` / `vh` / `mismatch`），
+ * 快照就返回一份假的那一趟 —— 探针据此
  * 量两屏的 `.box` 高度，判"换一屏框就长大"（`scripts/probes/pp-modal-height.mjs`）。
  *
  * ★ 只在 `import.meta.env.DEV` 下生效；生产构建里整段被摇掉，`getPostProcessRun`
@@ -91,6 +92,29 @@ function devPostProcessRun(): PostProcessRun | null {
           t('mock.warn.scarf'),
         ],
         result: { penX: -1, penY: 18.6, penZ: 3.8, glueSpeed: 70 },
+      },
+    }
+  }
+
+  /*
+   * **开了热床预涂胶**那一屏：结果屏默认落在警告页，卡片说"本次打印已开启热床预涂胶"。
+   * 真机上这一格由钩子按那一趟的 IR 给（`ResultFacts::bed_glue`），这里只是浏览器里的样张。
+   */
+  if (which === 'glue') {
+    return {
+      ...base,
+      question: null,
+      finished: {
+        ok: true,
+        cancelled: false,
+        message: t('mock.ask.done'),
+        code: null,
+        stage: null,
+        exitCode: 0,
+        elapsedMs: 11_840,
+        output: null,
+        warnings: [],
+        result: { penX: -1, penY: 18.6, penZ: 3.8, glueSpeed: 70, bedGlue: true },
       },
     }
   }
@@ -414,7 +438,7 @@ const mockCopyTargets = new Set<string>()
  * ★ 真窗口那半（`set_always_on_top` / `set_size` / `set_position`）在浏览器里**空转**——
  *   没有窗口可摆。但这两格照常记账：探针要验"点两下文字换了、盒子没变宽"。
  */
-let mockPin: PinPref = 'off'
+let mockPin: PinPref = 'page'
 let mockCompact = false
 /* 界面语言（2026-10-25）：`null` = 还没选过 ⇒ 跟随系统，与真后端同一个出厂档 */
 let mockLocale: LocalePref | null = null
@@ -438,6 +462,7 @@ const MOCK_FACTS: BasedOnFacts = {
   sourceRelease: null,
   sourceVersionAt: null,
   sourceSha256: null,
+  downloadSha256: null,
   cloudSource: null,
   cloudPublishedAt: null,
   cloudSha256: null,
@@ -449,13 +474,17 @@ const MOCK_FACTS: BasedOnFacts = {
   unverifiedReason: null,
 }
 
+/** 演示里那一版云端原文的摘要（这一档没更新过 ⇒ 下载那一刻与来源那一版同值） */
+const MOCK_DOWNLOAD_SHA = 'a2'.padEnd(64, '0')
+
 /** 演示里的"从 main 下载"那一档：源身份 + 对应版本的发布时间都定格在下载那一刻 */
 const MOCK_DOWNLOAD_FACTS: BasedOnFacts = {
   ...MOCK_FACTS,
   sourceKind: 'download',
   sourceRef: 'github#MuCoreBenC/MKPSupportEase@main',
   sourceVersionAt: '2026-10-15T05:46:00Z',
-  sourceSha256: 'a2'.padEnd(64, '0'),
+  sourceSha256: MOCK_DOWNLOAD_SHA,
+  downloadSha256: MOCK_DOWNLOAD_SHA,
   cloudSource: 'github#MuCoreBenC/MKPSupportEase@main',
   cloudPublishedAt: '2026-10-15T05:46:00Z',
   sourceCatalog: 'support-ease',
@@ -488,6 +517,7 @@ const mockLocal: LocalPresetFile[] = [
     fileName: 'A1-standard.toml',
     size: 2048,
     modifiedUnix: 1780000000,
+    sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
     kind: 'mkp_preset',
     state: 'ok',
     stateDetail: null,
@@ -512,6 +542,7 @@ const mockLocal: LocalPresetFile[] = [
     fileName: 'A1-fast.toml',
     size: 2048,
     modifiedUnix: 1780900000,
+    sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
     kind: 'mkp_preset',
     state: 'ok',
     stateDetail: null,
@@ -539,6 +570,7 @@ const mockLocal: LocalPresetFile[] = [
     fileName: 'A1 涂胶.toml',
     size: 2048,
     modifiedUnix: 1780500000,
+    sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
     kind: 'mkp_preset',
     state: 'ok',
     stateDetail: null,
@@ -563,6 +595,7 @@ const mockLocal: LocalPresetFile[] = [
     fileName: 'Process_0.2mm.json',
     size: 1024,
     modifiedUnix: 1780003600,
+    sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
     kind: null,
     state: null,
     stateDetail: null,
@@ -591,6 +624,7 @@ const mockLocal: LocalPresetFile[] = [
     fileName: '坏了的涂胶.toml',
     size: 1536,
     modifiedUnix: 1780007200,
+    sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
     kind: 'mkp_preset',
     state: 'unreadable',
     stateDetail: t('mock.err.tomlLine'),
@@ -1425,6 +1459,8 @@ let mockDownloaded: OnDiskFile[] = [
     downloadedUnix: 1780000000,
     replacedUnix: null,
     publishedAt: '2026-10-06T05:46:00Z',
+    sha256: 'a1f0000000000000000000000000000000000000000000000000000000000001',
+    localModifiedUnix: 1780000120,
   },
   {
     /** 套餐的另一半：`A1_STANDARD` 的切片器配置（见上面那段说明） */
@@ -1432,15 +1468,26 @@ let mockDownloaded: OnDiskFile[] = [
     downloadedUnix: 1780000000,
     replacedUnix: null,
     publishedAt: '2026-10-06T05:46:00Z',
+    sha256: 'a1f0000000000000000000000000000000000000000000000000000000000002',
+    localModifiedUnix: 1780000120,
   },
 ]
 let mockStale: OnDiskFile[] = [
-  { fileName: 'A1-fast.toml', downloadedUnix: 1777000000, replacedUnix: null, publishedAt: null },
+  {
+    fileName: 'A1-fast.toml',
+    downloadedUnix: 1777000000,
+    replacedUnix: null,
+    publishedAt: null,
+    sha256: 'a1f0000000000000000000000000000000000000000000000000000000000003',
+    localModifiedUnix: 1777000060,
+  },
   {
     fileName: 'A1mini-standard.toml',
     downloadedUnix: null,
     replacedUnix: 1777000000,
     publishedAt: null,
+    sha256: 'a1f0000000000000000000000000000000000000000000000000000000000004',
+    localModifiedUnix: 1777000060,
   },
 ]
 
@@ -1502,6 +1549,8 @@ async function mockDeliver(
       downloadedUnix: Math.floor(Date.now() / 1000),
       replacedUnix: null,
       publishedAt: '2026-10-06T05:46:00Z',
+      sha256: 'a1f0000000000000000000000000000000000000000000000000000000000005',
+      localModifiedUnix: Math.floor(Date.now() / 1000),
     },
   ]
   /* MKP toml 种一份演示正文（与 `fetchCloudPreset` 落本地那份同源）；别的类型没有正文可种 */
@@ -1615,7 +1664,8 @@ export const mockApi: MkpApi = {
    *
    * ★ 只有 **dev 且 URL 带 `?pp=…`** 时给一份假快照 —— 那是给探针用的
    *   （`scripts/probes/pp-modal-height.mjs`：量「结果」与「挪塔那一问」两屏是不是一样高）。
-   *   `?pp=result` / `?pp=warn` / `?pp=vh`（可变层高）/ `?pp=relocate` / `?pp=mismatch`。
+   *   `?pp=result` / `?pp=warn` / `?pp=glue`（开了热床预涂胶）/ `?pp=vh`（可变层高）/
+   *   `?pp=relocate` / `?pp=mismatch`。
    *   生产构建里这函数直接 `null`
    *   （`import.meta.env.DEV` 在 build 里是常量 false，整段被摇掉）。
    */
@@ -1962,6 +2012,7 @@ export const mockApi: MkpApi = {
       fileName,
       size,
       modifiedUnix: nowSec(),
+      sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
       kind: 'mkp_preset',
       /* 刚存出来的那份：假后端不解析 TOML，按演示口径记"能读"（真机上是后端算的） */
       state: 'ok',
@@ -2003,6 +2054,15 @@ export const mockApi: MkpApi = {
   /** 「恢复默认值」（编辑文件那颗）读的原文 —— 见 `mockLocalOrigin` 的注释 */
   async readLocalOriginText(path) {
     return mockLocalOrigin.get(path) ?? null
+  },
+
+  /**
+   * 「恢复默认值」要回到的那一版。浏览器预览没有 `baseline-local`（那是桌面端的
+   * 原文镜像），这里如实给 `null` —— 按钮禁用，不编一个"默认"出来。
+   */
+  async readPresetBaselineValues(path) {
+    void path
+    return null
   },
 
   /** 参数草稿的**摘要** —— 预设列表行上的「未保存」标记用。没有草稿就是 `null` */
@@ -2338,6 +2398,7 @@ export const mockApi: MkpApi = {
         fileName: name,
         size: MOCK_IMPORTED_TEXT.length,
         modifiedUnix: nowSec(),
+        sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
         kind: 'mkp_preset',
         state: 'ok',
         stateDetail: null,
@@ -2772,6 +2833,26 @@ export const mockApi: MkpApi = {
     }
   },
 
+  /* 用回归档那一版：演示里只把这一份的"手上这一版"换回它的旧字节，归档条目留着 */
+  async restoreArchivedFile(path) {
+    const row = mockArchived.find((a) => a.path === path)
+    if (row === undefined) {
+      throw new Error(t('mock.archive.noFile', { file: path }))
+    }
+    mockDownloaded = [
+      ...mockDownloaded.filter((f) => f.fileName !== row.fileName),
+      {
+        fileName: row.fileName,
+        downloadedUnix: Math.floor(Date.now() / 1000),
+        replacedUnix: null,
+        publishedAt: null,
+        sha256: row.sha256,
+        localModifiedUnix: Math.floor(Date.now() / 1000),
+      },
+    ]
+    mockStale = mockStale.filter((f) => f.fileName !== row.fileName)
+  },
+
   async downloadCatalogFiles(fileNames, onTick) {
     /* 逐份走同一条 `mockDeliver`；**一份失败不拖累别人**（与真机同口径），按份给结局 */
     const outcomes: DownloadOutcome[] = []
@@ -2939,7 +3020,10 @@ export const mockApi: MkpApi = {
     const resolved: ResolvedPostprocPrefs = {
       notifyOnFinish: mockPostproc.notifyOnFinish ?? true,
       uiMode: mockPostproc.uiMode ?? 'gui',
+      autoTopOnAsk: mockPostproc.autoTopOnAsk ?? true,
       glueBottomEnabled: mockPostproc.glueBottomEnabled ?? false,
+      underSupportEnabled: mockPostproc.underSupportEnabled ?? false,
+      underSupportMm: mockPostproc.underSupportMm ?? 0.5,
       skipVibrationCalibration: mockPostproc.skipVibrationCalibration ?? false,
       beginStageRetractEnabled: mockPostproc.beginStageRetractEnabled ?? true,
       beginStageRetractZLiftMm: mockPostproc.beginStageRetractZLiftMm ?? 5,
@@ -2970,10 +3054,30 @@ export const mockApi: MkpApi = {
     return {
       raw: mockPostproc,
       resolved,
+      /*
+       * 出厂档：**照抄 `presets/client-defaults.toml` 的 `[Prefs]`**。
+       *
+       * 浏览器预览没有内核，读不到那份文件 —— 改了默认值要同步这里，
+       * 否则「恢复默认」的对比框在预览里显示的是旧值（真机不受影响）。
+       */
+      factory: {
+        skipVibrationCalibration: false,
+        beginStageRetractEnabled: true,
+        beginStageRetractZLiftMm: 5,
+        zCalibrationDwellSec: 2,
+        xyCalibrationDwellSec: 3,
+        underSupportEnabled: false,
+        underSupportMm: 0.5,
+        glueBottomEnabled: false,
+        bedGlueEnabled: false,
+        bedGlueAllModels: false,
+        autoTowerPosition: 'ask',
+      },
       limits: {
         zDwell: { min: 1, max: 20 },
         xyDwell: { min: 1, max: 10 },
         zLift: { min: 20, max: 100 },
+        underSupport: { min: 0, max: 2 },
       },
     }
   },
@@ -3052,8 +3156,9 @@ export const mockApi: MkpApi = {
     return mockPin
   },
 
-  async applyPin() {
-    return mockPin === 'always'
+  /* 与真后端同一条算式（`ipc::window_layout::pin_window`）：临时置顶 或 档位那一层 */
+  async applyPin(onBbs: boolean, askTop: boolean) {
+    return askTop || mockPin === 'always' || (mockPin === 'page' && onBbs)
   },
 
   /* 与真后端同一套口径（2026-10-17 作者第二轮）：**小窗一开就置顶，还原时把置顶放回去** */
@@ -3359,6 +3464,7 @@ export const mockApi: MkpApi = {
         fileName,
         size: text.length,
         modifiedUnix: nowSec(),
+        sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
         kind: 'mkp_preset',
         state: 'ok',
         stateDetail: null,
@@ -3405,6 +3511,7 @@ export const mockApi: MkpApi = {
         fileName: name,
         size: text.length,
         modifiedUnix: nowSec(),
+        sha256: 'demo0000000000000000000000000000000000000000000000000000000000ff',
         kind: 'mkp_preset',
         state: 'ok',
         stateDetail: null,
@@ -3609,6 +3716,15 @@ export const mockApi: MkpApi = {
   async openUrl(url: string) {
     // 演示里不真的开浏览器；真机走 opener 插件
     mockUpdate.lastOpened = url
+  },
+
+  /*
+   * 写剪贴板（2026-11-15）：真机上是 Rust 那条 `copy_text`（系统剪贴板）。
+   * 浏览器预览里没有它，退回浏览器自己的 clipboard —— 拿不到就照实失败，
+   * 不假装抄到了。
+   */
+  async copyText(text: string) {
+    await navigator.clipboard.writeText(text)
   },
 }
 

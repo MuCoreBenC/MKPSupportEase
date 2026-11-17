@@ -64,6 +64,12 @@ const ALLOWED: &[(&str, &str)] = &[
         "CLI 的 `init` 子命令：先判 exists 再写，已存在就报错退出；写的是用户在命令行指定的路径",
     ),
     (
+        "postprocess/src/postproc/pass1/edge_band.rs",
+        "边缘带调试转储（`MKP_EDGE_DEBUG`）：`create_new` + pid/序号命名，每次都是新文件、\\\r
+         绝不覆盖任何已有文件；`create_dir_all` 只建转储目录。崩在半路坏掉的是那份半截转储，\\\r
+         不影响产物，也不影响下一次运行（换名重来）",
+    ),
+    (
         "postprocess/src/calibration_asset.rs",
         "改 3MF 里的校准身份标记（工作台 / 检查共用）：同目录临时文件 → sync_all → rename，\
          目标 3MF 在 rename 那一刻之前一个字节都没被碰过 —— 与 `pipeline/mod.rs` 的 `.part`\

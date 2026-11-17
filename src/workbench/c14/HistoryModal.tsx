@@ -303,13 +303,13 @@ export default function HistoryModal({
         ? '正在比对盘上的 presets/ 与影子树…'
         : files.length === 0
           ? emptyButDirty
-            ? `文件层面没有差异 —— 还有 ${dirtyCount} 处改动只活在内存里，保存会一并写入`
-            : '影子与盘上一模一样 —— 没有未保存的改动'
+            ? `文件没差异，还有 ${dirtyCount} 处改动在内存里，保存一并写入。`
+            : '没有未保存的改动。'
           : `${files.length} 份文件有改动 · +${changeCount} 行 —— 比的是盘上的 presets/ 与影子树，保存就是把右边写成左边`
       : fieldsOnly
         ? `文件层面没有差异 · 还有 ${lines?.length ?? 0} 处改动只在内存里（菜单 / 套餐 / 可见性写在 workbench 自己的文件里）`
         : files.length === 0
-          ? '保存 = 写进仓库文件（保存本身也能撤销），放弃 = 整条一起丢'
+          ? '保存写进仓库，放弃整条丢掉。'
           : `这一份改了几格 —— 右边每一格都能就地撤销`
 
   /* 文件清单两项共用（代码 / 改了什么 都画同一批文件） */
@@ -385,7 +385,7 @@ export default function HistoryModal({
        */
       footLead={
         onSave !== undefined || onDiscard !== undefined ? (
-          '放弃 = 影子树整个拉回盘上那份，这一批改动一件都不留；保存 = 写进仓库文件（保存本身也能撤销）'
+          '放弃整条丢掉，保存写进仓库。'
         ) : undefined
       }
       footer={
@@ -428,10 +428,10 @@ export default function HistoryModal({
         但**空 diff 不等于干净** —— 还有 N 处就得说还有 N 处，不许报"一模一样"。 */
         emptyButDirty ? (
           <p className={d.empty}>
-            {`文件层面没有差异 —— 还有 ${dirtyCount} 处改动只活在内存里（菜单 / 套餐 / 可见性写在 workbench 自己的文件里），保存会一并写入。`}
+            {`文件没差异，还有 ${dirtyCount} 处改动在内存里，保存一并写入。`}
           </p>
         ) : (
-          <p className={d.empty}>影子与盘上一模一样 —— 没有未保存的改动。</p>
+          <p className={d.empty}>没有未保存的改动。</p>
         )
       ) : (
         <div className={d.panes}>

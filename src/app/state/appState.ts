@@ -55,7 +55,7 @@ interface AppStateSnapshot {
    *   具体语言是 `i18n.resolveLocale` 的事（判据不许两个源）。
    */
   locale: LocalePref | null
-  /** 置顶档位（2026-10-17；`off` = 没选过，与后端同一个出厂默认） */
+  /** 置顶档位（2026-10-17；`page` = 没选过，与后端同一个出厂默认） */
   pin: PinPref
   /** 主窗在不在窄窗态（同上） */
   compact: boolean
@@ -65,7 +65,7 @@ let snapshot: AppStateSnapshot = {
   active: null,
   theme: null,
   locale: null,
-  pin: 'off',
+  pin: 'page',
   compact: false,
 }
 let loaded = false
@@ -119,7 +119,7 @@ export function appStateMutated(): void {
     api.getTheme().catch(() => null),
     /*
      * 窗口那两格（2026-10-17）。读不到就按**后端也认同的出厂默认**兜底
-     * （不置顶 / 不在窄窗）—— 与主题那条"失败当没有"同一个口径。
+     * （本页置顶 / 不在窄窗）—— 与主题那条"失败当没有"同一个口径。
      */
     api.getWindowPrefs().catch(() => null),
     /* 界面语言（2026-10-25）：读不到当"没选过" ⇒ 跟随系统，与后端同一个出厂档 */
@@ -130,7 +130,7 @@ export function appStateMutated(): void {
         active,
         theme,
         locale,
-        pin: win?.pin ?? 'off',
+        pin: win?.pin ?? 'page',
         compact: win?.compact ?? false,
       }
       landTheme(theme)

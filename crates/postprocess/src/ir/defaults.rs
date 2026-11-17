@@ -45,6 +45,17 @@ pub fn fill_defaults(ir: &mut Ir) {
     if ir.machine.tree_support && ir.wiping.support_extrusion_multiplier != 1.27 {
         ir.wiping.support_extrusion_multiplier = 1.27;
     }
+    /* 回抽 / 回填的两格（2026-11-13）：0 = 没配，用默认 25 mm/s（原来那句硬编码 F1500）。
+     * 位置空串同理按 `model` 处理；认不出的值由 `build` 在更早一步报错，这里不兜底。 */
+    if ir.gcode.mkp_retract_speed <= 0.0 {
+        ir.gcode.mkp_retract_speed = crate::ir::types::DEFAULT_E_SPEED_MM_PER_S;
+    }
+    if ir.gcode.mkp_extrude_speed <= 0.0 {
+        ir.gcode.mkp_extrude_speed = crate::ir::types::DEFAULT_E_SPEED_MM_PER_S;
+    }
+    if ir.gcode.mkp_retract_at.is_empty() {
+        ir.gcode.mkp_retract_at = "model".to_string();
+    }
     ir.filament.slicer = "BambuStudio".to_string();
 }
 

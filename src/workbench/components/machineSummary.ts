@@ -16,8 +16,8 @@ export function machineSummary(selected: string[], list: MachineList | null): st
   if (selected.length === 0) return '全部机型（不限）'
   const byId = new Map((list?.machines ?? []).map((m) => [m.id, m]))
   const total = list?.machines.length ?? 0
-  if (total > 0 && selected.length === total) return `全部机型（${total} 台全勾）`
+  if (total > 0 && selected.length === total) return `全部机型 · 共 ${total} 台`
   const names = selected.map((id) => byId.get(id)?.display ?? id)
-  if (names.length <= 3) return `${names.join('、')} —— ${names.length} 台`
-  return `${names.slice(0, 3).join('、')} 等 —— ${names.length} 台`
+  if (names.length <= 3) return `${names.join('、')} 等 ${names.length} 台`
+  return `${names.slice(0, 3).join('、')} 等 ${names.length} 台`
 }

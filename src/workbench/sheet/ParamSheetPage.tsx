@@ -66,6 +66,7 @@ import {
   type ColRef,
   type Desk,
   type DeskGroup,
+  type GroupMembersEdit,
   type MachineList,
   type Matrix,
   type MetaApplied,
@@ -81,6 +82,7 @@ import {
 import type { GotoFocus } from '../c14/types'
 import { locateAnchor } from '../c14/locate'
 import { toasts } from '../c14/toast'
+import { useScope } from '../scopeState'
 import GcodeModal from '../c14/GcodeModal'
 import SplitterC14 from '../c14/SplitterC14'
 import { useSplitWidth } from '../c14/useSplitWidth'
@@ -106,13 +108,15 @@ import type { BatchTarget } from '../views/BatchEdit'
 import CellEditor from '../views/CellEditor'
 import CompareMatrix from '../views/CompareMatrix'
 import ParamDefModal from '../views/ParamDefModal'
-import { nextSectionId } from '../views/sectionId'
+import { nextSectionId, nextTabId } from '../views/sectionId'
 import ParamDetail, { StatusDot, type DetailLayer } from '../views/ParamDetail'
 /* 分组抽屉：改名 / 换位 / 这一组的参数清单都在里头（卡头只负责打开它） */
 /* 组件卡里的画布占位（作者 2026-11-01：「它就占个位置就可以了」） */
 import ComponentSlot from '../views/ComponentSlot'
 import { slotSideOf } from '../views/componentSide'
 import SectionDrawer from '../views/SectionDrawer'
+import SectionMembersModal from '../views/SectionMembersModal'
+import NewTabModal from '../views/NewTabModal'
 import s from '../c14.module.css'
 
 /**
@@ -216,6 +220,12 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
   const [compareCols, setCompareCols] = useState<string[]>([])
   /** 仅显示差异（对照模式） */
   const [diffOnly, setDiffOnly] = useState(false)
+
+  /*
+   * 撤销作用域（2026-11-14）：选着某一版时**只认那一版**。
+   * 不能连机型一起认 —— 那会让别的版本的改动也算成"这一屏的"。
+   */
+  useScope([target === null ? (machineId ?? '') : target])
   /**
    * 「仍然展开看」摊开的那几张卡（C15 A2）。**只装 session 里点开过的** ——
    * 收不收起来每次渲染按后端给的行态现判，所以条件一变回来，卡自己就正常了。
@@ -225,6 +235,10 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
   const [openedCards, setOpenedCards] = useState<string[]>([])
   /** 分组抽屉开着的是哪一组（`null` = 关着）。改名 / 换位 / 参数清单都在抽屉里 */
   const [drawerSection, setDrawerSection] = useState<string | null>(null)
+  /** 页签栏那支笔开的是哪一个页签（null = 关着） */
+  const [membersTab, setMembersTab] = useState<string | null>(null)
+  /** 「＋ 新建页签」那个小框开着没有 */
+  const [tabAdding, setTabAdding] = useState(false)
   /*
    * 抽屉里那颗「当前」标记住的是哪一组 —— **不一定是 `drawerSection`**。
    *
@@ -683,6 +697,72 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
   }
 
   /**
+   * 成员编辑框确认：一次应用进草稿，右上角「保存」才落盘。
+   * 与 `saveSection` 同一跳 —— 换注册表视图、重取桌面、刷「未保存改动」。
+   */
+  const applyGroupMembers = async (edit: GroupMembersEdit) => {
+    const next = await wb.editGroup(edit)
+    setRegistry(next)
+    setMetaTick((t) => t + 1)
+    onEditApplied()
+    const name =
+      edit.scope === 'section'
+        ? (next.sections.find((x) => x.id === edit.id)?.label ?? edit.id)
+        : (next.tabs.find((x) => x.id === edit.id)?.label ?? edit.id)
+    toasts.push(`成员已应用（保存才落盘）· ${name}`, { label: '撤销', run: onUndo })
+  }
+
+  /** 页签栏末尾那颗笔：编辑当前页签的名字与成员。两处页签栏共用这一段 */
+  const editTabId = tabSel
+  const tabEditButton =
+    editTabId !== null &&
+    registry !== null &&
+    registry.tabs.some((t) => t.id === editTabId) ? (
+      <button
+        type="button"
+        className={s.pTabEdit}
+        aria-label="编辑当前页签"
+        title="编辑这个页签的名字与成员"
+        onClick={() => setMembersTab(editTabId)}
+      >
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+        </svg>
+      </button>
+    ) : null
+
+  /**
+   * 页签栏末尾那颗「＋」：新建一个页签。
+   *
+   * 与分组那颗「＋ 新增分组」同一个位置语言 —— 都长在它管的那一排的末尾。
+   * 名字就地输，id 自动取 `custom_tab_N`（id 会进两份 TOML，中文当不了 id）。
+   */
+  const tabAddButton = (
+    <button
+      type="button"
+      className={s.pTabEdit}
+      aria-label="新建页签"
+      title="新建一个页签"
+      onClick={() => setTabAdding(true)}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+    </button>
+  )
+
+  /**
+   * 组内顺序排完了（排序模态框自己落盘）。与上一条同一跳：
+   * 换掉注册表视图、让桌面与右栏按新次序重取。
+   */
+  const applySectionOrder = (next: RegistryView) => {
+    setRegistry(next)
+    setMetaTick((t) => t + 1)
+    onEditApplied()
+  }
+
+  /**
    * 卡片头交上来的：改分组名 / 换这一组在页签里的位置。
    *
    * 位置只给方向 —— 后端一次写完两处（注册表数组次序给客户端、`order` 给卡片），
@@ -690,13 +770,12 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
    * 它挪到哪儿去了（作者原话：「没办法去换它那个上下位置」）。
    */
   /**
-   * 删掉一个空分组。
+   * 删掉一个分组。组里的参数不会跟着没：后端先把它们落到这一页末尾的「未归类」。
    *
-   * 与改名、换位走**同一条路**（作者 2026-11-01：「删除的操作也是一样的，需要点保存或者
-   * 放弃」）：这一笔只是应用进草稿，右上角「保存」才真落盘，那之前「放弃」就退回来。
+   * 与改名、换位走**同一条路**：这一笔只是应用进草稿，右上角「保存」才真落盘，
+   * 那之前「放弃」就退回来。
    *
-   * 三道门在后端（还有参数 / 是组件卡 / 带 showWhen）—— 这里不预判，拒了就把那句话
-   * 原样报出来。
+   * 两道门在后端（是组件卡 / 带 showWhen）—— 这里不预判，拒了就把那句话原样报出来。
    *
    * # 抽屉不关（2026-11-02 作者：「删除之后的刷新，不要关闭我的抽屉」）
    *
@@ -714,6 +793,8 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       const before = registry?.sections ?? []
       const gone = before.find((x) => x.id === sectionId) ?? null
       const name = gone?.label ?? sectionId
+      /* 组里那几条参数会被后端搬到同一页签末尾的「未归类」—— 条数先数下来 */
+      const moved = (registry?.params ?? []).filter((p) => p.sectionId === sectionId).length
       const next = await wb.removeSection(sectionId)
 
       /*
@@ -741,7 +822,12 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       setMetaTick((t) => t + 1)
       onEditApplied()
       if (sel === sectionId) setSel(null)
-      toasts.push(`分组已删除（保存才落盘）· ${name}`, { label: '撤销', run: onUndo })
+      toasts.push(
+        moved === 0
+          ? `分组已删除（保存才落盘）· ${name}`
+          : `分组已删除，${moved} 条参数已移到「未归类」（保存才落盘）`,
+        { label: '撤销', run: onUndo },
+      )
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
     }
@@ -771,7 +857,73 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       onEditApplied()
       setDrawerSection(id)
       setDrawerAnchor(id)
+      /*
+       * 新组里一条参数都没有 —— 它那张卡只有**限定了页签**时才画得出来（见
+       * `derive::desk` 注入空组那一段）。所以这里把领域切过去、清掉搜索词，
+       * 否则"建完页面上没有它"，也就滚不过去。
+       */
+      setTabSel(tabId)
+      if (q.trim() !== '') setQ('')
+      pendingLocateRef.current = `t-sec-${id}`
       toasts.push(`已新建分组「${label}」（保存才落盘）`, { label: '撤销', run: onUndo })
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /**
+   * **新建一个页签**（页签栏末尾那颗「＋」）。两份 TOML 各加一段 `[[tabs]]`，
+   * 后端顺手在它下面建一个空分组 —— 否则点进去是一屏空白，参数没处放。
+   *
+   * 建完直接把领域切过去、清掉搜索词：新页签里 0 条参数，只有限定领域时才画得出卡。
+   */
+  const addTab = async (label: string) => {
+    try {
+      const id = nextTabId(registry?.tabs ?? [])
+      const next = await wb.addTab(id, label)
+      setRegistry(next)
+      setMetaTick((t) => t + 1)
+      onEditApplied()
+      setTabSel(id)
+      if (q.trim() !== '') setQ('')
+      setTabAdding(false)
+      toasts.push(`已新建页签「${label}」（保存才落盘）`, { label: '撤销', run: onUndo })
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /** 页签上移 / 下移一位（「编辑页签」框里那两颗箭头） */
+  const moveTab = async (tabId: string, dir: -1 | 1) => {
+    try {
+      const next = await wb.setTabMeta(tabId, {
+        label: null,
+        move: dir < 0 ? 'up' : 'down',
+      })
+      setRegistry(next)
+      setMetaTick((t) => t + 1)
+      onEditApplied()
+      const name = next.tabs.find((t) => t.id === tabId)?.label ?? tabId
+      toasts.push(`页签换位已应用（保存才落盘）· ${name}`, { label: '撤销', run: onUndo })
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /** 删掉一个空页签。带参数 / 带功能卡的由后端拒（它给出理由） */
+  const removeTab = async (tabId: string) => {
+    try {
+      const next = await wb.removeTab(tabId)
+      setRegistry(next)
+      setMetaTick((t) => t + 1)
+      onEditApplied()
+      setMembersTab(null)
+      if (tabSel === tabId) setTabSel(null)
+      if (drawerSection !== null && !next.sections.some((x) => x.id === drawerSection)) {
+        setDrawerSection(null)
+        setDrawerAnchor(null)
+      }
+      toasts.push('页签已删除（保存才落盘）', { label: '撤销', run: onUndo })
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
     }
@@ -1067,42 +1219,12 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       .map(({ key: k, label }) => ({ key: k, label }))
   }
 
-  /**
-   * 把这一条在组里上 / 下挪一位。
-   *
-   * ★ 用词：这里**不是**"直接落盘"（2026-11-02 作者纠正：「会进影子树对吧，我放弃
-   * 也能成功取消修改」）。所有 `wb_*` 命令写到的都是影子树 `workbench/.draft/presets/`，
-   * 右上角「保存」才 commit 到 `presets/`，「放弃」一定撤得掉。
-   * 与编辑定义框的区别只在**前端撤销栈的粒度**：那边攒一次「确认」发一笔，
-   * 这边每点一下箭头发一笔（连挪三次要撤三次）。
-   *
-   * 顺序值与编辑定义框里那条 `moveOrder` 用同一个算法：取两个邻居的中点，
-   * 到头就往外扩一格。两处各算一套的话，同一次挪动在不同入口下会得到不同的
-   * `order`，`layout_schema` 的 items 顺序就飘了。
+  /*
+   * 「挪一位」那条独立命令（`moveOrderOf`）**已经退役**（2026-11-14）：
+   * 右栏与定义框都换成同一个排序模态框，整组一次提交（`wb_set_section_order`）。
+   * 逐条发 `wb_set_param_meta` 的写法留着就等于：连挪三次 = 三次写盘 + 三条撤销，
+   * 而且那条载荷是整份定义（label/desc/六册译文全都要重抄一遍）。
    */
-  const moveOrderOf = async (key: string, dir: -1 | 1) => {
-    if (registry === null) return
-    const self = registry.params.find((p) => p.key === key)
-    if (self === undefined) return
-    const list = registry.params
-      .filter((p) => p.sectionId === self.sectionId)
-      .sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
-    const at = list.findIndex((p) => p.key === key)
-    if (at < 0) return
-    const other = list[at + dir]
-    if (other === undefined) return
-    const outer = list[at + dir * 2]
-    const nextOrder =
-      outer === undefined ? other.order + dir : (other.order + outer.order) / 2
-    try {
-      const next = await wb.setParamMeta(key, { ...metaOf(self), order: nextOrder })
-      setRegistry(next)
-      setMetaTick((t) => t + 1)
-    } catch {
-      /* 失败就让下一次重取把状态拉回来（不静默改界面） */
-      setMetaTick((t) => t + 1)
-    }
-  }
   /** 「编辑定义」正在改的那条（null = 关着） */
   const defParam = defEditKey !== null ? paramOf(defEditKey) : null
   /*
@@ -1156,11 +1278,11 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       mode === 'single' ? (rowOf(shownDesk, key)?.cells[shownDesk?.cur ?? 0] ?? null) : null
     const followWhy =
       mode !== 'single'
-        ? '对照模式一次看多列，先切回单列再操作'
+        ? '切回单列再改。'
         : cell === null
-          ? '这一行还没有格子（矩阵还在拉）'
+          ? '这一行还没读到值。'
           : !cell.own
-            ? '这一层本来就没有自己的值 —— 它已经在跟随基线'
+            ? '这一层没有自己的值，跟着基线。'
             : !cell.editable
               ? cell.deprecated
                 ? '这一项在这台机型上已弃用'
@@ -1172,7 +1294,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
         label: '编辑定义…',
         icon: 'params',
         /* 与右栏那颗「编辑定义」同一条判据：拿不到 `ParamView` 就没得改 */
-        disabled: p === null ? '注册表里没有这一条（派生数据还没回来）' : undefined,
+        disabled: p === null ? '还没读到这条参数。' : undefined,
         onSelect: () => {
           setSel(key)
           setDefEditKey(key)
@@ -1190,7 +1312,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       },
       {
         id: 'focus',
-        label: '选中并跳到这一行',
+        label: '选中并滚到这一行',
         onSelect: () => {
           setSel(key)
           locateAnchor(`t-param-${key}`, { row: true })
@@ -1448,11 +1570,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
           className={`${s.pRailHandle} ${railPinned ? s.pRailHandleOn : ''}`}
           data-open={railOpen}
           aria-expanded={railOpen}
-          data-tip={
-            railPinned
-              ? '收起机型与版本（收起后鼠标扫过就能临时打开）'
-              : '钉住机型与版本（不点也行：鼠标扫过就浮出来）'
-          }
+          data-tip={railPinned ? '收起；鼠标扫过可临时打开。' : '钉住；鼠标扫过会自动浮出。'}
           /* 收起必须把「悬停浮出」一起关掉 —— 不然收起会当场换成浮出（C14 第十七轮） */
           onClick={() => {
             if (railPinned) {
@@ -1490,9 +1608,9 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
             {mode === 'single' && machine !== null && target !== null && desk !== null
               ? `${totalCount} 参数 · ${editableCount} 可编辑` +
                 (target !== BASE
-                  ? ` · 本版钉着 ${desk.cols[desk.cur]?.items ?? 0} 项`
+                  ? ` · 本版自定 ${desk.cols[desk.cur]?.items ?? 0} 项`
                   : '')
-              : '从左树选一个机型和版本 —— 参数都在它们身上'}
+              : '从左树选一个机型和版本。'}
           </span>
         </span>
         {focusUid !== null && (
@@ -1501,7 +1619,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
             <button
               type="button"
               className={`${s.btn} ${s.btnSm}`}
-              title="回到那个版本的工作台，接着做它的下一步"
+              title="回到那个版本的机型页。"
               onClick={() => onGoto('machines', { machineId: machineId ?? '', uid: focusUid, key: null })}
             >
               回到版本页
@@ -1678,6 +1796,8 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                       {t.label} <em>{t.count}</em>
                     </button>
                   ))}
+                  {tabEditButton}
+                  {tabAddButton}
                 </div>
 
                 <div className={s.pScroll} ref={scrollRef}>
@@ -1767,7 +1887,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                     type="button"
                     className={`${s.pChip} ${diffOnly ? s.pChipOn : ''}`}
                     onClick={() => setDiffOnly(!diffOnly)}
-                    title="只留下这几列里值不一样的参数 —— 对照模式就是为了看这个"
+                    title="只看各列取值不同的参数。"
                   >
                     仅显示差异 <em>{shownMatrix.diffKeys.length}</em>
                   </button>
@@ -1802,6 +1922,8 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                       {t.label} <em>{t.count}</em>
                     </button>
                   ))}
+                  {tabEditButton}
+                  {tabAddButton}
                 </div>
 
                 <div className={s.pScroll} ref={scrollRef}>
@@ -1925,13 +2047,13 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                   groupLabel={groupLabelOf(registry, selRow)}
                   /*
                    * 「组内顺序」（2026-11-02）：这一条在它所属分组里的同级清单，
-                   * 按 `order` 排好（含自己）。右栏那一格与编辑定义框里那座下拉
-                   * 长相一致、数据同源（`[params.layout].order`）。
+                   * 按 `order` 排好（含自己）。2026-11-14 起与编辑定义框**共用同一个
+                   * 排序模态框**（拖 / 输位次 / 撤销重做 / 恢复）。
                    */
                   siblings={siblingsOf(sel)}
-                  /* 每点一下箭头就发一条 `wb_set_param_meta` —— 进的是**影子树 + 事务**，
-                     「放弃」照样撤得掉；与定义框的差别只是撤销栈粒度（它攒一次「确认」发一笔） */
-                  onMoveOrder={(dir) => void moveOrderOf(sel, dir)}
+                  sectionId={selParam?.sectionId}
+                  sectionLabel={groupLabelOf(registry, selRow)}
+                  onOrderApplied={applySectionOrder}
                   onClose={() => setSel(null)}
                   onLocate={sel === null ? undefined : () => locateParam(sel)}
                   /* 「属于 X 的子参数」点 X 就换到 X —— 那一行是入口，不是注解 */
@@ -2104,6 +2226,8 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
           markId={drawerAnchor}
           registry={registry}
           rows={drawerRows}
+          params={registry?.params ?? []}
+          onEditMembers={applyGroupMembers}
           /*
            * 「这一组现在页面上到底有没有东西」—— 作者 2026-11-01 的疑问是
            * 「主要页面看不到了，但抽屉能看到，所以他没有真的删掉？客户端会不会消费到一个空的」。
@@ -2169,6 +2293,42 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
         落盘成功把改前/改后整包交给外壳压撤销栈；回来的注册表直接顶掉旧的，
         三处派生数据靠 `metaTick` 重取。
       */}
+      {membersTab !== null && registry !== null && (
+        <SectionMembersModal
+          scope="tab"
+          id={membersTab}
+          label={registry.tabs.find((t) => t.id === membersTab)?.label ?? membersTab}
+          params={registry.params}
+          sections={registry.sections}
+          onApply={applyGroupMembers}
+          onClose={() => setMembersTab(null)}
+          /*
+           * 页签自己的两件事（上移 / 下移 / 删除）放在这一框里：那一框就是
+           * 「这一页长什么样」的编辑入口，页签名也在里面。判据与后端同一套 ——
+           * 只有空页签给删除按钮（参数没有第二个去处）。
+           */
+          tabOps={(() => {
+            const mine = registry.sections.filter((x) => x.tabId === membersTab)
+            const used = registry.params.filter((p) => mine.some((x) => x.id === p.sectionId)).length
+            const at = registry.tabs.findIndex((t) => t.id === membersTab)
+            return {
+              at,
+              total: registry.tabs.length,
+              canRemove: used === 0 && mine.every((x) => x.component === null && !x.standalone),
+              onMove: (dir: -1 | 1) => void moveTab(membersTab, dir),
+              onRemove: () => void removeTab(membersTab),
+            }
+          })()}
+        />
+      )}
+
+      {tabAdding && (
+        <NewTabModal
+          onCancel={() => setTabAdding(false)}
+          onCreate={(label) => void addTab(label)}
+        />
+      )}
+
       {defEditKey !== null && defParam !== null && (
         <ParamDefModal
           paramKey={defEditKey}
@@ -2179,6 +2339,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
           onClose={() => setDefEditKey(null)}
           onCommit={(edit) => commitDef(defEditKey, defParam, edit)}
           onStaleCleared={applyStaleCleared}
+          onOrderApplied={applySectionOrder}
         />
       )}
 
@@ -2231,7 +2392,7 @@ function GroupHead({
       <button
         type="button"
         className={s.pGroupName}
-        title="打开分组抽屉：改名、换位置、看这一组里都有什么"
+        title="改名、换位置、看组里的参数。"
         onClick={onOpen}
       >
         {group.label}
@@ -2267,7 +2428,7 @@ function CollapsedCard({
         <button
           type="button"
           className={`${s.btn} ${s.btnSm}`}
-          title="这几行现在都被条件关着 —— 摊开看它们（摊开了也还是改不动）"
+          title="条件不成立；摊开看，但仍改不动。"
           onClick={onOpen}
         >
           {words.relate.showAnyway}
@@ -2347,7 +2508,7 @@ function GroupCard({
             <button
               type="button"
               className={s.pFoldBtn}
-              title="这一卡现在一行都改不动 —— 收回去，要看了再摊开"
+              title="这一卡都改不动，收起。"
               onClick={onCollapse}
             >
               {words.relate.foldBack}
@@ -2367,6 +2528,8 @@ function GroupCard({
           </div>
         )}
         <div className={s.pGroupRows}>
+          {/* 空组也占一张卡：刚建的那一组就在这儿，只是里面还没有参数 */}
+          {group.items.length === 0 && <p className={s.pGroupEmpty}>还没有参数</p>}
           {/* 父项在前、子项紧跟 —— 与后端排好的顺序一致 */}
           {group.items
             .flatMap((it) => [it.row, ...it.children])
@@ -2661,9 +2824,17 @@ function tabCountsOf(
     if (r.tabId === null) continue
     count.set(r.tabId, (count.get(r.tabId) ?? 0) + 1)
   }
+  /* 空页签也要在这儿露头，否则新建完切到对照模式就找不到它（与后端 `desk_nav` 同一条） */
+  const used = new Set(registry.params.map((p) => p.sectionId))
   return registry.tabs
-    .map((t) => ({ id: t.id, label: t.label, count: count.get(t.id) ?? 0 }))
-    .filter((t) => t.count > 0)
+    .map((t) => ({
+      id: t.id,
+      label: t.label,
+      count: count.get(t.id) ?? 0,
+      fresh: t.sections.every((s) => !used.has(s.id)),
+    }))
+    .filter((t) => t.count > 0 || t.fresh)
+    .map(({ id, label, count: n }) => ({ id, label, count: n }))
 }
 
 /** 抽屉头的小字：「领域 · 分组」。tab 名要查注册表 */

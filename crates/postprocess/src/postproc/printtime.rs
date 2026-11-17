@@ -667,15 +667,14 @@ impl Parser {
         }
 
         let mut min_acc_factor = 1.0f64;
-        for a in 0..3 {
+        for (a, maa) in self.limits.max_accel_axis.iter().enumerate().take(3) {
             let axis_acc = if a < 2 {
                 accel * arc_xy * inv_distance
             } else {
                 accel * sdz.abs() * inv_distance
             };
-            let maa = self.limits.max_accel_axis[a];
-            if maa > 0.0 && axis_acc > maa {
-                min_acc_factor = min_acc_factor.min(maa / axis_acc);
+            if *maa > 0.0 && axis_acc > *maa {
+                min_acc_factor = min_acc_factor.min(*maa / axis_acc);
             }
         }
         accel *= min_acc_factor;

@@ -142,6 +142,9 @@ fn glue_nozzle_z(ir_data: &Ir, layer_z: f64, kind: PenZ) -> f64 {
 /// 旧实现只把标记后**紧邻的一条**交出去，后面的空走要么被 `delete_wipe` 丢弃、
 /// 要么按涂胶线原样发出 —— 两者都会让笔在落笔高度飞过一段距离。
 /// 这里按「连续空走」整段抬着走完，返回第一条未消费的下标。
+/* 8 个入参全是从调用点现拿的事实（层高 / 两个高度 / 笔在不在上面），
+不值得为它造一个只在这个文件里用一次的包装结构。 */
+#[allow(clippy::too_many_arguments)]
 fn emit_jump_run(
     sink: &mut LineSink,
     lines: &[String],
@@ -150,6 +153,9 @@ fn emit_jump_run(
     current_layer_height: f64,
     last_layer_height: f64,
     already_up: bool,
+    /* 落在「正常落笔高度」之上的额外高度（mm）。边缘带那一段用 `Glue.EdgeLift`：
+    笔在贴近边界时离面更高，XY/Z 有偏差也不会刮到模型。 */
+    extra_land_lift: f64,
 ) -> Result<(usize, f64, f64, f64), PostprocError> {
     let lift_height = ir_data.glue.inter_model_lift_height;
     let mut cur_z = glue_nozzle_z(ir_data, current_layer_height, PenZ::Hop);
@@ -241,13 +247,59 @@ fn emit_jump_run(
         return Ok((i, last.0, last.1, cur_z));
     }
 
-    let landed_z = glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed);
+    /*
+     * 落笔高度要看**下一段**是边缘带还是正常档。
+     *
+     * 标记是紧贴着涂胶行插的（`;EDGE_RAISE` 之后紧跟第一条涂胶移动），而落笔发生在
+     * 它**之前** —— 只看 `pending_raise`（上一次的状态）就会先落到正常高度，
+     * 于是那条贴着边的涂胶段笔下得太低（2026-11-16 实测漏判的那一段就是这个原因）。
+     */
+    let lift = match upcoming_edge_raise(lines, i) {
+        Some(true) => ir_data.glue.edge_lift.max(0.0),
+        Some(false) => 0.0,
+        None => extra_land_lift,
+    };
+    let landed_z = glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed) + lift;
     sink.push_str(&format!("G1 Z{}", format_z(landed_z)));
     sink.push_str(&format!(
         "G1 F{}",
         format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
     ));
     Ok((i, last.0, last.1, landed_z))
+}
+
+/// 从 `from` 往后看：**下一段涂胶**落在哪个档（`Some(true)` = 边缘带）。
+///
+/// 途中允许穿过空行、其余注释、空走与嵌套的跳转标记 —— 那些都不改变"这一段是抬是落"。
+/// 一旦遇到真正的移动行（带 E 或不是空走）就收手：那说明标记不在这趟里，
+/// 交给调用方沿用上一次的状态（`None`）。
+fn upcoming_edge_raise(lines: &[String], from: usize) -> Option<bool> {
+    for line in lines.iter().skip(from) {
+        let t = line.trim();
+        if t.is_empty() || t.starts_with("; FEATURE") || t.starts_with(";FEATURE") {
+            continue;
+        }
+        if t.contains(crate::gcode::MARKER_EDGE_RAISE) {
+            return Some(true);
+        }
+        if t.contains(crate::gcode::MARKER_EDGE_NORMAL) {
+            return Some(false);
+        }
+        if t.contains(crate::gcode::MARKER_ZJUMP_START)
+            || t.contains(crate::gcode::MARKER_ZJUMP_INTERNAL)
+            || t.contains(crate::gcode::MARKER_MICRO_LIFT)
+        {
+            continue;
+        }
+        if is_travel_line(t) {
+            continue;
+        }
+        if t.starts_with(';') {
+            continue;
+        }
+        return None;
+    }
+    None
 }
 
 /// 这一段连续空走是否真的把笔挪了位置（零长度重复句不算）。
@@ -341,7 +393,9 @@ fn write_glue_lines(
     skip_leading: usize,
 ) -> Result<(), PostprocError> {
     use crate::gcode::MARKER_MICRO_LIFT;
-    use crate::gcode::{MARKER_ZJUMP_INTERNAL, MARKER_ZJUMP_START};
+    use crate::gcode::{
+        MARKER_EDGE_NORMAL, MARKER_EDGE_RAISE, MARKER_ZJUMP_INTERNAL, MARKER_ZJUMP_START,
+    };
 
     if ir_data.machine.nozzle_diameter <= 0.3 && ir_data.glue.sparse_ratio > 0.0 {
         let mut move_indices: Vec<usize> = Vec::new();
@@ -441,8 +495,22 @@ fn write_glue_lines(
      * 仍然跳过抬升，直接把那段空走放到贴面高度飞（实测 R2 从 24 反弹到 113）。
      */
     let land_z = glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed);
+    /*
+     * 边缘带：「贴边那一段」的落笔高度 = 正常落笔 + `Glue.EdgeLift`。
+     * 标记由 `pass1::edge_band` 插在路径里（`;EDGE_RAISE` / `;EDGE_NORMAL`），一段不删。
+     */
+    let edge_lift = ir_data.glue.edge_lift.max(0.0);
+    let raised_z = land_z + edge_lift;
+    /* 下一次落笔多抬多少：抬着落 vs 正常落 */
+    let edge_land_lift = |raise: bool| if raise { edge_lift } else { 0.0 };
+    /* 下一次落笔要不要抬（跨过一次跳转也保持，标记插在跳转之前） */
+    let mut pending_raise = false;
+    /* 现在笔停在哪一档（只有笔落着的时候才有意义） */
+    let mut cur_raised = false;
     let mut pen_z = start_z;
-    let pen_is_up = |z: f64| z > land_z + 1e-6;
+    /* 「抬着」的判据要把边缘带那一档也算成"落着"：
+    否则从边缘带跳出去时不会抬到平飞高度，会贴着面飞 */
+    let pen_is_up = |z: f64| z > land_z + edge_lift + 1e-6;
 
     /*
      * 段尾的多余空走：最后一条涂胶行之后的空走没有任何用处（收笔由 `;Glueing Finished`
@@ -452,12 +520,47 @@ fn write_glue_lines(
         let t = l.trim();
         (t.starts_with("G1 ") || t.starts_with("G2 ") || t.starts_with("G3 ")) && t.contains(" E")
     });
+    /*
+     * 段首那条前导空走会被 `emit_glue_block` 整段跳过（`skip_leading`），而边缘标记是
+     * 插在「这一段的第一条移动」之前的 —— 那条移动有可能正是被跳过的那条空走。
+     * 先把被跳过那几行里的标记读进来，别让边缘带因为"位置太靠前"静默失效。
+     */
+    for line in lines.iter().take(skip_leading.min(lines.len())) {
+        let t = line.trim();
+        if t.contains(MARKER_EDGE_RAISE) {
+            pending_raise = true;
+        } else if t.contains(MARKER_EDGE_NORMAL) {
+            pending_raise = false;
+        }
+    }
     let mut emitted_move = skip_leading > 0;
     let mut idx = skip_leading;
     while idx < lines.len() {
         let il = lines[idx].trim().to_string();
         // 只丢「段尾的空走」，其余（`M204` 之类的状态行）照旧发出去
         if last_glue.is_some_and(|i| idx > i) && is_travel_line(&il) {
+            idx += 1;
+            continue;
+        }
+        /* 边缘带：只改落笔高度、**不删路径**（标记由 `edge_band` 插在路径里）。
+        笔落着就当场改高度；笔抬着则由下面这次落笔读 `pending_raise` 决定落多高。 */
+        if il.contains(MARKER_EDGE_RAISE) {
+            pending_raise = true;
+            if !pen_is_up(pen_z) && !cur_raised {
+                sink.push_str(&format!("G1 Z{}", format_z(raised_z)));
+                pen_z = raised_z;
+                cur_raised = true;
+            }
+            idx += 1;
+            continue;
+        }
+        if il.contains(MARKER_EDGE_NORMAL) {
+            pending_raise = false;
+            if !pen_is_up(pen_z) && cur_raised {
+                sink.push_str(&format!("G1 Z{}", format_z(land_z)));
+                pen_z = land_z;
+                cur_raised = false;
+            }
             idx += 1;
             continue;
         }
@@ -487,11 +590,14 @@ fn write_glue_lines(
                 current_layer_height,
                 last_layer_height,
                 pen_is_up(pen_z),
+                edge_land_lift(pending_raise),
             )?;
             prev_x = lx;
             prev_y = ly;
             if !z_after.is_nan() {
                 pen_z = z_after;
+                /* 这次落了：按**实际落到的 Z** 记住档位（落笔可能已经用了下一段的标记） */
+                cur_raised = z_after > land_z + 1e-6;
             }
             idx = next;
             continue;
@@ -526,11 +632,14 @@ fn write_glue_lines(
                 current_layer_height,
                 last_layer_height,
                 pen_is_up(pen_z),
+                edge_land_lift(pending_raise),
             )?;
             prev_x = lx;
             prev_y = ly;
             if !z_after.is_nan() {
                 pen_z = z_after;
+                /* 这次落了：按**实际落到的 Z** 记住档位（落笔可能已经用了下一段的标记） */
+                cur_raised = z_after > land_z + 1e-6;
             }
             idx = next;
             continue;
@@ -561,11 +670,14 @@ fn write_glue_lines(
                 current_layer_height,
                 last_layer_height,
                 pen_is_up(pen_z),
+                edge_land_lift(pending_raise),
             )?;
             prev_x = lx;
             prev_y = ly;
             if !z_after.is_nan() {
                 pen_z = z_after;
+                /* 这次落了：按**实际落到的 Z** 记住档位（落笔可能已经用了下一段的标记） */
+                cur_raised = z_after > land_z + 1e-6;
             }
             idx = next;
             continue;
@@ -589,11 +701,14 @@ fn write_glue_lines(
                 current_layer_height,
                 last_layer_height,
                 pen_is_up(pen_z),
+                edge_land_lift(pending_raise),
             )?;
             prev_x = lx;
             prev_y = ly;
             if !z_after.is_nan() {
                 pen_z = z_after;
+                /* 这次落了：按**实际落到的 Z** 记住档位（落笔可能已经用了下一段的标记） */
+                cur_raised = z_after > land_z + 1e-6;
             }
             idx = next;
             continue;
@@ -604,15 +719,14 @@ fn write_glue_lines(
             emitted_move = true;
             // 抬着走过来、终于遇到涂胶行 ⇒ 先落再涂
             if pen_is_up(pen_z) && il.contains(" E") {
-                sink.push_str(&format!(
-                    "G1 Z{}",
-                    format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
-                ));
+                let target = if pending_raise { raised_z } else { land_z };
+                sink.push_str(&format!("G1 Z{}", format_z(target)));
                 sink.push_str(&format!(
                     "G1 F{}",
                     format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
                 ));
-                pen_z = land_z;
+                pen_z = target;
+                cur_raised = pending_raise;
             }
             let mut glue_line = il.clone();
             if glue_line.contains(" E") {
@@ -687,15 +801,92 @@ fn extended_travel_z(ir_data: &Ir, layer_z: f64) -> f64 {
     glue_nozzle_z(ir_data, layer_z, PenZ::Travel)
 }
 
+/// 一次换笔的回抽：抽多少（`amount`，负数）与抽多快（`speed_mm_per_s`）。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SwapRetract {
+    pub amount: f64,
+    pub speed_mm_per_s: f64,
+}
+
+impl SwapRetract {
+    /// 独立一行 `G1 E{量} F{速度}`（面板是 mm/s，G-code 要 mm/min）。
+    pub(crate) fn line(&self) -> String {
+        format!(
+            "G1 E{} F{}",
+            format_e(self.amount),
+            format_speed(self.speed_mm_per_s * super::MM_PER_MINUTE)
+        )
+    }
+}
+
+/// 回抽插在换笔的哪一刻。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetractAt {
+    /// 脱层小螺旋之前（模型处，起飞前）
+    Model,
+    /// 挂载块里第一条带 X 的移动之后（到达等待位、推入之前）
+    Wait,
+    /// 挂载块末尾（换笔动作之后）
+    AfterDock,
+}
+
+/// 面板那一格 `MKP_retract_at` → 枚举。认不出的值由 `build` 在更早一步报错，
+/// 直接吃 IR JSON 的那条路按 `model` 处理并留一条 warn（不静默换成别的档）。
+pub(crate) fn retract_at(ir_data: &Ir) -> RetractAt {
+    match ir_data.gcode.mkp_retract_at.as_str() {
+        "wait" => RetractAt::Wait,
+        "after_dock" => RetractAt::AfterDock,
+        "model" | "" => RetractAt::Model,
+        other => {
+            tracing::warn!(value = other, "MKP_retract_at 认不出，按 model 处理");
+            RetractAt::Model
+        }
+    }
+}
+
+/// 一次换笔该发多少回抽：`Some(..)` = 内核发这一笔，`None` = 不发（模板自带，或量填 0）。
+///
+/// **整段 swap 只有一笔回抽。** 两个发起 swap 的地方各发一次：涂胶块与润笔，
+/// 插在哪由 [`retract_at`] 决定。`mount_toolhead` 只在 `wait` / `after_dock` 两档动手 ——
+/// 谁在里面无条件补一笔，就等于每次换笔抽两遍（0.0.11 就是这么把 E 抽成了两笔）。
+pub(crate) fn swap_retract(ir_data: &Ir) -> Option<SwapRetract> {
+    if custom_mount_gcode_has_retract(ir_data) || ir_data.gcode.mkp_retract == 0.0 {
+        return None;
+    }
+    Some(SwapRetract {
+        amount: ir_data.gcode.mkp_retract,
+        speed_mm_per_s: ir_data.gcode.mkp_retract_speed,
+    })
+}
+
+/// 这一行是不是「带 X 的 G1 移动」（判断是否已经到等待位）。
+fn is_x_move(line: &str) -> bool {
+    let code = line.split(';').next().unwrap_or("").trim();
+    code.starts_with("G1") && code.contains('X')
+}
+
 /// `mountToolhead`（glue_block.go:376）：custom_mount_gcode 切换下笔。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn mount_toolhead(
     sink: &mut LineSink,
     ir_data: &Ir,
     current_layer_height: f64,
     skip_final_z: bool,
+    retract: Option<SwapRetract>,
+    at: RetractAt,
 ) {
     sink.push_str(";Mounting Toolhead");
     sink.push_str(&stage_comment_line(MkpStage::MountToolhead, ""));
+
+    /* `model` 那一档由调用方在起飞前发过，这里只管另外两档：
+     * `wait` 插在「到达等待位」那一行之后（推入之前），`after_dock` 落在块尾。 */
+    let mut pending = if at == RetractAt::Model {
+        None
+    } else {
+        retract
+    };
+    let mut injected = false;
+
     for mount_line in &ir_data.toolhead.custom_mount_gcode {
         let ml = mount_line.trim();
         if ml.is_empty() {
@@ -711,16 +902,22 @@ pub(crate) fn mount_toolhead(
         } else {
             sink.push_str(ml);
         }
+        /* 「到达等待位」= 挂载块里第一条带 X 移动的 G1。模板里已经没有 E，
+         * 也不许再塞占位符，所以只能按这个形状认。 */
+        if at == RetractAt::Wait && !injected && is_x_move(ml) {
+            if let Some(r) = pending.take() {
+                sink.push_str(&r.line());
+            }
+            injected = true;
+        }
     }
-    /* 落笔的回抽现在**不在模板里**（模板只剩骨架，E 交给 `MKP_retract` 参数）。
-     * 收笔那边 `pass2` 早就有对称的一条（没有 E 行就补 `G1 E{mkp_extrude}`），
-     * 这里补上落笔这一半 —— 否则会变成「收笔挤出、落笔不回抽」，
-     * 撞笔时笔尖带着料。 */
-    if !custom_mount_gcode_has_retract(ir_data) {
-        sink.push_str(&format!(
-            "G1 E{} F1500",
-            format_e(ir_data.gcode.mkp_retract)
-        ));
+    if let Some(r) = pending.take() {
+        if at == RetractAt::Wait {
+            tracing::warn!(
+                "挂载模板里找不到带 X 的移动，回抽落到换笔之后（本该插在到达等待位那一刻）"
+            );
+        }
+        sink.push_str(&r.line());
     }
     sink.push_str(";Toolhead Mounted");
     if !skip_final_z {
@@ -833,15 +1030,18 @@ pub(crate) fn emit_glue_block(
     //    I/J 分量照抄切片器（`sqrt(.706² + .991²) = 1.217`），不用 `I{半径} J0` 那种写法。
     sink.push_str("M204 S10000");
     sink.push_str("G17");
-    let spiral_retract = if custom_mount_gcode_has_retract(ir_data) {
-        String::new()
-    } else {
-        format!(" E{}", format_e(ir_data.gcode.mkp_retract))
-    };
+    /* 回抽单独一行，位置由 `MKP_retract_at` 决定（默认就是这里：起飞前）。
+     * 小螺旋只做脱层 —— 它那句的 F 是空走速度（700 mm/s），带着 E 就等于按空走速度抽。 */
+    let retract = swap_retract(ir_data);
+    let at = retract_at(ir_data);
+    if at == RetractAt::Model {
+        if let Some(r) = retract {
+            sink.push_str(&r.line());
+        }
+    }
     sink.push_str(&format!(
-        "G3 Z{} I.706 J.991 P1{} F{}",
+        "G3 Z{} I.706 J.991 P1 F{}",
         format_z(current_layer_height + ir_data.glue.swap_hop_height),
-        spiral_retract,
         format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
     ));
 
@@ -861,7 +1061,7 @@ pub(crate) fn emit_glue_block(
         format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
     ));
 
-    mount_toolhead(sink, ir_data, current_layer_height, false);
+    mount_toolhead(sink, ir_data, current_layer_height, false, retract, at);
     sink.push_str(&marks::end("swap"));
 
     sink.push_str(";Glueing Started");
@@ -992,6 +1192,34 @@ pub(crate) fn emit_glue_block(
         {
             sink.push_str(";Gluepen Revitalization Start");
             sink.push_str(&stage_comment_line(MkpStage::RevitalizationStart, ""));
+            /*
+             * 润笔要在**落笔高度**上重画：这一段之前只发过 XY 回位（Z 还停在净空高度），
+             * 少了这一句整段就悬在模型上方画（2026-11-17 实测 Z12.3、层顶 7.3）。
+             * 高度口径与正式涂胶同一套：`Landed` = 层顶 + 胶 Z 偏移。
+             *
+             * **抬高跟随正式涂胶**：`edge_band` 已经把 `;EDGE_RAISE` / `;EDGE_NORMAL`
+             * 插在同一份路径里，润笔就是这段路径提前重画一遍，同一位置用同一档高度。
+             * 不另算判据，也不无条件用 `land_z` —— 那样同一圈会出现两个高度
+             * （2026-11-17 实测：涂胶段抬到 11.13、润笔段还在 10.63）。
+             */
+            let prime_iface = seg;
+            /* 抬高档与 `write_glue_lines` 同一套：正常落笔 + `Glue.EdgeLift` */
+            let revit_raised_z = land_z + ir_data.glue.edge_lift.max(0.0);
+            let mut revit_z = land_z;
+            for line in prime_iface {
+                let t = line.trim();
+                if t.contains(crate::gcode::MARKER_ZJUMP_START) {
+                    break;
+                }
+                if t.contains(crate::gcode::MARKER_EDGE_RAISE) {
+                    revit_z = revit_raised_z;
+                } else if t.contains(crate::gcode::MARKER_EDGE_NORMAL) {
+                    revit_z = land_z;
+                } else if t.starts_with("G1 ") && !t.contains("G1 F") {
+                    break;
+                }
+            }
+            sink.push_str(&format!("G1 Z{}", format_z(revit_z)));
             let revitalization_speed =
                 ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor;
             sink.push_str(&format!("G1 F{}", format_speed(revitalization_speed)));
@@ -999,7 +1227,6 @@ pub(crate) fn emit_glue_block(
             if target_length < 20.0 {
                 target_length = 100.0;
             }
-            let prime_iface = seg;
             let mut accumulated_dist = 0.0;
             let mut last_rx = f64::NAN;
             let mut last_ry = f64::NAN;
@@ -1007,6 +1234,21 @@ pub(crate) fn emit_glue_block(
                 let il = iface_line.trim();
                 if il.contains(crate::gcode::MARKER_ZJUMP_START) {
                     break;
+                }
+                /* 档位切换：笔落着就当场改高度，口径与 `write_glue_lines` 的主循环一致 */
+                if il.contains(crate::gcode::MARKER_EDGE_RAISE) {
+                    if revit_z != revit_raised_z {
+                        revit_z = revit_raised_z;
+                        sink.push_str(&format!("G1 Z{}", format_z(revit_z)));
+                    }
+                    continue;
+                }
+                if il.contains(crate::gcode::MARKER_EDGE_NORMAL) {
+                    if revit_z != land_z {
+                        revit_z = land_z;
+                        sink.push_str(&format!("G1 Z{}", format_z(revit_z)));
+                    }
+                    continue;
                 }
                 if !il.starts_with("G1 ") || il.contains("G1 F") {
                     continue;
@@ -1091,6 +1333,15 @@ pub(crate) fn emit_glue_block(
             }
             sink.push_str(";Gluepen Revitalization End");
             sink.push_str(&stage_comment_line(MkpStage::RevitalizationEnd, ""));
+            /*
+             * 回位是空走：抬回平飞高度再走，别贴着面横移。
+             * 段间抬升开着（默认 2mm）的那条分支自己会抬到 `Hop`，这里只管那一条
+             * 不抬的分支 —— 顺手把 `start_z` 记成笔实际在的高度，发射端才知道要落笔。
+             */
+            if ir_data.glue.inter_model_lift_height <= 0.0 {
+                start_z = glue_nozzle_z(ir_data, current_layer_height, PenZ::Travel);
+                sink.push_str(&format!("G1 Z{}", format_z(start_z)));
+            }
             stats.prime_total_length += accumulated_dist;
             if !ir_data.prime.per_model {
                 ir_data.state.this_layer_revitalization = false;
@@ -1551,5 +1802,206 @@ mod continuity_tests {
             "段中段空走应落一次，实际 {zs:?}，输出：\n{}",
             out.join("\n")
         );
+    }
+
+    /// 行里的负 E（回抽）。
+    fn negative_e(line: &str) -> Option<f64> {
+        line.split_whitespace()
+            .find_map(|t| t.strip_prefix('E'))
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| *v < 0.0)
+    }
+
+    /// 回抽归谁发：模板带 E 就归模板（内核一条都不发），量填 0 也不发。
+    #[test]
+    fn swap_retract_follows_template_ownership() {
+        let mut ir = test_ir();
+        ir.gcode.mkp_retract = -5.0;
+        ir.gcode.mkp_retract_speed = 18.0;
+        ir.toolhead.custom_mount_gcode = ["G92 E0", "L801"].iter().map(|s| s.to_string()).collect();
+        let r = swap_retract(&ir).expect("模板没有 E 时该由内核发");
+        assert_eq!(r.amount, -5.0);
+        assert_eq!(r.speed_mm_per_s, 18.0);
+        assert_eq!(r.line(), "G1 E-5.0 F1080.0");
+
+        ir.toolhead.custom_mount_gcode = ["G92 E0", "G1 E-5 F1800", "L801"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(
+            swap_retract(&ir).is_none(),
+            "模板自带 E 时内核不许再发第二笔"
+        );
+
+        ir.toolhead.custom_mount_gcode = ["G92 E0", "L801"].iter().map(|s| s.to_string()).collect();
+        ir.gcode.mkp_retract = 0.0;
+        assert!(swap_retract(&ir).is_none(), "回抽填 0 就一行都不发");
+    }
+
+    /// 默认那一档：一笔 `G1 E..` 落在小螺旋之前，挂载段里干净。
+    ///
+    /// 0.0.11 在 `mount_toolhead` 末尾又补了一笔，小螺旋那笔没让位 —— 每次换笔抽 −10，
+    /// 收笔只补 +5.5，净账每层 −4.5mm。模板骨架里不含 E 时，这条判据必须恰好是 1 笔。
+    #[test]
+    fn swap_block_retracts_exactly_once() {
+        let out = emit_swap_block(RetractAt::Model);
+        let retracts: Vec<&String> = out.iter().filter(|l| negative_e(l).is_some()).collect();
+        assert_eq!(
+            retracts.len(),
+            1,
+            "换笔回抽应恰好 1 笔，实际 {} 笔：{retracts:?}\n输出：\n{}",
+            retracts.len(),
+            out.join("\n")
+        );
+        assert_eq!(
+            retracts[0], "G1 E-5.0 F1500.0",
+            "回抽应是一句独立移动（速度 25 mm/s = F1500）"
+        );
+
+        let hop_at = out
+            .iter()
+            .position(|l| l.starts_with("G3 "))
+            .expect("没有脱层小螺旋");
+        assert!(
+            !out[hop_at].contains(" E"),
+            "小螺旋只做脱层：{}",
+            out[hop_at]
+        );
+        let mount_at = out
+            .iter()
+            .position(|l| l.contains(";Mounting Toolhead"))
+            .expect("没有 ;Mounting Toolhead");
+        let mounted_at = out
+            .iter()
+            .position(|l| l.contains(";Toolhead Mounted"))
+            .expect("没有 ;Toolhead Mounted");
+        assert!(
+            out[mount_at..mounted_at]
+                .iter()
+                .all(|l| negative_e(l).is_none()),
+            "挂载段里不许再有第二笔回抽：\n{}",
+            out[mount_at..mounted_at].join("\n")
+        );
+
+        fn emit_swap_block(at: RetractAt) -> Vec<String> {
+            let mut ir = swap_ir();
+            ir.gcode.mkp_retract_at = match at {
+                RetractAt::Model => "model",
+                RetractAt::Wait => "wait",
+                RetractAt::AfterDock => "after_dock",
+            }
+            .to_string();
+            let iface: Vec<String> = ["G1 X108.532 Y124.075 E.00154", "G1 X108.9 Y124.2 E.00154"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let mut sink = LineSink { lines: Vec::new() };
+            let mut stats = crate::postproc::pass1::ProcessStats::default();
+            let features = HashMap::new();
+            emit_glue_block(
+                &mut sink,
+                &iface,
+                &mut ir,
+                LAYER_Z,
+                LAST_LAYER_Z,
+                "A1",
+                &features,
+                &mut stats,
+            )
+            .expect("emit_glue_block 失败");
+            sink.lines
+        }
+    }
+
+    /// `wait`：回抽插在「到达等待位」那一行之后、推入之前。
+    #[test]
+    fn retract_at_wait_sits_between_wait_and_dock() {
+        let out = emit_with_position("wait");
+        let retract_at = out
+            .iter()
+            .position(|l| negative_e(l).is_some())
+            .expect("没有回抽");
+        assert_eq!(out[retract_at], "G1 E-5.0 F1500.0");
+        assert!(
+            out[retract_at - 1].starts_with("G1 X168"),
+            "回抽前一句该是到达等待位，实际：{}",
+            out[retract_at - 1]
+        );
+        assert!(
+            out[retract_at + 1].starts_with("G1 X182"),
+            "回抽后一句该是推入动作位，实际：{}",
+            out[retract_at + 1]
+        );
+        assert_eq!(
+            out.iter().filter(|l| negative_e(l).is_some()).count(),
+            1,
+            "仍然只许一笔"
+        );
+    }
+
+    /// `after_dock`：回抽落在挂载块末尾（`;Toolhead Mounted` 之前）。
+    #[test]
+    fn retract_after_dock_sits_at_the_end_of_the_mount_block() {
+        let out = emit_with_position("after_dock");
+        let retract_at = out
+            .iter()
+            .position(|l| negative_e(l).is_some())
+            .expect("没有回抽");
+        assert_eq!(out[retract_at + 1].trim(), ";Toolhead Mounted");
+        assert!(
+            out[retract_at - 1].starts_with("G1 F30000"),
+            "回抽前一句该是挂载块的最后一句，实际：{}",
+            out[retract_at - 1]
+        );
+    }
+
+    fn emit_with_position(position: &str) -> Vec<String> {
+        let mut ir = swap_ir();
+        ir.gcode.mkp_retract_at = position.to_string();
+        let iface: Vec<String> = ["G1 X108.532 Y124.075 E.00154", "G1 X108.9 Y124.2 E.00154"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let mut sink = LineSink { lines: Vec::new() };
+        let mut stats = crate::postproc::pass1::ProcessStats::default();
+        let features = HashMap::new();
+        emit_glue_block(
+            &mut sink,
+            &iface,
+            &mut ir,
+            LAYER_Z,
+            LAST_LAYER_Z,
+            "A1",
+            &features,
+            &mut stats,
+        )
+        .expect("emit_glue_block 失败");
+        sink.lines
+    }
+
+    /// 换笔块的固定底盘：骨架模板（不含 E）、无塔、收笔只留一句。
+    fn swap_ir() -> Ir {
+        let mut ir = test_ir();
+        ir.gcode.mkp_retract = -5.0;
+        ir.gcode.mkp_extrude = 5.5;
+        ir.gcode.mkp_retract_speed = 25.0;
+        ir.tower.use_towers = false;
+        ir.toolhead.custom_mount_gcode = [
+            "G92 E0",
+            "L801",
+            "M204 S10000",
+            "G1 X168 F30000",
+            "G1 X182 F10000",
+            "G1 X168 F30000",
+            "G1 F30000",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        ir.toolhead.custom_unmount_gcode = ["G92 E0", "G1 F30000"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        ir
     }
 }

@@ -146,6 +146,96 @@
   border-bottom-color: transparent;
 }
 
+/*
+ * **上次已采用**的那几项：同样一条淡绿铺满整行，但**不可勾** —— 它已经不是
+ * "待你决定"的了，留在列表里只为回答"上次我收的是哪一个"。
+ * 与 `.rowOn` 同一层色，重开这一屏时看着跟刚勾完那一刻一致。
+ */
+.rowDone {
+  background: var(--accent-soft);
+}
+
+.rowDone:not(:last-child) {
+  border-bottom-color: transparent;
+}
+
+/* 勾选框那一列换成一枚绿勾：位置对齐，但它按不动 */
+.doneMark {
+  align-self: center;
+  font-size: var(--fs-label);
+  color: #2f7d59;
+}
+
+[data-theme='dark'] .doneMark {
+  color: var(--accent);
+}
+
+/* 名字后面的「已采用」：绿字、不加底 —— 一行里已经有一层绿了 */
+.doneTag {
+  margin-left: 6px;
+  font-size: calc(var(--fs-label) - 0.5px);
+  color: #2f7d59;
+}
+
+[data-theme='dark'] .doneTag {
+  color: var(--accent);
+}
+
+/* 收进来的那个云端值：绿 —— 与上方待处理行里"我的值"同一族色 */
+.doneNew {
+  color: #2f7d59;
+}
+
+[data-theme='dark'] .doneNew {
+  color: var(--accent);
+}
+
+/* 上次「保持原样」那几项：不上色（什么也没改），只留一枚灰记号与灰标签 */
+.heldMark {
+  align-self: center;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.heldTag {
+  margin-left: 6px;
+  font-size: calc(var(--fs-label) - 0.5px);
+  color: var(--text-3);
+}
+
+/*
+ * 「保持过」那一行上的回头路。行上已经不再摆这颗按钮（留着就像在催"还有新值"），
+ * 于是它住在这里：小、无底，只有悬停才浮出边框 —— 它是补救，不是主流程。
+ */
+.rowAdopt {
+  flex: none;
+  margin-left: 8px;
+  padding: 0 6px;
+  height: 20px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  font: inherit;
+  font-size: calc(var(--fs-label) - 0.5px);
+  color: #2f7d59;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+[data-theme='dark'] .rowAdopt {
+  color: var(--accent);
+}
+
+.rowAdopt:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--bg-2);
+}
+
+.rowAdopt:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
 .what {
   min-width: 0;
 }

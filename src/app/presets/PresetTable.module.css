@@ -99,22 +99,18 @@
 }
 
 /*
- * **表头排序那一颗**（2026-10-16 作者：「表头加上排序吧……只用很小的图标，不占位置的」）。
+ * **表头排序那一颗**（2026-10-16 起；2026-11-15 作者：「带箭头的都没居中，
+ * 我也希望加上箭头」）：
  *
- * ① 整格可点 ⇒ `th` 里套一颗 `button`，撑满格子（点哪都行，不用瞄准那两个字）；
- * ② **箭头锚在文字右缘**（2026-10-16 作者：「紧跟着文字」「忽略排序箭头的占位再居中
- *    才对齐」）—— 居中只算文字，箭头悬在文字外侧不挤偏它；`table-layout: fixed`
- *    下列宽由 th 的 clamp() 定死 ⇒ 列宽照旧不动。
- * ③ 只给 `thName` 留了左内衬（--page-x），那颗 button 的 padding 必须归零，
- *    否则基准线就不是同一条了。
- *
- * ★ 布局走**普通流 + text-align**，不走 flex：`justify-content: inherit`
- *   继到的是 th 的 `normal`（＝起点靠左），flex 下 text-align 管不着 ——
- *   居中列的表头整颗被顶到左边（作者：「表头感觉偏左了」）。
- *   回 text-align 后居中列真的居中，箭头也自然跟在文字后面。
+ * 居中列（机型 / 版本 / 时间）走三格网格 —— 左 10px 空格、中间文字、右 10px 箭头。
+ * 左右对称，文字**真的落在列中线上**；箭头固定在右缘，不再把文字挤偏。
+ * 名称列左对齐，走 flex，箭头仍跟在文字后面。
+ * 箭头默认就露（35%），当前列实心 —— 六列都能排，得看得见。
  */
 .sortBtn {
-  display: block;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) 10px;
+  align-items: center;
   width: 100%;
   height: 100%;
   padding: 0;
@@ -122,18 +118,31 @@
   background: transparent;
   font: inherit;
   color: inherit;
-  text-align: inherit;
+  text-align: center;
   cursor: pointer;
+}
+
+.thName .sortBtn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  text-align: left;
 }
 
 .sortBtn:focus-visible {
   outline: none;
 }
 
-/* 文字自己是箭头的定位锚（见下条 .caret） */
 .sortText {
-  position: relative;
-  display: inline-block;
+  grid-column: 2;
+  justify-self: center;
+  min-width: 0;
+}
+
+.thName .sortText {
+  grid-column: auto;
+  justify-self: auto;
 }
 
 /* 聚焦时给文字描一圈 —— 与全站"不加外圈光环"那条一致（field 那套控件的同一条） */
@@ -143,37 +152,32 @@
   border-radius: 2px;
 }
 
-/*
- * 那颗箭头：**锚在文字右缘**（作者：「忽略排序箭头的占位再居中才对齐」）——
- * 挂在 `.sortText` 身上（文字自己 `position:relative`），`left:100%` 即"紧跟文字"，
- * 又**不参与居中计算**：居中的只是文字，箭头悬在外面不把文字挤偏。
- * 10px —— 比表头字号（--fs-body）小一半多，"很小"是作者的原话。
- */
 .caret {
-  position: absolute;
-  left: 100%;
-  top: calc(50% - 5px);
+  grid-column: 3;
+  justify-self: end;
   width: 10px;
   height: 10px;
-  margin-left: 5px;
   color: var(--text-2);
-  /* 默认不画 —— 六列同时挂箭头会很吵，也讲不出"现在按哪列排" */
-  opacity: 0;
+  opacity: 0.35;
+  transition: opacity 0.12s ease;
 }
 
-/* 鼠标移到这一格：淡淡露出来，提示"这列也能排" */
+.thName .caret {
+  grid-column: auto;
+  justify-self: auto;
+}
+
+/* 鼠标移到这一格：箭头提亮，提示"这列也能排" */
 .sortBtn:hover .caret {
-  opacity: 0.4;
+  opacity: 0.8;
 }
 
-/* 正在排的那一列：常驻且实心。★ 写在 hover 之后 —— 同特异性，后者赢，
-   否则"当前列"被 hover 一压就变淡了 */
+/* 正在排的那一列：实心。写在 hover 之后 —— 同特异性，后者赢 */
 .sortBtn[data-on='1'] .caret {
   opacity: 1;
 }
 
-/* 降序：同一颗箭头翻 180°（不为"下"再造一枚图标，见组件里那段）——
-   inline-block 上 transform 照常生效，绕自身中心转 */
+/* 降序：同一颗箭头翻 180°（不为"下"再造一枚图标，见组件里那段） */
 .sortBtn[data-on='1'][data-dir='desc'] .caret {
   transform: rotate(180deg);
 }
@@ -270,8 +274,14 @@
 /* 事实列（机型 / 版本 / 喷嘴 / 层高 / 时间）表头居中；名称列唯一左对齐 */
 .head th.thMachine,
 .head th.thVersion,
+/*
+ * 数字列与时间列：表头与格子**同一个对齐**（`.stat` 是居中的）。
+ * 云端档用的是另一档列宽（`.thTimeCloud`），漏了它就会出现"表头靠左、日期居中"
+ * 那种错位 —— 只改宽度不改对齐，必然对不上。
+ */
 .head th.thNum,
-.head th.thTime {
+.head th.thTime,
+.head th.thTimeCloud {
   text-align: center;
 }
 
@@ -287,22 +297,10 @@
 }
 
 /*
- * **置顶**：没有字、没有图钉，只有一层**很浅的底**（2026-10-10 作者：
- * 「不喜欢『置顶』两个字，也不喜欢图钉……能不能用很浅的、不占位置的感觉」）。
- *
- * 它是"这一行常驻抬起来一点"：比普通行深一档、hover 再深一档 ——
- * 与打开态（`data-active` 5%）同族但不同值，谁都不跟谁抢。
- * 排序仍由 `presetTree.sortRows` 管（置顶的排最前），这一层只管样子。
+ * 置顶**不再染整行底色**（2026-11-15 作者：「置顶是变背景颜色，我也不喜欢，
+ * 还是要改成图标吧」）—— 行首那颗图钉自己说（见 `.pinBtn`）。
+ * `data-pinned` 属性留着：钉没钉、菜单里那一项写什么还读它。
  */
-.row[data-pinned='true'] {
-  /* 原值就是 --surface-sunken 的浅色值（墨 3.5%）——走 token（2026-10-12 深色第二遍）：
-     写死的墨色在深色里等于没画，置顶行与普通行会完全同色 */
-  background: var(--surface-sunken);
-}
-
-.row[data-pinned='true']:hover {
-  background: var(--hairline);
-}
 
 /*
  * 正在生效的那一份：**文件名自己转绿**（绿在这一页唯一的语义）。
@@ -373,8 +371,217 @@
 /* ---------- 名称列 ---------- */
 
 .row td.name {
+  position: relative;
   min-width: 0;
   padding-left: var(--page-x);
+}
+
+/*
+ * **名称格**：图钉不占流（绝对定位在左槽），名字 / 备注的缩进都落在这层。
+ * 没有备注就不渲染 `.path`，名字自己垂直居中 —— 不留空行（2026-11-15 作者）。
+ */
+.nameWrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.table[data-pins='true'] .nameWrap {
+  padding-left: 22px;
+}
+
+/*
+ * **族视图（A）**：副本按**真实来路深度**一层层缩进（18px 一层），不再全挤在
+ * 同一个缩进里。最多画 8 层 —— 再深的链，名字仍靠母本签说明是谁的副本。
+ */
+.table[data-pins='true'] .row[data-family-depth='1'] .nameWrap {
+  padding-left: 40px;
+}
+.table[data-pins='true'] .row[data-family-depth='2'] .nameWrap {
+  padding-left: 58px;
+}
+.table[data-pins='true'] .row[data-family-depth='3'] .nameWrap {
+  padding-left: 76px;
+}
+.table[data-pins='true'] .row[data-family-depth='4'] .nameWrap {
+  padding-left: 94px;
+}
+.table[data-pins='true'] .row[data-family-depth='5'] .nameWrap {
+  padding-left: 112px;
+}
+.table[data-pins='true'] .row[data-family-depth='6'] .nameWrap {
+  padding-left: 130px;
+}
+.table[data-pins='true'] .row[data-family-depth='7'] .nameWrap {
+  padding-left: 148px;
+}
+.table[data-pins='true'] .row[data-family-depth='8'] .nameWrap {
+  padding-left: 166px;
+}
+
+/*
+ * **置顶图钉**（2026-11-15）：行首 18px 的一条槽，名字让出 22px。
+ * 只在多选时不出现（见 tsx 的 `showPins`）—— 复选框那一列已经占了
+ * 同一条基准线，两套钩子叠在一起谁也点不准。
+ *
+ * 钉住的那颗：**绿色 + 斜 18°**，跟未钉的淡灰钉子一眼分开；悬停不换色。
+ */
+.pinBtn {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 18px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-3);
+  opacity: 0.32;
+  cursor: pointer;
+  transform-origin: 50% 55%;
+  transition:
+    opacity 0.12s ease,
+    background-color 0.12s ease,
+    color 0.12s ease,
+    transform 0.12s ease;
+}
+
+.row:hover .pinBtn {
+  opacity: 0.55;
+}
+
+.pinBtn:hover {
+  opacity: 0.95;
+  background: var(--hover-1);
+  color: var(--text-1);
+}
+
+.pinBtn[data-pinned='true'] {
+  opacity: 1;
+  color: var(--accent);
+  transform: rotate(-18deg);
+}
+
+/* 钉住的那颗：行悬停 / 自身悬停都不变灰、不丢绿色 */
+.row:hover .pinBtn[data-pinned='true'] {
+  opacity: 1;
+}
+
+.pinBtn[data-pinned='true']:hover {
+  opacity: 1;
+  color: var(--accent);
+  background: var(--hover-1);
+}
+
+/*
+ * 钉住的行：**悬停不换底色**（作者 2026-11-15：一变灰就以为它没置顶了）。
+ * 展开（rowOpen）/ 菜单开着（data-active）/ 勾选（多选时 data-pins 为 false）
+ * 那几档各走各的，这里不抢。
+ */
+.table[data-pins='true'] .row[data-pinned='true']:not(.rowOpen, [data-active='true']):hover {
+  background: transparent;
+}
+
+/*
+ * 轨画在 `td.name` 上（不是 `nameWrap`）：行高 50，轨要整行连着，
+ * 每根枝自己收到行中线（`last` 按兄弟算，见 `familyLayoutOf`）。
+ * 父本的 x = 22 + (depth - 1) * 18。
+ */
+.row[data-family-child='true'] td.name::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-left: 1px solid var(--line-strong);
+}
+
+.row[data-family-depth='1'] td.name::before {
+  left: calc(var(--page-x) + 22px);
+}
+.row[data-family-depth='2'] td.name::before {
+  left: calc(var(--page-x) + 40px);
+}
+.row[data-family-depth='3'] td.name::before {
+  left: calc(var(--page-x) + 58px);
+}
+.row[data-family-depth='4'] td.name::before {
+  left: calc(var(--page-x) + 76px);
+}
+.row[data-family-depth='5'] td.name::before {
+  left: calc(var(--page-x) + 94px);
+}
+.row[data-family-depth='6'] td.name::before {
+  left: calc(var(--page-x) + 112px);
+}
+.row[data-family-depth='7'] td.name::before {
+  left: calc(var(--page-x) + 130px);
+}
+.row[data-family-depth='8'] td.name::before {
+  left: calc(var(--page-x) + 148px);
+}
+
+.row[data-family-child='true'][data-family-last='true'] td.name::before {
+  height: 50%;
+}
+
+.row[data-family-child='true'] td.name::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  border-top: 1px solid var(--line-strong);
+}
+
+.row[data-family-depth='1'] td.name::after {
+  left: calc(var(--page-x) + 22px);
+}
+.row[data-family-depth='2'] td.name::after {
+  left: calc(var(--page-x) + 40px);
+}
+.row[data-family-depth='3'] td.name::after {
+  left: calc(var(--page-x) + 58px);
+}
+.row[data-family-depth='4'] td.name::after {
+  left: calc(var(--page-x) + 76px);
+}
+.row[data-family-depth='5'] td.name::after {
+  left: calc(var(--page-x) + 94px);
+}
+.row[data-family-depth='6'] td.name::after {
+  left: calc(var(--page-x) + 112px);
+}
+.row[data-family-depth='7'] td.name::after {
+  left: calc(var(--page-x) + 130px);
+}
+.row[data-family-depth='8'] td.name::after {
+  left: calc(var(--page-x) + 148px);
+}
+
+/* 块首：上面一条稍重的分隔线（族与族之间） */
+.row[data-family-start='true'] td {
+  border-top: 1px solid var(--line);
+}
+
+.table tbody tr:first-child td {
+  border-top: 0;
+}
+
+/* 母本签：块首带着母本（被钉走 / 母本不在这一档），或副本的副本 */
+.familyTag {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 190px;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--text-3);
+  border-bottom: 1px dotted var(--line-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 名称行定死 20px 高：徽章/中/拉丁字都在内居中，不撑行；间距随宽连续 */
@@ -469,12 +676,11 @@
 }
 
 /*
- * 副标题（备注）。a03：**空着也预留一行高度**（min-height），
- * 保证有备注与没备注的行内容块同高、文件名落点一致；行总高由 .row td 的 height 统一。
+ * 副标题（备注）。**没有就整行不渲染**（2026-11-15 作者：不要留空行）——
+ * 名字自己垂直居中；有备注时两行整块居中。行总高仍由 `.row td` 的 height 统一。
  */
 .path {
   display: block;
-  min-height: 12px;
   margin-top: 2px;
   min-width: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -1544,12 +1750,32 @@
   color: var(--text-1);
 }
 
-/* 展开后的技术值：两列（与主体双列同一条 28px 沟），长 SHA / 长路径不撑破卡 */
+/*
+ * 展开后的技术值：**与主体同一套双列**（2026-11-17 作者：「也加一个竖线，
+ * 然后右边的和上面对齐」）—— 列宽拿同一条 `--dSplit`（`fitSplit` 写在卡片根上），
+ * 中缝同一条 `--line`、同一个 30 + 30 的沟。
+ */
 .dMoreGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 28px;
+  grid-template-columns:
+    minmax(0, calc((100% - 60px) * var(--dSplit, 0.5)))
+    minmax(0, 1fr);
+  gap: 0 30px;
   margin-top: 8px;
+}
+
+.dMoreCol,
+.dMoreColR {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 中缝那条竖线：与 `.dColR` 同位置、同一色 —— 上下两条线要能连成一条 */
+.dMoreColR {
+  padding-left: 30px;
+  border-left: 1px solid var(--line);
 }
 
 /*

@@ -1,4 +1,4 @@
-//! 首笔活化（对照 processor/revitalization_block.go 逐行移植）。
+//! 润笔（对照 processor/revitalization_block.go 逐行移植）。
 //!
 //! pass2 第二个 CHANGE_LAYER 触发（首层全部 feature 打完后）；
 //! 校准模式强制禁用。四象限小螺旋复用 tower::generate_mini_spiral_gcode。
@@ -8,7 +8,10 @@ use crate::gcode::{format_float, format_speed, format_z};
 use crate::ir::Ir;
 
 use crate::postproc::pass1::{LineSink, MM_PER_MINUTE, ProcessStats};
-use crate::postproc::pass1::{calc_glue_z, mount_toolhead, restore_fan_state, unmount_toolhead};
+use crate::postproc::pass1::{
+    RetractAt, calc_glue_z, mount_toolhead, restore_fan_state, retract_at, swap_retract,
+    unmount_toolhead,
+};
 use crate::postproc::tower;
 
 /// `emitFirstPenRevitalization`（revitalization_block.go:32）。
@@ -34,8 +37,18 @@ pub(crate) fn emit_first_pen_revitalization(
     ));
     sink.push_str(&format!("G1 Z{}", format_z(safe_z)));
 
+    /* 1.5 换笔回抽：与涂胶块同一口径 —— 整段 swap 一笔，位置由 `MKP_retract_at` 决定。
+     * 这条路上没有脱层小螺旋，所以「起飞前」那一档只能在这里自己发。 */
+    let retract = swap_retract(ir_data);
+    let at = retract_at(ir_data);
+    if at == RetractAt::Model {
+        if let Some(r) = retract {
+            sink.push_str(&r.line());
+        }
+    }
+
     // 2. 切换下笔（skipFinalZ=true：Z 已在安全高度）
-    mount_toolhead(sink, ir_data, current_layer_height, true);
+    mount_toolhead(sink, ir_data, current_layer_height, true, retract, at);
 
     // 3. 坐标转换
     let bbox = tower::calculate_tower_bbox(

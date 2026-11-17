@@ -1903,13 +1903,6 @@ text_zh_tw = "分組 {id} 沒有 name"
 text_ja = "グループ {id} に name がありません"
 params = ["id"]
 
-["ui.presetdata.assets.187"]
-text = "分组 {id} 一个成员都没有"
-text_en = "Group {id} has no members"
-text_zh_tw = "分組 {id} 一個成員都沒有"
-text_ja = "グループ {id} にメンバーが 1 つもありません"
-params = ["id"]
-
 ["ui.presetdata.assets.188"]
 text = "分组 {id} 的成员 {mid} 不是一条资产"
 text_en = "Member {mid} of group {id} is not an asset"
@@ -3046,11 +3039,11 @@ text_ja = "グループ「{label}」はこのページの端にあるため、�
 params = ["label"]
 
 ["ui.presetdata.registry.354"]
-text = "分组「{label}」里还有 {n} 条参数，不能删 —— 先把它们搬到别的分组"
-text_en = "Group “{label}” still holds {n} parameter(s) and cannot be deleted — move them to another group first"
-text_zh_tw = "分組「{label}」裡還有 {n} 條參數，不能刪 —— 先把它們搬到別的分組"
-text_ja = "グループ「{label}」にはまだ {n} 件のパラメータがあるため削除できません。先に別のグループへ移動してください"
-params = ["label", "n"]
+text = "「{label}」就是这一页的「未归类」，组里的参数没有第二个去处"
+text_en = "“{label}” is this page’s “Uncategorised” group; its parameters have nowhere else to go"
+text_zh_tw = "「{label}」就是這一頁的「未歸類」，組裡的參數沒有第二個去處"
+text_ja = "「{label}」はこのページの「未分類」グループで、この中のパラメーターには移す先がありません"
+params = ["label"]
 
 ["ui.presetdata.registry.355"]
 text = "「{label}」是功能卡（组件 / 条件分组），不是参数分组，不能删"
@@ -3065,6 +3058,54 @@ text_en = "“{k}” is not a translation slot in the ledger — only these six 
 text_zh_tw = "譯文台帳裡沒有「{k}」這一格 —— 只認這六冊：{names}"
 text_ja = "翻訳台帳に「{k}」という枠はありません。指定できるのは次の 6 つです：{names}"
 params = ["k", "names"]
+
+["ui.presetdata.registry.357"]
+text = "自动值的来源指错了参数"
+text_en = "The auto-value source points at a parameter that does not exist"
+text_zh_tw = "自動值的來源指錯了參數"
+text_ja = "自動値の参照先が存在しないパラメーターを指しています"
+
+["ui.presetdata.registry.358"]
+text = "分组 {section} 里一个参数都没有，排不了序"
+text_en = "Section {section} has no parameters, so there is nothing to order"
+text_zh_tw = "分組 {section} 裡一個參數都沒有，排不了序"
+text_ja = "グループ {section} にはパラメーターが一つもないため、並べ替えられません"
+params = ["section"]
+
+["ui.presetdata.registry.359"]
+text = "排序清单与分组 {section} 的参数对不上"
+text_en = "The ordering list does not match the parameters of section {section}"
+text_zh_tw = "排序清單與分組 {section} 的參數對不上"
+text_ja = "並び順のリストがグループ {section} のパラメーターと一致しません"
+params = ["section"]
+
+["ui.presetdata.registry.360"]
+text = "页签「{label}」已经在这一排的边上，挪不动了"
+text_en = "Tab “{label}” is already at the edge of the row and cannot move further"
+text_zh_tw = "頁籤「{label}」已經在這一排的邊上，挪不動了"
+text_ja = "タブ「{label}」はこの並びの端にあるため、これ以上移動できません"
+params = ["label"]
+
+["ui.presetdata.registry.361"]
+text = "页签「{label}」里还有 {n} 条参数，先把它们搬到别的页签再删"
+text_en = "Tab “{label}” still holds {n} parameters; move them to another tab first"
+text_zh_tw = "頁籤「{label}」裡還有 {n} 條參數，先把它們搬到別的頁籤再刪"
+text_ja = "タブ「{label}」にはまだ {n} 件のパラメーターがあります。先に別のタブへ移してください"
+params = ["label", "n"]
+
+["ui.presetdata.registry.362"]
+text = "页签「{label}」里有功能卡（组件 / 条件分组），不能整页删掉"
+text_en = "Tab “{label}” holds feature cards (component / conditional groups) and cannot be deleted as a whole"
+text_zh_tw = "頁籤「{label}」裡有功能卡（組件 / 條件分組），不能整頁刪掉"
+text_ja = "タブ「{label}」には機能カード（コンポーネント / 条件グループ）があるため、タブごと削除できません"
+params = ["label"]
+
+["ui.presetdata.registry.363"]
+text = "item id {v1} 被声明了两次"
+text_en = "Item id {v1} is declared twice"
+text_zh_tw = "item id {v1} 被聲明了兩次"
+text_ja = "item id {v1} が 2 回宣言されています"
+params = ["v1"]
 
 ["ui.runtime.app_state.345"]
 text = "读不到应用状态"
@@ -3163,6 +3204,12 @@ text_en = "Cannot read this backup: {v1}"
 text_zh_tw = "讀不到這份備份：{v1}"
 text_ja = "このバックアップを読み取れません：{v1}"
 params = ["v1"]
+
+["ui.runtime.branch_dir.1"]
+text = "记不下这个分支的文件夹"
+text_en = "Cannot record the folder for this branch"
+text_zh_tw = "記不下這個分支的資料夾"
+text_ja = "このブランチのフォルダーを記録できません"
 
 ["ui.runtime.backup.360"]
 text = "这不是一份 SupportEase 备份（里面没有说明书）"
@@ -5208,6 +5255,13 @@ text_zh_tw = "在「你要如何開啟這個檔案？」裡選好應用，再勾
 text_ja = "「このファイルを開く方法」でアプリを選び、「.3mf ファイルは常にこのアプリで開く」にチェック"
 params = []
 note = "Windows 走通时的状态句；「始终」那个勾选框是那边唯一能改成默认的地方（我们不碰注册表）"
+
+["ui.ipc.catalog.513"]
+text = "用回旧版本没跑到终局"
+text_en = "Restoring the old version did not run to completion"
+text_zh_tw = "用回舊版本沒跑到終局"
+text_ja = "旧バージョンへの切り戻しが完了しませんでした"
+params = []
 
 ["ui.workbench.txn.dirty"]
 text = "有 {count} 处改动还没保存 —— 先保存或放弃，再生成/发布"

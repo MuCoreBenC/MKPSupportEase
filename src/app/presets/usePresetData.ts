@@ -92,15 +92,18 @@ import type { DeliveryPresetSource } from './presetTree'
 import {
   applySlicerFilters,
   archivedIds,
+  branchOf,
   buildPresetTree,
   catalogKindToFileKind,
   cloudRows,
+  identityRefOf,
   localRows,
   machineNode,
   machinesInScope,
   slicerFilterValues,
 } from './presetTree'
 import type {
+  BranchFilter,
   PresetCloudRow,
   PresetKindAxis,
   PresetLocalRow,
@@ -404,6 +407,11 @@ export interface PresetData {
    * 回来重读云端那一侧（归档清单以盘为准）。
    */
   removeArchived: (path: string) => Promise<void>
+  /**
+   * **用回归档里的那一版**：把本机这一份换成旧版字节（已放入切片器的那份跟着换）。
+   * 云端目录与事件账不动 —— 所以换回来之后界面上标「旧版本」，点「下载」能换回当前版。
+   */
+  restoreArchived: (path: string) => Promise<void>
   /**
    * **在文件管理器里显示**（第十三层）：打开 Finder / 资源管理器并选中这份用户文件。
    * **不重读任何东西** —— 它一个状态都不改（打开的是系统窗口，不是我们的界面）。
@@ -739,6 +747,9 @@ export function usePresetData(importRevision = 0): PresetData {
           downloadedUnix: onDisk.get(f.fileName)?.downloadedUnix ?? null,
           replacedUnix: onDisk.get(f.fileName)?.replacedUnix ?? null,
           deliveryPublishedAt: onDisk.get(f.fileName)?.publishedAt ?? null,
+          /* 盘上这份自己的指纹与 mtime（两格都只答"我手上这一份"，与目录那版无关） */
+          localSha256: onDisk.get(f.fileName)?.sha256 ?? null,
+          localModifiedUnix: onDisk.get(f.fileName)?.localModifiedUnix ?? null,
           state: stateOf(f.fileName),
         },
       ]
@@ -1299,6 +1310,12 @@ export function usePresetData(importRevision = 0): PresetData {
     deliveryMutated()
   }, [])
 
+  /* 用回归档里那一版：本机字节换了 ⇒ 投递面广播（行状态、切片器那一栏一起重读） */
+  const restoreArchived = useCallback(async (path: string) => {
+    await api.restoreArchivedFile(path)
+    deliveryMutated()
+  }, [])
+
   /*
    * 另存为一份新的（第十一层）：只重读本地文件 —— 新的一份要出现在表里；使用中指针不归它管。
    *
@@ -1425,6 +1442,7 @@ export function usePresetData(importRevision = 0): PresetData {
     remove,
     removePreset,
     removeArchived,
+    restoreArchived,
     copyAsNew,
     reveal,
     revealDelivered,
@@ -1589,6 +1607,17 @@ export interface PresetPage {
   query: string
   setQuery: (next: string) => void
   searching: boolean
+  /**
+   * 本地表的**分支筛选**（当前分支 / 全部 / 没有来源）。
+   *
+   * `branches.length < 2` 时页面不渲染这个下拉 —— 只有一个分支的用户看不到它。
+   */
+  branchFilter: BranchFilter
+  setBranchFilter: (next: BranchFilter) => void
+  /** 本机出现过的来源分支（含当前这一支），已排序 */
+  branches: string[]
+  /** 当前源的分支；自建源没有 ref ⇒ `null` */
+  currentBranch: string | null
 
   /**
    * 切片器的喷嘴 / 层高筛选。MKP 没有这两个字段 ——
@@ -1645,6 +1674,14 @@ export function usePresetPage(data: PresetData): PresetPage {
   const deferredQuery = useDeferredValue(query)
   const [kind, setKind] = useSessionState<PresetKindAxis>('presets.kind', 'mkp')
   const [scope, setScope] = useSessionState<PresetScopeAxis>('presets.scope', 'local')
+  /*
+   * 本地表按**来源分支**筛。默认「当前分支 + 没有来源」—— 只有一个分支时这个下拉
+   * 根本不出现，普通用户看不到分支这回事。
+   */
+  const [branchFilter, setBranchFilter] = useSessionState<BranchFilter>(
+    'presets.branch',
+    'current',
+  )
   /* 切片器的喷嘴 / 层高筛选。空串 = 「全部」。落会话：切页对一眼回来不该复位 */
   const [nozzle, setNozzle] = useSessionState('presets.nozzle', '')
   const [layer, setLayer] = useSessionState('presets.layer', '')
@@ -1736,6 +1773,22 @@ export function usePresetPage(data: PresetData): PresetPage {
     [data.machineId, data.tree],
   )
 
+  /*
+   * **本机出现过的来源分支**（含当前这一支）—— 只决定"要不要给下拉"。
+   *
+   * 只有一个分支时不出现任何分支控件：普通用户不该知道分支是什么。
+   */
+  const branchInfo = useMemo(() => {
+    const seen = new Set<string>()
+    for (const f of data.local) {
+      const ref = branchOf(f.basedOnFacts)
+      if (ref !== null) seen.add(ref)
+    }
+    const current = identityRefOf(data.sourceIdentity)
+    if (current !== null) seen.add(current)
+    return { branches: [...seen].sort((a, b) => a.localeCompare(b)), current }
+  }, [data.local, data.sourceIdentity])
+
   /* 两张表的输入是同一份 —— 拼一次，两个纯函数各取所需 */
   const input = useMemo(
     (): PresetRowsInput => ({
@@ -1763,9 +1816,10 @@ export function usePresetPage(data: PresetData): PresetPage {
       catalogSerial: data.delivery.catalogSerial,
       sourceIdentity: data.sourceIdentity,
       remarks: data.remarks,
+      branchFilter,
     }),
     /* `data` 一个就够（`data.xxx` 都在它下面 —— 单列出来 eslint 会报"多余"） */
-    [data, copiedSet, kind, localSet, machines, pinned, deferredQuery, sort],
+    [data, copiedSet, kind, localSet, machines, pinned, deferredQuery, sort, branchFilter],
   )
 
   /*
@@ -1883,6 +1937,11 @@ export function usePresetPage(data: PresetData): PresetPage {
     query,
     setQuery,
     searching: query.trim() !== '',
+    /* 分支筛选：只有一个分支时页面不渲染它（`branches.length` 由页面判断） */
+    branchFilter,
+    setBranchFilter,
+    branches: branchInfo.branches,
+    currentBranch: branchInfo.current,
     slicerFilters: {
       nozzles: slicerValues.nozzles,
       allLayers: slicerValues.layers,

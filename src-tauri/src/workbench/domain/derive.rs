@@ -1328,6 +1328,59 @@ impl<'a> Book<'a> {
             }
         }
 
+        /*
+         * 这一页签里**空着**的分组也占一张卡：刚新建的组一条参数都没有，没有卡就
+         * 看不见、也滚不过去；把一组搬空之后同样还得能搬回来。
+         *
+         * 只在限定了页签、且没在搜索时补 —— 「全部」下塞一堆空卡会撑满页面；
+         * 搜索结果说的是"命中了什么"，不是"一共有哪些组"。
+         */
+        if let (Some(tab_id), false) = (tab, searching) {
+            let specials: Vec<&str> = self
+                .presets
+                .registry
+                .layout()
+                .iter()
+                .flat_map(|lt| lt.sections.iter())
+                .filter(|s| s.layout.as_deref() == Some("component"))
+                .map(|s| s.id.as_str())
+                .collect();
+            let ordered: Vec<(String, String)> = self
+                .presets
+                .registry
+                .layout_sections_all()
+                .into_iter()
+                .filter(|(t, _, _, _, component)| t == tab_id && component.is_none())
+                .map(|(_, _, id, label, _)| (id, label))
+                .collect();
+            let order_of = |want: &str| {
+                ordered
+                    .iter()
+                    .position(|(s, _)| s == want)
+                    .unwrap_or(usize::MAX)
+            };
+            for (id, label) in &ordered {
+                if specials.contains(&id.as_str()) || groups.iter().any(|g| &g.section_id == id) {
+                    continue;
+                }
+                let here = order_of(id);
+                let at = groups
+                    .iter()
+                    .position(|g| order_of(&g.section_id) > here)
+                    .unwrap_or(groups.len());
+                groups.insert(
+                    at,
+                    DeskGroup {
+                        section_id: id.clone(),
+                        label: label.clone(),
+                        count: 0,
+                        off_note: None,
+                        items: Vec::new(),
+                    },
+                );
+            }
+        }
+
         // 整组 / 整族被关掉的那句话。**判读当前请求那一层** —— 关没关是跟着
         // 这一层的值走的（版本改了开关，基底还关着，在版本层看就是开着的）
         for g in &mut groups {
@@ -1416,28 +1469,59 @@ impl<'a> Book<'a> {
                 *per_section.entry(p.layout.section_id.as_str()).or_default() += 1;
             }
         }
+        /*
+         * 整个注册表里每个分组的条数（**不看机型**）：「这一页还没装东西」用它判。
+         * `per_section` 答的是"这一台有没有"，两件事 —— A2L 那种机器上个位数不该被列出来，
+         * 而刚建出来的空页签正相反，哪台机器上都该能看见。
+         */
+        let mut anywhere: BTreeMap<&str, usize> = BTreeMap::new();
+        for p in self.presets.registry.params() {
+            *anywhere.entry(p.layout.section_id.as_str()).or_default() += 1;
+        }
+        /* 整页组件卡（设置页那 11 张）不进参数台页签栏 —— 与 `param_tabs` 同一条 */
+        let cards: std::collections::BTreeSet<&str> = self
+            .presets
+            .registry
+            .layout()
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .filter(|s| s.component.is_some() || s.layout.as_deref() == Some("component"))
+            .map(|s| s.id.as_str())
+            .collect();
         self.presets
             .registry
-            .param_tabs()
-            .into_iter()
+            .tabs()
+            .iter()
             .filter_map(|t| {
-                let sections: Vec<DeskNavSection> = t
+                let mine: Vec<&crate::workbench::presets::SectionMeta> = t
                     .sections
+                    .iter()
+                    .filter(|s| !cards.contains(s.id.as_str()))
+                    .collect();
+                if mine.is_empty() {
+                    return None;
+                }
+                let sections: Vec<DeskNavSection> = mine
                     .iter()
                     .filter_map(|s| {
                         let count = per_section.get(s.id.as_str()).copied().unwrap_or(0);
-                        // 这台机型一项都没有的组不列出来（A2L 那种机型会遇到）
-                        (count > 0).then(|| DeskNavSection {
+                        let fresh = anywhere.get(s.id.as_str()).copied().unwrap_or(0) == 0;
+                        // 这台机型一项都没有的组不列出来（A2L 那种机型会遇到）；
+                        // 空页签 / 刚建的空组例外 —— 那是"还没装"，不是"这台用不上"
+                        (count > 0 || fresh).then(|| DeskNavSection {
                             id: s.id.clone(),
                             label: s.label.clone(),
                             count,
                         })
                     })
                     .collect();
+                if sections.is_empty() {
+                    return None;
+                }
                 let count = sections.iter().map(|s| s.count).sum();
-                (count > 0).then_some(DeskNavTab {
-                    id: t.id,
-                    label: t.label,
+                Some(DeskNavTab {
+                    id: t.id.clone(),
+                    label: t.label.clone(),
                     count,
                     sections,
                 })
@@ -3219,6 +3303,38 @@ mod tests {
             assert!(t.count > 0);
             assert!(t.sections.iter().all(|s| s.count > 0));
         }
+    }
+
+    /// **空组也占一张卡**：新建的空组得看得见、点得到（它的锚点 `t-sec-<id>`
+    /// 挂在卡头上，没有卡就滚不过去）。只在限定了页签、且没在搜索时补。
+    #[test]
+    fn an_empty_group_gets_a_card_only_under_a_pinned_tab() {
+        let mut f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let tab = f.presets.registry.tabs()[0].id.clone();
+        f.presets
+            .registry
+            .ensure_section(&tab, "custom_1", "刚建的")
+            .expect("建一个空组");
+
+        let b = Book::new(&f.presets, &c, &d);
+        let pinned = b.desk("A1", None, Some(&tab), "");
+        let fresh = pinned
+            .groups
+            .iter()
+            .find(|g| g.section_id == "custom_1")
+            .expect("空组没有卡");
+        assert_eq!(fresh.count, 0);
+        assert!(fresh.items.is_empty(), "空组里不该冒出别人的行");
+
+        /* 「全部」下不补：那一屏本来就列着每个领域的卡，再塞空卡只是撑高页面 */
+        let all = b.desk("A1", None, None, "");
+        assert!(all.groups.iter().all(|g| g.section_id != "custom_1"));
+
+        /* 搜索态也不补：那份列表说的是「命中了什么」，不是「一共有哪些组」 */
+        let searched = b.desk("A1", None, Some(&tab), "擦料塔");
+        assert!(searched.groups.iter().all(|g| g.section_id != "custom_1"));
     }
 
     /// 父项把下面那几项关掉时，**给一句话让界面能收起来**

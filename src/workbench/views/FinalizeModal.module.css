@@ -109,8 +109,8 @@
 }
 
 .chipFixable {
-  border-color: var(--w-primary);
-  color: var(--w-primary);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .chipSource {

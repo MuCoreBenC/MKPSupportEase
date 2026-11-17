@@ -517,6 +517,22 @@ fn roll_origins(
 ///
 /// `decisions` 为空 = 「应用 0 项」：值一个不动，骨架与来源记录照样推进 —— 于是云端
 /// 只改了注释 / 时间戳那种换版也会被消化掉，「有新版」不再一直挂着。
+/// 这一批决定之后**还剩几项没表态**。
+///
+/// 判据只有一条：这一项在这次交上来的决定里**有没有** —— `adopt` 与 `hold` 都算表态
+/// （保持原值也是一个决定），只有"什么都没交"才是没表态。
+///
+/// 它决定来源记录推不推进：归零 ⇒ 追加一条履历（行上不再挂「有新版本」）。
+fn remaining_after(
+    entries: &[ParamSyncEntryDto],
+    decided: &BTreeMap<&str, ParamDecisionKind>,
+) -> usize {
+    entries
+        .iter()
+        .filter(|e| e.pending && !decided.contains_key(e.key.as_str()))
+        .count()
+}
+
 fn apply_at(
     root: &std::path::Path,
     user: &std::path::Path,
@@ -620,11 +636,7 @@ fn apply_at(
      *   反过来，`remaining > 0`（部分更新）时来源记录原样保留 —— 序号也**不前进**，
      *   于是它仍然显示「有新版」。那是对的：这一趟确实没接受完。
      */
-    let remaining = before
-        .entries
-        .iter()
-        .filter(|e| e.pending && !kinds.contains_key(e.key.as_str()))
-        .count();
+    let remaining = remaining_after(&before.entries, &kinds);
     /* 更新后账上要写"对应哪一版"——先用云端文件名，别等 cloud_path 被 move 走 */
     let cloud_file = cloud_path
         .rsplit('/')
@@ -673,7 +685,19 @@ fn apply_at(
             );
             runtime::provenance::rewrite_keeping_provenance(&skeleton, previous.as_ref())
         } else {
-            runtime::provenance::record_version(&skeleton, version)
+            /*
+             * ★ **旧记录先并回骨架，再追加这一条**（2026-11-13 真机 bug）。
+             *
+             * `skeleton` 是**云端正文**：里面没有 `[mkp_source]`。直接
+             * `record_version(&skeleton, …)` 会让 `append_version` parse 成空，
+             * 于是**新建一份只剩这一条的记录** —— 原来的 `origin`（从哪来、哪个分支）
+             * 与旧履历一起被抹掉，界面看起来就是"更新完直接变成最新，旧版没了"。
+             *
+             * 顺序不能反：先 `rewrite_keeping_provenance` 把旧记录贴回去，再 append。
+             */
+            let with_old =
+                runtime::provenance::rewrite_keeping_provenance(&skeleton, previous.as_ref());
+            runtime::provenance::record_version(&with_old, version)
         }
     } else {
         tracing::info!(
@@ -724,9 +748,18 @@ fn apply_at(
      * （与 [`super::preset_params::save_preset_params`] 同一条规矩）。
      */
     if next != local_text {
-        /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
-        let _ = runtime::baseline::ensure_origin_copy(root, user, path);
         runtime::local::write_text(user, path, &next)?;
+        /*
+         * ★ 原文镜像：只有"这次合并的结果与云端当前版逐字节一致"（逐项全部采用）
+         *   才刷新。保留了任何自定义值的混合体**不是**默认 —— 恢复默认值仍回到
+         *   上一次真正用上的那一版（见 `runtime::baseline` 模块头）。
+         *   比较剥掉来源段：落盘文件带着新的 `[mkp_source]`，云端原文没有。
+         */
+        if runtime::provenance::strip_for_compare(&next)
+            == runtime::provenance::strip_for_compare(&cloud_text)
+        {
+            let _ = runtime::baseline::refresh_origin_copy(root, user, path);
+        }
         /*
          * **「上次云端值」滚动**：这一趟把这份对齐到了新云端，被换下来的那一版
          * 就成为新的「上次云端」。记不上不影响更新本身（附加信息，与出处账同口径）。
@@ -781,7 +814,34 @@ fn apply_at(
         })
         .collect();
     if !record.is_empty() {
-        runtime::app_state::record_param_decisions(root, path, &record)?;
+        /*
+         * **可审计**：这一趟表了哪几项态，日志里查得到。
+         *
+         * 只记 `key:kind`，不记值 —— 值在文件里，日志只回答"这一趟表了什么态"。
+         * `remaining` 一起记：它是"还剩几项没表态"，也是"为什么还挂着有新版"的答案。
+         */
+        let decided: Vec<String> = record
+            .iter()
+            .map(|(key, d)| format!("{key}:{}", kind_text(d.kind)))
+            .collect();
+        let joined = decided.join(",");
+        if let Err(e) = runtime::app_state::record_param_decisions(root, path, &record) {
+            tracing::warn!(
+                path = %path,
+                decisions = %joined,
+                error = %e,
+                "云端更新表态没落上"
+            );
+            return Err(e);
+        }
+        tracing::info!(
+            path = %path,
+            serial = catalog.publish_serial,
+            cloud_sha = %current_sha,
+            remaining,
+            decisions = %joined,
+            "云端更新表态已落"
+        );
     }
 
     sync_at(root, user, path, false)
@@ -1220,6 +1280,17 @@ mod tests {
             runtime::local::read_text(&self.user, LOCAL).unwrap()
         }
 
+        /// 摆一份"下载那一刻"的默认（等价于真实下载落盘后的 `refresh_origin_copy`）
+        fn install_baseline(&self, text: &str) {
+            let p = crate::runtime::baseline::origin_path(&self.root, LOCAL).unwrap();
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            crate::fsx::atomic::atomic_write(&p, text.as_bytes()).unwrap();
+        }
+
+        fn baseline(&self) -> Option<String> {
+            crate::runtime::baseline::read_origin_copy(&self.root, LOCAL).unwrap()
+        }
+
         /// 云端当前版里某一项的值。
         ///
         /// 正文取自"目录里第一份预设"，值随那一份走 —— 断言比这个，不写死具体数字。
@@ -1359,6 +1430,70 @@ mod tests {
         );
     }
 
+    /// **全部采用** ⇒ 合并结果与云端当前版逐字节一致，默认跟着换成新版
+    #[test]
+    fn adopting_everything_refreshes_the_baseline() {
+        let w = World::new();
+        w.install_baseline(&w.based_text);
+
+        w.decide(KEY, "adopt");
+
+        let after = w.baseline().expect("全采用之后该有默认");
+        assert_eq!(
+            runtime::provenance::strip_for_compare(&after),
+            runtime::provenance::strip_for_compare(&w.current_text),
+            "全采用：默认换成云端当前版"
+        );
+        assert_ne!(after, w.based_text, "不再是下载时那一版");
+    }
+
+    /// ★ **整份接受不会把来源身份与旧履历抹掉**（2026-11-13 真机 bug）。
+    ///
+    /// `skeleton` 是云端正文、里面没有 `[mkp_source]`；曾经直接 `record_version(&skeleton)`，
+    /// `append_version` parse 成空 ⇒ 新建一份只剩最新的记录，`origin` 与旧条目一起消失。
+    #[test]
+    fn adopting_keeps_the_origin_and_the_old_history() {
+        let w = World::new();
+        w.install_baseline(&w.based_text);
+        let before = runtime::provenance::parse(&w.local_text()).expect("起始那份有来源记录");
+        assert!(!before.history.is_empty(), "起始就该有一条履历");
+
+        w.decide(KEY, "adopt");
+
+        let after = runtime::provenance::parse(&w.local_text()).expect("更新后仍有来源记录");
+        assert!(after.origin.is_some(), "origin（从哪来 / 哪个分支）不许丢");
+        assert!(
+            after.history.len() > before.history.len(),
+            "新的一条是追加，不是覆盖：{:?}",
+            after.history
+        );
+        assert_eq!(
+            after.history.first().map(|v| v.serial),
+            before.history.first().map(|v| v.serial),
+            "旧条目原样保留"
+        );
+    }
+
+    /// **保留我的值** ⇒ 合出来的是混合体，不算默认；默认仍是上一次真正用上的那版
+    #[test]
+    fn holding_my_value_does_not_refresh_the_baseline() {
+        let w = World::new();
+        w.install_baseline(&w.based_text);
+
+        w.decide(KEY, "hold");
+
+        assert_eq!(
+            w.baseline().as_deref(),
+            Some(w.based_text.as_str()),
+            "没采用就不算默认 —— 恢复默认值仍回到下载时那一版"
+        );
+        assert_ne!(
+            runtime::provenance::strip_for_compare(&w.local_text()),
+            runtime::provenance::strip_for_compare(&w.current_text),
+            "文件确实不是云端原文（保留了 -5）"
+        );
+    }
+
     /// 场景 C：保持 = **这一项还是我原来的值** + 水位推到当前版；之后同一版不再待处理
     ///
     /// （2026-10-20：写那一趟改成「以云端当前版为底重写」，所以文件不再是"一个字节都不动" ——
@@ -1380,6 +1515,50 @@ mod tests {
         );
     }
 
+    /// **勾一项就只算一项**：三选一之后剩下两项仍在待处理里。
+    ///
+    /// 云端这一版改了三项，用户只采用其中一项 ⇒ 待处理还剩两项、来源记录不推进、
+    /// 仍然「有新版」—— 界面可以再打开、再选一次。面板只交勾选项，没勾的不进 decisions。
+    #[test]
+    fn adopting_one_of_three_leaves_the_other_two_pending() {
+        let w = World::new();
+        /* 云端发一版：三项都动（x 是场景里那一项，y / z 只是凑出"三选一"） */
+        let defs = defs();
+        let text = param_alg::apply_param_edits(
+            &w.current_text,
+            &defs,
+            &[
+                FieldEdit::new(KEY, "1.5"),
+                FieldEdit::new("toolhead.offset.y", "30.5"),
+                FieldEdit::new("toolhead.offset.z", "5.5"),
+            ],
+        )
+        .unwrap();
+        w.publish_text(text);
+
+        let before = w.sync();
+        assert_eq!(before.pending_count, 3, "三项都该挂着：{before:?}");
+
+        /* 界面上「勾一项」交回来的就这一条（未勾的不进 decisions） */
+        let after = w.decide(KEY, "adopt");
+        assert_eq!(after.pending_count, 2, "没勾的两项继续待处理");
+        assert!(after.version_advanced, "没接受完就不许说已对齐到云端当前版");
+        for key in ["toolhead.offset.y", "toolhead.offset.z"] {
+            let e = after
+                .entries
+                .iter()
+                .find(|e| e.key == key)
+                .expect("该在结果里");
+            assert!(e.pending, "{key} 该继续待处理");
+            assert_eq!(e.decided, None, "{key} 没表态过");
+        }
+        /* 采用了的那一项真写进去了 */
+        assert_eq!(
+            param_alg::read_param_values(&w.local_text(), &defs).unwrap()[KEY],
+            "1.5"
+        );
+    }
+
     /// **应用 0 项**（云端只改了注释 / 时间戳）：新注释与新的来源记录进来、
     /// 我的值一个都不动 —— 「有新版」就此收场
     #[test]
@@ -1390,6 +1569,10 @@ mod tests {
         /* 值一项都没有变，只多了一行注释 —— 摘要照样变（来源记录比的是全文） */
         w.publish_text(format!("# 这一版只改了注释\n{}", w.current_text));
 
+        let before_history = runtime::provenance::parse(&w.local_text())
+            .expect("来源记录还在")
+            .history
+            .len();
         let before = w.sync();
         assert_eq!(before.pending_count, 0, "值一项都没动：{before:?}");
         assert!(before.version_advanced, "摘要变了 ⇒ 云端换版了");
@@ -1423,8 +1606,8 @@ mod tests {
         );
         assert_eq!(
             source.history.len(),
-            1,
-            "接整版 = 一条履历（旧条目一个字不改）"
+            before_history + 1,
+            "接整版 = **追加**一条（旧条目原样保留；2026-11-13 之前被覆盖成 1 条）"
         );
     }
 
@@ -1665,6 +1848,67 @@ mod tests {
             after.text,
             runtime::provenance::strip_for_compare(&w.local_text()),
             "草稿正文要跟着新文件走"
+        );
+    }
+
+    /// **全不勾 = 全保持原值**：值一个都不改，但这一版算处理完 ——
+    /// 履历推进到云端这一版，`based_on` 从 `outdated` 回到 `current`。
+    ///
+    /// 这一条钉的是"点了应用却没结束"那个 bug：只交勾上的项，剩下的算没表态，
+    /// 来源记录不推进，行上永远挂「有新版本」。
+    #[test]
+    fn holding_everything_settles_the_update() {
+        let w = World::new();
+
+        let sync = sync_at(&w.root, &w.user, LOCAL, false).unwrap();
+        let pending: Vec<ParamSyncEntryDto> =
+            sync.entries.iter().filter(|e| e.pending).cloned().collect();
+        assert!(!pending.is_empty(), "夹具该有一项待处理");
+
+        let decisions: Vec<ParamDecisionDto> = pending
+            .iter()
+            .map(|e| ParamDecisionDto {
+                param_key: e.key.clone(),
+                kind: "hold".to_owned(),
+            })
+            .collect();
+        apply_at(&w.root, &w.user, LOCAL, &decisions).unwrap();
+
+        /* 处理完就不该再有待处理项（这一版结清） */
+        let after = sync_at(&w.root, &w.user, LOCAL, false).unwrap();
+        assert!(
+            after.entries.iter().all(|e| !e.pending),
+            "全交 hold 之后这一版应当结清"
+        );
+
+        /* 值仍是本地那个（-5），云端那个没顶上来 */
+        let text = w.local_text();
+        assert!(text.contains("-5"), "保持原值：本地值不许被云端顶掉");
+
+        /* 履历推进到云端这一版（摘要对得上），"有新版本"的根就此断掉 */
+        let source = runtime::provenance::parse(&text);
+        let latest = source
+            .as_ref()
+            .and_then(|p| p.latest_version())
+            .expect("处理完这一版要追加履历");
+        assert_eq!(
+            latest.sha256.as_deref().map(str::to_ascii_lowercase),
+            Some(w.current_sha.to_ascii_lowercase()),
+            "履历记的必须是云端这一版"
+        );
+
+        /* 判定不再说「有新版本」（夹具目录没有 publishSerial，细致档位由别的用例覆盖） */
+        let catalog = runtime::load_released_catalog(&w.root).unwrap();
+        let ledger = runtime::source_ledger::provenance_of(&w.root, LOCAL);
+        let judge = runtime::local::Judge {
+            catalog: &catalog,
+            cloud: None,
+        };
+        let v = runtime::local::based_on(&judge, source.as_ref(), ledger.as_ref());
+        assert_ne!(
+            v.based_on,
+            runtime::local::BasedOn::Outdated,
+            "处理完这一版就不该再报有新版本"
         );
     }
 

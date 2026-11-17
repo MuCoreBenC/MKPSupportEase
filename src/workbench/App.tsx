@@ -36,6 +36,8 @@ import { FieldLayer } from './components/field'
 import PageSkeleton from './components/Skeleton'
 import { modalShortcutGate } from './components/modal'
 import { editQueue, settleAll } from './editQueue'
+/* 撤销的作用域：当前这一屏认哪几份（2026-11-14，见那个文件的头注） */
+import { scopeOf } from './scopeState'
 import { useDensity } from './useDensity'
 import {
   isAppError,
@@ -45,6 +47,7 @@ import {
   type IssueReport,
   type MetaApplied,
   type Patch,
+  type PublishSerialView,
   type Refresh,
   type TxnState,
   type Words,
@@ -62,10 +65,12 @@ import BundlesPage from './views/BundlesPage'
 import AssetsPage from './views/AssetsPage'
 import AnnotatePage from './views/AnnotatePage'
 import BuildPage from './views/BuildPage'
+import DefaultsPage from './views/DefaultsPage'
 import SettingsPage from './views/SettingsPage'
 import DevPage from './views/DevPage'
 import s from './c14.module.css'
 import { pageActions } from './pageActions'
+import { setUiPage, track } from '../app/log/track'
 
 /**
  * 一级导航。前五页是 C14 定稿的顺序 —— C14 把矩阵并进了参数台的对照模式
@@ -160,6 +165,20 @@ const NAV: NavItem[] = [
       </>
     ),
   },
+  /* 三根带滑块的横杆 = 默认配置（改新装默认值，写入影子树）。
+     与「设置」分开：那一页是数据根与云端源，这一页改的是会进客户端包的默认值。 */
+  {
+    id: 'defaults',
+    label: '默认配置',
+    icon: (
+      <>
+        <path d="M4 6h16M4 12h16M4 18h16" />
+        <circle cx="9" cy="6" r="2" />
+        <circle cx="15" cy="12" r="2" />
+        <circle cx="10" cy="18" r="2" />
+      </>
+    ),
+  },
   /* 齿轮 = 只读的设置（数据根与子目录职责）。
      ★ 2026-11-06 作者：「左侧的那一个图标，设置的改成齿轮的图标啊」——
         原来那个是"圆 + 八条射线"，看着像太阳/亮度，不像设置。换成标准齿形
@@ -203,6 +222,9 @@ const DRAFT_PAGES: ReadonlySet<NavId> = new Set<NavId>([
   'params',
   'assets',
   'build',
+  /* 默认配置：改的是 `presets/client-defaults.toml`，写入走 `with_struct_ctx`
+     ⇒ 页头那套「放弃 / 保存」与撤销栈天生就能用 */
+  'defaults',
 ])
 
 /** 导航宽度的三档（C14 第十七轮）：默认 236，可拖 64（图标档）~ 320（再宽只是挤正文） */
@@ -301,6 +323,19 @@ export function WorkbenchApp() {
   const [busy, setBusy] = useState(false)
 
   const [page, setPage] = useState<NavId>('machines')
+  /*
+   * **切页先让焦点离开输入框**（2026-11-14）。
+   *
+   * 机型那几格是 `onBlur` 才提交的：切页时焦点留在框里，那一笔就悬着 ——
+   * 到了新页面按 Cmd+Z，撤的是更早的一笔（作者实测：「点外面再撤销，多撤了几条」）。
+   * 点按钮切页浏览器会自己 blur，但 `goto` / 快捷键切页不会，所以这里统一补一下。
+   */
+  useEffect(() => {
+    setUiPage(page)
+    track('tab', { to: page })
+    const el = document.activeElement
+    if (el instanceof HTMLElement) el.blur()
+  }, [page])
   /**
    * 只认**当前页**那一槽：非激活页的元素被冻结、不会重渲染 ⇒ 它没机会注销自己，
    * 所以靠"页对不上就当没有"来失效（见 `pageActions.ts` 头注）。
@@ -363,6 +398,31 @@ export function WorkbenchApp() {
 
   /** 「后端状态变过了」计数器：每写一次 +1，页面据此重取（理由见旧版的教训注释） */
   const [tick, setTick] = useState(0)
+
+  /**
+   * **页头那枚「第几号」**：进生成页就摆出来，不用点进发布闸才看得到。
+   *
+   * 只在生成页取（其它页不亮这枚 chip），每次 `tick` 与进页各取一次；只读命令，
+   * 不写盘、不分配号。读不出来就照实说读不出来 —— 不摆一个 0 冒充第零号。
+   */
+  const [publishSerial, setPublishSerial] = useState<PublishSerialView | null>(null)
+  const [publishSerialError, setPublishSerialError] = useState<string | null>(null)
+  useEffect(() => {
+    if (page !== 'build') return
+    let alive = true
+    wb.publishSerial()
+      .then((v) => {
+        if (!alive) return
+        setPublishSerial(v)
+        setPublishSerialError(null)
+      })
+      .catch((e: unknown) => {
+        if (alive) setPublishSerialError(isAppError(e) ? e.message : String(e))
+      })
+    return () => {
+      alive = false
+    }
+  }, [page, tick])
 
 
   /* 页面常驻（C14 第十八轮）：第一次去才挂载，切走只藏起来 */
@@ -641,7 +701,24 @@ export function WorkbenchApp() {
    */
   /* 两个都返回 `boolean`（真撤成了没有）：未保存改动框里的「撤销这一笔」要据此
      决定要不要重取它自己那份 diff —— 没撤成还重取一次，等于把同一份账读两遍。 */
+  /*
+   * **撤销在途锁**（2026-11-14）。
+   *
+   * 作者：「它有延迟的话，用户多点几次就会多触发几次」。一条撤销要排空队列 → 回后端
+   * 写影子树 → 重读整本 → 让页面重取，链条几百毫秒起；这期间再按一次 Cmd+Z，
+   * 旧代码会**再发一条**，于是连点三次真的撤三条。锁住之后连点只算第一次。
+   */
+  const txnFlight = useRef(false)
+  /** 撤销 toast 上那颗「重做」要调后面才定义的 `redo` —— ref 绕开声明顺序 */
+  const redoRef = useRef<(() => Promise<boolean>) | null>(null)
+
+  /** 把归属 token 说成人话：`A1:FAST261111` → `A1/FAST261111`（与界面别处一致） */
+  const ownersText = (owners: string[]): string =>
+    owners.length === 0 ? '别处' : owners.map((o) => o.replace(':', '/')).join('、')
+
   const undo = useCallback(async (): Promise<boolean> => {
+    if (txnFlight.current) return false
+    txnFlight.current = true
     /* 飞在空中的值写先落完 —— 否则撤销撤的是"落完之前的那一半" */
     await settleAll()
     /* ★ 参数台 v2 那一条队列也得先排空（2026-11-03）。它不走 `editQueue`：
@@ -652,8 +729,14 @@ export function WorkbenchApp() {
     editQueue.clear()
     setBusy(true)
     try {
-      const st = await wb.txnUndo()
-      applyTxn(st)
+      /* 作用域（2026-11-14）：栈顶不是当前这一份 ⇒ 后端一格不动、回 `refused` */
+      const out = await wb.txnUndo(scopeOf())
+      applyTxn(out.state)
+      if (out.refused !== null) {
+        toasts.push(`没撤：这一笔属于 ${ownersText(out.refused.owners)}。`)
+        return false
+      }
+      if (out.done === null) return false
       /* 后端那一笔被撤掉了，参数台 v2 手里的草稿就不再是真话 —— 让它丢掉 */
       sheetWrites.drop()
       await refreshBook()
@@ -668,37 +751,52 @@ export function WorkbenchApp() {
        */
       setTick((n) => n + 1)
       refreshReport()
+      /* 右下角回执（2026-11-14）：撤了哪一条 + 一颗「重做」。连点时它也让人看清点了几次 */
+      toasts.push(`已撤销：${out.done.label}`, { label: '重做', run: () => void redoRef.current?.() })
       return true
     } catch (e) {
       fail(e)
       return false
     } finally {
       setBusy(false)
+      txnFlight.current = false
     }
   }, [applyTxn, fail, refreshBook, refreshReport])
 
   const redo = useCallback(async (): Promise<boolean> => {
+    if (txnFlight.current) return false
+    txnFlight.current = true
     await settleAll()
     /* 同 `undo`：队列里没落的写先发完，否则它们会落在重做之后 */
     await sheetWrites.settle().catch(() => undefined)
     editQueue.clear()
     setBusy(true)
     try {
-      const st = await wb.txnRedo()
-      applyTxn(st)
+      const out = await wb.txnRedo(scopeOf())
+      applyTxn(out.state)
+      if (out.refused !== null) {
+        toasts.push(`没重做：这一笔属于 ${ownersText(out.refused.owners)}。`)
+        return false
+      }
+      if (out.done === null) return false
       sheetWrites.drop()
       await refreshBook()
       /* 同 `undo`：重做也改了影子树，参数台那一屏必须重取 desk */
       setTick((n) => n + 1)
       refreshReport()
+      toasts.push(`已重做：${out.done.label}`)
       return true
     } catch (e) {
       fail(e)
       return false
     } finally {
       setBusy(false)
+      txnFlight.current = false
     }
   }, [applyTxn, fail, refreshBook, refreshReport])
+
+  /* 上面那条 toast 里的「重做」从这一刻起能点到真函数 */
+  redoRef.current = redo
 
   const save = useCallback(async (): Promise<boolean> => {
     if (busy) return false
@@ -729,7 +827,7 @@ export function WorkbenchApp() {
       applyTxn(await wb.txnState())
       setTick((n) => n + 1)
       refreshReport()
-      toasts.push('已保存 —— 改动已写进仓库文件')
+      toasts.push('已保存到仓库。')
       return true
     } catch (e) {
       fail(e)
@@ -794,6 +892,21 @@ export function WorkbenchApp() {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return
       if (modalShortcutGate.blocking()) return
+      /*
+       * **焦点在可编辑元素里 ⇒ 这条快捷键不归外壳**（2026-11-14）。
+       *
+       * 作者在「描述」框里按 Cmd+Z：「好像没有生效」，点外面再撤却连撤了几条 ——
+       * 因为这里无条件 `preventDefault`：文字撤不了（原生被掐掉），撤掉的反而是
+       * **上一条已提交的改动**（往往还是别的字段 / 别的版本）。
+       *
+       * 现在的口径：框内归框（浏览器原生文字撤销），失焦之后才归应用。
+       * 光标在框里时 `Cmd+S` 也不拦 —— 那是页面自己的事（`pageActions`）。
+       */
+      const el = e.target as HTMLElement | null
+      const editable =
+        el !== null &&
+        (el.isContentEditable || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT')
+      if (editable) return
       const k = e.key.toLowerCase()
       if (k === 'z' && !e.shiftKey) {
         e.preventDefault()
@@ -812,12 +925,16 @@ export function WorkbenchApp() {
       }
     }
     window.addEventListener('keydown', onKey)
+
     return () => window.removeEventListener('keydown', onKey)
   }, [undo, redo, save, page])
 
   /* 草稿不干净时，刷新前用浏览器原生弹窗问一嘴（自绘模态框弹出来时刷新已经走了） */
   /* 脏 = 整本里记的（值草稿 + 事务）+ 事务自己那份。两处都看，切页瞬间也不会闪「已保存」 */
   const dirty = (book?.dirtyCount ?? 0) > 0 || txn?.dirty === true
+  /* 页头按钮上那个数：与状态栏「未保存改动（N）」同一个源（`Txn::dirty_count`），
+     不另算一套 —— 两处对不上时用户只会信小的那个 */
+  const dirtyN = book?.dirtyCount ?? 0
 
   /**
    * 页头那一槽要不要显示（作者 2026-10-16：「有需要的页面就显示，不需要的页面就不显示」）。
@@ -843,7 +960,7 @@ export function WorkbenchApp() {
    */
   const saveWhy =
     pageSlot !== null
-      ? '这一份没有要写回去的改动（和仓库里那份一样）'
+      ? '没有要保存的改动。'
       : (words?.disabled.nothingToSave ?? '没有未保存的改动')
   useEffect(() => {
     if (!dirty) return
@@ -893,20 +1010,23 @@ export function WorkbenchApp() {
       case 'machines':
         return `${book.badges.machines} 台机型 · ${book.badges.versions} 个版本`
       case 'params':
-        return '保存值由后端按三层算好 —— 徽章只在「现在」与它不同时出现'
+        /* 参数台不摆副标题：那排读数（N 参数 · M 可编辑）由页面自己说，见 ParamSheetPage */
+        return ''
       case 'bundles':
-        return '套餐 = 交付的真源（bundles.toml）—— 装什么、谁在用、改指向，都在这一页'
+        return '装了哪些文件、谁在用、怎么改指向。'
       case 'build':
         /* 三档的中文标签只有一个出口（后端词表）—— 这里不再写一遍 block→阻断 */
         return report && words
           ? `${words.severity.block.label} ${report.blocks} · ${words.severity.todo.label} ${report.todos} · ${words.severity.hint.label} ${report.hints}${report.hints > 0 && report.blocks === 0 && report.todos === 0 ? ' · 都过了' : ''}`
           : ''
       case 'assets':
-        return '资产域定义 + 引用反查 —— 交付身份改了先进草稿'
+        return '文件登记、被谁引用；改动先进草稿。'
       case 'annotate':
-        return '在图上拖框 —— 导出的就是 marks（百分比坐标，浅深两张图共用一份）'
+        return '在图上拖框，浅深两张共用一份标注。'
+      case 'defaults':
+        return '改新装默认值；重新构建客户端后才生效。'
       case 'settings':
-        return '只读 —— 数据根与工作台子目录的职责'
+        return '数据根与各子目录的职责。'
       case 'dev':
         return '把平时看不见的那几屏按按钮演出来（不读 G-code、不落记录）'
     }
@@ -938,6 +1058,8 @@ export function WorkbenchApp() {
       case 'annotate':
         /* 这一页不读整本 / 词表，骨架基本见不到；给一具形状对得上的占位（见 renderPage 的门） */
         return <PageSkeleton layout="cols" cards={2} rows={6} label="标注台正在加载" />
+      case 'defaults':
+        return <PageSkeleton layout="flow" cards={3} rows={5} label="默认配置正在加载" />
       case 'settings':
         return <PageSkeleton layout="flow" cards={2} rows={4} label="设置正在加载" />
       case 'dev':
@@ -1032,6 +1154,9 @@ export function WorkbenchApp() {
             onReportRefresh={refreshReport}
           />
         )
+      case 'defaults':
+        /* 这一页只读一条命令（`wb_defaults_view`），不等整本 / 词表 */
+        return <DefaultsPage tick={tick} onBookRefresh={refreshBook} />
       case 'settings':
         if (!boot) return skeletonFor('settings')
         return <SettingsPage boot={boot} />
@@ -1058,9 +1183,7 @@ export function WorkbenchApp() {
           data-icon={navIcon}
           aria-expanded={!navIcon}
           data-tip={
-            navIcon
-              ? '展开侧边栏（窗口小也能展开）'
-              : '收起侧边栏 —— 只留图标（记着我这次的选择）'
+            navIcon ? '展开侧边栏。' : '收起侧边栏，只留图标。'
           }
           onClick={() => {
             if (navIcon) {
@@ -1114,7 +1237,7 @@ export function WorkbenchApp() {
               {bd.n > 0 && (
                 <span
                   className={`${s.navBadge} ${bd.block ? '' : s.navBadgeSoft}`}
-                  data-tip={bd.block ? '有阻断没处理完' : '有待处理的项，但不挡生成'}
+                  data-tip={bd.block ? '有阻断没处理完' : '有待办，不挡生成。'}
                 >
                   {bd.n}
                 </span>
@@ -1249,7 +1372,7 @@ export function WorkbenchApp() {
                         {bd.n > 0 && (
                           <span
                             className={`${s.navBadge} ${bd.block ? '' : s.navBadgeSoft}`}
-                            data-tip={bd.block ? '有阻断没处理完' : '有待处理的项，但不挡生成'}
+                            data-tip={bd.block ? '有阻断没处理完' : '有待办，不挡生成。'}
                           >
                             {bd.n}
                           </span>
@@ -1279,6 +1402,32 @@ export function WorkbenchApp() {
                   */}
                   {headOpsVisible && (
                     <div className={s.headOps}>
+                      {/*
+                        生成页常驻的一枚只读 chip：`support-ease · 第 17 号`。
+                        账本与目录不同代时补「待核对」（不弹窗 —— 它只是"这一页看到的号
+                        可能与下一代接不上"，点进发布闸才谈得上处理）。
+                      */}
+                      {page === 'build' && publishSerialError !== null && (
+                        <span className={`${s.tag} ${s.tagGhost}`} data-tip={publishSerialError}>
+                          序号读不到
+                        </span>
+                      )}
+                      {page === 'build' && publishSerial !== null && (
+                        <span
+                          className={s.tag}
+                          data-tip={
+                            publishSerial.serial === null
+                              ? '还没发布过，第一次是第 1 号。'
+                              : '正式发布才推进这个号。'
+                          }
+                        >
+                          {publishSerial.serial === null
+                            ? `${publishSerial.catalogId} · 还没发过`
+                            : `${publishSerial.catalogId} · 第 ${publishSerial.serial} 号${
+                                publishSerial.inSync ? '' : ' · 待核对'
+                              }`}
+                        </span>
+                      )}
                       {pageSlot !== null ? (
                         <>
                           <span
@@ -1312,7 +1461,11 @@ export function WorkbenchApp() {
                             data-tip={saveOn ? (pageSlot.saveTitle ?? '把这一份落盘') : saveWhy}
                             onClick={() => pageActions.run('save')}
                           >
-                            {pageSlot.busy === true ? (pageSlot.savingLabel ?? '保存中…') : '保存'}
+                            {pageSlot.busy === true
+                              ? (pageSlot.savingLabel ?? '保存中…')
+                              : dirtyN > 0
+                                ? `保存改动 · ${dirtyN} 处`
+                                : '保存改动'}
                           </button>
                         </>
                       ) : (
@@ -1337,13 +1490,12 @@ export function WorkbenchApp() {
                           className={`${s.btn} ${s.btnSm}`}
                           data-tip={
                             dirty
-                              ? `看看这 ${book?.dirtyCount ?? 0} 处改动 —— 逐行 diff，看完在框里放弃或保存`
-                              : (words?.save.saved.explain ?? '草稿和磁盘那一份一致')
+                              ? `看这 ${book?.dirtyCount ?? 0} 处改动，在框里放弃或保存。`
+                              : (words?.save.saved.explain ?? '没有未保存的改动。')
                           }
                           onClick={() => setHistoryOpen(true)}
                         >
-                          {words ? words.save[dirty ? 'dirty' : 'saved'].label : '—'}
-                          {dirty ? `（${book?.dirtyCount ?? 0}）` : ''} · 查看改动
+                          {dirtyN > 0 ? `查看改动 · ${dirtyN} 处` : '查看改动'}
                         </button>
                       )}
                     </div>
@@ -1361,9 +1513,8 @@ export function WorkbenchApp() {
                     {boot.problem}
                     {boot.detail && <> —— <span className="wb-mono">{boot.detail}</span></>}
                     <br />
-                    确认仓库里的
                     <span className="wb-mono">presets/</span>
-                    已就位，然后点
+                    放回仓库后，点
                     <button
                       type="button"
                       className="wb-link"
@@ -1373,11 +1524,7 @@ export function WorkbenchApp() {
                     >
                       重新加载
                     </button>
-                    ，或去
-                    <button type="button" className="wb-link" onClick={() => setPage('settings')}>
-                      设置页
-                    </button>
-                    看数据根。
+                    。
                   </div>
                 )}
 
@@ -1389,8 +1536,7 @@ export function WorkbenchApp() {
                   <div className="wb-banner" data-tone="warn" style={{ margin: '0 12px' }}>
                     盘上的
                     <span className="wb-mono"> presets/ </span>
-                    在这个窗口外面改过了 —— 现在显示的仍是打开时读进来的那一份（参数名、可选项、
-                    分组都可能是旧的）。点
+                    改过了，这里还是旧数据。
                     <button
                       type="button"
                       className="wb-link"
@@ -1412,8 +1558,6 @@ export function WorkbenchApp() {
                     >
                       重新加载
                     </button>
-                    读进来，不用重启。{' '}
-                    <strong>有未保存的改动时会先问你一句</strong>，不会悄悄丢掉。
                   </div>
                 )}
 
@@ -1488,7 +1632,7 @@ export function WorkbenchApp() {
                 <button
                   type="button"
                   className={`${s.sbBtn} ${dirty ? s.sbBtnOn : ''}`}
-                  title="看看这几处都改了什么 —— 每一格从什么值改成什么值"
+                  title="看每一格从什么值改成什么值。"
                   onClick={() => setHistoryOpen(true)}
                 >
                   未保存改动（{book?.dirtyCount ?? 0}）
@@ -1509,10 +1653,7 @@ export function WorkbenchApp() {
                   <span className={`${s.sbBar} ${s.sbMinor}`}>|</span>
                   <span
                     className={`${s.sbSeg} ${s.sbMinor}`}
-                    data-tip={
-                      `日志里搜 ${txn.receipt.req} 就是这个动作的全部行` +
-                      `（${txn.receipt.command}${txn.receipt.ok ? '' : '，失败了'}）`
-                    }
+                    data-tip={`日志里搜 ${txn.receipt.req}，能找到这次操作。`}
                     style={{ fontFamily: 'ui-monospace, monospace', userSelect: 'text' }}
                   >
                     {txn.receipt.req}

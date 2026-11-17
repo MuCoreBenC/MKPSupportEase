@@ -153,8 +153,11 @@ jobs:
       - name: 准备工具链
         if: steps.scope.outputs.code == '1'
         run: |
-          rustup toolchain install stable --profile minimal --component clippy,rustfmt
-          rustup default stable
+          # 版本锁在 `rust-toolchain.toml`（仓库根）：本地与 CI 必须是同一个 clippy，
+          # 否则"本地绿、CI 红"是必然 —— 新版本会加 lint，推前闸用的是本地那个更宽松的。
+          # `rustup show` 在目录里读到 toolchain 文件就按它安装；这里不再写死 `stable`。
+          rustup show
+          rustup component add clippy rustfmt
           rustc -V && cargo -V
 
       - name: 缓存 cargo registry 与 target

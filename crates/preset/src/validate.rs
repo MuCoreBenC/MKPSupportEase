@@ -130,12 +130,14 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
         "SheathWallWidth" => ConfigVal::F64(w.sheath_wall_width),
         "SheathEnableHeight" => ConfigVal::F64(w.sheath_enable_height),
         "SheathConvergeLayers" => ConfigVal::I64(w.sheath_converge_layers),
-        "IroningESumThreshold" => ConfigVal::F64(w.ironing_e_sum_threshold),
+        "IroningESumLimit" => ConfigVal::F64(w.ironing_e_sum_limit),
         "IroningMode" => ConfigVal::Str(w.ironing_mode.clone()),
         "UseIroningPath" => ConfigVal::Bool(w.use_ironing_path),
         "IroningCoverageThreshold" => ConfigVal::F64(w.ironing_coverage_threshold),
-        "IroningSuppressExpand" => ConfigVal::F64(w.ironing_suppress_expand),
-        "IroningSuppressExpandMode" => ConfigVal::Str(w.ironing_suppress_expand_mode.clone()),
+        "IroningKeepout" => ConfigVal::F64(w.ironing_keepout),
+        "IroningKeepoutMode" => ConfigVal::Str(w.ironing_keepout_mode.clone()),
+        "GlueEdgeLines" => ConfigVal::I64(w.glue_edge_lines),
+        "GlueEdgeLift" => ConfigVal::F64(w.glue_edge_lift),
         "PrimeTriggerLayers" => ConfigVal::I64(w.prime_trigger_layers),
         "PrimeEnabled" => ConfigVal::Bool(w.prime_enabled),
         "DiskStaggerMode" => ConfigVal::Str(w.disk_stagger_mode.clone()),
@@ -463,6 +465,7 @@ mod tests {
         );
     }
 
+    /// 回抽只允许 −50 ~ 0：正数没有物理意义，界面上也不该给机会填。
     #[test]
     fn registry_rejects_out_of_range_mkpretract() {
         let mut cfg = cfg_from("");
@@ -470,7 +473,7 @@ mod tests {
         let err = validate_against_registry(&cfg, &load_param_registry(), "A1", None).unwrap_err();
         assert_eq!(
             msg(err),
-            "param toolhead.MKP_retract value 60 is out of range [-50, 50]"
+            "param toolhead.MKP_retract value 60 is out of range [-50, 0]"
         );
     }
 

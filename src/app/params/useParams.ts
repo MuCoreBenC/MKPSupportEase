@@ -17,11 +17,13 @@
  * 手抄表和真注册表的总数都是 67，但最后两类的切分完全不同（手抄：涂胶 31 / 更多 4，
  * 真注册表：涂胶 18 / 更多 17）。总数对得上所以一直没人发现 —— 这里以真注册表为准。
  *
- * # 三层值
+ * # 两层值
  *
- *   出厂     `RecipeParam.baseValue`（被版本盖过的那几条有）否则加载时 `origin === 'base'` 的值
- *     ↓ 已保存  保存动作把草稿并进来。**按「机型:版本」分开记**，切回去还看得见
- *       ↓ 草稿  未保存的改动
+ *   已保存  保存动作把草稿并进来。**按「机型:版本」分开记**，切回去还看得见
+ *     ↓ 草稿  未保存的改动
+ *
+ * 注册表里的出厂值**不在这条链上** —— 它只是工作台的共用口径（含占位零），
+ * 客户端不消费（「恢复默认值」读的是 `baseline-local/`，见 AGENTS.md）。
  *
  * 显示读 `draft ?? saved`。中间那一层不能省：行上那个「↩」chip 要退回的是**已保存值**，
  * 而「恢复默认值」退回的是**出厂值** —— 保存过一次之后这两个就不是一回事了。
@@ -63,6 +65,8 @@ import {
 import type {
   ActiveOrigin,
   CatalogParamDef,
+  BaselineSnapshot,
+  BaselineValue,
   Machine,
   MachineVersion,
   ParamDecision,
@@ -78,8 +82,8 @@ import type {
 } from '../../api'
 import type { FieldSchema } from '../../components/field'
 import { isDirtyValue } from './dirtyValue'
-/* 显示精度唯一出口（`mm` 两位、其余原样）—— 与 `FieldControl` / `NumberField` 同一套 */
-import { displayDecimals, formatNum } from '../../components/field/value'
+/* 数字显示的唯一出口（修浮点尾巴、按 step 收精度）—— 与 `FieldControl` / `NumberField` 同一套 */
+import { formatNum } from '../../components/field/value'
 /* 关掉模态框再进来的会话缓存（草稿层 + 撤销重做 + 修改历史），见它头注 */
 import {
   clearParamSession,
@@ -355,8 +359,6 @@ interface ComboData {
   placeByKey: Map<string, Place>
   /** api 给的当前值 = 「文件里现在写着什么」的基准 */
   baseByKey: Map<string, string>
-  /** 出厂值 */
-  factoryByKey: Map<string, string>
   /** 这个 combo 的 MKP 文件名（`A1.toml`）。包里这个版本没有 MKP 文件时是 null */
   fileLabel: string | null
 }
@@ -474,63 +476,10 @@ function controlFromUi(ui: string): 'number' | 'switch' | 'choice' | 'text' {
   return 'number'
 }
 
-/**
- * 单位字段的写法归一：**长得像区间的 unit 当成没有单位**。
- *
- * 真注册表里 `unit` 不是每次都写单位 —— 风扇速度那条写的是 `"unit": "0-255"`
- * （同一个对象的 min 0 / max 255 就在旁边），也就是 **min/max 被塞进了 unit 位**。
- * 照原样渲染出来是三处一样的话：
- *
- *   行里的步进器   `250 0-255`    —— 值后面跟着一个假单位
- *   行里的还原胶囊 `已保存的 255 0-255`
- *   保存确认       `255 0-255 → 250 0-255`
- *
- * 作者的原话：「不要显示区间 0-255 这种」。所以这里只认这一种脏数据，把它当**没有单位**：
- *
- *   · 范围一点没丢 —— 它在 min/max 上，行展开的「取值范围」写的是 `0 ~ 255`，
- *     步进器也照样按 0/255 夹值（`FieldControl` 已经把 min/max 递下去了）
- *   · 真单位（mm / mm/s / 秒 / %）一律照原样显示，**不在这里发明第二种规则** ——
- *     全仓库只有这一条 unit 是区间形状（实测 grep：`"unit": "<数字>-<数字>"` 命中 1 条）
- */
-const RANGE_LIKE_UNIT = /^\s*\d+(?:\.\d+)?\s*[-~～—–]\s*\d+(?:\.\d+)?\s*$/
-
-/**
- * 单位归一：`null` 与 `undefined` **同义 = 没有单位**。
- *
- * ★ 2026-10-17：「擦料塔挤出倍率」曾显示成 `1 null`。注册表里那一条根本没有 `unit`
- *   字段，但配方/定义通道过来是 JSON 的 `null` —— 而下游判的是 `!== undefined`，
- *   `null` 就那么一字不改地拼进了字符串。这不是脏数据，是**两种"没有"**。
- *   所以这里把 `null` 也吞掉，往后的类型只有 `string | undefined` 一种缺失形态。
- */
-function unitOf(raw: string | null | undefined): string | undefined {
-  if (raw == null) return undefined
-  return RANGE_LIKE_UNIT.test(raw) ? undefined : raw
-}
-
-/**
- * 某个值该显示成什么字 —— 还原 chip、历史条目、保存确认、行内只读值全走这一套翻译。
- *
- * 两条规矩（2026-10-17）：
- *   1. **有单位才拼单位**（`null` 不算，见 `unitOf`）；
- *   2. **数字按显示精度渲染**（`formatNum`）：`mm` 固定两位（`-0.50` / `24.00` / `3.70`），
- *      其余单位原样、只修浮点尾巴。盘上的原文一个字都不改 —— 这里只管"给我看的字"。
- */
-export function valueText(def: ParamDef | undefined, raw: string, tr: Tr): string {
-  if (raw === '') return tr('params.value.empty')
-  if (def === undefined) return raw
-  if (def.field.control === 'switch') {
-    return raw === 'true' ? tr('params.value.on') : tr('params.value.off')
-  }
-  if (def.field.control === 'choice') {
-    return def.field.choices?.find((c) => c.value === raw)?.label ?? raw
-  }
-  if (def.field.control === 'gcode') {
-    return tr('params.value.lines', { count: raw.split('\n').length })
-  }
-  /* 数字按显示精度走；非数字（`tower` / G-code 之类）`formatNum` 原样退回 */
-  const text = formatNum(raw, displayDecimals(def.unit, def.field.step))
-  return def.unit != null ? `${text} ${def.unit}` : text
-}
+/* 显示格式化住 `valueText.ts`（纯函数、能单独测）；这里只把它转出去，
+   页面上那些调用点不用改 import 路径 */
+import { autoLabel, autoNumber, unitOf, valueText } from './valueText'
+export { autoLabel, autoNumber, unitOf, valueText }
 
 const cellKey = (machineId: string, versionId: string, key: string) =>
   `${machineId}:${versionId}:${key}`
@@ -642,14 +591,10 @@ export interface Params {
   savedValueOf: (key: string) => string
   /** 这一项上一次保存之前的值（2026-10-21；没记录过 = null） */
   prevSavedOf: (key: string) => string | null
-  /** 出厂值。「恢复默认值」与行详情要它 */
-  factoryOf: (key: string) => string
   dirtyOf: (key: string) => boolean
   dirtyCount: number
   /** 哪些分类里有未保存的改动 —— 分类胶囊上那颗红点 */
   dirtyTabs: Set<string>
-  /** 与出厂不同的条数，按当前机型实算 */
-  changedCount: number
 
   isVisible: (key: string) => boolean
   /** 现在是哪个父字段的条件没满足。可见时返回 null */
@@ -700,10 +645,18 @@ export interface Params {
   /** 行上那个 chip：退回**已保存值**（= 撤掉草稿） */
   revertToSaved: (key: string) => void
   /**
-   * 底栏的「恢复默认值」：全部退回**出厂值**（目录里那份 `baseValue`），
-   * 算一次动作、可整体撤销（2026-10-08 资源库改判：不再问任何历史快照）。
+   * 底栏的「恢复默认值」：退回**最近一次与云端某一版逐字节一致落盘的原样**
+   * （`baseline-local/`），算一次动作、可整体撤销。
+   *
+   * `values` 由 [`loadRestoreSnapshot`] 先取好（确认框要按它列「旧 → 新」）；
+   * **不读注册表的出厂值** —— 那是工作台内部口径，含占位零。
    */
-  restoreDefaults: () => void
+  restoreDefaults: (values: BaselineValue[]) => void
+  /**
+   * 取「恢复默认值」要回到的那一版。`null` = 没有可恢复的（按钮禁用）。
+   * 与「编辑文件」那颗读同一份字节。
+   */
+  loadRestoreSnapshot: () => Promise<BaselineSnapshot | null>
   /**
    * 全部未保存的改动**一次退回已保存值**（原「取消」；2026-10-16 起 =
    * 「放弃并退出」做的事——作者：「退出编辑模式就是作废，那些改的都作废，
@@ -1046,17 +999,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const presetPrefsRevision = usePresetPrefsRevision()
   /** 上一次那次读认的是哪一份文件 —— 换文件才丢云端表态，改偏好不该丢 */
   const syncPathRef = useRef<string | null>(null)
-
-  /**
-   * **「恢复默认值」的基准** —— **已退场**（2026-10-08 资源库改判）。
-   *
-   * 那一版是"退回这份预设当初那版云端的默认值"（藏在内部 baseline 里）。
-   * 现在整个功能不要了：**有问题就让用户删掉、重新取一份** —— 参数表上的「恢复默认值」
-   * 退回**出厂值**（目录里那份 `baseValue`），不再去问任何历史快照。
-   *
-   * 于是这一条读（`getPresetDefaults`）与状态一起下线：少一次请求、少一个"我该退到哪一版"
-   * 的隐性概念。
-   */
 
   /**
    * **保存**：把草稿提交成"本地预设"（云端线另存 / 用户线写回）。
@@ -1410,7 +1352,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         const defs: ParamDef[] = []
         const defByKey = new Map<string, ParamDef>()
         const baseByKey = new Map<string, string>()
-        const factoryByKey = new Map<string, string>()
 
         /* 把某个 key 登记进分类 / 分组索引 */
         const place = (key: string, sectionId: string): void => {
@@ -1504,6 +1445,10 @@ export function useParams(opts: UseParamsOptions = {}): Params {
               min: p?.min ?? rd.min,
               max: p?.max ?? rd.max,
               step: p?.step ?? rd.step,
+              /* 「0 = 自动」的字段（注册表 `zeroMeansAuto`）：0 不是"不生效" */
+              zeroMeansAuto: meta?.zeroMeansAuto === true ? true : undefined,
+              /* 那个自动值怎么算（注册表 `autoValue`）：界面照它算，不按 key 写死 */
+              autoValue: meta?.autoValue,
               /*
                * 选项级弃用映射到共用件的 `FieldOption.deprecated`（划线）。**不新造第二个信号**
                * （FieldOption.deprecated 早就在，SegmentedField / SelectField 已经在画）。
@@ -1527,11 +1472,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           /* 值本体只对活字段有（弃用字段配方通道不下发 → 不填，展示走兜底） */
           if (p !== undefined) {
             baseByKey.set(key, normalizeRaw(p.value, meta?.valueType))
-            /* 出厂值：被版本盖过的那几条带 baseValue，没盖过的 value 本身就是出厂值 */
-            factoryByKey.set(
-              key,
-              normalizeRaw(p.origin === 'variant' ? p.baseValue : p.value, meta?.valueType),
-            )
           }
           place(key, sectionId)
         }
@@ -1552,7 +1492,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           defByKey,
           placeByKey,
           baseByKey,
-          factoryByKey,
           fileLabel,
         })
       })
@@ -1643,8 +1582,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     (key: string) => draft[key] ?? savedValueOf(key),
     [draft, savedValueOf],
   )
-
-  const factoryOf = useCallback((key: string) => combo?.factoryByKey.get(key) ?? '', [combo])
 
   /* 判据只有一处（`isDirtyValue`）：草稿里的值真的与已保存值不同才算脏 */
   const dirtyOf = useCallback(
@@ -1885,22 +1822,33 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   )
 
   /**
+   * 取「恢复默认值」要回到的那一版 —— `baseline-local/` 那份原文。
+   * 参数页与「编辑文件」读同一份字节；没有就 `null`（按钮禁用）。
+   */
+  const loadRestoreSnapshot = useCallback(async (): Promise<BaselineSnapshot | null> => {
+    if (localPath === null) return null
+    return api.readPresetBaselineValues(localPath)
+  }, [localPath])
+
+  /**
    * 整份恢复默认值：一次动作，撤销一下就全回来。
    *
-   * **退回目录里那份出厂值**（2026-10-08 资源库改判）：那套"退回这份预设当初那版交付预设的
-   * 默认值"整个退场了 —— 有问题就让用户删掉、重新取一份，参数页不再养一份历史快照，
-   * 也就没有"基准里缺哪一项"那一串回落。
+   * **退的是「最近一次与云端某一版逐字节一致落盘的原样」**，不是注册表里的出厂值 ——
+   * 那些值只是工作台的共用口径（含占位零），客户端不消费（见 AGENTS.md）。
+   * 云端更新里那几项"采用"的待落决定一并作废：否则保存时又把云端值写回去，恢复白做。
    */
-  const restoreDefaults = useCallback(() => {
-    if (combo === null) return
-    apply(
-      tr('params.act.restoreDefaults'),
-      combo.defs.map((d) => ({
-        key: d.key,
-        value: combo.factoryByKey.get(d.key) ?? '',
-      })),
-    )
-  }, [apply, combo, tr])
+  const restoreDefaults = useCallback(
+    (values: BaselineValue[]) => {
+      if (values.length === 0) return
+      apply(
+        tr('params.act.restoreDefaults'),
+        values.map((v) => ({ key: v.key, value: v.value })),
+      )
+      /* 放在 `apply` **之后**：它会按"这一步之后的表态表"覆盖一次（同 `discardAll`） */
+      setSyncDecisions({})
+    },
+    [apply, tr],
+  )
 
   /* 撤销 / 重做在**回调体里**读栈算完再 set —— StrictMode 会把 updater 跑两次 */
   const undo = useCallback(() => {
@@ -2085,21 +2033,22 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       return
     }
     /*
-     * **这一批云端更新的表态**（2026-10-20）：只交还"还在待处理、而且表过态"的那几项。
+     * **这一批云端更新的表态**（2026-10-20）：只交还**这一趟表过态**的那几项。
      * 没表态的项不能捎带（那等于替用户做了决定），保存完它仍然挂着。
      *
-     * ★ 表态表只活在内存里（关掉这一屏就没了）；草稿却会跟到下一次打开。
-     *   所以这里补一条**从草稿反推**：某一项还没表态，可草稿里的值已经就是云端新值
-     *   ——那等于"用过了"，只是那一笔表态在关窗时丢了。不补的话值已经改了、
-     *   水位却没推进，云端更新会一直挂着，逼用户再点一次「用新值」（还是 noop）。
-     *   保持原样推不出来（没有值线索），丢了就丢了 —— 那一版下次再问一遍，不算错。
+     * ★ **只认表态表**：草稿值等于云端新值**不算表态** ——
+     *   用户可能只是手打了一个恰好相同的数。从草稿值反推 adopt 会让**没勾的项**
+     *   被静默记成已处理。
+     *   代价是关窗丢掉的那笔表态不再自动认领：云端下次再问一遍，用户再点「用新值」
+     *   是 noop —— 宁可多问一次，也不替用户做决定。
+     *
+     * ★ **不再按 `pending` 过滤**：保存过的项在「云端更新」那一屏里还能点
+     *   「改用新值」—— 那一笔要照样交上去（后端按 key 记账、原地把表态改成
+     *   adopt），不然值写进去了、账还写着"保持"。
      */
     const decisions: ParamDecision[] = []
     for (const e of sync?.entries ?? []) {
-      if (!e.pending) continue
-      const kind =
-        syncDecisions[e.key] ??
-        (e.cloudNew !== null && draft[e.key] === e.cloudNew ? 'adopt' : undefined)
+      const kind = syncDecisions[e.key]
       if (kind !== undefined) decisions.push({ paramKey: e.key, kind })
     }
     /*
@@ -2354,12 +2303,6 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     () => (combo?.tabs ?? []).map((t) => localizeTab(t, locale)),
     [combo, locale],
   )
-
-  /** 与出厂不同的条数 —— 按当前机型实算，不是写死的 67 */
-  const changedCount = useMemo(() => {
-    if (combo === null) return 0
-    return combo.defs.filter((d) => valueOf(d.key) !== (combo.factoryByKey.get(d.key) ?? '')).length
-  }, [combo, valueOf])
 
   const sectionsOf = useCallback(
     (tabId: string) => localizedTabs.find((t) => t.id === tabId)?.sections ?? [],
@@ -2755,7 +2698,11 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const syncDraftOf = useCallback(
     (key: string): SyncDraftKind | null => {
       const entry = syncByKey.get(key)
-      if (entry === undefined || !entry.pending) return null
+      if (entry === undefined) return null
+      /*
+       * 不再要求 `entry.pending`：保存过的项也能在「云端更新」那一屏里点「改用新值」，
+       * 那一笔同样是"还没保存的决定"，行上要当场画成采用态（不然值变了、行上什么都没说）。
+       */
       return syncDecisions[key] ?? null
     },
     [syncByKey, syncDecisions],
@@ -2868,11 +2815,9 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     total: combo?.defs.length ?? 0,
     valueOf,
     savedValueOf,
-    factoryOf,
     dirtyOf,
     dirtyCount: dirtyKeys.length,
     dirtyTabs,
-    changedCount,
     isVisible,
     blockedBy: findBlocked,
     condOn,
@@ -2888,6 +2833,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     dismissReslice: useCallback(() => setResliceAsk(false), []),
     revertToSaved,
     restoreDefaults,
+    loadRestoreSnapshot,
     discardAll,
     save,
     savedNote,

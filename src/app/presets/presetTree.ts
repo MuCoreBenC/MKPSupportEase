@@ -102,6 +102,7 @@ import type {
   VersionFiles,
 } from '../../api'
 import type { StringKey, Tr } from '../../i18n'
+import type { RelativePart } from '../store/package'
 
 /**
  * 用户自己的一份文件（本地文件，`presets-local/`）。
@@ -269,11 +270,17 @@ export function originCellOf(tr: Tr, row: PresetTableRow): OriginCell {
     const full = row.basedOnFacts?.sourceRef ?? null
     const ref = row.cloudFile ?? (row.basedOnSource?.split('/').pop() ?? null)
 
-    /* 用户自己另存出来的：指向母本那一份（可点） */
+    /*
+     * 用户自己另存出来的：**正文只写「备份」**，母本名字留在悬停与定位里。
+     *
+     * 2026-11-17 作者：「这个来源我觉得就多余……最多就是备份，就是恢复进来的」——
+     * `本地 · A1_MINI-fast260326 copy.toml` 这种写法把"我这份是从哪份拷的"
+     * 摆在了最显眼的位置，而用户此刻要读的是"这份是不是我要用的"。
+     */
     if (kind === 'copy') {
       if (row.originName) {
         return {
-          text: tr('presets.tree.origin.localCopy', { name: row.originName }),
+          text: tr('presets.tree.origin.backup'),
           ref: null,
           title: tr('presets.tree.origin.localCopyTitle', { name: row.originName }),
           locate: {
@@ -310,10 +317,7 @@ export function originCellOf(tr: Tr, row: PresetTableRow): OriginCell {
     if (kind === 'download') {
       const branch = identityRefOf(full)
       return {
-        text:
-          branch === null
-            ? tr('presets.tree.origin.cloud')
-            : tr('presets.tree.origin.cloudRef', { ref: branch }),
+        text: cloudOriginText(tr, full),
         ref,
         title:
           branch === null
@@ -369,17 +373,16 @@ export function originCellOf(tr: Tr, row: PresetTableRow): OriginCell {
      * `云端 · main` 对不上；源类型属于"当前设置"那一层，收进「更多」即可。
      */
     const identity = row.basedOnFacts?.cloudSource ?? null
-    const branch = identityRefOf(identity)
     return {
-      text:
-        branch === null
-          ? tr('presets.tree.origin.cloud')
-          : tr('presets.tree.origin.cloudRef', { ref: branch }),
+      text: cloudOriginText(tr, identity),
       ref: null,
       title:
         identity === null
           ? tr('presets.tree.origin.cloudNoRefTitle')
-          : tr('presets.tree.origin.cloudTitle', { ref: branch ?? '-' }),
+          : tr('presets.tree.origin.cloudTitle', {
+              /* 有分支念分支，没有就念「哪条线」（自建源的主机）—— 与正文同一套口径 */
+              ref: identityRefOf(identity) ?? identityLineOf(identity) ?? '-',
+            }),
       full: identity,
       why: null,
     }
@@ -620,13 +623,6 @@ export interface CloudRowState {
   warn: boolean
   /** 动作按钮的悬停说明 */
   hint: StringKey | null
-  /**
-   * ★ **只有这一档为真，详情才画「云端新版发布」那一行**。
-   *
-   * 作者的口径：本地文件能用的状态下不显示云端时间 —— 那会让人以为"云端有新的"，
-   * 却没有任何可更新的版本。时间只在真有新版、且真给更新按钮时出现。
-   */
-  showCloudRelease: boolean
 }
 
 /** `github#owner/repo@main` → `main`；没有 ref（自建源）⇒ `null` */
@@ -638,18 +634,120 @@ export function identityRefOf(key: string | null | undefined): string | null {
   return ref !== '' && ref !== '-' ? ref : null
 }
 
+/**
+ * 这份用户文件**属于哪个来源分支**（ref）。`null` = 没有来源记录（导入 / 手拖）。
+ *
+ * 只用它分组与筛选：版本新旧仍然由 Rust 侧 `based_on` 回答，这里不重算任何判定。
+ */
+export function branchOf(
+  facts: { sourceRef?: string | null } | null | undefined,
+): string | null {
+  return identityRefOf(facts?.sourceRef ?? null)
+}
+
+/**
+ * 这份用户文件是不是**下载建的主份**。
+ *
+ * 云端那一行只认它：同一份云端可能被「另存为 / 复制」出好几份，副本各有各的
+ * 更新按钮，但不该把云端行拖成「有新版本」。没账的老文件（`null`）当主份 ——
+ * 把它们排除掉会让云端行显示「未下载」。
+ */
+export function isMainCopy(f: { provenanceKind?: string | null }): boolean {
+  const kind = f.provenanceKind
+  return kind === undefined || kind === null || kind === 'download'
+}
+
+/**
+ * 这一份（属于 `mine` 支）算不算"当前这一支的"。
+ *
+ * - 当前源没有 ref（自建源）⇒ 一律算（不隔离）
+ * - 这一份没有来源记录 ⇒ 算（导入 / 老副本，不属于任何分支）
+ * - 两边都有且不同 ⇒ **不算**（它在盘上照旧存在，只是不参与当前这一支的认领）
+ */
+export function branchMatches(mine: string | null, current: string | null): boolean {
+  return current === null || mine === null || mine === current
+}
+
+/**
+ * 本地表筛选：这一行在 `filter` 档下留不留。
+ *
+ * `hasSource` = 这份文件尾部**有没有来源记录**（`basedOnFacts.sourceRef` 非空）。
+ * 它和"分支名"是两件事：自建源（`http://127.0.0.1:8787` 那种）记着来源、但**没有
+ * 分支概念**（ref 是 `-`）—— 那种文件属于"当前源"，不是「没有来源」。
+ * 只有导入 / 手拖进来、压根没有来源记录的，才进「没有来源」那一档。
+ */
+export function branchKept(
+  mine: string | null | undefined,
+  hasSource: boolean,
+  filter: BranchFilter,
+  current: string | null,
+): boolean {
+  if (filter === 'all') return true
+  if (filter === 'unfiled') return !hasSource
+  /* 当前分支：没有来源记录的也留着 —— 在哪个分支下藏掉它都等于说"你那份不见了" */
+  return !hasSource || branchMatches(mine ?? null, current)
+}
+
+/**
+ * 源身份里的**「哪条线」**：`github` / `gitee` 念平台名，自建源念**主机**（带端口）。
+ *
+ * 自建目录源（`custom#127.0.0.1:8787@-`）以前整段念成 `custom` —— 那是内部枚举名，
+ * 用户读不出"这是我那台机器上的源"（2026-11-17 作者：「不要写 custom」）。
+ */
+export function identityLineOf(key: string | null | undefined): string | null {
+  if (!key) return null
+  const [host, rest] = key.split('#')
+  if (host === 'github') return 'GitHub'
+  if (host === 'gitee') return 'Gitee'
+  const repo = (rest ?? '').split('@')[0]
+  /*
+   * 自建目录源记的是 `主机:端口/交付目录`（`127.0.0.1:8787/delivery`）——
+   * `/delivery` 是目录名，不是"哪条线"，念出来只会让人以为源名字就叫这个。
+   */
+  const line = repo.split('/')[0]
+  return line !== '' ? line : (host || null)
+}
+
 /** `github#owner/repo@main` → `GitHub · main`（有新版那一行显示"从哪来的新版"） */
 export function identityDisplayOf(tr: Tr, key: string | null | undefined): string | null {
   if (!key) return null
-  const host = key.split('#')[0]
-  const platform =
-    host === 'github'
-      ? 'GitHub'
-      : host === 'gitee'
-        ? 'Gitee'
-        : (host || tr('presets.tree.identity.unknownSource'))
+  const line = identityLineOf(key) ?? tr('presets.tree.identity.unknownSource')
   const ref = identityRefOf(key)
-  return ref === null ? platform : `${platform} · ${ref}`
+  return ref === null ? line : `${line} · ${ref}`
+}
+
+/**
+ * 云端来源那一格写什么：有分支就是 `云端 · main`；没有分支（自建目录源）就把
+ * **主机**接在后面（`云端 · 127.0.0.1:8787`），而不是退回光秃秃的「云端」——
+ * 那句什么也没说（2026-11-17 作者：「它就应该显示云端，然后加上分支之类的」）。
+ */
+function cloudOriginText(tr: Tr, identity: string | null | undefined): string {
+  const branch = identityRefOf(identity ?? null)
+  if (branch !== null) return tr('presets.tree.origin.cloudRef', { ref: branch })
+  const line = identityLineOf(identity)
+  return line === null
+    ? tr('presets.tree.origin.cloud')
+    : `${tr('presets.tree.origin.cloud')} · ${line}`
+}
+
+/**
+ * 相对时间那一格怎么念。**文案住 i18n 表**（四语同改），这里只做「分档 → 键」的映射。
+ *
+ * 只给「云端当前」用；`relativePart(...)` 返回 `null` 时调用方退回 `instantText`。
+ */
+export function relativeLabel(tr: Tr, part: RelativePart): string {
+  switch (part.kind) {
+    case 'now':
+      return tr('time.relative.now')
+    case 'minute':
+      return tr('time.relative.minute', { n: String(part.value) })
+    case 'hour':
+      return tr('time.relative.hour', { n: String(part.value) })
+    case 'day':
+      return tr('time.relative.day', { n: String(part.value) })
+    case 'month':
+      return tr('time.relative.month', { n: String(part.value) })
+  }
 }
 
 /** 说不清的原因 → 人话（后端给稳定词，界面只翻词） */
@@ -669,7 +767,7 @@ export const UNVERIFIED_WHY: Record<UnverifiedReason, StringKey> = {
  * 是否显示云端时间）在这里产生一次，组件只负责画。
  *
  * 它**不看时间**：谁新谁旧由 `basedOn`（Rust 侧 `catalogId + serial + SHA + ref`）回答。
- * 时间只做追溯：`showCloudRelease` 为真时，界面才把「云端新版发布」那一行画出来。
+ * 「云端当前」那一行**永久显示**（不跟有没有新版走）；这里只回答动作给不给。
  */
 export function updateStatusOf(row: {
   basedOn?: BasedOn
@@ -683,7 +781,6 @@ export function updateStatusOf(row: {
     action: 'none',
     warn: false,
     hint: null,
-    showCloudRelease: false,
   } as const
   if (row.localState === undefined) return { ...none }
 
@@ -710,7 +807,6 @@ export function updateStatusOf(row: {
         ...none,
         text: 'presets.tree.cloudLocal.stale',
         action: 'update',
-        showCloudRelease: true,
       }
     /*
      * **发布前进了，但这一份没变**：不说「有新版」，也不给动作 ——
@@ -729,7 +825,6 @@ export function updateStatusOf(row: {
         ...none,
         text: 'presets.tree.cloudLocal.unchanged',
         action: 'update',
-        showCloudRelease: true,
       }
     /*
      * **说不清版本关系**：不声称有新版，也不给「更新」——
@@ -775,7 +870,6 @@ export function updateStatusOf(row: {
         ...none,
         text: CLOUD_LOCAL_TEXT[row.localState],
         action: row.localState === 'stale' ? 'update' : 'none',
-        showCloudRelease: row.localState === 'stale',
       }
   }
 }
@@ -1193,6 +1287,13 @@ export const ARCHIVE_DRAWER = {
   bodyTitle: 'presets.tree.archiveDrawer.bodyTitle',
   /** 认不出机型版本时那一格写什么 */
   unknown: 'presets.tree.archiveDrawer.unknown',
+  /* 正文区三档：这一版 / 正在用的 / 对比 */
+  tabOld: 'presets.tree.archiveDrawer.tabOld',
+  tabCurrent: 'presets.tree.archiveDrawer.tabCurrent',
+  tabDiff: 'presets.tree.archiveDrawer.tabDiff',
+  /* 用回这一版（两段式：第二下是「确认用回」） */
+  restore: 'presets.tree.archiveDrawer.restore',
+  restoreAsk: 'presets.tree.archiveDrawer.restoreAsk',
 } as const satisfies Record<string, StringKey>
 
 /**
@@ -1711,6 +1812,16 @@ export interface PresetRowBase {
    */
   sizeText?: string
   modifiedText?: string
+  /**
+   * **盘上那份文件的 mtime**（真值，不是事件时刻）。详情「本地修改时间」读它。
+   *
+   * 它与 `modifiedText` 是两件事：后者在本地表那一列答"这份字节什么时候到的"，
+   * 这个答"这份文件在盘上最后一次被写入"（自己在外头改过、重新下载过都会动）。
+   * 没有（云端行 / 盘上没有这份）就是 `undefined`，界面照实「未知」。
+   */
+  localModifiedText?: string
+  /** **盘上这份的指纹**（前 8 位用于「下载」那一格）—— 没有就是本机还没有这一份 */
+  localSha256?: string | null
   /** 上面那两格是哪来的。`undefined` = 这个来源没有这两格（自己的文件、preset 行走别的口径） */
   statFrom?: 'file' | 'demo'
   /** 唯一底账（使用中指针）说正在使用的就是这一份。**全页最多一行** */
@@ -1811,6 +1922,13 @@ export interface PresetLocalRow extends PresetRowBase {
   basedOnFacts?: BasedOnFacts
   basedOn?: BasedOn
   /**
+   * 这份文件属于哪个来源分支（ref）；`null` = 没有来源记录（导入 / 手拖）。
+   *
+   * 分支之间靠**磁盘目录**隔离（各落各的文件夹），这一格只供筛选与"我这儿有没有
+   * 这一支的"使用 —— 不参与版本判定。
+   */
+  branch?: string | null
+  /**
    * 来源记录里记的来源原文（`delivery/mkp/presets/A1-standard.toml`）。没有来源记录是 `null`。
    * **老文件里可能记着旧形状（`mkp/presets/…`）** —— 那种认不出就是 `unknown`，
    * 不回填、不猜（文件本身照旧能读能改能应用）。
@@ -1885,6 +2003,13 @@ export interface PresetCloudRow extends PresetRowBase {
    * 切片器档不出这个字段：那一档照旧按 `presetState` 四态说话。
    */
   localState?: CloudLocalState
+  /**
+   * 「下载时间」：本机这一份是哪次下载 / 替换进来的（`DeliveryDownloaded` / `DeliveryReplaced`）。
+   *
+   * 与本地行那一格同义（都是事件时刻，不是 mtime）；没下过就是 `undefined`，
+   * 界面照实「未知」—— 不拿 mtime 顶。
+   */
+  obtainedUnix?: number | null
 }
 
 export type PresetTableRow = PresetLocalRow | PresetCloudRow
@@ -2007,7 +2132,17 @@ export interface PresetRowsInput {
    * **判据不读它**：那是 Rust 侧 `based_on` 的事。
    */
   sourceIdentity: string | null
+  /**
+   * 本地表按**来源分支**筛：`current` = 当前分支 + 没有来源（默认）；
+   * `all` = 全都列；`unfiled` = 只列没有来源的。
+   *
+   * 只有本机存在多个分支时才在界面上给这一档（见 `PagePresets` 的筛选排）。
+   */
+  branchFilter?: BranchFilter
 }
+
+/** 本地表的分支筛选档（见 `PresetRowsInput.branchFilter`） */
+export type BranchFilter = 'current' | 'all' | 'unfiled'
 
 /**
  * 目录里登记的一份交付预设，摊平成行要用的形状。
@@ -2099,6 +2234,18 @@ export interface DeliveryPresetSource {
    * 两处各判一次，迟早有一处忘了跟（"需更新"以前就是那样把坏档说成"未下载"的）。
    */
   state: PresetFileState
+  /**
+   * **盘上这份的指纹**（`OnDiskFile.sha256`）—— 「下载」那一格读它，答的是
+   * "我手上是哪一版"。与 [`sha256`]（目录登记的那一版）是两回事：盘上那份可能是旧版。
+   * `null` = 盘上没有这一份 / 老目录没给。
+   */
+  localSha256: string | null
+  /**
+   * 盘上那份文件的 **mtime**（`OnDiskFile.localModifiedUnix`）—— 只当「本地修改时间」。
+   * 它与 `downloadedUnix` / `replacedUnix` 回答的不是一件事：那两个是"什么时候到我机器上的"，
+   * 这个是"这份文件在盘上最后一次被写入"。**不许互相顶替**（AGENTS §6）。
+   */
+  localModifiedUnix: number | null
 }
 
 /** 一台机型下的一个文件：代表那一份 + 用到它的版本名与 id */
@@ -2359,6 +2506,166 @@ function sortRows<R extends PresetRowBase>(rows: R[], sort: PresetSort): R[] {
 }
 
 /**
+ * **族视图（A）**：把本地文件按**来路账的母本路径**排成「母本在前、副本缩进」。
+ *
+ * 与 `copyRankOf` 的区别：那一套是**按名字猜**（` copy N`），用户把副本改名之后
+ * 就认不出是一家的了；这里只认 `originPath`，名字改成什么都不断亲。
+ *
+ * 规则：
+ *   · 母本在**当前可见行**里 ⇒ 副本按**真实层数**缩进（depth 1、2、3……）；
+ *     `depth >= 2` 的（副本的副本）在名字没带母本名时再挂一枚母本签。
+ *   · 母本不在可见行里（被机型 / 分支 / 搜索筛掉，或盘上已经没了）⇒ 副本自己
+ *     当块首，挂母本签。**不在这里判"母本在不在盘上"** —— 这一层只有筛后的行。
+ *   · 置顶的副本**脱离母本**当块首（自己的子树跟着走）；母本还钉着的话就不脱。
+ *   · 置顶的块永远排最前（`sortRows` 已经排好输入序，这里只按输入序铺块）。
+ *
+ * 只在「名称 / 族优先」那一档用；别的排序档是平的，不画轨。
+ */
+export interface FamilyMeta {
+  /** 这一行是一个块的块首（母本、被钉走的副本、母本不可见的副本） */
+  lead: boolean
+  /** 0 = 块首；1 起 = 第几层副本（界面按层缩进，最多画到第 8 层） */
+  depth: number
+  /** 同一母本下最后一个孩子（族轨在这一行收口） */
+  last: boolean
+  /** 块里有副本（块首上画一条分隔线用） */
+  start: boolean
+  /** 挂在名字后面的母本签；`null` = 不挂 */
+  tagName: string | null
+}
+
+export interface FamilyLayoutRow<T> {
+  row: T
+  meta: FamilyMeta | null
+}
+
+/** 族视图只用到这几格；`PresetTableRow` 结构上满足它（云端行没有 originPath） */
+export interface FamilyInputRow {
+  rowKey: string
+  fileName: string
+  path: string
+  pinned: boolean
+  originPath?: string | null
+  originName?: string | null
+}
+
+const stemOfFileName = (fileName: string): string => {
+  const i = fileName.lastIndexOf('.')
+  return i > 0 ? fileName.slice(0, i) : fileName
+}
+
+export function familyLayoutOf<T extends FamilyInputRow>(
+  rows: readonly T[],
+): FamilyLayoutRow<T>[] {
+  const index = new Map<string, number>()
+  rows.forEach((row, i) => index.set(row.rowKey, i))
+  const byPath = new Map<string, T>()
+  for (const row of rows) byPath.set(row.path, row)
+
+  const motherOf = (row: T): T | null => {
+    const origin = row.originPath
+    if (origin === null || origin === undefined || origin === '') return null
+    return byPath.get(origin) ?? null
+  }
+  const hasPinnedAncestor = (row: T): boolean => {
+    let cur = motherOf(row)
+    let guard = 0
+    while (cur !== null && guard < 40) {
+      if (cur.pinned) return true
+      cur = motherOf(cur)
+      guard += 1
+    }
+    return false
+  }
+
+  /*
+   * 块首：
+   *   ① 没有母本（原件 / 导入 / 母本不在可见行里）；
+   *   ② 置顶的副本，且上面没有也置顶的母本。
+   * 其余有母本可见的行都是孩子。
+   */
+  const leadKeys = new Set<string>()
+  for (const row of rows) {
+    if (row.originPath === null || row.originPath === undefined || row.originPath === '') {
+      leadKeys.add(row.rowKey)
+      continue
+    }
+    if (motherOf(row) === null) {
+      leadKeys.add(row.rowKey)
+      continue
+    }
+    if (row.pinned && !hasPinnedAncestor(row)) leadKeys.add(row.rowKey)
+  }
+
+  const children = new Map<string, T[]>()
+  for (const row of rows) {
+    if (leadKeys.has(row.rowKey)) continue
+    const mother = motherOf(row)
+    if (mother === null) continue
+    const list = children.get(mother.rowKey) ?? []
+    list.push(row)
+    children.set(mother.rowKey, list)
+  }
+  for (const list of children.values()) {
+    list.sort((a, b) => (index.get(a.rowKey) ?? 0) - (index.get(b.rowKey) ?? 0))
+  }
+
+  const emitted = new Set<string>()
+  const out: FamilyLayoutRow<T>[] = []
+
+  for (const root of rows) {
+    if (emitted.has(root.rowKey)) continue
+    if (!leadKeys.has(root.rowKey)) continue
+
+    const block: { row: T; depth: number; lastSibling: boolean }[] = []
+    const walk = (row: T, depth: number, lastSibling: boolean): void => {
+      if (emitted.has(row.rowKey)) return
+      emitted.add(row.rowKey)
+      block.push({ row, depth, lastSibling })
+      const kids = children.get(row.rowKey) ?? []
+      kids.forEach((child, i) => walk(child, depth + 1, i === kids.length - 1))
+    }
+    walk(root, 0, false)
+
+    block.forEach((item, i) => {
+      const isLead = i === 0
+      const mother = motherOf(item.row)
+      let tagName: string | null = null
+      if (isLead) {
+        /* 块首还带着母本（被钉走 / 母本不在这一档）⇒ 必须说清是谁的副本 */
+        const motherName = mother?.fileName ?? item.row.originName ?? null
+        if (motherName !== null && motherName !== '') tagName = stemOfFileName(motherName)
+      } else if (item.depth >= 2 && mother !== null) {
+        const motherStem = stemOfFileName(mother.fileName)
+        /* 名字本来就带母本名（老的 `xxx copy 2`）⇒ 不再挂冗余的签 */
+        if (!stemOfFileName(item.row.fileName).startsWith(motherStem)) tagName = motherStem
+      }
+      out.push({
+        row: item.row,
+        meta: {
+          lead: isLead,
+          depth: item.depth,
+          /* 每根枝自己收口：副本的副本不是"整块最后一行"也要把轨收掉 */
+          last: item.lastSibling,
+          start: isLead && block.length > 1,
+          tagName,
+        },
+      })
+    })
+  }
+
+  /* 环 / 认不出母本的兜底：宁可平着列，也不能把行丢了 */
+  for (const row of rows) {
+    if (emitted.has(row.rowKey)) continue
+    out.push({
+      row,
+      meta: { lead: true, depth: 0, last: false, start: false, tagName: null },
+    })
+  }
+  return out
+}
+
+/**
  * 机型 id → 显示名。
  *
  * 两张表的「机型」那一列都查它。`machines` 是当前这一档的机型（选了一台就一台，
@@ -2542,6 +2849,9 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
         /* 来源记录：它当初基于云端哪一版、那一版现在还在不在（第七层） */
         basedOn: f.basedOn,
         basedOnFacts: f.basedOnFacts,
+        /* 这一份自己的字节摘要（「本机 SHA」那格；与「来源版本 SHA」是两个数） */
+        localSha256: f.sha256,
+        branch: branchOf(f.basedOnFacts),
         basedOnSource: f.basedOnLabel,
         basedOnCloud: source,
 
@@ -2561,6 +2871,8 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
         originName: f.originName,
         cloudFile: f.cloudFile,
         versionPublishedAt: f.versionPublishedAt,
+        /* 「云端当前」那一行要的：当前目录的发布时刻（这份自己属于哪一代在 `versionPublishedAt`） */
+        publishedAt: input.releaseAt ?? undefined,
         obtainedUnix: f.obtainedUnix,
       }
     })
@@ -2742,6 +3054,14 @@ export function localRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
           (p.downloadedUnix ?? p.replacedUnix) === null
             ? undefined
             : new Date((p.downloadedUnix ?? p.replacedUnix)! * 1000).toISOString(),
+        /* 盘上那份文件自己的 mtime 与指纹（不是事件时刻 —— 那两格在 `modifiedText` / `obtainedUnix`） */
+        localModifiedText:
+          p.localModifiedUnix === null
+            ? undefined
+            : new Date(p.localModifiedUnix * 1000).toISOString(),
+        localSha256: p.localSha256,
+        /* 「下载时间」：这份字节是下载进来的还是替换上去的（两个事件至多一个有值） */
+        obtainedUnix: p.downloadedUnix ?? p.replacedUnix,
         arrivalBy:
           p.downloadedUnix !== null
             ? ('downloaded' as const)
@@ -2762,14 +3082,57 @@ export function localRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
         presetState: state,
         /* 发布时刻：展开详情「云端更新」一格（本地行的下载时间在 `modifiedText` 上） */
         publishedAt: releaseAt,
+        /*
+         * **「更多详情」那一块对切片器配置也要有**（2026-11-17 作者：本地表没有、
+         * 云端表有）。它只摆事实：当前源身份、目录这一版的 SHA、这份属于哪一代。
+         * `[mkp_source]` 那几格切片器没有记录，照实留 null；MKP 那支一个字不动。
+         */
+        basedOnFacts:
+          p.kind === 'mkp_preset'
+            ? undefined
+            : {
+                sourceKind: null,
+                sourceRef: null,
+                sourceRelease: null,
+                sourceVersionAt: null,
+                sourceSha256: null,
+                downloadSha256: null,
+                cloudSource: input.sourceIdentity ?? null,
+                cloudPublishedAt: p.deliveryPublishedAt,
+                cloudSha256: p.sha256,
+                sourceCatalog: null,
+                sourceSerial: null,
+                /* 「云端当前版」那格要念"第 N 版"，序号跟着目录走 */
+                cloudCatalog: input.catalogLine ?? null,
+                cloudSerial: input.catalogSerial ?? null,
+                unverifiedReason: null,
+              },
         live,
       }
     })
 
   const all = [...assetRows, ...local, ...presetRows]
+  /*
+   * 本地表按**来源分支**筛（云端表不筛：它永远只有当前分支的目录）。
+   *
+   * `current` 把"没有来源"的那批一起留着 —— 导入 / 手拖进来的文件不属于任何分支，
+   * 在哪个分支下藏掉它都等于说"你那份不见了"。
+   */
+  const currentRef = identityRefOf(input.sourceIdentity)
+  const branchFilter = input.branchFilter ?? 'current'
+  const keepsBranch = (row: PresetLocalRow): boolean =>
+    /* 切片器那一档与来源分支无关 */
+    row.origin !== 'local' ||
+    branchKept(
+      row.branch,
+      row.basedOnFacts?.sourceRef != null,
+      branchFilter,
+      currentRef,
+    )
+  const kept = all.filter(keepsBranch)
   return {
-    rows: sortRows(all.filter((r) => fileMatchesQuery(r, query)), sort),
-    total: all.length,
+    rows: sortRows(kept.filter((r) => fileMatchesQuery(r, query)), sort),
+    total: kept.length,
   }
 }
 
@@ -2883,11 +3246,28 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
   const claims = new Map<string, { basedOn: BasedOn; facts: BasedOnFacts }>()
   if (kind === 'mkp') {
     const indexByPath = new Map(input.localIndex.map((e) => [e.path, e]))
+    /* 当前这一支的 ref；没有 ref（自建源）时不做隔离 */
+    const currentRef = identityRefOf(sourceIdentity)
     for (const f of input.local) {
       if (f.kind !== 'mkp_preset') continue
       const entry = indexByPath.get(f.path)
       /* 账本里没有它 → 不认领（复制 / 拖回 / 导入 / 恢复的那些都在这一档） */
       if (entry === undefined) continue
+      /*
+       * 云端行只认**下载建的主份**。
+       *
+       * 副本（`… copy 2.toml`）各自在本地表里显示自己的「有新版本」、各自点更新；
+       * 它们落后不该让云端那一行永远挂着更新按钮 —— 用户点一次更新只处理他那一次。
+       */
+      if (!isMainCopy(f)) continue
+      /*
+       * **分支隔离**：别的分支下载的那一份，不算"我这儿有这一支的"。
+       *
+       * 不隔离的话，A 分支留着的那份会把 B 分支的云端行压成「不同分支」——
+       * 用户不把它删掉就永远下不了 B 分支的一份，而删掉又意味着丢掉 A 分支那份。
+       * 来源分支明确不同才算；没有记录的老副本照旧认领（与以前一致）。
+       */
+      if (!branchMatches(branchOf(f.basedOnFacts), currentRef)) continue
       /*
        * 认领者里**只要有一份不是 current**，这一行就还有「更新」要做
        * （更新是"把云端新版处理到本地这份上"，陈旧的认领者需要它）——
@@ -3041,6 +3421,14 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
          * （「未知」+ `PRESET_TIME_WHY.cloudMissing` 那句话）。
          */
         modifiedText: releaseAt ?? undefined,
+        /* 本机那份自己的 mtime 与 SHA（没下载过就是「未知」，界面照实说） */
+        localModifiedText:
+          p.localModifiedUnix === null
+            ? undefined
+            : new Date(p.localModifiedUnix * 1000).toISOString(),
+        localSha256: p.localSha256,
+        /* 「下载时间」：本机这一份是哪次下载 / 替换进来的（没下过就是未知） */
+        obtainedUnix: p.downloadedUnix ?? p.replacedUnix,
         applied: live,
         pinned: pinned.includes(`preset:${p.fileName}`),
         pinOrder: pinned.indexOf(`preset:${p.fileName}`),
@@ -3085,6 +3473,7 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
           sourceRelease: claim?.facts.sourceRelease ?? null,
           sourceVersionAt: claim?.facts.sourceVersionAt ?? null,
           sourceSha256: claim?.facts.sourceSha256 ?? null,
+          downloadSha256: claim?.facts.downloadSha256 ?? null,
           cloudSource: sourceIdentity,
           cloudPublishedAt: releaseAt,
           /* 目录登记值就摆在这儿 —— 不再因为"前端没搬"而写未知 */

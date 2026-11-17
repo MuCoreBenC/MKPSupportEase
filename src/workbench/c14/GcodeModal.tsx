@@ -95,7 +95,7 @@ export default function GcodeModal({
       /* 这里的每一笔写都进外壳的草稿栈 —— Cmd+Z 得照常够得着它们（页脚那句就是它） */
       shellShortcuts
       onClose={onClose}
-      closeTitle="改动留在草稿里（没有保存）—— 想丢弃这次改动，用下面的「取消」"
+      closeTitle="改动在草稿里，用「取消」丢弃。"
       footer={
         <>
           <span className={s.pGmNote}>
@@ -107,8 +107,8 @@ export default function GcodeModal({
             disabled={String(cell.raw ?? '') === openValue}
             data-tip={
               String(cell.raw ?? '') === openValue
-                ? '这一层还没改过 —— 没有可取消的'
-                : '把这一层改回打开框之前的值，然后关框'
+                ? '这一层没有改动。'
+                : '改回打开前的值并关框。'
             }
             onClick={cancel}
           >

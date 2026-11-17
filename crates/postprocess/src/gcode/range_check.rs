@@ -1,6 +1,6 @@
 //! 工具头运动范围检测（对照 range_check.go）。
 //!
-//! 消费方：首笔活化（revitalization_block）与热床预涂胶。返回违规列表交给
+//! 消费方：润笔（revitalization_block）与热床预涂胶。返回违规列表交给
 //! 上层发警告——本 crate 不做 IO、不打日志。
 //!
 //! 与旧侧的一处刻意偏离：Go 在 movement_range 全零时 `fmt.Println` 一条提示

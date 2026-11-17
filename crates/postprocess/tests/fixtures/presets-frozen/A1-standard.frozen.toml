@@ -46,7 +46,7 @@ G1 E5.5 F1000
 G92 E0
 G1 F30000
 """
-first_pen_revitalization_flag = false # 首笔活化标志
+first_pen_revitalization_flag = false # 首层塔上预出胶
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
 MKP_retract = 0 # 回抽长度(mm)
 prime_length = 100 # 预涂长度(mm) 范围:0~500

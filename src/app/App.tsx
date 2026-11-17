@@ -3,6 +3,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -60,6 +61,12 @@ import type { SettingsTarget, SettingsTargetId } from './settings/targets'
    ★ 那一趟的状态**在 App 这一层读一次**（`usePostProcessRun`），同时喂给两处：
      那一屏模态框 + 标题栏那枚小胶囊（「后台运行」收起来之后总得有个入口回得去）。 */
 import PostProcessModal from './postprocess/PostProcessModal'
+import {
+  SETTINGS_FOLD_MS,
+  asksForAnswer,
+  postProcessScene,
+  postProcessSettingsFold,
+} from './postprocess/facts'
 import { usePostProcessRun } from './postprocess/usePostProcessRun'
 import { usePinPref } from './state/appState'
 import { usePostprocPrefs } from './state/usePostprocPrefs'
@@ -259,22 +266,8 @@ export default function App() {
   const density = useDensity(rootRef)
   const [tab, setTab] = useState('machine')
 
-  /*
-   * 窗口置顶（2026-10-17）：**落地只看这一处** —— 档位来自 AppState（工艺页那枚胶囊
-   * 点出来的），"现在在哪一页"只有这里知道（`tab`）。于是：
-   *
-   *   always → 恒置顶；page → 只有 `bbs`（工艺页）置顶；off → 不置顶。
-   *
-   * ★ 切页的每一个入口（顶栏页签、`openBbs`、`openPresetsForSlicer`、开发台）
-   *   最终都改的是 `tab`，所以一条 effect 就够，不必逐处埋点。
-   * ★ 不写盘、不发广播：档位没变，只是把它落到窗口上（见 `api.applyPin`）。
-   */
+  /* 置顶档位（工艺页那枚胶囊点出来的）；落到窗口上的是下面 `postProcess` 之后那条 effect */
   const pin = usePinPref()
-  useEffect(() => {
-    void api.applyPin(tab === 'bbs').catch(() => {
-      /* 置顶失败不该打断用户 —— 真实原因是窗口没了之类，日志在 Rust 侧 */
-    })
-  }, [pin, tab])
 
   /*
    * 界面动作记录（2026-11-12）：全局点击捕获装一次；页签变化也记一笔 ——
@@ -431,21 +424,71 @@ export default function App() {
   const postProcess = usePostProcessRun(silentPostproc)
 
   /*
-   * **设置页不摆后处理那一屏**（2026-11-12 作者：「它可以在很多页面都出现，但是在设置页面
-   * 就让它不要出现」「跳转过去才不会被挡住」）。
+   * **窗口置顶：落地只看这一处**（2026-10-17）。
    *
-   * 两种进入方式都收在这一条：
-   *   · 从失败那屏跳进来 / 点右上角胶囊 ⇒ 一进来就收成胶囊（结论不丢，回来还能看）；
-   *   · 后台跑完那一刻人正好停在设置页 ⇒ 同样只留胶囊，不许弹出来盖住开关。
-   * ★ 渲染那一格也有同一个判据（见下面 `PostProcessModal`）：只靠 effect 的话，
-   *   切页签那一帧还是会压在设置页上。
+   * 两条理由算出一个层级：
+   *   · 档位（AppState 里那一格，工艺页那枚胶囊点出来的）：`always` 恒置顶、
+   *     `page` 只在工艺页（`tab === 'bbs'`）置顶、`off` 不置顶；
+   *   · 这一屏**正在等一个回答**（下面 `askTop`）—— 2026-11-17 作者：
+   *     「在这个页面的时候，他可以自动置顶窗口，可以在设置页面关闭自动置顶」。
+   *     那一屏是切片器拉起来问一句的：用户切回切片器看图 / 摆模型时它会被盖住，
+   *     两分钟没人答就按"不跑"收场 —— 人根本没看见。设置页可以关（出厂开），
+   *     读不到偏好按开处理（与静默档那条同一条取向：读不到时给人看得见的那一侧）。
+   *
+   * ★ 切页的每一个入口（顶栏页签、`openBbs`、`openPresetsForSlicer`、开发台）
+   *   最终都改的是 `tab`，所以一条 effect 就够，不必逐处埋点。
+   * ★ 不写盘、不发广播：档位没变，只是把它落到窗口上（见 `api.applyPin`）。
+   * ★★ 问句那一格是**唯一**判据（`run.question`，钩子收掉它时归零）；不许另起
+   *   一条只算页签的 effect —— 两个源各设一次 `always_on_top`，会在问句屏与
+   *   切片器之间来回抢层级。
    */
-  const parkPostProcess = postProcess.park ?? postProcess.dismiss
+  const askTop =
+    asksForAnswer(postProcess.run, postProcess.dismissed) &&
+    (postprocPrefs?.resolved.autoTopOnAsk ?? true)
   useEffect(() => {
-    if (tab !== 'settings') return
-    if (postProcess.run === null || postProcess.dismissed) return
-    parkPostProcess()
-  }, [tab, postProcess.run, postProcess.dismissed, parkPostProcess])
+    void api.applyPin(tab === 'bbs', askTop).catch(() => {
+      /* 置顶失败不该打断用户 —— 真实原因是窗口没了之类，日志在 Rust 侧 */
+    })
+  }, [pin, tab, askTop])
+
+  /*
+   * **设置页上的「完成」：成功摆 10 秒再折成胶囊**（作者 2026-11-13）。
+   *
+   * 三条口径（判据住在 `postprocess/facts.ts` 的 `postProcessSettingsFold`）：
+   *   · 人本来就停在设置页、成功刚出来 ⇒ 先摆 10 秒（得看得见成没成），到点折；
+   *     失败 / 取消当场折（作者：「只想给成功」）；
+   *   · 从别的页切进设置页 ⇒ 立刻折（他已经看过那一屏，来这儿是要改开关）；
+   *   · 折了之后点胶囊 ⇒ 就开着，不再计时（上一帧已经是 `finished`）。
+   * 跑着 / 机型不匹配 / 点位测试不归这条管：优先级最高，照常盖在设置页上。
+   *
+   * ★ 用 `useLayoutEffect`：切页签那一帧要在上屏之前折好，不能让结论屏闪一下。
+   */
+  const scene = postProcessScene(postProcess.run)
+  /* 「完成」那一幕是不是成功那趟；不是完成幕时恒 false（宽限只给成功） */
+  const succeeded = postProcess.run?.finished?.ok === true
+  const prevOnSettings = useRef(tab === 'settings')
+  const prevScene = useRef(scene)
+  const parkPostProcess = postProcess.park ?? postProcess.dismiss
+  useLayoutEffect(() => {
+    const fold = postProcessSettingsFold({
+      scene,
+      dismissed: postProcess.dismissed,
+      succeeded,
+      onSettings: tab === 'settings',
+      prevOnSettings: prevOnSettings.current,
+      prevScene: prevScene.current,
+    })
+    prevOnSettings.current = tab === 'settings'
+    prevScene.current = scene
+
+    if (fold === 'now') {
+      parkPostProcess()
+      return
+    }
+    if (fold !== 'grace') return
+    const id = window.setTimeout(parkPostProcess, SETTINGS_FOLD_MS)
+    return () => window.clearTimeout(id)
+  }, [tab, scene, succeeded, postProcess.dismissed, parkPostProcess])
 
   return (
     <div ref={rootRef} className={s.shell} data-density={density} data-tab={tab}>
@@ -468,9 +511,10 @@ export default function App() {
             fluid
             /* 后台跑着的那一趟：喂给标题栏那枚小胶囊（**不再是页签下面一条横条**，
                那条一出现就把整页往下推 —— 作者 2026-10-17 否了它的位置）。
-               ★ 设置页不给它：那一页连胶囊也不摆（点开也只会被下面那条 effect 收回去，
-               摆一颗点了没反应的钮比不摆更糟）。离开设置页它自己回来。 */
-            postProcess={tab === 'settings' ? undefined : postProcess}
+               ★ 设置页也给（作者 2026-11-13：「也留胶囊」「还可以在设置页点开胶囊」）：
+               跑着 / 问句收起后照样点得回来；「完成」在那一页由上面那条 effect 折成胶囊，
+               点开后一直开着，切走再切回来才立刻折。 */
+            postProcess={postProcess}
           />
 
           {/* 导入结果条（in-flow，标签栏下面一条）：有结果才出现，不是会自己消失的提示 */}
@@ -507,14 +551,13 @@ export default function App() {
               <PageSettings target={settingsTarget} />
             </PageSlot>
           </main>
-          {/* 设置页不摆这一屏（判据见上面那条 effect）：跳过来改设置的人要看得见那一行开关 */}
-          {tab !== 'settings' && (
-            <PostProcessModal
-              view={postProcess}
-              onOpenReport={openReport}
-              onOpenSettings={openSettings}
-            />
-          )}
+          {/* 设置页上「完成」那一幕由上面那条 effect 折成胶囊；跑着 / 问句照常弹。
+              ★ 这里不再按页签拦渲染：「完成」先摆 10 秒再折，那就得让它真的渲出来 */}
+          <PostProcessModal
+            view={postProcess}
+            onOpenReport={openReport}
+            onOpenSettings={openSettings}
+          />
         </FieldLayer>
       </FileImportProvider>
       </DevPreviewProvider>

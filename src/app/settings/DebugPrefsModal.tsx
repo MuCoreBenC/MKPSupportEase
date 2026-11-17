@@ -125,6 +125,16 @@ export default function DebugPrefsModal({ open, onClose }: { open: boolean; onCl
       onClose={onClose}
       footer={
         <>
+          {/*
+           * 「恢复默认」住左下角（作者 2026-11-17：「不如把恢复默认放在左下角」）：
+           * 它改的是右栏那一堆值，和「放弃 / 保存」是同一档的收尾动作 ——
+           * 标题栏留给视图切换（默认点位 / 记录）。列表与参照表面板下不出现。
+           */}
+          {panel === 'edit' && (
+            <Btn variant="ghost" onClick={() => void set(RESET_PATCH, () => {})}>
+              {tr('settings.calib.debugReset')}
+            </Btn>
+          )}
           {/* 校验没过时把毛病摆在这儿；没事就摆那句说明 */}
           <span className={codeIssue === null ? s.footNote : `${s.footNote} ${s.footWarn}`}>
             {codeIssue ?? tr('settings.calib.debugKeepNote')}
@@ -158,14 +168,15 @@ export default function DebugPrefsModal({ open, onClose }: { open: boolean; onCl
         </>
       }
     >
+      {/* 从轻到重：切参照表 → 看记录 → 恢复默认（只有最后那颗会改值） */}
+      <HeadAnchorsButton
+        active={panel === 'anchors'}
+        onClick={() => setPanel(panel === 'anchors' ? 'edit' : 'anchors')}
+      />
       <HeadRecordsButton
         count={presets.length}
         active={panel === 'list'}
         onClick={() => setPanel(panel === 'list' ? 'edit' : 'list')}
-      />
-      <HeadAnchorsButton
-        active={panel === 'anchors'}
-        onClick={() => setPanel(panel === 'anchors' ? 'edit' : 'anchors')}
       />
 
       <div className={s.debugGrid}>
@@ -195,15 +206,6 @@ export default function DebugPrefsModal({ open, onClose }: { open: boolean; onCl
               )
             }
           />
-          <div className={s.resetRow}>
-            <button
-              type="button"
-              className={s.textBtn}
-              onClick={() => void set(RESET_PATCH, () => {})}
-            >
-              {tr('settings.calib.debugReset')}
-            </button>
-          </div>
           {panel === 'anchors' ? (
             <AnchorTable onUse={applyAnchor} />
           ) : r.debugCustomGcode !== null ? (
