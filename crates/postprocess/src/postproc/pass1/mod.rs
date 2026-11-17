@@ -183,6 +183,27 @@ pub struct Pass1Output {
     pub layer_index: HashMap<ZKey, LayerHeightIndex>,
 }
 
+/// 笔从 `pen` 走到一条 `G0/G1` 的落点，返回（起点, 终点）。
+///
+/// 起点是**笔当场所在的位置**，空走也算 —— 空走不落料，但它确实把笔挪过去了。
+/// 拿上一条挤出移动的终点当起点，会在覆盖图上连出一条并不存在的线，把两块
+/// 相隔很远的支撑焊成一片（2026-11-17 实测：6.68 层 29 条，最长 27.30mm）。
+///
+/// 层首没有笔位时起点取终点本身（零长度）：不编造「从床原点走来」的那一段。
+/// 两个轴都给不出坐标时返回 `None`（这条移动不参与覆盖）。
+fn step_pen(
+    pen: Option<(f64, f64)>,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Option<((f64, f64), (f64, f64))> {
+    if x.is_none() && y.is_none() {
+        return None;
+    }
+    let from = pen.unwrap_or((x.unwrap_or(0.0), y.unwrap_or(0.0)));
+    let to = (x.unwrap_or(from.0), y.unwrap_or(from.1));
+    Some((from, to))
+}
+
 /// `FirstPass`：第一遍扫描（pass1.go:41）。
 ///
 /// `ir_data` 会被就地修改（机型维度填充 / 元数据提取 / State 运行态 /
@@ -234,7 +255,8 @@ pub fn first_pass(
     let mut layer_moves: Vec<(f64, f64, f64, f64, bool)> = Vec::new();
     let mut prev_moves: Vec<(f64, f64, f64, f64, bool)> = Vec::new();
     let mut in_support = false;
-    let mut support_xy: Option<(f64, f64)> = None;
+    /* 笔当前所在的位置：空走也推进（见 [`step_pen`]），层切时清空 */
+    let mut pen_xy: Option<(f64, f64)> = None;
     let mut last_xy_command = String::new();
     let mut last_xy_command_fe_flag = true;
     let mut start_idx = 0usize;
@@ -470,7 +492,7 @@ pub fn first_pass(
             last_layer_height = current_layer_height;
             /* 上一层的支撑收口：它才是这一层涂胶笔下的承托面 */
             prev_moves = std::mem::take(&mut layer_moves);
-            support_xy = None;
+            pen_xy = None;
             let nums = num_strip(trimmed);
             if let Some(&n) = nums.first() {
                 current_layer_height = n;
@@ -495,12 +517,17 @@ pub fn first_pass(
             let x = extract_coord(bytes, b'X');
             let y = extract_coord(bytes, b'Y');
             let e = extract_coord(bytes, b'E');
-            /* 只算挤出（有 E 且为正）：空走横跨两个岛会凭空连出一片假覆盖 */
-            if (x.is_some() || y.is_some()) && e.is_some_and(|v| v > 0.0) {
-                let from = support_xy.unwrap_or((x.unwrap_or(0.0), y.unwrap_or(0.0)));
-                let to = (x.unwrap_or(from.0), y.unwrap_or(from.1));
-                layer_moves.push((from.0, from.1, to.0, to.1, in_support));
-                support_xy = Some(to);
+            /*
+             * 笔位每一条移动都推进（含空走）；只有挤出（E>0）才铺覆盖。
+             *
+             * 两件事必须分开：位置记录的是「笔在哪」，覆盖记录的是「哪里落过料」。
+             * 合在一起就会拿空走之前的旧位置当下一段的起点，凭空连出并不存在的覆盖。
+             */
+            if let Some((from, to)) = step_pen(pen_xy, x, y) {
+                if e.is_some_and(|v| v > 0.0) {
+                    layer_moves.push((from.0, from.1, to.0, to.1, in_support));
+                }
+                pen_xy = Some(to);
             }
         }
 
@@ -1524,4 +1551,69 @@ fn format_g_shortest(v: f64) -> String {
     // （0~1000）两种表示一致，直接用十进制最短表示。
     let s = format!("{v}");
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::step_pen;
+
+    /// 空走推进笔位：下一段挤出的起点必须是空走落点，不能是上一段挤出的终点。
+    ///
+    /// 这一条就是「两块支撑中间隔着空气，却被连成一片」的现场：
+    /// 支撑 A 打印完 → 空走到支撑 B → 打印 B，B 的第一条不能从 A 的终点起笔。
+    #[test]
+    fn travel_moves_the_pen_so_next_extrusion_starts_at_the_travel_end() {
+        let mut pen = None;
+
+        /* 层首第一条：零长度，不编造起点 */
+        let (from, to) = step_pen(pen, Some(10.0), Some(10.0)).expect("有坐标");
+        assert_eq!(from, to);
+        pen = Some(to);
+
+        /* 支撑 A 的第二条，首尾相接 */
+        let (from, to) = step_pen(pen, Some(20.0), Some(10.0)).expect("有坐标");
+        assert_eq!(from, (10.0, 10.0));
+        pen = Some(to);
+
+        /* 空走到支撑 B 的落点：不落料，但笔到了 */
+        let (_, to) = step_pen(pen, Some(60.0), Some(40.0)).expect("有坐标");
+        pen = Some(to);
+
+        /* 支撑 B 的第一条：起点是空走落点，不是 A 的终点 */
+        let (from, _) = step_pen(pen, Some(70.0), Some(40.0)).expect("有坐标");
+        assert_eq!(from, (60.0, 40.0));
+    }
+
+    /// 反向：连续挤出仍然首尾相接，不能因为改成跟踪笔位就断开。
+    #[test]
+    fn consecutive_extrusions_stay_connected() {
+        let mut pen = None;
+        let mut prev_to: Option<(f64, f64)> = None;
+        for (x, y) in [(1.0, 2.0), (3.0, 2.0), (3.0, 4.0), (1.0, 4.0)] {
+            let (from, to) = step_pen(pen, Some(x), Some(y)).expect("有坐标");
+            if let Some(p) = prev_to {
+                assert_eq!(from, p, "相邻挤出必须首尾相接");
+            }
+            prev_to = Some(to);
+            pen = Some(to);
+        }
+    }
+
+    /// 只给一个轴：另一个轴沿用笔位，不能当 0。
+    #[test]
+    fn single_axis_move_keeps_the_other_coordinate() {
+        let (from, to) = step_pen(Some((5.0, 7.0)), Some(9.0), None).expect("有坐标");
+        assert_eq!(from, (5.0, 7.0));
+        assert_eq!(to, (9.0, 7.0));
+
+        let (_, to) = step_pen(Some((5.0, 7.0)), None, Some(1.0)).expect("有坐标");
+        assert_eq!(to, (5.0, 1.0));
+    }
+
+    /// 两个轴都没有坐标：这条行不参与覆盖，也不改写笔位。
+    #[test]
+    fn move_without_xy_is_ignored() {
+        assert!(step_pen(Some((5.0, 7.0)), None, None).is_none());
+        assert!(step_pen(None, None, None).is_none());
+    }
 }

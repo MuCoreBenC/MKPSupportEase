@@ -1196,8 +1196,30 @@ pub(crate) fn emit_glue_block(
              * 润笔要在**落笔高度**上重画：这一段之前只发过 XY 回位（Z 还停在净空高度），
              * 少了这一句整段就悬在模型上方画（2026-11-17 实测 Z12.3、层顶 7.3）。
              * 高度口径与正式涂胶同一套：`Landed` = 层顶 + 胶 Z 偏移。
+             *
+             * **抬高跟随正式涂胶**：`edge_band` 已经把 `;EDGE_RAISE` / `;EDGE_NORMAL`
+             * 插在同一份路径里，润笔就是这段路径提前重画一遍，同一位置用同一档高度。
+             * 不另算判据，也不无条件用 `land_z` —— 那样同一圈会出现两个高度
+             * （2026-11-17 实测：涂胶段抬到 11.13、润笔段还在 10.63）。
              */
-            sink.push_str(&format!("G1 Z{}", format_z(land_z)));
+            let prime_iface = seg;
+            /* 抬高档与 `write_glue_lines` 同一套：正常落笔 + `Glue.EdgeLift` */
+            let revit_raised_z = land_z + ir_data.glue.edge_lift.max(0.0);
+            let mut revit_z = land_z;
+            for line in prime_iface {
+                let t = line.trim();
+                if t.contains(crate::gcode::MARKER_ZJUMP_START) {
+                    break;
+                }
+                if t.contains(crate::gcode::MARKER_EDGE_RAISE) {
+                    revit_z = revit_raised_z;
+                } else if t.contains(crate::gcode::MARKER_EDGE_NORMAL) {
+                    revit_z = land_z;
+                } else if t.starts_with("G1 ") && !t.contains("G1 F") {
+                    break;
+                }
+            }
+            sink.push_str(&format!("G1 Z{}", format_z(revit_z)));
             let revitalization_speed =
                 ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor;
             sink.push_str(&format!("G1 F{}", format_speed(revitalization_speed)));
@@ -1205,7 +1227,6 @@ pub(crate) fn emit_glue_block(
             if target_length < 20.0 {
                 target_length = 100.0;
             }
-            let prime_iface = seg;
             let mut accumulated_dist = 0.0;
             let mut last_rx = f64::NAN;
             let mut last_ry = f64::NAN;
@@ -1213,6 +1234,21 @@ pub(crate) fn emit_glue_block(
                 let il = iface_line.trim();
                 if il.contains(crate::gcode::MARKER_ZJUMP_START) {
                     break;
+                }
+                /* 档位切换：笔落着就当场改高度，口径与 `write_glue_lines` 的主循环一致 */
+                if il.contains(crate::gcode::MARKER_EDGE_RAISE) {
+                    if revit_z != revit_raised_z {
+                        revit_z = revit_raised_z;
+                        sink.push_str(&format!("G1 Z{}", format_z(revit_z)));
+                    }
+                    continue;
+                }
+                if il.contains(crate::gcode::MARKER_EDGE_NORMAL) {
+                    if revit_z != land_z {
+                        revit_z = land_z;
+                        sink.push_str(&format!("G1 Z{}", format_z(revit_z)));
+                    }
+                    continue;
                 }
                 if !il.starts_with("G1 ") || il.contains("G1 F") {
                     continue;
