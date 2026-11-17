@@ -907,7 +907,8 @@ export default function PostProcessModal({
    */
   const [answering, setAnswering] = useState<{
     kind: string
-    deadline: number
+    /** 这一问的自动终止时刻（与问句上那一格同一个值；老钩子没有 ⇒ `undefined`） */
+    deadline: number | undefined
     /** 点下去那一刻进度条停在的百分比（见下面 `shownPercent`） */
     from: number
   } | null>(null)
@@ -1437,6 +1438,23 @@ export default function PostProcessModal({
   }
 
   /**
+   * **答这一问**：先记下"这一问正在办"，再把答复递出去（所有选项按钮的唯一出口）。
+   *
+   * `answer_post_process` 是投递即返回 —— 钩子那边要等它把剩下的步骤跑完（十几秒到几分钟）
+   * 才把问句收掉，这期间 `run.question` 一直挂着。不记这一笔，问句屏就一直是问句屏，
+   * 进度 hero 那一条永远出不来（作者：「点了之后没回到进度条的 hero」）。
+   *
+   * `from` 记下点下去那一刻的百分比：答复之后主线是从 0% 起跑的，条子不许倒车
+   * （见下面 `shownPercent`）。
+   */
+  const answer = (choiceId: string) => {
+    const q = run?.question ?? null
+    if (q === null) return
+    setAnswering({ kind: q.questionKind, deadline: q.deadlineUnixMs, from: percent })
+    void act(() => api.answerPostProcess(q.questionKind, choiceId))
+  }
+
+  /**
    * **逃生：先请求停止、再收窗**（2026-10-19，作者：「出错的时候加一个停止并关闭的按钮，
    * 这样就不用管多的操作了」）。
    *
@@ -1742,9 +1760,7 @@ export default function PostProcessModal({
                       className={s.choiceBtn}
                       disabled={busy}
                       title={c.hint}
-                      onClick={() => {
-                        void act(() => api.answerPostProcess(run.question?.questionKind ?? '', c.id))
-                      }}
+                      onClick={() => answer(c.id)}
                     >
                       {c.label}
                     </Btn>
@@ -1756,21 +1772,10 @@ export default function PostProcessModal({
                * 这一趟只是去试位置，继续占强调位、放最右；停下退到左边、用普通皮肤。
                */
               <>
-                <Btn
-                  disabled={busy}
-                  onClick={() =>
-                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'stop'))
-                  }
-                >
+                <Btn disabled={busy} onClick={() => answer('stop')}>
                   {tr('postproc.choice.stop')}
                 </Btn>
-                <Btn
-                  variant="accent"
-                  disabled={busy}
-                  onClick={() =>
-                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'keep'))
-                  }
-                >
+                <Btn variant="accent" disabled={busy} onClick={() => answer('keep')}>
                   {tr('postproc.choice.keep')}
                 </Btn>
               </>
@@ -1780,21 +1785,10 @@ export default function PostProcessModal({
                * （第 9~11 轮定的：不匹配还硬跑会出事，强调位留给人先看清再决定）。
                */
               <>
-                <Btn
-                  disabled={busy}
-                  onClick={() =>
-                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'keep'))
-                  }
-                >
+                <Btn disabled={busy} onClick={() => answer('keep')}>
                   {tr('postproc.choice.keep')}
                 </Btn>
-                <Btn
-                  variant="accent"
-                  disabled={busy}
-                  onClick={() =>
-                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'stop'))
-                  }
-                >
+                <Btn variant="accent" disabled={busy} onClick={() => answer('stop')}>
                   {tr('postproc.choice.stop')}
                 </Btn>
               </>

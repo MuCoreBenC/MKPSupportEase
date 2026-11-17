@@ -676,6 +676,51 @@ pub fn delete_archived(internal_root: &Path, path: &str) -> Result<(), AppError>
     remove_file_idempotent(&target, path)
 }
 
+/// **用回这一版**：把归档区里那份旧字节重新变成"本机手上这一版"。
+///
+/// 只改本机的"手上这一版"（预设走内容仓库 + 索引；其余按目录落点直接覆盖），
+/// **不碰**目录登记、版本链与事件账 —— 云端只有最新版，所以换回来之后这一份会被
+/// 认成「旧版本」，点「下载」就能换回当前版。这就是"用回旧版"的全部含义。
+///
+/// 已经是这一版 ⇒ 幂等直接成功（索引 / 字一个字都不动）。
+pub fn restore_archived(
+    internal_root: &Path,
+    catalog: &super::Catalog,
+    path: &str,
+) -> Result<(), AppError> {
+    let prefix = format!("{}/", super::paths::ARCHIVE_DIR);
+    if !path.starts_with(&prefix) {
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.delivery.385",
+            &[("prefix", &prefix.to_string())],
+        )));
+    }
+    let rel = &path[prefix.len()..];
+    let Some(file) = catalog.files.iter().find(|f| f.path == rel) else {
+        return Err(AppError::not_found(messages::text(
+            "ui.ipc.catalog.056",
+            &[("file_name", rel)],
+        )));
+    };
+    let source = resolve_in(internal_root, path)?;
+    let bytes = std::fs::read(&source).map_err(|_| {
+        AppError::not_found(messages::text(
+            "ui.ipc.catalog.069",
+            &[("rel", &path.to_string())],
+        ))
+    })?;
+    let sha = hex(&Sha256::digest(&bytes));
+    if !is_preset(file) {
+        let target = resolve_in(internal_root, &file.path)?;
+        return atomic_write(&target, &bytes);
+    }
+    if delivery_index::entry(internal_root, &file.path).is_some_and(|e| e.sha256 == sha) {
+        return Ok(());
+    }
+    content::ensure(internal_root, &sha, &bytes)?;
+    delivery_index::record_file(internal_root, &file.path, &sha, Some(bytes.len() as u64))
+}
+
 /// 删一个文件；不存在 = 已是目标状态，照实成功（幂等）
 fn remove_file_idempotent(target: &Path, what: &str) -> Result<(), AppError> {
     match std::fs::remove_file(target) {
@@ -2180,6 +2225,53 @@ mod tests {
                 .sha256,
             file.expected_sha().unwrap()
         );
+    }
+
+    /// **用回旧版**：索引指回归档那一版（字节搬进内容仓库），归档与目录一个都不动
+    #[test]
+    fn restore_archived_makes_the_old_bytes_the_local_copy_again() {
+        let root = tempfile::tempdir().unwrap();
+        let v1 = preset_entry("A1.toml", b"# v1\n");
+        let v2 = preset_entry("A1.toml", b"# v2\n");
+
+        deliver(root.path(), &v1, &MemorySource(b"# v1\n".to_vec())).unwrap();
+        deliver(root.path(), &v2, &MemorySource(b"# v2\n".to_vec())).unwrap();
+        /* 换代时旧字节进归档 —— 这里手动摆一份，与写侧同形 */
+        let archived = root.path().join("archive").join(&v1.path);
+        std::fs::create_dir_all(archived.parent().unwrap()).unwrap();
+        std::fs::write(&archived, b"# v1\n").unwrap();
+
+        let catalog = catalog_with(vec![v2.clone()]);
+        assert_eq!(stored_bytes(root.path(), &v2).unwrap(), b"# v2\n");
+
+        restore_archived(root.path(), &catalog, "archive/delivery/mkp/presets/A1.toml").unwrap();
+
+        assert_eq!(
+            stored_bytes(root.path(), &v2).unwrap(),
+            b"# v1\n",
+            "本机这一版换成归档那份"
+        );
+        assert_eq!(
+            file_status(root.path(), &v2),
+            FileOnDisk::Stale,
+            "与目录登记不一致 ⇒ 界面照实标「旧版本」"
+        );
+        assert!(archived.is_file(), "用回不消耗归档那份");
+    }
+
+    /// 只认 `archive/` 里的路径；别的（下载区、绝对路径）一概拒绝
+    #[test]
+    fn restore_archived_only_accepts_the_archive_area() {
+        let root = tempfile::tempdir().unwrap();
+        let v1 = preset_entry("A1.toml", b"# v1\n");
+        let catalog = catalog_with(vec![v1.clone()]);
+        for bad in ["delivery/mkp/presets/A1.toml", "/etc/passwd", "../archive/x"] {
+            assert!(
+                restore_archived(root.path(), &catalog, bad).is_err(),
+                "{bad} 不该被当成归档路径"
+            );
+        }
+        assert!(stored_bytes(root.path(), &v1).is_none(), "一次都没写盘");
     }
 
     #[test]

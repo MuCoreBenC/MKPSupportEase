@@ -2358,6 +2358,13 @@ export type TowerRelocateMode = 'off' | 'auto' | 'ask'
 export interface ResolvedPostprocPrefs {
   notifyOnFinish: boolean
   uiMode: PostprocUiMode
+  /**
+   * **后处理那一屏在等回答时把主窗置顶**（出厂 = 开，2026-11-17）。
+   *
+   * 那一屏是切片器拉起来的：用户切回切片器看模型时它会被盖住，等到超时都没人看见。
+   * 只影响窗口层级，**不进 IR、不改产物**。
+   */
+  autoTopOnAsk: boolean
   glueBottomEnabled: boolean
   /** **下方支撑余量（实验）**：涂胶段离笔下方支撑边界够远就不抬高 */
   underSupportEnabled: boolean
@@ -2420,6 +2427,8 @@ export interface ResolvedPostprocPrefs {
 export interface PostprocPrefsWire {
   notifyOnFinish?: boolean | null
   uiMode?: PostprocUiMode | null
+  /** 等回答时置顶窗口：`null` = 回到出厂档（开） */
+  autoTopOnAsk?: boolean | null
   glueBottomEnabled?: boolean | null
   /** **下方支撑余量（实验）**：`null` = 回到出厂档（关） */
   underSupportEnabled?: boolean | null
@@ -4114,8 +4123,12 @@ export interface MkpApi {
    *
    * 为什么与 `setPin` 分开：切页是高频动作、且档位没变 —— 走写盘那条会把前端
    * 绕回自己的 effect 里。这一条只把已经选好的档落到窗口上。
+   *
+   * `askTop` = 后处理那一屏**正在等回答**、且设置页「等回答时置顶」开着。
+   * 它与档位是**或**的关系：档位是 `off` 时它也能把窗浮上来；问句收掉之后
+   * 前端带着 `false` 再调一次，窗口落回档位算出来的那一层。
    */
-  applyPin(onBbs: boolean): Promise<boolean>
+  applyPin(onBbs: boolean, askTop: boolean): Promise<boolean>
 
   /**
    * 进 / 出窄窗：宽 600、高 = 当前屏可用高 90%、贴右缘。

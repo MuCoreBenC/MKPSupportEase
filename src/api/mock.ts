@@ -438,7 +438,7 @@ const mockCopyTargets = new Set<string>()
  * ★ 真窗口那半（`set_always_on_top` / `set_size` / `set_position`）在浏览器里**空转**——
  *   没有窗口可摆。但这两格照常记账：探针要验"点两下文字换了、盒子没变宽"。
  */
-let mockPin: PinPref = 'off'
+let mockPin: PinPref = 'page'
 let mockCompact = false
 /* 界面语言（2026-10-25）：`null` = 还没选过 ⇒ 跟随系统，与真后端同一个出厂档 */
 let mockLocale: LocalePref | null = null
@@ -2978,6 +2978,7 @@ export const mockApi: MkpApi = {
     const resolved: ResolvedPostprocPrefs = {
       notifyOnFinish: mockPostproc.notifyOnFinish ?? true,
       uiMode: mockPostproc.uiMode ?? 'gui',
+      autoTopOnAsk: mockPostproc.autoTopOnAsk ?? true,
       glueBottomEnabled: mockPostproc.glueBottomEnabled ?? false,
       underSupportEnabled: mockPostproc.underSupportEnabled ?? false,
       underSupportMm: mockPostproc.underSupportMm ?? 0.5,
@@ -3094,8 +3095,9 @@ export const mockApi: MkpApi = {
     return mockPin
   },
 
-  async applyPin() {
-    return mockPin === 'always'
+  /* 与真后端同一条算式（`ipc::window_layout::pin_window`）：临时置顶 或 档位那一层 */
+  async applyPin(onBbs: boolean, askTop: boolean) {
+    return askTop || mockPin === 'always' || (mockPin === 'page' && onBbs)
   },
 
   /* 与真后端同一套口径（2026-10-17 作者第二轮）：**小窗一开就置顶，还原时把置顶放回去** */

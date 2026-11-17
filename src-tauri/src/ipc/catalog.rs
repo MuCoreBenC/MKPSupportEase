@@ -272,6 +272,20 @@ pub async fn read_downloaded_text(app: AppHandle, file_name: String) -> Result<S
     })?
 }
 
+/// **跟着换**：这一份本机换版之后，把切片器目录里那份也换掉（只换已经放入的）。
+///
+/// 与「放入」是两件事：这一手不会新建任何文件，只看目标目录里有没有同名的那一份。
+/// 判据在 [`crate::ipc::presets::replace_placed_copies`]，这里只负责把字节取出来。
+fn sync_placed_copy(root: &Path, file: &runtime::catalog::CatalogFile) {
+    let Some(slicer) = crate::ipc::presets::slicer_of_kind(&file.kind) else {
+        return;
+    };
+    let Some(bytes) = runtime::delivery::stored_bytes(root, file) else {
+        return;
+    };
+    crate::ipc::presets::replace_placed_copies(slicer, &file.file_name, &bytes);
+}
+
 /// 把 catalog 里登记的一份文件从数据源拉进**它自己的落点**。
 ///
 /// 落点 = `catalog.path`（唯一路径语义）—— 没有固定的"下载区根"，目录按需建。
@@ -337,6 +351,8 @@ pub async fn download_runtime_file(
             }
 
             outcome?;
+            /* 已经放入切片器的那一份跟着换 —— 没放入的一份都不建 */
+            sync_placed_copy(&root, file);
             /* 预设的真实落点是 `content/<sha>`，文件名一律报目录里的名字 */
             Ok(file.file_name.clone())
         })
@@ -461,6 +477,12 @@ pub async fn download_runtime_files(
             };
 
             let outcomes = runtime::delivery::deliver_all(&root, &wanted, &remote, &report);
+            /* 取到的那几份里，已经放入切片器的跟着换（没放入的不建） */
+            for outcome in outcomes.iter().filter(|o| o.ok) {
+                if let Some(file) = wanted.iter().find(|f| f.file_name == outcome.file_name) {
+                    sync_placed_copy(&root, file);
+                }
+            }
             Ok(outcomes
                 .into_iter()
                 .map(|o| DownloadOutcomeDto {
@@ -1017,6 +1039,32 @@ pub async fn delete_archived_file(app: AppHandle, path: String) -> Result<(), Ap
         let root = internal_root(&app)?;
         runtime::delivery::delete_archived(&root, &path)
     })
+}
+
+/// **用回这一版**（旧版本抽屉里那颗按钮）：把归档那份旧字节重新变成"本机这一版"。
+///
+/// 只动本机：目录登记、版本链、事件账一个都不碰 —— 于是换回来之后这一份会被认成
+/// 「旧版本」（`FileTrust::OldVersion`），界面上照实显示、点「下载」就能换回当前版。
+/// 已经放入切片器的那份跟着换（与下载新版同一条规矩：只换已放入的）。
+#[tauri::command]
+pub async fn restore_archived_file(app: AppHandle, path: String) -> Result<(), AppError> {
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        traced("restoreArchivedFile", |_| {
+            let root = internal_root(&app)?;
+            let catalog = runtime::load_released_catalog(&root)?;
+            runtime::delivery::restore_archived(&root, &catalog, &path)?;
+            let rel = path
+                .strip_prefix(&format!("{}/", runtime::paths::ARCHIVE_DIR))
+                .unwrap_or(&path);
+            if let Some(file) = catalog.files.iter().find(|f| f.path == rel) {
+                sync_placed_copy(&root, file);
+            }
+            Ok(())
+        })
+    });
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.513", &[])).with_detail(e.to_string())
+    })?
 }
 
 /* ---------- 使用中指针（第一圈 ⑤：用户状态的第一个真数据） ---------- */

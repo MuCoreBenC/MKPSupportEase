@@ -356,6 +356,8 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
             "resolved": {
                 "notifyOnFinish": r.notify_on_finish,
                 "uiMode": r.ui_mode.wire(),
+                /* 等回答时置顶（2026-11-17）：只影响窗口层级，不进 IR */
+                "autoTopOnAsk": r.auto_top_on_ask,
                 "glueBottomEnabled": r.glue_bottom_enabled,
                 /* 下方支撑余量（实验，2026-11-17）：余量够的涂胶段不抬高 */
                 "underSupportEnabled": r.under_support_enabled,

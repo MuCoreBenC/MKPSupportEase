@@ -2492,6 +2492,22 @@ machineMinVariants = {  }
 machineMaxVariants = {  }
 pinned = false
 
+[params.machineVariants]
+A1 = 1
+"A1:STANDARD" = 1
+"A1:FAST260326" = 1
+"A1:FAST261111" = 1
+A1_MINI = 1
+"A1_MINI:STANDARD" = 1
+"A1_MINI:FAST260326" = 1
+"A1_MINI:FAST261111" = 1
+P1S = 1
+"P1S:LITE" = 1
+P2S = 1
+"P2S:STANDARD" = 1
+X1C = 1
+"X1C:LITE" = 1
+
 [[params]]
 key = "wiping.glue_edge_lift"
 configKey = "GlueEdgeLift"
@@ -2521,6 +2537,22 @@ deprecated = false
 machineMinVariants = {  }
 machineMaxVariants = {  }
 pinned = false
+
+[params.machineVariants]
+A1 = 0.5
+"A1:STANDARD" = 0.5
+"A1:FAST260326" = 0.5
+"A1:FAST261111" = 0.5
+A1_MINI = 0.5
+"A1_MINI:STANDARD" = 0.5
+"A1_MINI:FAST260326" = 0.5
+"A1_MINI:FAST261111" = 0.5
+P1S = 0.5
+"P1S:LITE" = 0.5
+P2S = 0.5
+"P2S:STANDARD" = 0.5
+X1C = 0.5
+"X1C:LITE" = 0.5
 
 [[params]]
 key = "wiping.min_support_interface_enabled"

@@ -96,6 +96,26 @@ export type BlockScope = 'field' | 'section'
 /** `preview::BulkKind` */
 export type BulkKind = 'detaching' | 'changing' | 'noChange'
 
+/* ---------- 默认配置（客户端偏好出厂值） ---------- */
+
+/**
+ * `workbench::app::defaults::DefaultsField` —— 一行默认值。
+ *
+ * `value` 只有三种形态：开关（boolean）、数字（number）、枚举（string）——
+ * 后端也只认这三种，多一种就会在写盘前被拒。
+ */
+export interface DefaultsField {
+  key: string
+  label: string
+  value: string | number | boolean
+}
+
+/** `workbench::app::defaults::DefaultsView` —— 整页：文件路径 + 11 行 `[Prefs]` */
+export interface DefaultsView {
+  path: string
+  fields: DefaultsField[]
+}
+
 /* ---------- 启动 ---------- */
 
 /** `workbench::Roots`。**唯一的数据根是 `presets/`**，没有第二候选、不 fallback */
@@ -2915,6 +2935,18 @@ export const wb = {
       giteeUrl,
     }),
   words: () => invoke<Words>('wb_words'),
+
+  /** 默认配置：读 `presets/client-defaults.toml` 的 `[Prefs]` 段（影子树优先） */
+  defaultsView: () => invoke<DefaultsView>('wb_defaults_view'),
+
+  /**
+   * 默认配置：改一格。
+   *
+   * 写的是**影子树**里的那一份（草稿），右上角「保存改动」才进真仓库；
+   * 撤销 / 重做走结构编辑那条栈，与改机型显示名同一套。
+   */
+  defaultsApply: (key: string, value: string | number | boolean) =>
+    invoke<DefaultsView>('wb_defaults_apply', { key, value }),
 
   /**
    * 界面偏好：**主题档位**（`light` / `dark` / `system`）。`null` = 还没选过 ⇒ 跟随系统。

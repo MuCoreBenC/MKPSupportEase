@@ -342,6 +342,9 @@ export const bridgeApi: MkpApi = {
   readArchivedText: (path) => call('readArchivedText', 'read_archived_text', { path }),
   deleteArchivedFile: (path) =>
     call<void>('deleteArchivedFile', 'delete_archived_file', { path }),
+  /* 用回归档里那一版：只换本机这一版（云端目录与事件账不动，已放入切片器的那份跟着换） */
+  restoreArchivedFile: (path) =>
+    call<void>('restoreArchivedFile', 'restore_archived_file', { path }),
   /* 删除本机那份交付预设文件（一切皆可删：删了回到「未下载」，随时可从云端重下） */
   deleteDeliveryFile: (fileName) =>
     call<void>('deleteDeliveryFile', 'delete_delivery_file', { fileName }),
@@ -402,7 +405,7 @@ export const bridgeApi: MkpApi = {
      窗口几何的副作用全在 `ipc::window_layout`，前端只发意图、不碰 setSize */
   getWindowPrefs: () => call('getWindowPrefs', 'get_window_prefs'),
   setPin: (pin, onBbs) => call('setPin', 'set_pin', { pin, onBbs }),
-  applyPin: (onBbs) => call('applyPin', 'apply_pin', { onBbs }),
+  applyPin: (onBbs, askTop) => call('applyPin', 'apply_pin', { onBbs, askTop }),
   setCompact: (compact) => call('setCompact', 'set_compact', { compact }),
   /* 屏幕引导（2026-10-15）：改了参数之后指给用户看那一步 —— 只读坐标，不替用户点 */
   locateBedTypeControl: () => call('locateBedTypeControl', 'locate_bed_type_control'),

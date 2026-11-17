@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   SETTINGS_FOLD_MS,
+  asksForAnswer,
   estimatedPrintTimeSeconds,
   postProcessScene,
   postProcessSettingsFold,
@@ -167,5 +168,32 @@ describe('设置页上的后处理那一屏', () => {
       postProcessScene(run({ finished: { ok: true } as PostProcessFinished })),
     ).toBe('finished')
     expect(postProcessScene(null)).toBeNull()
+  })
+})
+
+/* 等回答时置顶窗口那一条的判据（2026-11-17） */
+describe('这一屏是不是在等回答', () => {
+  const run = (over: Partial<PostProcessRun>): PostProcessRun =>
+    ({ finished: null, question: null, ...over }) as PostProcessRun
+  const q = { questionKind: 'tower-relocation' } as PostProcessQuestion
+
+  it('有待答的问句、这一屏也在屏上 ⇒ 是（窗口该浮起来）', () => {
+    expect(asksForAnswer(run({ question: q }), false)).toBe(true)
+  })
+
+  it('答案已经递出去、问句还没被收掉 ⇒ 仍是（那一屏还在等）', () => {
+    /* 答完到钩子把问句收掉之间也是这一屏 —— 窗口不许中途掉回切片器后面 */
+    expect(asksForAnswer(run({ question: q }), false)).toBe(true)
+  })
+
+  it('跑着 / 完成 / 没有这一趟 ⇒ 不是', () => {
+    expect(asksForAnswer(run({}), false)).toBe(false)
+    expect(asksForAnswer(run({ finished: { ok: true } as PostProcessFinished }), false)).toBe(false)
+    expect(asksForAnswer(null, false)).toBe(false)
+  })
+
+  it('收进右上角胶囊 / 开发台预览 ⇒ 都不是（不许拿窗口挡切片器）', () => {
+    expect(asksForAnswer(run({ question: q }), true)).toBe(false)
+    expect(asksForAnswer(run({ question: q, preview: true }), false)).toBe(false)
   })
 })

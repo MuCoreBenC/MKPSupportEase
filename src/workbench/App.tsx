@@ -65,6 +65,7 @@ import BundlesPage from './views/BundlesPage'
 import AssetsPage from './views/AssetsPage'
 import AnnotatePage from './views/AnnotatePage'
 import BuildPage from './views/BuildPage'
+import DefaultsPage from './views/DefaultsPage'
 import SettingsPage from './views/SettingsPage'
 import DevPage from './views/DevPage'
 import s from './c14.module.css'
@@ -164,6 +165,20 @@ const NAV: NavItem[] = [
       </>
     ),
   },
+  /* 三根带滑块的横杆 = 默认配置（改新装默认值，写入影子树）。
+     与「设置」分开：那一页是数据根与云端源，这一页改的是会进客户端包的默认值。 */
+  {
+    id: 'defaults',
+    label: '默认配置',
+    icon: (
+      <>
+        <path d="M4 6h16M4 12h16M4 18h16" />
+        <circle cx="9" cy="6" r="2" />
+        <circle cx="15" cy="12" r="2" />
+        <circle cx="10" cy="18" r="2" />
+      </>
+    ),
+  },
   /* 齿轮 = 只读的设置（数据根与子目录职责）。
      ★ 2026-11-06 作者：「左侧的那一个图标，设置的改成齿轮的图标啊」——
         原来那个是"圆 + 八条射线"，看着像太阳/亮度，不像设置。换成标准齿形
@@ -207,6 +222,9 @@ const DRAFT_PAGES: ReadonlySet<NavId> = new Set<NavId>([
   'params',
   'assets',
   'build',
+  /* 默认配置：改的是 `presets/client-defaults.toml`，写入走 `with_struct_ctx`
+     ⇒ 页头那套「放弃 / 保存」与撤销栈天生就能用 */
+  'defaults',
 ])
 
 /** 导航宽度的三档（C14 第十七轮）：默认 236，可拖 64（图标档）~ 320（再宽只是挤正文） */
@@ -914,6 +932,9 @@ export function WorkbenchApp() {
   /* 草稿不干净时，刷新前用浏览器原生弹窗问一嘴（自绘模态框弹出来时刷新已经走了） */
   /* 脏 = 整本里记的（值草稿 + 事务）+ 事务自己那份。两处都看，切页瞬间也不会闪「已保存」 */
   const dirty = (book?.dirtyCount ?? 0) > 0 || txn?.dirty === true
+  /* 页头按钮上那个数：与状态栏「未保存改动（N）」同一个源（`Txn::dirty_count`），
+     不另算一套 —— 两处对不上时用户只会信小的那个 */
+  const dirtyN = book?.dirtyCount ?? 0
 
   /**
    * 页头那一槽要不要显示（作者 2026-10-16：「有需要的页面就显示，不需要的页面就不显示」）。
@@ -1002,6 +1023,8 @@ export function WorkbenchApp() {
         return '文件登记、被谁引用；改动先进草稿。'
       case 'annotate':
         return '在图上拖框，浅深两张共用一份标注。'
+      case 'defaults':
+        return '改新装默认值；重新构建客户端后才生效。'
       case 'settings':
         return '数据根与各子目录的职责。'
       case 'dev':
@@ -1035,6 +1058,8 @@ export function WorkbenchApp() {
       case 'annotate':
         /* 这一页不读整本 / 词表，骨架基本见不到；给一具形状对得上的占位（见 renderPage 的门） */
         return <PageSkeleton layout="cols" cards={2} rows={6} label="标注台正在加载" />
+      case 'defaults':
+        return <PageSkeleton layout="flow" cards={3} rows={5} label="默认配置正在加载" />
       case 'settings':
         return <PageSkeleton layout="flow" cards={2} rows={4} label="设置正在加载" />
       case 'dev':
@@ -1129,6 +1154,9 @@ export function WorkbenchApp() {
             onReportRefresh={refreshReport}
           />
         )
+      case 'defaults':
+        /* 这一页只读一条命令（`wb_defaults_view`），不等整本 / 词表 */
+        return <DefaultsPage tick={tick} onBookRefresh={refreshBook} />
       case 'settings':
         if (!boot) return skeletonFor('settings')
         return <SettingsPage boot={boot} />
@@ -1433,7 +1461,11 @@ export function WorkbenchApp() {
                             data-tip={saveOn ? (pageSlot.saveTitle ?? '把这一份落盘') : saveWhy}
                             onClick={() => pageActions.run('save')}
                           >
-                            {pageSlot.busy === true ? (pageSlot.savingLabel ?? '保存中…') : '保存'}
+                            {pageSlot.busy === true
+                              ? (pageSlot.savingLabel ?? '保存中…')
+                              : dirtyN > 0
+                                ? `保存改动 · ${dirtyN} 处`
+                                : '保存改动'}
                           </button>
                         </>
                       ) : (
@@ -1463,7 +1495,7 @@ export function WorkbenchApp() {
                           }
                           onClick={() => setHistoryOpen(true)}
                         >
-                          查看改动
+                          {dirtyN > 0 ? `查看改动 · ${dirtyN} 处` : '查看改动'}
                         </button>
                       )}
                     </div>

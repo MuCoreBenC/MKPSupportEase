@@ -124,6 +124,7 @@ import PostprocModeSection from './PostprocModeSection'
 import CalibSection from './CalibSection'
 import UnderSupportSection from './UnderSupportSection'
 import BedGlueSection from './BedGlueSection'
+import ResetPostprocDefaults from './ResetPostprocDefaults'
 import DataSection from './DataSection'
 /* 预设那一块（2026-10-20）：与上面同一条规矩（自己一个文件、只管自己那一行） */
 import PresetsSection from './PresetsSection'
@@ -1862,6 +1863,8 @@ export default function PageSettings({
         <CalibSection nested />
         <UnderSupportSection nested />
         <BedGlueSection nested />
+        {/* 这一类自己的收尾动作：11 项一起置回「没设过」，由后端按出厂值重算 */}
+        <ResetPostprocDefaults nested />
       </div>
 
       {/* 预设：自己一张卡（`PresetsSection` 自带卡片头） */}

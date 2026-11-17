@@ -1,0 +1,209 @@
+/*
+ * 「默认配置」页的版式 —— 一列卡片，卡片里是「分节头 + 成行设置项」。
+ *
+ * 与客户端设置页同构：顺序、每组一句话、行左标题右控件。
+ * 颜色只取工作台的 token（`c14tokens.css`），不新造一套。
+ */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 860px;
+  padding: 4px 2px 40px;
+}
+
+/* 顶上那句「改的是新装默认值」 —— 一句话，别做成广告条 */
+.intro {
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.intro b {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.group {
+  background: var(--card-face);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.groupHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--hairline, var(--line));
+}
+
+.groupIcon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--text-3);
+}
+
+.groupTitle {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.groupDesc {
+  margin: 2px 0 0;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 卡内小节（同一张卡里换一层：校准动作 / 涂胶与塔） */
+.sectionNote {
+  padding: 10px 14px 2px;
+  color: var(--text-3);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--hairline, var(--line));
+}
+
+.row:first-child {
+  border-top: 0;
+}
+
+.label {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.key {
+  margin-left: 8px;
+  color: var(--text-3);
+  font-family: var(--mono, ui-monospace);
+  font-size: 11px;
+}
+
+.control {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.unit {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.num {
+  width: 92px;
+  padding: 5px 8px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 6px;
+  background: var(--surface-sunken);
+  color: var(--text-1);
+  font-family: var(--mono, ui-monospace);
+  font-size: 12px;
+  text-align: right;
+}
+
+.num:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.select {
+  min-width: 120px;
+  padding: 5px 8px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 6px;
+  background: var(--surface-sunken);
+  color: var(--text-1);
+  font-size: 12px;
+}
+
+.switch {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-3);
+  transition: transform 120ms ease, background 120ms ease;
+}
+
+.switch[aria-checked='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.switch[aria-checked='true']::after {
+  transform: translateX(16px);
+  background: var(--accent);
+}
+
+.switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* 只在客户端设置的那一行：整行降到次要色，行尾一句 */
+.readonly {
+  color: var(--text-3);
+}
+
+.readonly .label {
+  color: var(--text-3);
+}
+
+.onlyClient {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.err {
+  padding: 10px 14px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  color: var(--danger-ink, var(--danger));
+  font-size: 12px;
+}
+
+.empty {
+  padding: 24px 0;
+  color: var(--text-3);
+  font-size: 12px;
+  text-align: center;
+}

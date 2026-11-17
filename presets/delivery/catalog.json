@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "86c0271930753b91",
+  "revision": "0d099d04cc990909",
   "publishedAt": "2026-11-15T17:54:23Z",
   "brands": [
     {
@@ -4104,7 +4104,22 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1": 1,
+          "A1:FAST260326": 1,
+          "A1:FAST261111": 1,
+          "A1:STANDARD": 1,
+          "A1_MINI": 1,
+          "A1_MINI:FAST260326": 1,
+          "A1_MINI:FAST261111": 1,
+          "A1_MINI:STANDARD": 1,
+          "P1S": 1,
+          "P1S:LITE": 1,
+          "P2S": 1,
+          "P2S:STANDARD": 1,
+          "X1C": 1,
+          "X1C:LITE": 1
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -4145,7 +4160,22 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1": 0.5,
+          "A1:FAST260326": 0.5,
+          "A1:FAST261111": 0.5,
+          "A1:STANDARD": 0.5,
+          "A1_MINI": 0.5,
+          "A1_MINI:FAST260326": 0.5,
+          "A1_MINI:FAST261111": 0.5,
+          "A1_MINI:STANDARD": 0.5,
+          "P1S": 0.5,
+          "P1S:LITE": 0.5,
+          "P2S": 0.5,
+          "P2S:STANDARD": 0.5,
+          "X1C": 0.5,
+          "X1C:LITE": 0.5
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -6880,8 +6910,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "8427bf16bab749b7c4f63815cde652c2742e78994c7cefdc04319c84223789af",
-      "size": 5351
+      "sha256": "cb341ebd5b5362e882d89f35dc34bbb21ae0f6f4005e1ff7ba80d1736cc26147",
+      "size": 5353
     },
     {
       "kind": "mkp_preset",
@@ -6889,8 +6919,8 @@
       "path": "delivery/mkp/presets/A1-fast260326.toml",
       "machineId": "A1",
       "versionId": "FAST260326",
-      "sha256": "ffe61dba08d7557c31fc216c05aefbdafe68f4aa4feabb23e40e64d58e702886",
-      "size": 5356
+      "sha256": "4e5835f452c467501840d41e09f28c9148ed21195d416ca2a58f7d978576b952",
+      "size": 5358
     },
     {
       "kind": "mkp_preset",
@@ -6898,8 +6928,8 @@
       "path": "delivery/mkp/presets/A1-fast261111.toml",
       "machineId": "A1",
       "versionId": "FAST261111",
-      "sha256": "114a614f5b4f505e09ab877c1cba25c4a704a24e6f44429a68dd99bde1e48463",
-      "size": 5356
+      "sha256": "055b22b4b9060a66f03c06e38be62e1b1036c7aedb3af4ff30b965e3c8250274",
+      "size": 5358
     },
     {
       "kind": "mkp_preset",
@@ -6907,8 +6937,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "712aa316f5265abb7e72ceed141cec5d26b0becf2f136bd7779e22f8251cae7c",
-      "size": 5359
+      "sha256": "f020a3fab9442ae6291019a51b904af6c1fc1dcd672a74e68bf7d5bc556b1176",
+      "size": 5361
     },
     {
       "kind": "mkp_preset",
@@ -6916,8 +6946,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast260326.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST260326",
-      "sha256": "6ff81c6d6f8a7a05abbb597f8a489c62779ab936514bf0fca3eacc63367e3d95",
-      "size": 5359
+      "sha256": "203c68df61ee7136294248cda50cd071b474b86b34f85e071d44a80453c744c1",
+      "size": 5361
     },
     {
       "kind": "mkp_preset",
@@ -6925,8 +6955,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast261111.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST261111",
-      "sha256": "616e3c4270c226275c45bc2b23c27eb90f7842e031f737eeb1131cff9ba45cab",
-      "size": 5359
+      "sha256": "72a6fab744d0a9e4f1079a71e36a6ca2e69cc715229543d790375d1173312ffd",
+      "size": 5361
     },
     {
       "kind": "mkp_preset",
@@ -6934,8 +6964,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "f5794de046b9efbd818bf67bbc4851369cb604dec09481aaf52cefb89f5e9be5",
-      "size": 5500
+      "sha256": "653c3db3ca5d8c0a11bf63ef1c53cdd91ac68e3d771ede81c043e29cd8d0c1fa",
+      "size": 5502
     },
     {
       "kind": "mkp_preset",
@@ -6943,8 +6973,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "284099a463f9ca1b58b12e3cd1c347b5eb8f48828ca4501564bc364aff01e3d0",
-      "size": 5500
+      "sha256": "02dacdaf2a454c7cd53141ac0e46beaf18e582b34d09377d5274b80e8fd04f9c",
+      "size": 5502
     },
     {
       "kind": "icon",
@@ -7033,8 +7063,8 @@
       "path": "assets/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json",
       "machineId": "A1",
       "versionId": "",
-      "sha256": "2ba10a2d873744f97e75a1697fa9a054b58aacb772993d6d05e973f04fda5004",
-      "size": 1308
+      "sha256": "c2b7fd6a8ccc531ddbd45ff7be5bd232479ba9c016c7d84c10622f9d564ce06d",
+      "size": 1332
     },
     {
       "kind": "bbs_config",
@@ -7042,8 +7072,8 @@
       "path": "assets/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
       "machineId": "A1",
       "versionId": "",
-      "sha256": "e4696732236194d4035635adce6abc01fe3efb01847249745f4a36c4f6d5977f",
-      "size": 1332
+      "sha256": "6084dcfa7046dfb75200377ae63b7d9a3e53d6d3bb1ec2ec8915325a5fa80877",
+      "size": 1352
     },
     {
       "kind": "bbs_config",
@@ -7051,8 +7081,8 @@
       "path": "assets/bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json",
       "machineId": "A1_MINI",
       "versionId": "",
-      "sha256": "567a018e5d1c66a573a4ad32cea04c6524858a74bfd6af7bc1f0263c45626c6f",
-      "size": 1315
+      "sha256": "218ffe206f71fd9dabe2e2320fe3b88b429e1421e75cbd09965568694b5c327a",
+      "size": 1339
     },
     {
       "kind": "bbs_config",
@@ -7060,8 +7090,8 @@
       "path": "assets/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
       "machineId": "A1_MINI",
       "versionId": "",
-      "sha256": "1ae5318f97eeb95a3e804619d5102d1d851d06860e53a9a4899dad0db4d717ca",
-      "size": 1301
+      "sha256": "74b25732ffc26f20443b6f2939f0ee38e99ef6e1e245719d75f80013afce8244",
+      "size": 1324
     },
     {
       "kind": "bbs_config",
@@ -7069,8 +7099,8 @@
       "path": "assets/bbs/Process/0.2mm/MKPProcess P1S 0.2 0.10.json",
       "machineId": "P1S",
       "versionId": "",
-      "sha256": "810d4441deef000106366220010d7ca48ae586ac52936af53c84dcb1b3dca8e1",
-      "size": 1906
+      "sha256": "b88888e7259f95d69303840ed6f6efe6f3ec7e905bca747b20a74c7614c1bad2",
+      "size": 1930
     },
     {
       "kind": "bbs_config",
@@ -7078,8 +7108,8 @@
       "path": "assets/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
       "machineId": "P1S",
       "versionId": "",
-      "sha256": "264addc551633c553828492580eef74fc51f2690a127919ed8da051634d8bc2d",
-      "size": 1872
+      "sha256": "9d652b83117f10661c0ce4b7f86ad7d8808ba1e02d3d4fee75a919f09ed4759e",
+      "size": 1891
     },
     {
       "kind": "bbs_config",
@@ -7087,8 +7117,8 @@
       "path": "assets/bbs/Process/0.2mm/MKPProcess X1 0.2 0.10.json",
       "machineId": "X1C",
       "versionId": "",
-      "sha256": "9d9737d18f8cea34d284031dd544b444a00e56c112a4d0ab74b0813f56e2e9ca",
-      "size": 1904
+      "sha256": "b42fbc4e539d8fb7ff71b5543bd3b729a79821ab81c15d35897101e1ee4bc774",
+      "size": 1928
     },
     {
       "kind": "bbs_config",
@@ -7096,8 +7126,8 @@
       "path": "assets/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
       "machineId": "X1C",
       "versionId": "",
-      "sha256": "1fe7377c92d0f67bb8ed1cda16edb12c32a56e3cb4d864983eaccb6ced0a8fa4",
-      "size": 1925
+      "sha256": "db15cf311d699ab0985fe917224743dcce9f7bcbe508141570507e24d9b7c3c7",
+      "size": 1945
     }
   ],
   "structureSignature": "2242174c52e8a9b6",

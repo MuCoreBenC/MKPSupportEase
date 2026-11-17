@@ -1084,7 +1084,7 @@ fn user_base_of(slicer: &str) -> Option<PathBuf> {
 /// 一种资产只进一个切片器：BBS 的工艺预设放进 Orca 的目录里，Orca 的字段表对不上它
 /// （与「去工艺页面查看」那条判据同源）。所以「放入」不带参数时只写它自己那一档 ——
 /// 想往别的切片器放，得在框里那一行上自己点。
-fn slicer_of_kind(kind: &str) -> Option<&'static str> {
+pub(crate) fn slicer_of_kind(kind: &str) -> Option<&'static str> {
     match kind {
         "bbs_config" => Some("bambu"),
         _ => None,
@@ -1129,7 +1129,7 @@ fn copy_targets_in(user_base: &Path, dirs: Vec<PathBuf>) -> Vec<PathBuf> {
 }
 
 /// 某个切片器「放入会写到哪里」的那一组目录（`user/` 一层都没有 ⇒ `None`）。
-fn process_dirs_of(slicer: &str) -> Option<Vec<PathBuf>> {
+pub(crate) fn process_dirs_of(slicer: &str) -> Option<Vec<PathBuf>> {
     let user_base = user_base_of(slicer)?;
     let dirs = process_dirs_in(&user_base);
     Some(copy_targets_in(&user_base, dirs))
@@ -1455,6 +1455,45 @@ pub fn copy_to_slicer(
             targets: written,
         })
     })
+}
+
+/// **跟着换**：本机这一版变了（下载到新版 / 用回旧版）之后，把切片器目录里那份也换掉。
+///
+/// 判据只看「目标目录里有没有同名文件」（与 [`get_slicer_copied`] 同一套）：
+/// **没放入的一个都不建** —— 换版本不该替用户往切片器里塞东西。
+/// 返回真正被换掉的目录数；写失败只记日志，不拦调用方（换版本本身已经成功了）。
+pub(crate) fn replace_placed_copies(slicer: &str, file_name: &str, bytes: &[u8]) -> usize {
+    let Some(dirs) = process_dirs_of(slicer) else {
+        return 0;
+    };
+    let done = replace_placed_in(&dirs, file_name, bytes);
+    if done > 0 {
+        tracing::info!(file = %file_name, targets = done, "切片器目录已跟着换成这一版");
+    }
+    done
+}
+
+/// [`replace_placed_copies`] 的判据本体：**只换已经存在的那几份，一份都不新建**。
+///
+/// 目录从外面递进来（真机上由 `process_dirs_of` 枚举），判据因此能被单测钉住。
+fn replace_placed_in(dirs: &[PathBuf], file_name: &str, bytes: &[u8]) -> usize {
+    let mut done = 0usize;
+    for dir in dirs {
+        let target = dir.join(file_name);
+        if !target.is_file() {
+            continue;
+        }
+        match crate::fsx::atomic::atomic_write(&target, bytes) {
+            Ok(()) => done += 1,
+            Err(e) => tracing::warn!(
+                file = %file_name,
+                at = %target.display(),
+                "已放入的那份没跟上新版：{}",
+                e.message
+            ),
+        }
+    }
+    done
 }
 
 #[cfg(test)]
@@ -1920,6 +1959,27 @@ mod tests {
 
     /// 缓存按字节配对：同一份字节复用解析结果，字节变了自动 miss。
     /// 目录换新（升级/应用远端更新）后没有失效钩子可忘 —— 构造上就不存在那个坑
+    #[test]
+    /// 跟着换：**只换已经放入的那几份**，没放入的不新建（换代不该往切片器里塞东西）
+    #[test]
+    fn replace_placed_only_touches_copies_that_are_already_there() {
+        let root = tempfile::tempdir().unwrap();
+        let placed = root.path().join("placed");
+        let empty = root.path().join("empty");
+        std::fs::create_dir_all(&placed).unwrap();
+        std::fs::create_dir_all(&empty).unwrap();
+        std::fs::write(placed.join("A.json"), b"old").unwrap();
+
+        let done = replace_placed_in(&[placed.clone(), empty.clone()], "A.json", b"new");
+
+        assert_eq!(done, 1);
+        assert_eq!(std::fs::read(placed.join("A.json")).unwrap(), b"new");
+        assert!(
+            !empty.join("A.json").exists(),
+            "没放入的目录一个文件都不该多出来"
+        );
+    }
+
     #[test]
     fn the_byte_cache_serves_and_invalidates_itself() {
         let shared = Arc::new(runtime::Catalog::default());

@@ -408,6 +408,11 @@ export interface PresetData {
    */
   removeArchived: (path: string) => Promise<void>
   /**
+   * **用回归档里的那一版**：把本机这一份换成旧版字节（已放入切片器的那份跟着换）。
+   * 云端目录与事件账不动 —— 所以换回来之后界面上标「旧版本」，点「下载」能换回当前版。
+   */
+  restoreArchived: (path: string) => Promise<void>
+  /**
    * **在文件管理器里显示**（第十三层）：打开 Finder / 资源管理器并选中这份用户文件。
    * **不重读任何东西** —— 它一个状态都不改（打开的是系统窗口，不是我们的界面）。
    */
@@ -1302,6 +1307,12 @@ export function usePresetData(importRevision = 0): PresetData {
     deliveryMutated()
   }, [])
 
+  /* 用回归档里那一版：本机字节换了 ⇒ 投递面广播（行状态、切片器那一栏一起重读） */
+  const restoreArchived = useCallback(async (path: string) => {
+    await api.restoreArchivedFile(path)
+    deliveryMutated()
+  }, [])
+
   /*
    * 另存为一份新的（第十一层）：只重读本地文件 —— 新的一份要出现在表里；使用中指针不归它管。
    *
@@ -1428,6 +1439,7 @@ export function usePresetData(importRevision = 0): PresetData {
     remove,
     removePreset,
     removeArchived,
+    restoreArchived,
     copyAsNew,
     reveal,
     revealDelivered,

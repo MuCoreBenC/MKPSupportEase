@@ -45,13 +45,13 @@
     ],
     "print_settings_id": "MKPProcess P1S",
     "raft_first_layer_density": "100%",
-    "support_expansion": "1",
     "small_perimeter_speed": [
         "100%"
     ],
     "smooth_coefficient": "10",
     "sparse_infill_pattern": "zig-zag",
     "support_base_pattern_spacing": "3",
+    "support_expansion": "1",
     "support_interface_bottom_layers": "0",
     "support_interface_filament": "1",
     "support_interface_pattern": "rectilinear_interlaced",
@@ -68,11 +68,12 @@
     "support_threshold_angle": "30",
     "support_top_z_distance": "0",
     "support_type": "normal(auto)",
+    "thick_bridges": "1",
     "top_surface_acceleration": [
         "5000"
     ],
-    "thick_bridges": "1",
     "tree_support_wall_count": "1",
+    "type": "process",
     "version": "1.9.0.26",
     "wall_generator": "arachne"
 }

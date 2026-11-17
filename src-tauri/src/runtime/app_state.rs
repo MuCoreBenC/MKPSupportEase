@@ -221,9 +221,12 @@ pub fn apply_lang(pref: Option<LocalePref>) {
 ///
 /// 三档，与前端 `src/api/contract.ts` 的 `PinPref` 一一对应 —— **id 是契约**：
 ///
-/// - `off`：不置顶（没选过也是这一档）；
-/// - `page`：**只有工艺页置顶** —— 切到别的页签自动解除，切回来又浮上去；
+/// - `off`：不置顶；
+/// - `page`：**只有工艺页置顶** —— 切到别的页签自动解除，切回来又浮上去（**没选过是这一档**）；
 /// - `always`：任何页面都置顶。
+///
+/// ★ 出厂 = `page`（2026-11-17 作者：「工艺页面也是默认本页置顶」）：工艺页的用法就是
+///   摆到切片器旁边对着看，不置顶就会被切片器盖住。别的页签不受影响。
 ///
 /// ★ 为什么是一格三档、不是两个 bool：两个开关能拼出"关着又始终"这种非法态，
 ///   而"该不该真置顶"是**算出来的**（见 `ipc::window_layout::apply_pin`），不落盘。
@@ -286,6 +289,13 @@ pub struct PostprocPrefs {
     /// 界面形态：`"silent"`（后台静默，不显示任何窗口）/ `"gui"`（独立窗口显示进度）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ui_mode: Option<PostprocUiMode>,
+    /// **这一屏在等回答时把主窗置顶**（出厂 = 开）。
+    ///
+    /// 那一屏是切片器拉起来的：用户切回切片器看模型时它会被盖住，等到超时都没人看见
+    /// （钩子按"不跑"收场）。开着 ⇒ 有待答的问句时窗口浮在最前；答完 / 收起来就落回
+    /// 原本那一档置顶（见 `ipc::window_layout::apply_pin`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_top_on_ask: Option<bool>,
     /// **支撑面底面涂胶**：在支撑面下方一层也涂（比主涂胶低一个层高）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub glue_bottom_enabled: Option<bool>,
@@ -455,22 +465,33 @@ impl PostprocUiMode {
 }
 
 impl PostprocPrefs {
-    /// 每一项的**出厂档**（`None` 的落点）。这里就是真值，界面不另写一份。
+    /// 每一项的**出厂档**（`None` 的落点）。
+    ///
+    /// 与内核 `PrefsIr::default()` 读**同一份** `presets/client-defaults.toml`，
+    /// 本文件不再写字面量 —— 要改默认值只有那一个地方。
     pub fn resolved(&self) -> ResolvedPostprocPrefs {
+        let d = postprocess::ir::client_prefs_default();
         ResolvedPostprocPrefs {
             notify_on_finish: self.notify_on_finish.unwrap_or(true),
             ui_mode: self.ui_mode.unwrap_or(PostprocUiMode::Gui),
-            glue_bottom_enabled: self.glue_bottom_enabled.unwrap_or(false),
-            under_support_enabled: self.under_support_enabled.unwrap_or(false),
+            auto_top_on_ask: self.auto_top_on_ask.unwrap_or(true),
+            glue_bottom_enabled: self.glue_bottom_enabled.unwrap_or(d.glue_bottom_enabled),
+            under_support_enabled: self
+                .under_support_enabled
+                .unwrap_or(d.under_support_enabled),
             under_support_mm: self
                 .under_support_mm
-                .unwrap_or(UNDER_SUPPORT_MM_DEFAULT)
+                .unwrap_or(d.under_support_mm)
                 .clamp(UNDER_SUPPORT_MM_MIN, UNDER_SUPPORT_MM_MAX),
-            skip_vibration_calibration: self.skip_vibration_calibration.unwrap_or(false),
-            begin_stage_retract_enabled: self.begin_stage_retract_enabled.unwrap_or(true),
+            skip_vibration_calibration: self
+                .skip_vibration_calibration
+                .unwrap_or(d.skip_vibration_calibration),
+            begin_stage_retract_enabled: self
+                .begin_stage_retract_enabled
+                .unwrap_or(d.begin_stage_retract_enabled),
             begin_stage_retract_z_lift_mm: self
                 .begin_stage_retract_z_lift_mm
-                .unwrap_or(BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT)
+                .unwrap_or(d.begin_stage_retract_z_lift_mm)
                 .clamp(
                     BEGIN_STAGE_RETRACT_Z_LIFT_MIN,
                     BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
@@ -494,16 +515,23 @@ impl PostprocPrefs {
             debug_move_y: self.debug_move_y.unwrap_or(false),
             z_calibration_dwell_sec: self
                 .z_calibration_dwell_sec
-                .unwrap_or(Z_DWELL_DEFAULT)
+                .unwrap_or(d.z_calibration_dwell_sec)
                 .clamp(Z_DWELL_MIN, Z_DWELL_MAX),
             xy_calibration_dwell_sec: self
                 .xy_calibration_dwell_sec
-                .unwrap_or(XY_DWELL_DEFAULT)
+                .unwrap_or(d.xy_calibration_dwell_sec)
                 .clamp(XY_DWELL_MIN, XY_DWELL_MAX),
-            bed_glue_enabled: self.bed_glue_enabled.unwrap_or(false),
-            bed_glue_all_models: self.bed_glue_all_models.unwrap_or(false),
+            bed_glue_enabled: self.bed_glue_enabled.unwrap_or(d.bed_glue_enabled),
+            bed_glue_all_models: self.bed_glue_all_models.unwrap_or(d.bed_glue_all_models),
             force_calibration_mode: self.force_calibration_mode.unwrap_or(false),
-            auto_tower_position: self.auto_tower_position.unwrap_or_default(),
+            /* 三档一一对应；映射写在这里，别再各写一份默认值 */
+            auto_tower_position: self
+                .auto_tower_position
+                .unwrap_or(match d.auto_tower_position {
+                    postprocess::ir::TowerRelocateModeIr::Off => TowerRelocateMode::Off,
+                    postprocess::ir::TowerRelocateModeIr::Auto => TowerRelocateMode::Auto,
+                    postprocess::ir::TowerRelocateModeIr::Ask => TowerRelocateMode::Ask,
+                }),
         }
     }
 }
@@ -539,22 +567,25 @@ pub struct PresetPrefs {
     pub auto_copy_script: Option<bool>,
 }
 
-/// Z 轴校准停留时间的出厂值与量程（秒）。
+/// Z 轴校准停留时间的**出厂值镜像**与量程（秒）。
+///
+/// 出厂值的真值在 `presets/client-defaults.toml`（`resolved()` 与内核 `PrefsIr::default()`
+/// 都读它）；这里的常量只为判据服务 —— 两边一旦漂，`the_two_default_sets_agree` 会红。
 pub const Z_DWELL_DEFAULT: i64 = 2;
 pub const Z_DWELL_MIN: i64 = 1;
 pub const Z_DWELL_MAX: i64 = 20;
 
-/// XY 轴校准停留时间的出厂值与量程（秒）。
+/// XY 轴校准停留时间的**出厂值镜像**与量程（秒）。理同上。
 pub const XY_DWELL_DEFAULT: i64 = 3;
 pub const XY_DWELL_MIN: i64 = 1;
 pub const XY_DWELL_MAX: i64 = 10;
 
-/// 下方支撑余量的出厂值与量程（mm）。上限 2mm 与设置页滑杆一致。
+/// 下方支撑余量的**出厂值镜像**与量程（mm）。上限 2mm 与设置页滑杆一致。理同上。
 pub const UNDER_SUPPORT_MM_DEFAULT: f64 = 0.5;
 pub const UNDER_SUPPORT_MM_MIN: f64 = 0.0;
 pub const UNDER_SUPPORT_MM_MAX: f64 = 2.0;
 
-/// 开始阶段收笔在原版抬 Z 之上再补抬的相对高度（mm）的出厂值与量程。
+/// 开始阶段收笔在原版抬 Z 之上再补抬的相对高度（mm）的**出厂值镜像**与量程。
 ///
 /// ★ 量程必须与内核那一份（`postprocess::pipeline::hooks::BEGIN_STAGE_RETRACT_Z_LIFT_*_MM`）
 ///   一致：管线对越界值不是夹取、而是**回落到下限 5**（原厂口径）。界面这边要是宽容到 300，
@@ -586,6 +617,8 @@ pub const DEBUG_SPEED_DEFAULT: f64 = 10000.0;
 pub struct ResolvedPostprocPrefs {
     pub notify_on_finish: bool,
     pub ui_mode: PostprocUiMode,
+    /// 有待答的问句时把主窗置顶（见 [`PostprocPrefs::auto_top_on_ask`]）
+    pub auto_top_on_ask: bool,
     pub glue_bottom_enabled: bool,
     /// **下方支撑余量（实验）**：见 [`PostprocPrefs::under_support_enabled`]
     pub under_support_enabled: bool,
@@ -1529,9 +1562,9 @@ pub fn resolved_postproc_prefs(root: &Path) -> Result<ResolvedPostprocPrefs, App
 
 /* ---------- pin / compact / lastWindowBox：窗口怎么摆（2026-10-17） ---------- */
 
-/// 主窗置顶档位。**`None` = 还没选过 ⇒ `off`**（见 [`PinPref`]）。
+/// 主窗置顶档位。**`None` = 还没选过 ⇒ `page`**（见 [`PinPref`]）。
 pub fn pin(root: &Path) -> Result<PinPref, AppError> {
-    Ok(load(root)?.pin.unwrap_or(PinPref::Off))
+    Ok(load(root)?.pin.unwrap_or(PinPref::Page))
 }
 
 /// 记下置顶档位（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
@@ -2227,12 +2260,12 @@ mod tests {
 
     /* ---------- pin / compact / lastWindowBox ---------- */
 
-    /// 三格都是"没写过 = 出厂那一档"：不置顶、不在窄窗、没有还原点；
+    /// 三格都是"没写过 = 出厂那一档"：本页置顶、不在窄窗、没有还原点；
     /// 写过之后各自读得回来，**互不踩**（三格同一次原子替换里）
     #[test]
     fn window_prefs_start_at_default_and_roundtrip() {
         let d = tempfile::tempdir().unwrap();
-        assert_eq!(pin(d.path()).unwrap(), PinPref::Off, "没选过 = 不置顶");
+        assert_eq!(pin(d.path()).unwrap(), PinPref::Page, "没选过 = 本页置顶");
         assert!(!compact(d.path()).unwrap(), "没选过 = 不在窄窗");
         assert_eq!(
             last_window_box(d.path()).unwrap(),

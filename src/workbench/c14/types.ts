@@ -40,5 +40,6 @@ export type PageId =
   | 'build'
   | 'assets'
   | 'annotate'
+  | 'defaults'
   | 'settings'
   | 'dev'

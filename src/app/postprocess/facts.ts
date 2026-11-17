@@ -1,10 +1,11 @@
 /*
  * 后处理那一屏的几处判据（纯函数，便于回归）。
  *
- * 三件事：
+ * 四件事：
  *   · 结果态「取什么值」：失败 / 取消时「预估打印时间」右侧给「—」，不拿切片器自报的顶上；
  *   · 「去设置」后收成右上角胶囊，**直到用户点「关闭」才消失**（不套 60 秒过期）；
- *   · 这一屏演到哪一幕（开场 / 问 / 完成）—— 在设置页上「完成」什么时候折成胶囊。
+ *   · 这一屏演到哪一幕（开场 / 问 / 完成）—— 在设置页上「完成」什么时候折成胶囊；
+ *   · 这一屏是不是**正在等回答**（等回答时窗口自动置顶那一条认它）。
  *
  * ★ 为什么单独成件：这些原本都住在组件文件里（`PostProcessModal.tsx` /
  *   `PostProcessChip.tsx` / `App.tsx`），判据塞进去就只能靠肉眼复核；抽成纯函数才写得了
@@ -88,6 +89,23 @@ export function postProcessScene(run: PostProcessRun | null): PostProcessScene |
   if (run === null) return null
   if (run.finished !== null) return 'finished'
   return run.question === null ? 'opening' : 'question'
+}
+
+/**
+ * **这一屏正在等用户回答吗** —— 「等回答时置顶窗口」那一条的判据（2026-11-17）。
+ *
+ * 那一屏是切片器拉起来问一句的：用户切回切片器看图 / 摆模型时它会被盖住，
+ * 两分钟没人答就按"不跑"收场 —— 人根本没看见。所以只要还有待答的问句、
+ * 而这一屏又真在屏上（没被收进右上角胶囊），窗口就该浮起来。
+ *
+ * ★ 判据只有「幕是 `question` + 没收起」：`run.question` 由钩子收掉（答完 / 终止 /
+ *   超时）那一刻归零，wire 上没有第二条"正在等"的字段。
+ * ★ 开发台「预览」那一趟不置顶：它不是真钩子在等，浮上来只会挡着切片器。
+ */
+export function asksForAnswer(run: PostProcessRun | null, dismissed: boolean): boolean {
+  if (dismissed) return false
+  if (run?.preview === true) return false
+  return postProcessScene(run) === 'question'
 }
 
 /**

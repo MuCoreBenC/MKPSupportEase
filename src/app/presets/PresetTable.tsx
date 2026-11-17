@@ -477,6 +477,14 @@ interface Props {
    */
   onReveal?: (row: PresetTableRow) => void
   /**
+   * **「更新信息」右侧那颗「查看」**：看这一份**已经下载到本机**的正文（只读）。
+   *
+   * 切片器配置没有"跟云端哪一版"那套，行上却一样有「更新」——那一块原来整格是空的，
+   * 用户看不到任何关于这次更新的字，也没有能点开看看的入口（2026-11-17 作者截图）。
+   * 省略 = 这一页不给这一颗。
+   */
+  onView?: (row: PresetTableRow) => void
+  /**
    * 开始改这一份（临时编辑那条链）。两边共一个入口：
    * 交付行只给"与目录一致"的那一份；我自己那份都能改（认不出是哪一类的不给）。
    */
@@ -585,6 +593,7 @@ export default function PresetTable({
   onOpenArchive,
   onOpenLocal,
   onReveal,
+  onView,
   onParams,
   onLive,
   onUse,
@@ -916,10 +925,16 @@ export default function PresetTable({
                           : undefined,
                     })
                   : {
-                      /* 切片器 / BBS 档没有"跟云端哪一版"这回事：整格不出现 */
-                      text: null,
+                      /*
+                       * 切片器 / BBS 档：没有"跟云端哪一版"那套（`basedOn` 只对 MKP 预设成立），
+                       * 但**有没有新版**一样答得出 —— `presetState` 四态在源上算好，
+                       * 与列表徽章、右侧那颗「更新」同一个出口（`updateStateOf`）。
+                       * 原来这里整格写 null，于是详情右边「更新信息」永远是空的
+                       * （行上有「更新」按钮、那块却一个字都没有 —— 2026-11-17 作者截图）。
+                       */
+                      text: updateState === undefined ? null : UPDATE_STATE_TEXT[updateState],
                       action: 'none' as const,
-                      warn: false,
+                      warn: row.presetState === 'tampered',
                       hint: null,
                     }
               const statusText = status.text === null ? null : tr(status.text, status.params)
@@ -1789,6 +1804,16 @@ export default function PresetTable({
                             <div className={s.dSecHead}>
                               <Icon name="refresh" size={13} className={s.dSecIcon} />
                               <span>{tr('presets.table.detail.update')}</span>
+                              {/* 看本机这一份的正文（切片器配置那一档没有别的入口） */}
+                              {onView !== undefined && row.downloaded && (
+                                <button
+                                  type="button"
+                                  className={s.dReveal}
+                                  onClick={() => onView(row)}
+                                >
+                                  {tr('presets.table.detail.view')}
+                                </button>
+                              )}
                             </div>
                             <div className={s.dKvs}>
                               {status.text !== null && (
@@ -1848,14 +1873,15 @@ export default function PresetTable({
                                 没有新版也要看得见云端停在哪一版。时间用相对值，悬停给到分钟的绝对时间；
                                 分支与序号进折叠区（一行里塞不下，也不该塞）。
                               */}
-                              {row.basedOnFacts?.cloudPublishedAt != null && (
+                              {(row.basedOnFacts?.cloudPublishedAt ?? row.publishedAt) != null && (
                                 <div className={s.dRow}>
                                   <span className={s.dKey}>
                                     {tr('presets.table.detail.key.cloudCurrent')}
                                   </span>
                                   <span className={s.dVal}>
                                     {(() => {
-                                      const raw = row.basedOnFacts?.cloudPublishedAt ?? null
+                                      const raw =
+                                        row.basedOnFacts?.cloudPublishedAt ?? row.publishedAt ?? null
                                       if (raw === null) return null
                                       const abs = instantText(raw) ?? raw
                                       const rel = relativePart(raw, Date.now())

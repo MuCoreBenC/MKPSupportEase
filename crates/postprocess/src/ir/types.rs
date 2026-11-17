@@ -576,26 +576,35 @@ pub struct PrefsIr {
 }
 
 impl Default for PrefsIr {
-    /// 出厂档 —— **与 `runtime::app_state::ResolvedPostprocPrefs` 的默认值必须一致**
-    /// （判据 `crates/postprocess` 里那条 `default_prefs_match_the_client_defaults` 咬着）。
+    /// 出厂档 —— 来自 [`client_prefs_default`]（`presets/client-defaults.toml`）。
     ///
-    /// 为什么两边各写一份而不是共用：`postprocess` 是独立 crate，**不许**回头依赖
-    /// 客户端（那是"内核知道界面"的反向依赖）。所以两份 + 一条判据，判据是唯一防线。
+    /// 客户端 `runtime::app_state` 读的是同一份，所以两处不会再各写一套字面量；
+    /// 判据 `default_prefs_match_the_client_defaults` 仍留着，咬住「别有人又写回去」。
     fn default() -> Self {
-        Self {
-            glue_bottom_enabled: false,
-            under_support_enabled: false,
-            under_support_mm: 0.5,
-            skip_vibration_calibration: false,
-            begin_stage_retract_enabled: true,
-            begin_stage_retract_z_lift_mm: 5,
-            z_calibration_dwell_sec: 2,
-            xy_calibration_dwell_sec: 3,
-            bed_glue_enabled: false,
-            bed_glue_all_models: false,
-            auto_tower_position: TowerRelocateModeIr::Ask,
-        }
+        *client_prefs_default()
     }
+}
+
+/// `presets/client-defaults.toml` → 出厂偏好（进程内只解析一次）。
+///
+/// 缺字段 / 语法错直接 panic：出厂值读不出来时**不许**拿别的值顶上 ——
+/// 那会让「设置页写着 A、切出来是 B」变成没人能解释的事。
+///
+/// 文件随源码进二进制（`include_str!`），改了重编即可生效。
+pub fn client_prefs_default() -> &'static PrefsIr {
+    static CELL: std::sync::OnceLock<PrefsIr> = std::sync::OnceLock::new();
+    CELL.get_or_init(|| {
+        /// 配置文件外形（`[Prefs]` 段与 `mkpse-pp` 的配置同一套键名）
+        #[derive(Deserialize)]
+        struct DefaultsFile {
+            #[serde(rename = "Prefs")]
+            prefs: PrefsIr,
+        }
+        const RAW: &str = include_str!("../../../../presets/client-defaults.toml");
+        let file: DefaultsFile = toml::from_str(RAW)
+            .expect("presets/client-defaults.toml 必须能解析（客户端偏好出厂值的唯一源）");
+        file.prefs
+    })
 }
 
 /// 「模型与擦料塔相撞时怎么办」三档 —— 内核这一侧的镜像。

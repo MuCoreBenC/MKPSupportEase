@@ -6,8 +6,10 @@
 //! # 三条口径
 //!
 //! - **该不该真置顶是算出来的**，不落盘：`always` 恒真、`page` 只在工艺页、
-//!   `off` 恒假。页签的真值在前端（`App.tsx` 的 `tab`），所以切页那一下由前端
-//!   调 [`apply_pin`] —— 后端不复制一份"现在在哪一页"。
+//!   `off` 恒假；另有一条临时理由 —— 后处理那一屏**正在等回答**（`ask_top`，
+//!   设置页可关）。两者都算完之后才是窗口实际的层级。页签的真值在前端
+//!   （`App.tsx` 的 `tab`），所以切页那一下由前端调 [`apply_pin`] ——
+//!   后端不复制一份"现在在哪一页"。
 //! - **窄窗的还原点 = 用户上一次手动摆放的位置与尺寸**（`lastWindowBox`），
 //!   不是"进窄窗那一刻"的几何。两者的差别只在一种情形上：用户先点了窄窗、
 //!   再也没动过窗口，那时两者本来就一样。
@@ -151,17 +153,23 @@ fn fallback_geometry(win: &WebviewWindow) -> (f64, f64, f64, f64) {
 
 /* ---------- 置顶 ---------- */
 
-/// 按档位与"现在在不在工艺页"把窗口的置顶标志设成该有的一档。返回**实际设成了置顶吗**。
+/// 按档位、"现在在不在工艺页"、以及"后处理那一屏是不是正在等回答"把窗口的置顶标志
+/// 设成该有的一档。返回**实际设成了置顶吗**。
+///
+/// `ask_top` 是那一条临时理由（设置页「等回答时置顶」开着、且有待答的问句）：
+/// 它与三档是**或**的关系 —— 人的档位是 `off` 时它也能把窗浮上来；问句一收掉，
+/// 调用方会再调一次（此时 `ask_top` 为假），窗口于是落回档位算出来的那一层。
 ///
 /// 失败只打日志：置顶失败不该让界面上的切换报错（用户看得见的是窗口层级，
 /// 不是一条错误）。`off` 与 `page`（不在工艺页）都会主动 `false` ——
 /// 切页那一下必须真的解除，否则"只有这一页置顶"就是句空话。
-pub fn pin_window(app: &AppHandle, pref: PinPref, on_bbs: bool) -> bool {
-    let on_top = match pref {
-        PinPref::Always => true,
-        PinPref::Page => on_bbs,
-        PinPref::Off => false,
-    };
+pub fn pin_window(app: &AppHandle, pref: PinPref, on_bbs: bool, ask_top: bool) -> bool {
+    let on_top = ask_top
+        || match pref {
+            PinPref::Always => true,
+            PinPref::Page => on_bbs,
+            PinPref::Off => false,
+        };
     let Some(win) = app.get_webview_window(MAIN) else {
         return false;
     };
@@ -334,8 +342,8 @@ pub fn restore_at_startup(app: &AppHandle) {
     };
     /* 启动宽限期（见 [`STARTUP_GRACE`]）：从这一刻起 2 秒内来的几何事件不记账 */
     *startup_grace() = Some(Instant::now() + STARTUP_GRACE);
-    let pref = runtime::app_state::pin(&root).unwrap_or(PinPref::Off);
-    pin_window(app, pref, false);
+    let pref = runtime::app_state::pin(&root).unwrap_or(PinPref::Page);
+    pin_window(app, pref, false, false);
     if runtime::app_state::compact(&root).unwrap_or(false) {
         if let Err(e) = enter_compact(app) {
             tracing::warn!("上次的窄窗没摆回去：{e}");
@@ -380,7 +388,7 @@ pub async fn set_pin(app: AppHandle, pin: String, on_bbs: bool) -> Result<String
             ))
         })?;
         runtime::app_state::set_pin(&root, pref)?;
-        pin_window(&app, pref, on_bbs);
+        pin_window(&app, pref, on_bbs, false);
         notify_app_state(&app);
         Ok(pref.wire().to_owned())
     })
@@ -388,12 +396,20 @@ pub async fn set_pin(app: AppHandle, pin: String, on_bbs: bool) -> Result<String
 
 /// 切页之后重新算一次"该不该置顶"（**不写盘、不广播** —— 它只是把已经选好的档
 /// 落到窗口上；档位本身没变，广播会把前端绕回这个 effect 里）。
+///
+/// `ask_top` = 后处理那一屏**正在等回答**（且设置页「等回答时置顶」开着）。
+/// 它与档位是或的关系，见 [`pin_window`]；问句收掉时前端会带着 `false` 再调一次，
+/// 窗口就落回档位算出来的那一层。
 #[tauri::command]
-pub async fn apply_pin(app_handle: AppHandle, on_bbs: bool) -> Result<bool, AppError> {
+pub async fn apply_pin(
+    app_handle: AppHandle,
+    on_bbs: bool,
+    ask_top: bool,
+) -> Result<bool, AppError> {
     traced("applyPin", |_| {
         let root = internal_root(&app_handle)?;
         let pref = runtime::app_state::pin(&root)?;
-        Ok(pin_window(&app_handle, pref, on_bbs))
+        Ok(pin_window(&app_handle, pref, on_bbs, ask_top))
     })
 }
 
@@ -426,12 +442,12 @@ pub async fn set_compact(app: AppHandle, compact: bool) -> Result<bool, AppError
             runtime::app_state::set_compact(&root, true)?;
             /* 替用户打开置顶（"小窗对比"时它不能被切片器盖住） */
             runtime::app_state::set_pin(&root, PinPref::Always)?;
-            pin_window(&app, PinPref::Always, true);
+            pin_window(&app, PinPref::Always, true, false);
             if let Err(e) = enter_compact(&app) {
                 let _ = runtime::app_state::set_compact(&root, before);
                 let _ = runtime::app_state::set_pin(&root, pin_before);
                 let _ = runtime::app_state::set_pin_before_compact(&root, None);
-                pin_window(&app, pin_before, true);
+                pin_window(&app, pin_before, true, false);
                 return Err(e);
             }
         } else {
@@ -450,7 +466,7 @@ pub async fn set_compact(app: AppHandle, compact: bool) -> Result<bool, AppError
             if runtime::app_state::pin(&root)? == PinPref::Always {
                 if let Some(prev) = runtime::app_state::pin_before_compact(&root)? {
                     runtime::app_state::set_pin(&root, prev)?;
-                    pin_window(&app, prev, true);
+                    pin_window(&app, prev, true, false);
                 }
             }
             runtime::app_state::set_pin_before_compact(&root, None)?;

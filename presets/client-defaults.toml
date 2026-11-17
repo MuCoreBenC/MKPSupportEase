@@ -1,0 +1,26 @@
+# 客户端偏好的出厂值 —— **只此一份**。
+#
+# 两个消费者都 `include_str!` 这一份：
+#   · 内核 `postprocess::ir::PrefsIr::default()`（决定切出来的 G-code）
+#   · 客户端 `runtime::app_state` 的 `PostprocPrefs::resolved()`（设置页没填时的初值）
+#
+# 改这里 = 改**新装**的默认值。已经装好的客户端不受影响，直到用户自己点
+# 设置页的「恢复默认」；改完要重新构建才进二进制。
+#
+# 它不是机型 / 参数预设：不参与 `presets generate` 的三层生成物，
+# 也不是工作台参数表里那个 `default`（那个归参数注册表管）。
+#
+# 键名是内核 IR 的 PascalCase（`PrefsIr` 的 serde 口径），枚举值小写。
+
+[Prefs]
+GlueBottomEnabled = false
+UnderSupportEnabled = true
+UnderSupportMm = 0.5
+SkipVibrationCalibration = true
+BeginStageRetractEnabled = true
+BeginStageRetractZLiftMm = 5
+ZCalibrationDwellSec = 2
+XyCalibrationDwellSec = 3
+BedGlueEnabled = false
+BedGlueAllModels = false
+AutoTowerPosition = "ask"

@@ -1,8 +1,8 @@
 /*
  * 设置页「后处理模式」那一块（2026-10-17）。
  *
- * 四行：跑完发不发系统通知 / 静默还是 GUI / 支撑面底面涂胶 / 智能塔位置。
- * 另导出 `ResetPostprocRow`（重置后处理状态）—— 它是整类的收尾动作，
+ * 五行：跑完发不发系统通知 / 静默还是 GUI / 等回答时置不置顶 / 支撑面底面涂胶 /
+ * 智能塔位置。另导出 `ResetPostprocRow`（重置后处理状态）—— 它是整类的收尾动作，
  * 由 `PageSettings` 排在大类末尾，不跟在这四行后头。
  *
  * 组件单独一个文件是有原因的：`PageSettings.tsx` 已经一千多行，再往里塞四块会
@@ -151,6 +151,25 @@ export default function PostprocModeSection() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/*
+        等回答时置顶（2026-11-17）：那一屏是切片器拉起来问一句的，用户切回切片器看模型
+        时它会被盖住，两分钟没人答就按"不跑"收场。关掉这一档就回到"窗口层级只认置顶
+        那三档"的老样子（切片器会盖住它）。
+      */}
+      <div className={`${s.field} ${s.fieldRow}`}>
+        <div className={s.fieldText}>
+          <div className={s.fieldTitle}>
+            {tr('settings.postproc.topOnAsk')}
+            <Tip text={tr('settings.postproc.topOnAskNote')} />
+          </div>
+        </div>
+        <Switch
+          checked={r.autoTopOnAsk}
+          ariaLabel={tr('settings.postproc.topOnAsk')}
+          onChange={(next) => void set({ autoTopOnAsk: next }, on)}
+        />
       </div>
 
       <div className={`${s.field} ${s.fieldRow}`}>

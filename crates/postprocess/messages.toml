@@ -5256,6 +5256,13 @@ text_ja = "「このファイルを開く方法」でアプリを選び、「.3m
 params = []
 note = "Windows 走通时的状态句；「始终」那个勾选框是那边唯一能改成默认的地方（我们不碰注册表）"
 
+["ui.ipc.catalog.513"]
+text = "用回旧版本没跑到终局"
+text_en = "Restoring the old version did not run to completion"
+text_zh_tw = "用回舊版本沒跑到終局"
+text_ja = "旧バージョンへの切り戻しが完了しませんでした"
+params = []
+
 ["ui.workbench.txn.dirty"]
 text = "有 {count} 处改动还没保存 —— 先保存或放弃，再生成/发布"
 text_en = "{count} change(s) are not saved yet — save or discard them before generating or publishing"

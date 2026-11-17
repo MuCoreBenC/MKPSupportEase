@@ -606,6 +606,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 删除（作者裁决 2026-10-06：一切皆可删 —— 删了可重下/代价讲清）
         ipc::catalog::delete_delivery_file,
         ipc::catalog::delete_archived_file,
+        // 用回旧版本：只换本机这一版（目录与事件账不动）
+        ipc::catalog::restore_archived_file,
         ipc::catalog::check_remote_update,
         ipc::catalog::apply_remote_update,
         // 软件更新（release.json）—— 与预设数据两条链：设置页「软件更新」块的两个口子
@@ -810,6 +812,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 删除（作者裁决 2026-10-06：一切皆可删 —— 删了可重下/代价讲清）
         ipc::catalog::delete_delivery_file,
         ipc::catalog::delete_archived_file,
+        // 用回旧版本：与上面那份清单一字不差
+        ipc::catalog::restore_archived_file,
         ipc::catalog::check_remote_update,
         ipc::catalog::apply_remote_update,
         // 软件更新（release.json）—— 与上面那份清单一字不差
@@ -865,6 +869,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_set_bootstrap,
         app::wb_book,
         app::wb_registry,
+        // 默认配置（客户端偏好出厂值）：读写 `presets/client-defaults.toml`，
+        // 写入走结构编辑那条事务（影子树 + 撤销 + 保存改动）
+        app::defaults::wb_defaults_view,
+        app::defaults::wb_defaults_apply,
         // 参数定义编辑（2026-10-03 作者：「弃用是谁决定的？我没办法改」）：
         // 名称 / 单位 / 值类型 / 控件 / 范围 / 步进 / 出厂默认 / 属于 / 前置条件 / 弃用，
         // 就地写进 param_registry.toml 的 [[params]] 本体 —— 即时落盘，不走参数草稿

@@ -1257,6 +1257,13 @@ export const ARCHIVE_DRAWER = {
   bodyTitle: 'presets.tree.archiveDrawer.bodyTitle',
   /** 认不出机型版本时那一格写什么 */
   unknown: 'presets.tree.archiveDrawer.unknown',
+  /* 正文区三档：这一版 / 正在用的 / 对比 */
+  tabOld: 'presets.tree.archiveDrawer.tabOld',
+  tabCurrent: 'presets.tree.archiveDrawer.tabCurrent',
+  tabDiff: 'presets.tree.archiveDrawer.tabDiff',
+  /* 用回这一版（两段式：第二下是「确认用回」） */
+  restore: 'presets.tree.archiveDrawer.restore',
+  restoreAsk: 'presets.tree.archiveDrawer.restoreAsk',
 } as const satisfies Record<string, StringKey>
 
 /**

@@ -63,6 +63,7 @@ import type { SettingsTarget, SettingsTargetId } from './settings/targets'
 import PostProcessModal from './postprocess/PostProcessModal'
 import {
   SETTINGS_FOLD_MS,
+  asksForAnswer,
   postProcessScene,
   postProcessSettingsFold,
 } from './postprocess/facts'
@@ -265,22 +266,8 @@ export default function App() {
   const density = useDensity(rootRef)
   const [tab, setTab] = useState('machine')
 
-  /*
-   * 窗口置顶（2026-10-17）：**落地只看这一处** —— 档位来自 AppState（工艺页那枚胶囊
-   * 点出来的），"现在在哪一页"只有这里知道（`tab`）。于是：
-   *
-   *   always → 恒置顶；page → 只有 `bbs`（工艺页）置顶；off → 不置顶。
-   *
-   * ★ 切页的每一个入口（顶栏页签、`openBbs`、`openPresetsForSlicer`、开发台）
-   *   最终都改的是 `tab`，所以一条 effect 就够，不必逐处埋点。
-   * ★ 不写盘、不发广播：档位没变，只是把它落到窗口上（见 `api.applyPin`）。
-   */
+  /* 置顶档位（工艺页那枚胶囊点出来的）；落到窗口上的是下面 `postProcess` 之后那条 effect */
   const pin = usePinPref()
-  useEffect(() => {
-    void api.applyPin(tab === 'bbs').catch(() => {
-      /* 置顶失败不该打断用户 —— 真实原因是窗口没了之类，日志在 Rust 侧 */
-    })
-  }, [pin, tab])
 
   /*
    * 界面动作记录（2026-11-12）：全局点击捕获装一次；页签变化也记一笔 ——
@@ -435,6 +422,34 @@ export default function App() {
   const { prefs: postprocPrefs } = usePostprocPrefs()
   const silentPostproc = postprocPrefs?.resolved.uiMode === 'silent'
   const postProcess = usePostProcessRun(silentPostproc)
+
+  /*
+   * **窗口置顶：落地只看这一处**（2026-10-17）。
+   *
+   * 两条理由算出一个层级：
+   *   · 档位（AppState 里那一格，工艺页那枚胶囊点出来的）：`always` 恒置顶、
+   *     `page` 只在工艺页（`tab === 'bbs'`）置顶、`off` 不置顶；
+   *   · 这一屏**正在等一个回答**（下面 `askTop`）—— 2026-11-17 作者：
+   *     「在这个页面的时候，他可以自动置顶窗口，可以在设置页面关闭自动置顶」。
+   *     那一屏是切片器拉起来问一句的：用户切回切片器看图 / 摆模型时它会被盖住，
+   *     两分钟没人答就按"不跑"收场 —— 人根本没看见。设置页可以关（出厂开），
+   *     读不到偏好按开处理（与静默档那条同一条取向：读不到时给人看得见的那一侧）。
+   *
+   * ★ 切页的每一个入口（顶栏页签、`openBbs`、`openPresetsForSlicer`、开发台）
+   *   最终都改的是 `tab`，所以一条 effect 就够，不必逐处埋点。
+   * ★ 不写盘、不发广播：档位没变，只是把它落到窗口上（见 `api.applyPin`）。
+   * ★★ 问句那一格是**唯一**判据（`run.question`，钩子收掉它时归零）；不许另起
+   *   一条只算页签的 effect —— 两个源各设一次 `always_on_top`，会在问句屏与
+   *   切片器之间来回抢层级。
+   */
+  const askTop =
+    asksForAnswer(postProcess.run, postProcess.dismissed) &&
+    (postprocPrefs?.resolved.autoTopOnAsk ?? true)
+  useEffect(() => {
+    void api.applyPin(tab === 'bbs', askTop).catch(() => {
+      /* 置顶失败不该打断用户 —— 真实原因是窗口没了之类，日志在 Rust 侧 */
+    })
+  }, [pin, tab, askTop])
 
   /*
    * **设置页上的「完成」：成功摆 10 秒再折成胶囊**（作者 2026-11-13）。

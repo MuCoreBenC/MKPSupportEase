@@ -55,6 +55,7 @@ pub mod bundles;
 /// 0600），前端拿不到原值
 pub mod credentials;
 /// 交付层（b05 Task 12）：目录类 JSON 与资产复制，`wb_publish` 落盘
+pub mod defaults;
 pub mod delivery;
 /// 「本地测试源（开发）」：一颗按钮＝把 `npm run dev:test-update` 替你敲了
 /// （起本地假云端 + 以 `MKPSE_PRESET_SOURCE_URL` 起客户端 dev）。
@@ -946,6 +947,7 @@ const COMMAND_LABELS: &[(&str, &str)] = &[
     ("wb_set_section_meta", "改分组名与位置"),
     ("wb_remove_section", "删除分组"),
     ("wb_anno_write", "保存标注"),
+    ("wb_defaults_apply", "改默认配置"),
 ];
 
 /// **还走 `txn` 文件事务栈的编辑命令**（迁移期 2026-11-03 只剩这一条）。
