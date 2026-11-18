@@ -23,8 +23,13 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const ROOT = new URL('..', import.meta.url).pathname
+/*
+ * ★ Windows 上只有 `fileURLToPath` 给的是 `G:\…`；`URL#pathname` 给的是 `/G:/…`，
+ * 再 `join` 一次就成了 `G:\G:\…`（pre-push 钩子在 Windows 上直接 ENOENT，push 过不去）。
+ */
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const DICT = join(ROOT, 'src/i18n/zh-CN.ts')
 const BASELINE = join(ROOT, 'scripts/copy-baseline.json')
 
