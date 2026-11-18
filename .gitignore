@@ -5,6 +5,8 @@ node_modules
 # 第十八刀撤掉 `presets/delivery/` 那条忽略却不起作用，就是被这一行拦的。
 /dist
 /dist-ssr
+# 绿色版（`npm run build:portable`）摆出来的那袋货：单 exe + 压好的 zip，不入库
+/dist-portable
 # 预设交付产物 presets/delivery/ **入库**（2026-10-02 第十八刀改判）。
 #
 # 旧裁决是"不入库"——那时把它当成一次性本地构建产物。现在产品契约变了：

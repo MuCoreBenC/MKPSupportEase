@@ -29,6 +29,7 @@
     "version:check": "node scripts/version.mjs check",
     "version:ensure": "node scripts/version.mjs ensure-preview",
     "preview:build": "node scripts/version.mjs ensure-preview && npm run tauri -- build && node scripts/local-release.mjs",
+    "build:portable": "node scripts/portable.mjs",
     "version:release": "node scripts/version.mjs release",
     "version:next": "node scripts/version.mjs next",
     "presets": "cargo run --quiet -p mkp-support-ease --features workbench --bin presets --",
