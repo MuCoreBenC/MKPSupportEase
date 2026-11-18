@@ -80,6 +80,18 @@ fn main() -> ExitCode {
             mkp_support_ease_lib::hook::run_with_channel(&job)
         }
         Ok(mkp_support_ease_lib::args::Mode::Gui) => {
+            /*
+             * ★ **绿色版的第一道门**（2026-11-18）：安装包会把 WebView2 运行时替用户装上，
+             * 绿色版（单 exe / zip 解压即用）没有那一层。缺了就**在建窗之前**说清楚 ——
+             * 否则 `run()` 会在建窗那一步失败，用户看到的是"双击了、什么都没发生"。
+             *
+             * 只判界面那一条路：钩子那一趟不开窗（它跑在切片器里），照样该干完活就走。
+             */
+            #[cfg(windows)]
+            if mkp_support_ease_lib::webview2::missing() {
+                let _ = mkp_support_ease_lib::webview2::prompt_download();
+                return ExitCode::FAILURE;
+            }
             mkp_support_ease_lib::run();
             ExitCode::SUCCESS
         }
