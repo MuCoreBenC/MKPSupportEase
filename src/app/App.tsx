@@ -492,7 +492,9 @@ export default function App() {
 
   return (
     <div ref={rootRef} className={s.shell} data-density={density} data-tab={tab}>
-      <BreezeBackdrop />
+      {/* 浅色窗底那层微风：**只有设置页要它**（作者 2026-11-18：切页时它跟到别的页面上，
+          像是那一页的背景漏了过来）。其它页的底色由 `.shell::before` 那三层渐变负责。 */}
+      {tab === 'settings' && <BreezeBackdrop />}
       {/* 开发台（`dev-preview` 事件的接收口）：只在开发构建里收得到事件，真机上是恒"没有"
           （见 `app/dev/preview.tsx`）—— 放最外层，各页的模态框都能认领自己的那一格 */}
       <DevPreviewProvider>
