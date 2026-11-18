@@ -1,22 +1,26 @@
 /*
- * 设置页「预设」那一块（2026-10-20 开，2026-11-01 加第二行）。
+ * 设置页「预设」那一块（2026-10-20 开，2026-11-01 加第二行，2026-11-18 加第三行）。
  *
- * 两行，都是"预设页怎么算"的偏好：
- *   ① **复制出来的那一份跟不跟云端更新**（出厂 = 关）
- *   ② **使用之后自动复制后处理脚本**（出厂 = 关）—— 换了「使用中」那一份就把它的
+ * 三行，都是"预设页怎么算 / 替不替用户做下一步"的偏好：
+ *   ① **下载之后自动使用**（出厂 = 开）—— 在云端点「下载」之后直接设为使用中
+ *   ② **复制出来的那一份跟不跟云端更新**（出厂 = 关）
+ *   ③ **使用之后自动复制后处理脚本**（出厂 = 开）—— 换了「使用中」那一份就把它的
  *      后处理命令抄进剪贴板（作者 2026-11-01 点名要的那一档）
  *
  * 组件单独一个文件，与 `PostprocModeSection` 同一个理由：`PageSettings.tsx` 已经一千多行。
- * 这一块只管自己这两行 —— 读写走各自那两条专门的命令，改完广播 `presetPrefsMutated()`
- * （预设页据此把身份账本重读一遍），别的一概不碰。
+ * 这一块只管自己这三行 —— 读写走各自那几条专门的命令，改完广播 `presetPrefsMutated()`
+ * （预设页据此重读偏好 / 身份账本），别的一概不碰。
  *
- * # 第 ① 档的分量
+ * # 第 ② 档的分量
  *
  * 它改的是**身份账本的出口**：账本按它决定"复制出来的那一份认不认云端"，
  * 于是云端那一表每行的三态（未获取 / 本地已有 / 有新版）与那颗「更新」跟着变 ——
  * 所以写了必须广播（不广播，用户切回预设页看到的还是旧账）。
- * 第 ② 档不改变任何账，写完**不广播**（广播会让预设页白重读一遍本机文件）。
+ * ① / ③ 不改变任何账，但它们改的是**预设页下一步做什么**（下载完自动使用 /
+ * 换完自动抄脚本）—— 也广播，让预设页手里那一档当场换过来。
  *
+ * ★ 出厂值住在 `presets/client-defaults.toml` 的 `[Client]` 段（工作台「默认配置」
+ *   页改的就是它）；这里不写第二套默认值。
  * ★ 文案走字典（2026-10-25）。读失败 / 保存失败都用 `{detail}` 承接后端原话。
  */
 
@@ -31,13 +35,15 @@ import { SectionHead } from './SectionHead'
 import s from './PageSettings.module.css'
 
 /*
- * 四条读写都写成模块级常量：`BoolRow` 的读放进了 effect 依赖，
+ * 六条读写都写成模块级常量：`BoolRow` 的读放进了 effect 依赖，
  * 组件里现写箭头函数的话每次渲染都是新引用 ⇒ 每一帧重读一次盘。
  */
 const READ_COPIES = () => api.getCopiesFollowCloud()
 const WRITE_COPIES = (next: boolean) => api.setCopiesFollowCloud(next)
 const READ_AUTO_COPY = () => api.getAutoCopyScript()
 const WRITE_AUTO_COPY = (next: boolean) => api.setAutoCopyScript(next)
+const READ_AUTO_USE = () => api.getAutoUseAfterDownload()
+const WRITE_AUTO_USE = (next: boolean) => api.setAutoUseAfterDownload(next)
 
 /**
  * 一行布尔开关：左标题 + 气泡说明，右圆钮。
@@ -136,6 +142,18 @@ export default function PresetsSection() {
         desc={tr('settings.presets.desc')}
       />
 
+      {/*
+       * 第 ① 档（2026-11-18）：云端点「下载」之后直接设为使用中。
+       * 判据在预设页那颗「下载」里（`PagePresets` 的 `download`），这一格是它的总开关。
+       */}
+      <BoolRow
+        label="settings.presets.autoUse"
+        note="settings.presets.autoUseNote"
+        read={READ_AUTO_USE}
+        write={WRITE_AUTO_USE}
+        after={presetPrefsMutated}
+      />
+
       <BoolRow
         label="settings.presets.copies"
         note="settings.presets.copiesNote"
@@ -146,7 +164,7 @@ export default function PresetsSection() {
       />
 
       {/*
-       * 第 ② 档（2026-11-01）：换了「使用中」那一份就抄一遍它的后处理脚本。
+       * 第 ③ 档（2026-11-01）：换了「使用中」那一份就抄一遍它的后处理脚本。
        * 判据在前端 `postprocess/autoCopy.ts`，这一格只是它的总开关。
        */}
       <BoolRow

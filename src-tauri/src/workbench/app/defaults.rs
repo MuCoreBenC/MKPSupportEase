@@ -1,15 +1,19 @@
 //! 「默认配置」页的后端：读写 `presets/client-defaults.toml`。
 //!
-//! 出厂值的真值只有这一份 —— 内核 `postprocess::ir::PrefsIr::default()` 与客户端
-//! `runtime::app_state::PostprocPrefs::resolved()` 都 `include_str!` 它。
-//! 这一页改的是**新装**的默认值：已经装好的客户端不受影响，要重新构建才进包。
+//! 出厂值的真值只有这一份 —— 内核 `postprocess::ir::PrefsIr::default()`、客户端
+//! `runtime::app_state::PostprocPrefs::resolved()` 与 `runtime::client_defaults`
+//! 都 `include_str!` 它。这一页改的是**新装**的默认值：已经装好的客户端不受影响，
+//! 要重新构建才进包。
 //!
 //! 写入走 [`with_struct_ctx`]：一个文件、一条撤销点、失败回滚 ——
 //! 与本仓改机型显示名同一条路，不另造事务。
 //!
-//! **只做 `[Prefs]` 段**：那里是「真改变切出来 G-code」的 11 项。外观 / 切片 / 备份 /
-//! 高级 / 引导图是客户端私有偏好，不在这个文件里，页面照客户端顺序摆出来并注明
-//! 只在客户端设置（见 `src/workbench/views/DefaultsPage.tsx`）。
+//! **两段都做**：
+//! - `[Prefs]`：真改变切出来 G-code 的那十一项；
+//! - `[Client]`：客户端预设页那两步（下载后自动使用 / 使用后自动复制脚本）。
+//!
+//! 外观 / 切片 / 备份 / 高级 / 引导图是客户端私有偏好，不在这个文件里，页面照客户端
+//! 顺序摆出来并注明只在客户端设置（见 `src/workbench/views/DefaultsPage.tsx`）。
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -23,19 +27,21 @@ use super::{one_field, with_ctx, with_struct_ctx, Ctx};
 /// 相对影子根（`presets/`）的文件名
 const FILE: &str = "client-defaults.toml";
 
-/// 这一页能改的键。**只认这些** —— 多一个不认：改错文件比报错更难查。
-const EDITABLE: &[(&str, &str)] = &[
-    ("UnderSupportEnabled", "启用下方支撑余量"),
-    ("UnderSupportMm", "下方支撑余量阈值"),
-    ("GlueBottomEnabled", "支撑面下方一层也涂胶"),
-    ("SkipVibrationCalibration", "跳过震动校准检测"),
-    ("BeginStageRetractEnabled", "开始阶段收笔"),
-    ("BeginStageRetractZLiftMm", "收笔抬升高度"),
-    ("ZCalibrationDwellSec", "Z 轴校准停留时间"),
-    ("XyCalibrationDwellSec", "XY 轴校准停留时间"),
-    ("BedGlueEnabled", "热床预涂胶"),
-    ("BedGlueAllModels", "热床涂胶覆盖所有模型"),
-    ("AutoTowerPosition", "智能塔位置"),
+/// 这一页能改的键（段 / 键 / 标签）。**只认这些** —— 多一个不认：改错文件比报错更难查。
+const EDITABLE: &[(&str, &str, &str)] = &[
+    ("Prefs", "UnderSupportEnabled", "启用下方支撑余量"),
+    ("Prefs", "UnderSupportMm", "下方支撑余量阈值"),
+    ("Prefs", "GlueBottomEnabled", "支撑面下方一层也涂胶"),
+    ("Prefs", "SkipVibrationCalibration", "跳过震动校准检测"),
+    ("Prefs", "BeginStageRetractEnabled", "开始阶段收笔"),
+    ("Prefs", "BeginStageRetractZLiftMm", "收笔抬升高度"),
+    ("Prefs", "ZCalibrationDwellSec", "Z 轴校准停留时间"),
+    ("Prefs", "XyCalibrationDwellSec", "XY 轴校准停留时间"),
+    ("Prefs", "BedGlueEnabled", "热床预涂胶"),
+    ("Prefs", "BedGlueAllModels", "热床涂胶覆盖所有模型"),
+    ("Prefs", "AutoTowerPosition", "智能塔位置"),
+    ("Client", "AutoUseAfterDownload", "下载后自动使用"),
+    ("Client", "AutoCopyScript", "使用后自动复制后处理脚本"),
 ];
 
 /// 一行默认值
@@ -60,6 +66,19 @@ pub struct DefaultsView {
 struct DefaultsFile {
     #[serde(rename = "Prefs")]
     prefs: postprocess::ir::PrefsIr,
+    #[serde(rename = "Client")]
+    client: ClientSection,
+}
+
+/// `[Client]` 段：客户端预设页那两步的出厂值。
+///
+/// 缺字段 = 解析失败（与 `[Prefs]` 同一条口径）—— 不拿 `false` 顶上。
+#[derive(Debug, Deserialize)]
+struct ClientSection {
+    #[serde(rename = "AutoUseAfterDownload")]
+    auto_use_after_download: bool,
+    #[serde(rename = "AutoCopyScript")]
+    auto_copy_script: bool,
 }
 
 /// 读这一份：影子树优先（草稿态），没有就退回真仓库那一份。
@@ -80,8 +99,17 @@ fn read_text(ctx: &Ctx) -> Result<String, AppError> {
     }
 }
 
-/// `PrefsIr` 的一格 → JSON 值。键不认识就是 `None`（调用方报错）
-fn value_of(prefs: &postprocess::ir::PrefsIr, key: &str) -> Option<Value> {
+/// 文件里的一格 → JSON 值。键不认识就是 `None`（调用方报错）
+fn value_of(file: &DefaultsFile, key: &str) -> Option<Value> {
+    match key {
+        "AutoUseAfterDownload" => Some(Value::Bool(file.client.auto_use_after_download)),
+        "AutoCopyScript" => Some(Value::Bool(file.client.auto_copy_script)),
+        _ => prefs_value_of(&file.prefs, key),
+    }
+}
+
+/// `[Prefs]` 段的一格 → JSON 值。
+fn prefs_value_of(prefs: &postprocess::ir::PrefsIr, key: &str) -> Option<Value> {
     use postprocess::ir::TowerRelocateModeIr;
     Some(match key {
         "UnderSupportEnabled" => Value::Bool(prefs.under_support_enabled),
@@ -118,8 +146,8 @@ pub fn view_from(ctx: &Ctx) -> Result<DefaultsView, AppError> {
     let file = parse(&read_text(ctx)?)?;
     let fields = EDITABLE
         .iter()
-        .map(|(key, label)| {
-            let value = value_of(&file.prefs, key)
+        .map(|(_, key, label)| {
+            let value = value_of(&file, key)
                 .ok_or_else(|| AppError::corrupted(format!("presets/{FILE} 里没有可读的 {key}")))?;
             Ok(DefaultsField {
                 key: (*key).to_owned(),
@@ -152,35 +180,35 @@ fn to_toml(value: &Value) -> Result<toml_edit::Value, AppError> {
 
 /// 改一格：写影子文件 + 记一条字段账
 fn apply_in(ctx: &mut Ctx, key: &str, value: &Value) -> Result<DefaultsView, AppError> {
-    let label = EDITABLE
+    let (section, label) = EDITABLE
         .iter()
-        .find(|(k, _)| *k == key)
-        .map(|(_, l)| *l)
+        .find(|(_, k, _)| *k == key)
+        .map(|(s, _, l)| (*s, *l))
         .ok_or_else(|| {
             AppError::invalid_argument(format!(
-                "{key} 不是这一页能改的键（只认 `[Prefs]` 段里那 11 项）"
+                "{key} 不是这一页能改的键（只认 client-defaults.toml 里那 13 项）"
             ))
         })?;
 
     let before_text = read_text(ctx)?;
-    let before = parse(&before_text)?.prefs;
+    let before = parse(&before_text)?;
 
     let mut doc: toml_edit::DocumentMut = before_text
         .parse()
         .map_err(|e| AppError::corrupted(format!("presets/{FILE} 解析不了：{e}")))?;
-    let table = doc["Prefs"]
+    let table = doc[section]
         .as_table_mut()
-        .ok_or_else(|| AppError::corrupted(format!("presets/{FILE} 里没有 [Prefs] 段")))?;
+        .ok_or_else(|| AppError::corrupted(format!("presets/{FILE} 里没有 [{section}] 段")))?;
     if !table.contains_key(key) {
         return Err(AppError::corrupted(format!(
-            "presets/{FILE} 的 [Prefs] 里没有 {key} —— 缺字段就是缺，不替你补一行"
+            "presets/{FILE} 的 [{section}] 里没有 {key} —— 缺字段就是缺，不替你补一行"
         )));
     }
     table[key] = toml_edit::Item::Value(to_toml(value)?);
     let next_text = doc.to_string();
 
     /* 写完先自己读一遍：坏档绝不落进影子树（撤销栈里那份字节要能被人看懂） */
-    let after = parse(&next_text)?.prefs;
+    let after = parse(&next_text)?;
 
     let target = ctx.shadow_root.join(FILE);
     if let Some(parent) = target.parent() {
@@ -203,7 +231,7 @@ fn apply_in(ctx: &mut Ctx, key: &str, value: &Value) -> Result<DefaultsView, App
         path: format!("presets/{FILE}"),
         fields: EDITABLE
             .iter()
-            .filter_map(|(k, l)| {
+            .filter_map(|(_, k, l)| {
                 value_of(&after, k).map(|value| DefaultsField {
                     key: (*k).to_owned(),
                     label: (*l).to_owned(),
@@ -243,12 +271,26 @@ mod tests {
     #[test]
     fn the_shared_file_parses_and_covers_every_editable_key() {
         let file = parse(RAW).expect("出厂值文件必须能解析");
-        for (key, label) in EDITABLE {
+        for (_, key, label) in EDITABLE {
             assert!(
-                value_of(&file.prefs, key).is_some(),
+                value_of(&file, key).is_some(),
                 "{key}（{label}）在这份文件里读不出来"
             );
         }
+    }
+
+    /// `[Client]` 段那两格也能单独改，而且不碰 `[Prefs]`（两段各是各）
+    #[test]
+    fn writing_a_client_key_keeps_the_prefs_section() {
+        let before = parse(RAW).expect("改之前");
+        let mut doc: toml_edit::DocumentMut = RAW.parse().expect("DocumentMut");
+        doc["Client"]["AutoCopyScript"] = toml_edit::Item::Value(false.into());
+        let after = parse(&doc.to_string()).expect("改完之后还得能解析");
+        assert!(!after.client.auto_copy_script);
+        assert_eq!(
+            after.prefs.bed_glue_enabled, before.prefs.bed_glue_enabled,
+            "改客户端那一段不许连带 [Prefs]"
+        );
     }
 
     #[test]
@@ -286,7 +328,7 @@ mod tests {
     #[test]
     fn value_of_rejects_keys_outside_the_whitelist() {
         let file = parse(RAW).expect("parse");
-        assert!(value_of(&file.prefs, "DebugWaitX").is_none());
-        assert!(value_of(&file.prefs, "").is_none());
+        assert!(value_of(&file, "DebugWaitX").is_none());
+        assert!(value_of(&file, "").is_none());
     }
 }

@@ -112,6 +112,11 @@ const presetPrefsListeners = new Set<() => void>()
  * 后挂载的也不至于先闪一下"关"。**真值仍在后端那一格**（`presets.copiesFollowCloud`）。
  */
 let presetPrefsValue = false
+/**
+ * 「下载之后自动设为使用中」的内存镜像（2026-11-18）。
+ * 出厂按**开**算 —— 与 `presets/client-defaults.toml` 的 `[Client]` 段一致。
+ */
+let presetAutoUseValue = true
 
 /**
  * **预设页那一格偏好改过了**（设置页写完「复制出来的也跟着云端更新」就调）。
@@ -167,6 +172,34 @@ export function useCopiesFollowCloud(): boolean {
       (e: unknown) => {
         /* 读不出来就保持上一次那一档（出厂 = 关）—— 不抛、不挡页面 */
         console.error('读「复制出来的也跟着云端更新」失败', e)
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [revision])
+  return on
+}
+
+/**
+ * 「下载之后自动设为使用中」**当前那一档**（2026-11-18；进预设页读一次，改了就广播）。
+ *
+ * 出厂（还没读回来）按**开**算 —— 与 `presets/client-defaults.toml` 的 `[Client]` 段一致。
+ * 读者只有预设页那一颗「下载」：开 ⇒ 取回本机之后接着设为使用中。
+ */
+export function useAutoUseAfterDownload(): boolean {
+  const revision = usePresetPrefsRevision()
+  const [on, setOn] = useState(() => presetAutoUseValue)
+  useEffect(() => {
+    let alive = true
+    void api.getAutoUseAfterDownload().then(
+      (v) => {
+        presetAutoUseValue = v
+        if (alive) setOn(v)
+      },
+      (e: unknown) => {
+        /* 读不出来就保持上一次那一档（出厂 = 开）—— 不抛、不挡页面 */
+        console.error('读「下载后自动使用」失败', e)
       },
     )
     return () => {

@@ -25,6 +25,7 @@
 //! 3. **界面说了不算**：退出码与成败判定都在钩子那一侧（切片器只认进程退出码）；
 //!    这里那颗「停止」只是往通道里写一条 `cancel`，由钩子决定怎么收手。
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use tauri::{AppHandle, Emitter as _, Manager as _};
@@ -153,10 +154,18 @@ pub struct RunSnapshot {
 pub struct HookSlot(pub Arc<HookView>);
 
 /// 界面这一侧那一趟的状态。
+/// 盯盘间隔（见 [`HookView::poll_pending`]）：700ms —— 用户能接受的"窗口起来了、问句跟着出来"
+/// 的延迟；一次只是一个 4KB 文件的 `read_to_string`，且只在"界面还没有这一趟"时才读。
+pub const POLL_EVERY: std::time::Duration = std::time::Duration::from_millis(700);
+
 pub struct HookView {
     shared: Mutex<Shared>,
     /// 回写线（取消 / 答复）：界面一起来就装上，之后一直用同一条
     writer: Mutex<Option<hook_ipc::Handle>>,
+    /// 内部根（[`Self::set_root`] 在起监听器时塞进来）：读那份"问句落盘"用
+    /// （见 [`crate::hook_ipc::PendingQuestion`]）—— 窗口是被钩子拉起来的时候前端晚一步，
+    /// 问句得从盘上捞回来。
+    root: Mutex<Option<PathBuf>>,
     /// **开发台预览的代次**：每来一条新的演出指令 +1。
     ///
     /// 用处只有一个 —— 「那一问」那一档：预览里没有真答复线（`ask` 无人可答），
@@ -276,6 +285,17 @@ fn raise_main_window(app: &AppHandle) {
     }
 }
 
+/// 这一条问句是不是**新的一问**（见 [`HookView::apply`] 的 `Question` 那一支）。
+///
+/// 钩子每 `hook_ipc::QUESTION_REPUSH` 把**同一问**重推一次（界面那侧幂等），抬窗却
+/// 不是幂等的动作 —— 每 2 秒抬一次等于用户处理期间什么都干不了。判据只看（种类 +
+/// 自动终止时刻）：同一问重推这两样逐字相同，换一问必然至少变一样。
+fn is_fresh_question(prev: Option<&QuestionDto>, next: &QuestionDto) -> bool {
+    !prev.is_some_and(|q| {
+        q.question_kind == next.question_kind && q.deadline_unix_ms == next.deadline_unix_ms
+    })
+}
+
 /// 系统通知那两行字（标题 / 正文）。
 ///
 /// 文案口径与界面上那一屏一致：**成功就说成功的那句**（校准件那两种跑法各一句），
@@ -323,13 +343,65 @@ fn silent_mode(app: &AppHandle) -> bool {
         .is_some_and(|p| p.ui_mode == crate::runtime::app_state::PostprocUiMode::Silent)
 }
 
+/// **等回答时把窗口抬到最前**用户开着没有（设置页「等回答时自动置顶」那一格）。
+///
+/// 与前端 `askTop` 读的是同一格（`PostprocPrefs::auto_top_on_ask`）：那边管"浮在
+/// 上面"，这里管"从最小化 / 被盖住里露出来"—— 同一件事的两个侧面。用户明确关掉
+/// 就是"别在我面前弹"，抬窗比置顶还硬，不能绕过这一格。
+///
+/// ★ 读不出来（状态文件坏了 / 目录不在）按**开**：与 `silent_mode` 的兜底同一个取向
+///   （读不到时给人看得见的那一侧）；出厂也是开。
+fn wants_raise_on_ask(app: &AppHandle) -> bool {
+    crate::fsx::paths::internal_root(app)
+        .ok()
+        .and_then(|root| crate::runtime::app_state::resolved_postproc_prefs(&root).ok())
+        .map_or(true, |p| p.auto_top_on_ask)
+}
+
 impl HookView {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             shared: Mutex::new(Shared::default()),
             writer: Mutex::new(None),
+            root: Mutex::new(None),
             preview_gen: std::sync::atomic::AtomicU64::new(0),
         })
+    }
+
+    /// 记下内部根（`lib.rs` 起监听器那一步调一次）—— 之后读"问句落盘"要用它。
+    pub fn set_root(&self, root: &std::path::Path) {
+        *self.root.lock().expect("锁没坏") = Some(root.to_path_buf());
+    }
+
+    /// 盘上那份"正在等的问句"（没有 / 过期 ⇒ `None`）。
+    fn pending_on_disk(&self) -> Option<crate::hook_ipc::PendingQuestion> {
+        let root = self.root.lock().expect("锁没坏").clone()?;
+        crate::hook_ipc::PendingQuestion::load(&root)
+    }
+
+    /// **盯盘**：内存里还没有这一趟时，看看盘上是不是已经有一问在等（每 [`POLL_EVERY`] 一次）。
+    ///
+    /// 为什么需要它：窗口是被钩子拉起来的时候，前端读快照那一刻**问句还没写出来**
+    /// （钩子要先把 G-code 读一遍才轮到那一问），而 socket 上的事件又掉进"前端还没订阅"
+    /// 那条缝 —— 两头都不接，界面就永远停在首页。这一条把"后来才出现的问句"补进来：
+    /// 按真钩子那两条消息原样喂给 [`Self::apply`]（开场 + 问句），状态机与日志与真路一致。
+    pub fn poll_pending(&self, app: &AppHandle) {
+        if self.shared.lock().expect("锁没坏").preset_name.is_some() {
+            return; /* 这一趟已经在界面上了，走事件那条路 */
+        }
+        let Some(pending) = self.pending_on_disk() else {
+            return;
+        };
+        tracing::info!("盘上有一问在等（界面被拉起时前端还没订阅）：按开场 + 问句喂进来");
+        self.apply(
+            app,
+            FromHook::Hello {
+                preset_name: pending.preset_name,
+                gcode_name: pending.gcode_name,
+                facts: pending.facts,
+            },
+        );
+        self.apply(app, FromHook::Question(Box::new(pending.question)));
     }
 
     /// 装上回写线（由 `lib.rs` 在起监听器时调一次）。
@@ -392,14 +464,31 @@ impl HookView {
                 let _ = app.emit(PROGRESS_EVENT, progress);
             }
             FromHook::Question(question) => {
-                {
+                /* ★ **问到人头上，窗口就得浮到最前**（2026-11-18 作者：「就算我开静默，
+                只要有提问它就需要拉起来……不然用户都不知道」）。
+
+                静默档不抬窗那一条（见上面 `Hello` 那一支）只管"看进度"；这一问两分钟
+                没人答，钩子就按"不跑"收场 —— 人压根没看见，等于没问。
+
+                ★ 只抬**新的一问**：钩子每 2 秒把同一问重推一次（`hook_ipc` 的
+                `QUESTION_REPUSH`），每条都抬就是每 2 秒抢一次焦点，用户什么都干不了。
+                ★ 开发台预览不抬：那一趟是用户自己在工作台点的，开演时已经抬过了。
+                ★ 设置页「等回答时自动置顶」关着就不抬（见 [`wants_raise_on_ask`]）。 */
+                let fresh = {
                     let mut g = self.shared.lock().expect("锁没坏");
+                    let fresh = is_fresh_question(g.question.as_ref(), &question) && !g.preview;
                     g.question = Some((*question).clone());
                     g.question_emitted = true;
+                    fresh
+                };
+                let raised = fresh && wants_raise_on_ask(app);
+                if raised {
+                    raise_main_window(app);
                 }
                 /* 这一条是用户"答不答"的唯一入口：推过没有要留痕（见 `question_emitted`） */
                 tracing::info!(
                     kind = %question.question_kind,
+                    raised,
                     "钩子在等一个答复：问句已推给界面"
                 );
                 let _ = app.emit(QUESTION_EVENT, question);
@@ -734,6 +823,31 @@ impl HookView {
 
     /// 全量快照；这一趟**从来没来过**（普通模式、或者还没切片）⇒ `None`。
     pub fn snapshot(&self) -> Option<RunSnapshot> {
+        /* ★ 内存里没有这一趟（窗口是被钩子拉起来的、前端晚了一步，事件全掉进缝里）⇒
+        **从盘上捞**：问句落了一份 `run/pending-question.json`（见 `PendingQuestion`）。
+        这样"界面起来了却什么也不问"就只剩一条路：盘上也没有。 */
+        let from_disk = {
+            let g = self.shared.lock().expect("锁没坏");
+            if g.preset_name.is_some() {
+                None
+            } else {
+                self.pending_on_disk()
+            }
+        };
+        if let Some(p) = from_disk {
+            return Some(RunSnapshot {
+                preset_name: p.preset_name,
+                gcode_name: p.gcode_name,
+                facts: p.facts,
+                question: Some(p.question),
+                progress: None,
+                finished: None,
+                preview: false,
+                /* 事件没送到过 ⇒ 让界面喊 `replay_question` 再推一次 */
+                question_emitted: false,
+            });
+        }
+
         let g = self.shared.lock().expect("锁没坏");
         let preset_name = g.preset_name.clone()?;
         Some(RunSnapshot {
@@ -756,9 +870,21 @@ impl HookView {
     ///
     /// 已经不在了（问句被结论清掉）就什么都不做 —— 界面会自己在快照回来之后重画。
     pub fn replay_question(&self, app: &AppHandle) {
-        let question = self.shared.lock().expect("锁没坏").question.clone();
+        let question = self
+            .shared
+            .lock()
+            .expect("锁没坏")
+            .question
+            .clone()
+            /* 内存里没有 ⇒ 盘上那份（见 `snapshot` 同一段注释） */
+            .or_else(|| self.pending_on_disk().map(|p| p.question));
         if let Some(question) = question {
             tracing::info!("界面晚了一步：把在等的问句补推一次");
+            /* 补推也是"问到人头上了"：窗口这时可能正缩在后面（静默档 / 用户最小化了），
+            与 `apply` 的 `Question` 那一支同一条理由 —— 不浮上来等于没问 */
+            if wants_raise_on_ask(app) {
+                raise_main_window(app);
+            }
             let _ = app.emit(QUESTION_EVENT, question);
         }
     }
@@ -791,6 +917,10 @@ impl HookView {
             let _ = app.emit(PROGRESS_EVENT, progress);
         }
         if let Some(question) = question {
+            /* 这一趟里还挂着问句 ⇒ 同样是"问到人头上"（与 `replay_question` 同一条） */
+            if wants_raise_on_ask(app) {
+                raise_main_window(app);
+            }
             let _ = app.emit(QUESTION_EVENT, question);
         }
         if let Some(finished) = finished {
@@ -1411,5 +1541,34 @@ mod tests {
             "machine-mismatch"
         );
         assert!(finished.is_none(), "没结论就不推结论");
+    }
+
+    /// 同一问会被钩子每 2 秒重推一次 —— **只有新的一问才许抬窗**
+    /// （重推是幂等的，抬窗抢焦点不是）。
+    #[test]
+    fn only_a_new_question_raises_the_window() {
+        let q = |kind: &str, deadline: u64| QuestionPayload {
+            question_kind: kind.to_owned(),
+            text: "还继续吗？".to_owned(),
+            deadline_unix_ms: deadline,
+            choices: Vec::new(),
+            geo: None,
+            fields: Vec::new(),
+        };
+
+        let first = q("machine-mismatch", 1_763_000_000_000);
+        assert!(is_fresh_question(None, &first), "第一问要抬");
+        assert!(
+            !is_fresh_question(Some(&first), &q("machine-mismatch", 1_763_000_000_000)),
+            "同一问重推不许再抬（否则每 2 秒抢一次焦点）"
+        );
+        assert!(
+            is_fresh_question(Some(&first), &q("calibration-mode", 1_763_000_000_000)),
+            "换一问要抬"
+        );
+        assert!(
+            is_fresh_question(Some(&first), &q("machine-mismatch", 1_763_000_000_999)),
+            "同一类但换了截止时刻 = 新的一问"
+        );
     }
 }

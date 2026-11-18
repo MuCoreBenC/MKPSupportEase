@@ -419,10 +419,17 @@ let mockPostproc: PostprocPrefsWire = {}
 let mockCopiesFollowCloud = false
 
 /*
- * 「使用之后自动复制后处理脚本」那一档（2026-11-01）：内存镜像，出厂 = 关
- * （真数据在 Rust 侧 `run/app-state.json` 的 `presets.autoCopyScript`）。
+ * 「使用之后自动复制后处理脚本」那一档（2026-11-01）：内存镜像，出厂 = 开
+ * （真数据在 Rust 侧 `run/app-state.json` 的 `presets.autoCopyScript`，
+ * 出厂值来自 `presets/client-defaults.toml` 的 `[Client]` 段）。
  */
-let mockAutoCopyScript = false
+let mockAutoCopyScript = true
+
+/*
+ * 「下载之后自动设为使用中」那一档（2026-11-18）：内存镜像，出厂 = 开
+ * （真数据在 Rust 侧 `run/app-state.json` 的 `presets.autoUseAfterDownload`）。
+ */
+let mockAutoUseAfterDownload = true
 
 /*
  * **出处账**（2026-10-20）：真机那一本在用户根 `provenance.json`（`runtime::provenance`），
@@ -1566,6 +1573,16 @@ async function mockDeliver(
         '',
       ].join('\n'),
     )
+  }
+  /*
+   * **下载即放入**（2026-11-18 作者：「就是在套餐里面一起下载的，就放入」）——
+   * 与真机 `download_runtime_file` 末尾那一手同一条口径：切片器配置写进它自己那一档的
+   * 每个账号目录；MKP 预设不进切片器（走「启用」），`copyToSlicerIn` 会抛，跳过就是。
+   */
+  try {
+    copyToSlicerIn(fileName)
+  } catch {
+    /* 不是切片器配置 —— 与真机一样什么都不做 */
   }
 }
 
@@ -2996,7 +3013,7 @@ export const mockApi: MkpApi = {
 
   /*
    * 「使用之后自动复制后处理脚本」（2026-11-01）：与上面那条同一套口径 ——
-   * 内存镜像、回解析后的 boolean、出厂 = 关。
+   * 内存镜像、回解析后的 boolean、出厂 = 开。
    *
    * ★ 浏览器里它**真的会生效**（换「使用中」之后抄脚本那条链是前端的），
    *   但 preview 里没有本机可执行物与预设文件，`getPostProcessCommand` 会照实
@@ -3009,6 +3026,19 @@ export const mockApi: MkpApi = {
   async setAutoCopyScript(enabled) {
     mockAutoCopyScript = enabled
     return mockAutoCopyScript
+  },
+
+  /*
+   * 「下载之后自动设为使用中」（2026-11-18）：同一套口径 —— 内存镜像、出厂 = 开。
+   * 读者是预设页「云端 → MKP 配置」那颗「下载」（下载完接着走 `applyActivePreset`）。
+   */
+  async getAutoUseAfterDownload() {
+    return mockAutoUseAfterDownload
+  },
+
+  async setAutoUseAfterDownload(enabled) {
+    mockAutoUseAfterDownload = enabled
+    return mockAutoUseAfterDownload
   },
 
   /*

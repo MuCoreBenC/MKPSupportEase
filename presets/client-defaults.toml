@@ -1,8 +1,9 @@
 # 客户端偏好的出厂值 —— **只此一份**。
 #
-# 两个消费者都 `include_str!` 这一份：
+# 三个消费者都 `include_str!` 这一份：
 #   · 内核 `postprocess::ir::PrefsIr::default()`（决定切出来的 G-code）
 #   · 客户端 `runtime::app_state` 的 `PostprocPrefs::resolved()`（设置页没填时的初值）
+#   · 客户端 `runtime::client_defaults`（`[Client]` 段：预设页两步替不替用户做）
 #
 # 改这里 = 改**新装**的默认值。已经装好的客户端不受影响，直到用户自己点
 # 设置页的「恢复默认」；改完要重新构建才进二进制。
@@ -24,3 +25,17 @@ XyCalibrationDwellSec = 3
 BedGlueEnabled = false
 BedGlueAllModels = false
 AutoTowerPosition = "ask"
+
+# ---- 客户端「预设」偏好 ----
+#
+# 与 `[Prefs]` **不是同一件事**：这一段不改变切出来的 G-code，内核也不读它；
+# 它只决定客户端界面上的两步要不要替用户做掉。读者是
+# `src-tauri/src/runtime/app_state.rs` 的 `PresetPrefs`（`None` 的落点）。
+
+[Client]
+# 复制出来的那一份跟不跟云端（出厂 = 关：复制件是独立的一份）
+CopiesFollowCloud = false
+# 使用之后自动复制后处理脚本（出厂 = 开）
+AutoCopyScript = true
+# 下载之后自动设为使用中（出厂 = 开）
+AutoUseAfterDownload = true

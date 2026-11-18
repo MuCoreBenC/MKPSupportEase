@@ -3,8 +3,8 @@
  *
  * # 它改的是哪一份
  *
- * `presets/client-defaults.toml` 的 `[Prefs]` 段。那份是唯一源：内核
- * `PrefsIr::default()` 与客户端 `PostprocPrefs::resolved()` 都 `include_str!` 它。
+ * `presets/client-defaults.toml`。那份是唯一源：内核 `PrefsIr::default()`、客户端
+ * `PostprocPrefs::resolved()` 与 `runtime::client_defaults` 都 `include_str!` 它。
  * 所以这里改完**不影响已装好的客户端**，要重新构建才进包 —— 顶上那句话就是为这个。
  *
  * # 为什么能撤销、能保存
@@ -12,11 +12,12 @@
  * 写入走 `with_struct_ctx`（一个文件、一条撤销点），落的是影子树；
  * 外壳的「保存改动」才把影子树写进真仓库。这一页不画自己的保存按钮。
  *
- * # 为什么只做两组的控件
+ * # 哪些能改
  *
- * 那 11 个键是「真改变切出来 G-code」的全部。外观 / 切片 / 备份 / 高级 / 引导图
- * 是客户端私有偏好，不在这个文件里 —— 照客户端顺序摆出来、标一句「只在客户端设置」，
- * 不假装它们能在这里改。
+ * `[Prefs]` 那 11 个键是「真改变切出来 G-code」的全部；`[Client]` 那 2 个键是客户端
+ * 预设页那两步（下载后自动使用 / 使用后自动复制脚本）。两段都在这一份文件里、
+ * 都能在这里改。外观 / 切片 / 备份 / 高级 / 引导图是客户端私有偏好，不在这个文件里 ——
+ * 照客户端顺序摆出来、标一句「只在客户端设置」，不假装它们能在这里改。
  */
 import { useCallback, useEffect, useState } from 'react'
 
@@ -79,6 +80,12 @@ const EDIT_GROUPS: EditGroup[] = [
     title: '下方支撑余量',
     desc: '笔下方支撑够宽时不让它抬；贴合实验判据。',
     sections: [{ note: '', keys: ['UnderSupportEnabled', 'UnderSupportMm'] }],
+  },
+  {
+    id: 'presets',
+    title: '预设',
+    desc: '下载与使用之后，那两步替不替用户做掉。',
+    sections: [{ note: '', keys: ['AutoUseAfterDownload', 'AutoCopyScript'] }],
   },
 ]
 

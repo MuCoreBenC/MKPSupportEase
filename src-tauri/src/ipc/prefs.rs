@@ -310,7 +310,7 @@ pub async fn set_copies_follow_cloud(app: AppHandle, enabled: bool) -> Result<bo
     })
 }
 
-/// **使用一份预设之后自动复制它的后处理脚本**（出厂 = 关）。
+/// **使用一份预设之后自动复制它的后处理脚本**（出厂 = 开）。
 ///
 /// ★ 回的是**解析后的 `bool`**，与上面那条同一条口径（盘上"没选过"是 `None`）。
 ///
@@ -333,6 +333,29 @@ pub async fn set_auto_copy_script(app: AppHandle, enabled: bool) -> Result<bool,
     traced("setAutoCopyScript", |_| {
         let root = internal_root(&app)?;
         let got = runtime::app_state::set_auto_copy_script(&root, enabled)?;
+        notify_app_state(&app);
+        Ok(got)
+    })
+}
+
+/// **下载之后自动设为使用中**（出厂 = 开）。
+///
+/// 读者只有预设页那一处：在「云端 → MKP 配置」点「下载」之后，要不要接着走
+/// 首页那颗按钮的第二步（`applyActivePreset`）。后端不读这一格。
+#[tauri::command]
+pub async fn get_auto_use_after_download(app: AppHandle) -> Result<bool, AppError> {
+    traced("getAutoUseAfterDownload", |_| {
+        let root = internal_root(&app)?;
+        runtime::app_state::auto_use_after_download(&root)
+    })
+}
+
+/// 开关「下载之后自动设为使用中」。
+#[tauri::command]
+pub async fn set_auto_use_after_download(app: AppHandle, enabled: bool) -> Result<bool, AppError> {
+    traced("setAutoUseAfterDownload", |_| {
+        let root = internal_root(&app)?;
+        let got = runtime::app_state::set_auto_use_after_download(&root, enabled)?;
         notify_app_state(&app);
         Ok(got)
     })

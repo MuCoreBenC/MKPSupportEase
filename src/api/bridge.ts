@@ -386,6 +386,12 @@ export const bridgeApi: MkpApi = {
   getAutoCopyScript: () => call('getAutoCopyScript', 'get_auto_copy_script'),
   setAutoCopyScript: (enabled) =>
     call('setAutoCopyScript', 'set_auto_copy_script', { enabled }),
+  /* 预设页偏好第三项（2026-11-18）：「下载之后自动设为使用中」—— 同一格 presets。
+     读者是预设页「云端 → MKP 配置」那颗「下载」，后端不读它 */
+  getAutoUseAfterDownload: () =>
+    call('getAutoUseAfterDownload', 'get_auto_use_after_download'),
+  setAutoUseAfterDownload: (enabled) =>
+    call('setAutoUseAfterDownload', 'set_auto_use_after_download', { enabled }),
   /* 后处理偏好（2026-10-17）：设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块。
      读回的是**解析后**的值 + 量程；写是**整格覆盖**（改一项传全量） */
   getPostprocPrefs: () => call('getPostprocPrefs', 'get_postproc_prefs'),

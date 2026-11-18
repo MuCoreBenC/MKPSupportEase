@@ -1,11 +1,12 @@
 /*
  * 后处理那一屏的几处判据（纯函数，便于回归）。
  *
- * 四件事：
+ * 五件事：
  *   · 结果态「取什么值」：失败 / 取消时「预估打印时间」右侧给「—」，不拿切片器自报的顶上；
  *   · 「去设置」后收成右上角胶囊，**直到用户点「关闭」才消失**（不套 60 秒过期）；
  *   · 这一屏演到哪一幕（开场 / 问 / 完成）—— 在设置页上「完成」什么时候折成胶囊；
- *   · 这一屏是不是**正在等回答**（等回答时窗口自动置顶那一条认它）。
+ *   · 这一屏是不是**正在等回答**（等回答时窗口自动置顶那一条认它）；
+ *   · 这一屏现在收着没有（有问句就一律露面，静默档也收不住）。
  *
  * ★ 为什么单独成件：这些原本都住在组件文件里（`PostProcessModal.tsx` /
  *   `PostProcessChip.tsx` / `App.tsx`），判据塞进去就只能靠肉眼复核；抽成纯函数才写得了
@@ -71,6 +72,35 @@ export function showsPostProcessChip(s: ChipState): boolean {
   if (s.run.finished === null) return s.dismissed
   const parkedAway = s.parked === true && s.dismissed
   return parkedAway || (s.quietUntil !== null && !s.expired)
+}
+
+/**
+ * **这一屏现在收着没有** —— 模态框渲不渲染的唯一判据。
+ *
+ * 三条来路都要算进来：
+ *   · `dismissed` —— 用户自己点过「后台运行」/「关闭」；
+ *   · `silent` —— 设置页选了静默（它让这一屏**根本不弹**，除非用户点过胶囊）；
+ *   · `questionOpen` —— **有问句挂着**（`run.question !== null`；钩子收掉它时归零）。
+ *
+ * ★ 有问句就一律露面（2026-11-18 作者：「就算我开静默，只要有提问它就需要拉起来……
+ *   不然用户都不知道」）。它压过静默，也压过"用户点过后台运行"—— 那一问没人答，
+ *   钩子两分钟后就按"不跑"收场，人却从头到尾不知道有人问过他。
+ * ★ `forcedOpen` 只认**用户点胶囊**那一下：静默档下他要看。
+ */
+export interface ScreenAwayInput {
+  /** 用户自己把这一屏收起来了（「后台运行」/「关闭」） */
+  dismissed: boolean
+  /** 静默档（设置页「后处理模式」） */
+  silent: boolean
+  /** 静默档下用户点过右上角那枚胶囊 */
+  forcedOpen: boolean
+  /** 有问句挂着 —— 钩子正在等人答 */
+  questionOpen: boolean
+}
+
+export function screenDismissed(i: ScreenAwayInput): boolean {
+  if (i.questionOpen) return false
+  return i.dismissed || (i.silent && !i.forcedOpen)
 }
 
 /* ---- 这一屏演的是哪一幕 / 在设置页上怎么折成胶囊 ---- */

@@ -186,7 +186,8 @@ import { useFileImport } from '../import/useFileImport'
 import { useDevPreview } from '../dev/useDevPreview'
 import { usePresetUsage } from '../state/usePresetUsage'
 /* 设置页那一格「复制出来的也跟着云端更新」：本地行画不画「有新版」看它（2026-10-20） */
-import { useCopiesFollowCloud } from '../state/deliveryState'
+/* 「下载之后自动使用」（2026-11-18）：云端表那颗「下载」取回之后接不接着走「使用」 */
+import { useAutoUseAfterDownload, useCopiesFollowCloud } from '../state/deliveryState'
 /* 「正文草稿被别处作废」那一嗓子（参数页保存时发）：编辑器还开着就按新内容重开 */
 import { lastTextDraftDroppedPath, useTextDraftDrop } from '../state/draftState'
 import { FieldLayer } from '../../components/field'
@@ -736,6 +737,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 「我设置里面没开，它就不应该把那些复制出来的也显示……它就只显示那一个」。
    */
   const copiesFollowCloud = useCopiesFollowCloud()
+  /*
+   * 设置页「下载后自动使用」（2026-11-18，出厂开）：云端表 MKP 那一行点「下载」之后，
+   * 取回本机就接着设为使用中 —— 与首页那颗「下载并使用」的第二步同一件事。
+   */
+  const autoUseAfterDownload = useAutoUseAfterDownload()
   const [note, setNote] = useState<Note | null>(null)
   /*
    * 「云端」那一颗刷新现在**自己说话**（作者 2026-11-11）：图标 →（变宽）检查中… →
@@ -1165,9 +1171,26 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *
    * 云端删不了 —— 发布目录只读、BBS 账号里的云端预设也不归本程序删；能删的是**本机
    * 切片器目录里那份**，而它正是"删了还在"的来源。默认不勾（删别人的目录要用户自己点）。
-   * 只对**单份、切片器配置、而且确实已放入**的那种行出现（见 `slicerCopyOf`）。
+   * 只对**单份、切片器配置、而且盘上至少一处真有那一份**的行出现（见 `slicerCopyOf`
+   * 与 `removeSlicerAny`）。
    */
   const [alsoSlicerOn, setAlsoSlicer] = useState(false)
+  /**
+   * 那个勾**该不该出现**：这一份在本机**任一切片器**的账号目录里至少有一处真有它。
+   *
+   * 不能只看 `row.live`：那一格是状态列的「已放入」，判的是**自己那一档每一处都有** ——
+   * 只放进两个账号、`default` 还空着的那份写着「未放入」，可盘上那两份删完照样留在
+   * 切片器里；反过来，副本只落在另一个切片器（OrcaSlicer）里时它也是 `false`。
+   * 勾是"还有东西要一起删"的提示，所以按**盘上有没有**给。
+   *
+   * `null` = 还没读到（框先出来、勾晚一格）/ 不是切片器配置。
+   */
+  const [removeSlicerAny, setRemoveSlicerAny] = useState<{
+    fileName: string
+    any: boolean
+  } | null>(null)
+  /** 框现在问的是哪一份 —— 读盘那一下回来时对一眼，关框 / 换一行之后的结果不许落进来 */
+  const removeAskFileRef = useRef<string | null>(null)
 
   /*
    * **多选（批量删除）**（2026-10-29 作者：「我想批量删除」）。
@@ -2040,12 +2063,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       markBusy(row.rowKey)
       setNote({ text: msg('presets.page.download.running', { name: row.fileName }), bad: false })
       data.fetchCloud(row.fileName).then(
-        (done) => {
+        async (done) => {
           leave(key)
           clearBusy(row.rowKey)
           /*
            * ★ a04：**同名已经有一份了** —— 不覆盖、也不静默：问用户
            * （同意就自动改一个没被占的名字落一份新的，原来那份一个字节不动）。
+           * 这条路上不自动「使用」：用户还没说要不要导入那一份新的。
            */
           if (done.takenBy !== undefined) {
             setTakenAsk({
@@ -2056,13 +2080,33 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             })
             return
           }
-          setNote({
-            /* 一句大白话就够（2026-10-13 作者：**技术细节不必让用户知道**）——
-               "云端字节进了下载区、另落一份你自己那份"是我们内部的两件事，
-               用户要的是"这下我能用它了" */
-            text: msg('presets.page.download.done', { name: done.fileName }),
-            bad: false,
-          })
+          /*
+           * 「下载后自动使用」（2026-11-18，设置页那一格，出厂开）：
+           * 取回本机就接着走「使用」—— 与首页「下载并使用」的第二步同一件事。
+           * 下载已经成功；这一步失败要分开说，不能让整件事看起来像没下成。
+           */
+          if (!autoUseAfterDownload) {
+            setNote({
+              /* 一句大白话就够（2026-10-13 作者：**技术细节不必让用户知道**）——
+                 "云端字节进了下载区、另落一份你自己那份"是我们内部的两件事，
+                 用户要的是"这下我能用它了" */
+              text: msg('presets.page.download.done', { name: done.fileName }),
+              bad: false,
+            })
+            return
+          }
+          try {
+            await data.apply(done.fileName, done.path)
+            setNote({
+              text: msg('presets.page.download.doneUsed', { name: done.fileName }),
+              bad: false,
+            })
+          } catch (e: unknown) {
+            setNote({
+              text: msg('presets.page.download.doneUseFailed', { detail: errorText(e) }),
+              bad: true,
+            })
+          }
         },
         (e: unknown) => {
           leave(key)
@@ -2094,7 +2138,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           setNote({ text: tickText(tick), bad: tick.stage === 'failed' }),
         )
         .then(
-          () => {
+          (placed) => {
             leave(key)
             clearBusy(row.rowKey)
             setNote({
@@ -2104,10 +2148,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   : msg('presets.page.download.archivedDone', { name: row.fileName })
                 /*
                  * 大白话（2026-10-13 作者：**技术细节不必让用户知道**）——
-                 * 落点路径不印在提示条上（要看文件在哪，行上右键有「显示我们那份的文件夹」）；
-                 * **"要进切片器还得点复制"这条指引留着**：那是用户真要做的下一步。
+                 * 落点路径不印在提示条上（要看文件在哪，行上右键有「显示我们那份的文件夹」）。
+                 * 下载会顺手放进切片器（2026-11-18）；本机没有切片器账号目录时
+                 * `placed` 是 false —— 那时照实说"得自己点「放入」"，不假装放好了。
                  */
-                : msg('presets.page.download.doneSlicer', { name: row.fileName }),
+                : placed
+                  ? msg('presets.page.download.doneSlicer', { name: row.fileName })
+                  : msg('presets.page.download.doneSlicerManual', { name: row.fileName }),
               bad: false,
             })
           },
@@ -2859,6 +2906,29 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     menu.close()
     setAlsoSlicer(false)
     setRemoveAsk([row])
+    setRemoveSlicerAny(null)
+    removeAskFileRef.current = row.fileName
+    if (!isSlicerDelivered(row)) return
+    /* 每一处都有 = 一定有一处有 —— 状态列已经答了，不必再读盘 */
+    if (slicerCopyOf(row)) {
+      setRemoveSlicerAny({ fileName: row.fileName, any: true })
+      return
+    }
+    /*
+     * 只放进了一部分账号（`default` 空着那种）、或只落在另一个切片器里：状态列写
+     * 「未放入」，可盘上那几份删完还会留在切片器里。现读一次盘，**有一处**就给勾。
+     */
+    const fileName = row.fileName
+    const settle = (any: boolean) => {
+      /* 读盘那一下回来时框可能已经关了 / 问的是另一行了 —— 晚到的那份不算数 */
+      if (removeAskFileRef.current !== fileName) return
+      setRemoveSlicerAny({ fileName, any })
+    }
+    api.getSlicerPlacements(fileName).then(
+      (placements) => settle(placements.dirs.some((dir) => dir.placed)),
+      /* 读不出来就当没有 —— 不给一个按不动的勾 */
+      () => settle(false),
+    )
   }
 
   /** 删除确认框里那颗「删除」：关框；一份走 [`runRemove`]，多份走 [`runRemoveMany`] */
@@ -2867,6 +2937,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     if (rows === null || rows.length === 0) return
     const alsoSlicer = alsoSlicerOn
     setRemoveAsk(null)
+    setRemoveSlicerAny(null)
+    removeAskFileRef.current = null
     if (rows.length === 1) runRemove(rows[0], alsoSlicer)
     else void runRemoveMany(rows)
   }
@@ -3273,13 +3345,21 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /* 措辞在模块级 `removeWhyNotOf`（那里才谈得上"依赖稳定"）：effect 里也能老实声明依赖 */
 
   /**
-   * 这一行**在切片器目录里真有那一份**吗 —— 决定删除确认框里要不要给那个勾。
+   * 这一行是**切片器配置的交付行**吗 —— 只有它才可能有"切片器目录里那份"。
    *
-   * 只认切片器那一档的交付行：MKP 预设根本不进切片器（走「使用」），别的来源也没有那一步。
-   * `live` 对切片器 = 「每个账号目录里都有」，也就是确实有东西可删。
+   * MKP 预设根本不进切片器（走「使用」），别的来源也没有那一步。
+   */
+  const isSlicerDelivered = (row: PresetTableRow): boolean =>
+    row.origin === 'preset' && row.kind !== 'mkp_preset'
+
+  /**
+   * 这一行**在切片器目录里每一处都有**吗 —— 状态列「已放入」的判据。
+   *
+   * 只是"不用再读盘"的快捷判断：每一处都有就一定有一处有。删除框那个勾看的是
+   * **至少一处**（`removeSlicerAny`），见 `askRemove`。
    */
   const slicerCopyOf = (row: PresetTableRow): boolean =>
-    row.origin === 'preset' && row.kind !== 'mkp_preset' && 'live' in row && row.live
+    isSlicerDelivered(row) && 'live' in row && row.live
 
   /** 删除确认框的第二行：**代价跟着行的来源走** —— 能重下的说能重下，真删的说真删 */
   const removeConfirmDetail = (row: PresetTableRow): string => {
@@ -4847,6 +4927,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   onClick={() => {
                     setRemoveAsk(null)
                     setAlsoSlicer(false)
+                    setRemoveSlicerAny(null)
+                    removeAskFileRef.current = null
                   }}
                 >
                   {tr('presets.page.removeAsk.cancel')}
@@ -4861,6 +4943,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             onClose={() => {
               setRemoveAsk(null)
               setAlsoSlicer(false)
+              setRemoveSlicerAny(null)
+              removeAskFileRef.current = null
             }}
           >
             {/* 一份 = 原来那一条代价；多份 = 按来源分开数（见 `removeManyDetail`） */}
@@ -4872,8 +4956,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                    * **「同时删掉切片器目录里那份」**（2026-11-10 作者要的那个勾）。
                    * 云端删不了（发布目录只读、BBS 账号里的云端也不归本程序删），
                    * 所以这里能勾的就是本机盘上那一份 —— 那句话在下面的小字里写明。
+                   * 判据是**盘上任一处有**（见 `askRemove`），不是状态列那个"每一处都有"。
                    */}
-                  {slicerCopyOf(removeAsk[0]) && (
+                  {removeSlicerAny !== null &&
+                    removeSlicerAny.fileName === removeAsk[0].fileName &&
+                    removeSlicerAny.any && (
                     <div className={s.removeOpt}>
                       <Switch
                         checked={alsoSlicerOn}

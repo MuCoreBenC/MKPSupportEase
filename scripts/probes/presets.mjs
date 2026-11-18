@@ -594,7 +594,7 @@ if (archiveCells > 0) {
  * 守四件事（后三件都在切片器档上量）：
  *   ① 资源库那一档**没有**批量行；
  *   ② 那一批是"盘上没有 / 不对"的那些（已下载的不进来）；
- *   ③ 结局**逐份**给 —— 没成的那几份各占一行、带后端给的原因，不压成一句"批量失败"；
+ *   ③ 结局**逐份**给 —— 失败的那几份各占一行、带后端给的原因，不压成一句"批量失败"；
  *   ④ 有名有姓的失败**不许被说成成功**（假后端里这一批是全军覆没）。
  * 命令级失败那一档（比如没配数据源 → 一份都没发出去）浏览器里没有触发路径，这里量不到。
  */
@@ -633,11 +633,11 @@ if (batchCount > 0) {
   if (batchNote.lines < 2) {
     problems.push(`逐份结局该各占一行，实测提示条里只有 ${batchNote.lines} 个段落`)
   }
-  if (!/没成/.test(batchNote.text)) {
-    problems.push(`这一批全军覆没，提示条该如实说「没成」，实测「${batchNote.text}」`)
+  if (!/失败/.test(batchNote.text)) {
+    problems.push(`这一批全军覆没，提示条该如实说「失败」，实测「${batchNote.text}」`)
   }
   if (/都成了/.test(batchNote.text)) {
-    problems.push(`一份都没成，不许说成功（实测「${batchNote.text}」）`)
+    problems.push(`全部都失败，不许说成功（实测「${batchNote.text}」）`)
   }
   if (!/没有下载区/.test(batchNote.text)) {
     problems.push(`逐份结局里要带后端给的原因（"浏览器里没有下载区…"），实测「${batchNote.text}」`)
@@ -2176,12 +2176,12 @@ await page.waitForTimeout(300)
 /*
  * ★★ 2026-10-14 修：导入的结果**2026-10-13 起是一格模态框**（作者：「上面这个什么横幅
  *   也是改成模态框」—— 原来挂在标签栏下当 in-flow 横幅），标题是「导入完成」/
- *   「导入：有几份没成」。原探针读 `[role="status"]` 的第一个 —— 那是**别的**结果条
+ *   「导入：有几份失败」。原探针读 `[role="status"]` 的第一个 —— 那是**别的**结果条
  *   （比如更早那一手复制留下的），于是 ZIP 那条读到的永远不是导入自己的话。
  *   现在按对话框读：正文在标题下面那句 subtitle 与逐行明细里。
  */
 const bannerText = async () => {
-  const dlg = page.getByRole('dialog', { name: /导入完成|导入：有几份没成/ }).last()
+  const dlg = page.getByRole('dialog', { name: /导入完成|导入：有几份失败/ }).last()
   if ((await dlg.count()) === 0) return ''
   const raw = await dlg.textContent().catch(() => '')
   return (raw ?? '').replace(/\s+/g, ' ').trim()

@@ -1244,12 +1244,16 @@ pub fn get_slicer_placements(
 /// **连同切片器目录里那份一起删掉**（删除确认框里那个勾，2026-11-10 作者）。
 ///
 /// 为什么需要它：我们在下载区删了，切片器那边还留着一份同名 —— 用户看到的就是
-/// 「删了还在」（他在 BBS 的工艺列表里还能选到它）。这一手把**这份预设自己那个切片器**
+/// 「删了还在」（他在 BBS 的工艺列表里还能选到它）。这一手把**本机所有切片器**
 /// 每个账号目录里的同名文件删掉，返回删了几份。
 ///
-/// 不碰的东西：
-/// - **别的切片器**（用户自己手动放过去的，不是我们放的）；
-/// - **云端**：我们的发布目录只读，BBS 账号里的云端预设也不归本程序删 —— 这里只删本机盘上那份。
+/// 为什么不是"只删这份预设自己那一档"（2026-11-18 作者：「他并没有真的把我全部删掉」）：
+/// 框里能往另一个切片器手动放同一份，`default` 那几个目录也可能只放进去了一部分 ——
+/// 只要还剩一处，用户就还是"删了它还在"。勾上的是「切片器里那份一起删」，
+/// 不是「BBS 里那份一起删」。
+///
+/// 不碰的东西：**云端** —— 我们的发布目录只读，BBS 账号里的云端预设也不归本程序删，
+/// 这里只删本机盘上那份。
 ///
 /// 幂等：本来就不在（没放过 / 已经删过 / 被外部动过）算 0，不报错。
 #[tauri::command]
@@ -1263,19 +1267,23 @@ pub fn remove_slicer_copies(app: AppHandle, file_name: String) -> Result<usize, 
         let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
             return Ok(0);
         };
-        let Some(own) = slicer_of_kind(&file.kind) else {
+        /* 只有切片器配置会有"放进切片器的那份"；MKP 预设走「启用」，同名文件不是它的 */
+        if slicer_of_kind(&file.kind).is_none() {
             return Ok(0);
-        };
-        let Some(dirs) = process_dirs_of(own) else {
-            return Ok(0);
-        };
+        }
         let mut removed = 0usize;
         let mut failed: Vec<String> = Vec::new();
-        for dir in dirs {
-            match std::fs::remove_file(dir.join(&file.file_name)) {
-                Ok(()) => removed += 1,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => failed.push(format!("{}：{}", account_of(&dir), e)),
+        for slicer in ["bambu", "orca"] {
+            /* 没装 / 没打开过的那一档没有 user 目录，直接跳过 */
+            let Some(dirs) = process_dirs_of(slicer) else {
+                continue;
+            };
+            for dir in dirs {
+                match std::fs::remove_file(dir.join(&file.file_name)) {
+                    Ok(()) => removed += 1,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => failed.push(format!("{}：{}", account_of(&dir), e)),
+                }
             }
         }
         if !failed.is_empty() {
@@ -1471,6 +1479,43 @@ pub(crate) fn replace_placed_copies(slicer: &str, file_name: &str, bytes: &[u8])
         tracing::info!(file = %file_name, targets = done, "切片器目录已跟着换成这一版");
     }
     done
+}
+
+/// **下载完顺便放进切片器**：写进这个切片器的**每个**账号目录，目标已有同名就换掉。
+///
+/// 与 [`replace_placed_copies`] 的区别只有一个：这个**会新建**缺的那几份。作者 2026-11-18
+/// 定的口径是「在套餐里一起下载的，就放入」—— 下到本机却没进切片器，用户还得再点一次，
+/// 而那一份副本躺在切片器看不见的地方。
+///
+/// 写失败**只记日志、不拦调用方**：下载本身已经成功了，用户可以再点「放入」重来
+/// （那条路会把失败原样说给用户听）。
+pub(crate) fn place_copies(slicer: &str, file_name: &str, bytes: &[u8]) {
+    let Some(dirs) = process_dirs_of(slicer) else {
+        return;
+    };
+    let written = place_in(&dirs, file_name, bytes);
+    if written > 0 {
+        tracing::info!(file = %file_name, targets = written, "下载完已放进切片器");
+    }
+}
+
+/// [`place_copies`] 的判据本体：**每个目录都写**（缺的新建，已有的换成这一版）。
+///
+/// 目录从外面递进来（真机上由 `process_dirs_of` 枚举），判据因此能被单测钉住。
+fn place_in(dirs: &[PathBuf], file_name: &str, bytes: &[u8]) -> usize {
+    let mut written = 0usize;
+    for dir in dirs {
+        match crate::fsx::atomic::atomic_write(&dir.join(file_name), bytes) {
+            Ok(()) => written += 1,
+            Err(e) => tracing::warn!(
+                file = %file_name,
+                at = %dir.display(),
+                "下载完没能放进切片器：{}",
+                e.message
+            ),
+        }
+    }
+    written
 }
 
 /// [`replace_placed_copies`] 的判据本体：**只换已经存在的那几份，一份都不新建**。
@@ -1975,6 +2020,23 @@ mod tests {
             !empty.join("A.json").exists(),
             "没放入的目录一个文件都不该多出来"
         );
+    }
+
+    /// 下载完那一手：**每个账号目录都写**（缺的那几份新建），目标已有同名就换成新的
+    #[test]
+    fn place_copies_writes_every_account_including_missing_ones() {
+        let root = tempfile::tempdir().unwrap();
+        let fresh = root.path().join("fresh");
+        let old = root.path().join("old");
+        std::fs::create_dir_all(&fresh).unwrap();
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("A.json"), b"old").unwrap();
+
+        let written = place_in(&[fresh.clone(), old.clone()], "A.json", b"new");
+
+        assert_eq!(written, 2);
+        assert_eq!(std::fs::read(fresh.join("A.json")).unwrap(), b"new");
+        assert_eq!(std::fs::read(old.join("A.json")).unwrap(), b"new");
     }
 
     /// 缓存按字节配对：同一份字节复用解析结果，字节变了自动 miss。

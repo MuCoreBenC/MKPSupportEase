@@ -40,15 +40,15 @@
    * ★★★ **标题栏永远在模态框层之上**（2026-10-18 作者：「模态框会导致窗口拖不动，又回归了，
    * 必须彻底修好」）。
    *
-   * 来路：后处理那一屏的 `.layer` 是 `position: absolute; inset: 0; z-index: 92`
-   * ——它**铺满整扇窗**（普通模态框只铺内容区），于是标题栏被它整个盖住：鼠标落在
-   * 标题栏上时命中的是遮罩，`onMouseDown` 的拖窗根本收不到事件。
-   * 之前只在「跑着」那一态补了一条 `dragShield`（95），结果态 / 问句态就漏了 ——
-   * 表现正是作者说的"有时候拖不动"。
+   * 来路：后处理那一屏的 `.layer` 早先铺满**整扇窗**，标题栏被它整个盖住：鼠标落在
+   * 标题栏上时命中的是遮罩，`onMouseDown` 的拖窗根本收不到事件。现在它铺的是
+   * **内容区**，但「跑着」那一态仍有一条拖窗带要接管标题栏。
+   * 这条一破，表现就是作者说的「有时候拖不动」。
    *
    * 现在把标题栏抬到 **93**（压过后处理层 92，仍低于窗控键 94 / 拖窗带 95）：
    *   · 任何后处理状态（跑着 / 问句 / 结果）标题栏都能拖、页签都点得着；
-   *   · 「跑着」那一态仍由 `dragShield`（95）接管整条标题栏（窗控键点不着，只能拖）；
+   *   · 「跑着」那一态由 `dragShield`（95）接管标题栏；Windows 上它**给窗控键让出
+   *     右边那一格**，于是那三颗键照旧能按（见 `PostProcessModal.module.css`）；
    *   · 普通模态框（40，portal 到内容区）本来就盖不到标题栏 —— 口径统一。
    * 层表见 `App.module.css` 头注释。
    */
@@ -331,8 +331,8 @@ body[data-window-dragging='true'] .logo[data-clickable='true']:active {
 }
 
 .controls {
-  --winctrl-w: 46px;
-
+  /* 每颗多宽由外壳给（`App.module.css` 的 `.shell` 的 `--winctrl-w`，mini 档 40）——
+     后处理那条拖窗带也要按同一个数给窗控键让位，所以这里不再自己定一份 */
   display: flex;
   align-self: stretch;
   flex-shrink: 0;
@@ -347,8 +347,9 @@ body[data-window-dragging='true'] .logo[data-clickable='true']:active {
 
      94 还多压过一样东西：窗口内侧那圈 resize 命中条（93）—— 正常状态下这三颗键
      优先于命中条（贴窗口最上沿那一块是"点关闭"而不是"改大小"）。
-     跑着的时候后处理那一屏会铺一条 95 的拖窗带把整条标题栏盖掉，这三颗键
-     自然也就点不着了（见 `postprocess/PostProcessModal.module.css`） */
+     跑着的时候后处理那一屏会铺一条 95 的拖窗带；它在 Windows 上**只铺到这三颗键
+     左边**（右边让出 `3 × --winctrl-w`）—— 于是后处理期间窗口照旧拖得动，而这三颗
+     键也照旧按得着（见 `postprocess/PostProcessModal.module.css` 的 `.dragShield`） */
   position: relative;
   z-index: 94;
 
@@ -356,11 +357,6 @@ body[data-window-dragging='true'] .logo[data-clickable='true']:active {
      stretch 只能填到 37px。负外边距把 margin box 撑回 38px，
      按钮盖住那条分隔线 —— 系统的窗口键底下也没有线 */
   margin-bottom: -1px;
-}
-
-/* 迷你档窗口窄，46 会把页签挤掉，收到 40 */
-.bar[data-density='mini'] .controls {
-  --winctrl-w: 40px;
 }
 
 .ctrl {

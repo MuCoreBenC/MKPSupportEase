@@ -245,13 +245,15 @@ export const zhCN = {
 
   /* 设置页：预设 */
   'settings.presets.title': '预设',
-  'settings.presets.desc': '复制与脚本的默认行为',
+  'settings.presets.desc': '下载、复制与脚本的默认行为',
   'settings.presets.copies': '副本跟随云端更新',
   'settings.presets.copiesNote': '开启后，副本和原文件一样显示并接受云端更新。',
   /* 2026-11-01 作者：「我使用之后自动复制后处理脚本……只要变了那个使用的状态，
      就从一个文件变成另外一个文件的时候，就复制那一个正在使用的后处理脚本到那个剪切板」 */
   'settings.presets.autoCopy': '使用预设后复制后处理脚本',
   'settings.presets.autoCopyNote': '点击使用后自动复制它的后处理脚本',
+  'settings.presets.autoUse': '下载后自动使用',
+  'settings.presets.autoUseNote': '下载完直接设为使用中，不用再点使用',
   'settings.presets.readFailed': '这一档读不出来：{detail}',
   'settings.presets.saveFailed': '没保存成：{detail}',
 
@@ -366,7 +368,7 @@ export const zhCN = {
   'mock.demo.previewHint': '演示：预览版只在主动检查时并列出现，不会主动通知普通用户。',
   'settings.update.downloading': '下载中 {pct}',
   'settings.update.installing': '正在安装…',
-  'settings.update.lastFailed': '上次更新没成功：{detail}',
+  'settings.update.lastFailed': '上次更新失败：{detail}',
   'settings.update.previewNote': '测试版可能有未修复的问题。',
 'settings.update.autoCheckHint': '每次成功同步云端目录时顺带查一次正式版；启动时不联网。',
 'notify.update.title': '有新版本',
@@ -643,7 +645,7 @@ export const zhCN = {
   /* 通用导入条（拖入 / 选择器）2026-10-26 */
 
   // ---- 导入 ----
-  'import.bad': '导入：有几份没成',
+  'import.bad': '导入：有几份失败',
   'import.done': '导入完成',
   'import.ok': '知道了',
   'import.line.done': '已导入 {name}',
@@ -1351,7 +1353,7 @@ export const zhCN = {
   'report.export.copyPath': '复制路径',
   'report.export.copied': '已复制',
   'report.export.reveal': '定位文件位置',
-  'report.export.failReveal': '定位没成：',
+  'report.export.failReveal': '定位失败：',
 
   /* 预设页 PagePresets */
 
@@ -1391,10 +1393,13 @@ export const zhCN = {
   'presets.page.update.failed': '更新失败：{detail}',
   'presets.page.update.nothingToDo': '{name} 这一版没有需要更新的',
   'presets.page.import.takenDone': '已导入 {name}，原文件保留',
-  'presets.page.import.failed': '导入没成：{detail}',
+  'presets.page.import.failed': '导入失败：{detail}',
   'presets.page.download.running': '正在下载 {name}…',
   'presets.page.download.done': '已下载 {name}',
-  'presets.page.download.doneSlicer': '已下载 {name}。要进切片软件，点「放入」。',
+  'presets.page.download.doneUsed': '已下载 {name}，并设为使用中',
+  'presets.page.download.doneUseFailed': '{name} 已下载，没能设为使用中：{detail}',
+  'presets.page.download.doneSlicer': '已下载 {name}，并放进切片器。',
+  'presets.page.download.doneSlicerManual': '已下载 {name}。没找到切片器目录，点「放入」自己选。',
   'presets.page.download.failed': '下载失败：{detail}',
   'presets.page.download.tamperedDone': '已更新 {name}，换成了云端当前版本',
   'presets.page.download.archivedDone': '已更新 {name}，旧版已移到「旧版本」',
@@ -1404,10 +1409,10 @@ export const zhCN = {
   'presets.page.edit.savedReopened': '编辑区已按最新内容重开',
   'presets.page.edit.reopenFailed': '重开不了：{detail}',
   'presets.page.edit.saveFailed': '没存上，文件一个字没动：{detail}',
-  'presets.page.edit.exitFailed': '退回没成：{detail}',
+  'presets.page.edit.exitFailed': '退回失败：{detail}',
   'presets.page.edit.restored': '已恢复默认值，可撤销',
   'presets.page.edit.discarded': '已放弃未保存的改动',
-  'presets.page.edit.discardFailed': '放弃没成：{detail}',
+  'presets.page.edit.discardFailed': '放弃失败：{detail}',
   'presets.page.rename.noDefault': '{name} 没有默认名',
   'presets.page.rename.alreadyDefault': '{name} 已经是默认名了',
   'presets.page.rename.restoring': '正在恢复默认名：{from} → {to}…',
@@ -1705,9 +1710,9 @@ export const zhCN = {
   'postproc.chip.runningTitle': '后处理中：{phase} · {pct}%',
   'postproc.chip.runningAria': '后处理中：{phase} · {pct}%',
   'postproc.chip.done': '已完成',
-  'postproc.chip.notDone': '没成',
+  'postproc.chip.notDone': '失败',
   'postproc.chip.okTitle': '后处理完成：{message}',
-  'postproc.chip.notOkTitle': '后处理没成：{message}',
+  'postproc.chip.notOkTitle': '后处理失败：{message}',
   'postproc.chip.okAria': '后处理完成：{message}',
   'postproc.chip.notOkAria': '后处理失败：{message}',
 
@@ -1950,7 +1955,7 @@ export const zhCN = {
   'presets.tree.batch.count.missing': '未下载 {count} 份',
   'presets.tree.batch.count.stale': '需更新 {count} 份',
   'presets.tree.batch.count.tampered': '内容异常 {count} 份',
-  'presets.tree.batch.why': '这一批＝把多份单文件操作合成一次：全程走同一条下载管道（没有第二套），逐份给结局 —— 哪一份没成会单独列出来，绝不压成一句"批量失败"或"批量成功"。已下载的那几份不在这一批里（不重复下）。范围是**当前机型 + 这一档类型**，不受搜索词影响（搜索是"我在找什么"，不该改变"按一下要动几份"）。',
+  'presets.tree.batch.why': '这一批＝把多份单文件操作合成一次：全程走同一条下载管道（没有第二套），逐份给结局 —— 哪一份失败会单独列出来，绝不压成一句"批量失败"或"批量成功"。已下载的那几份不在这一批里（不重复下）。范围是**当前机型 + 这一档类型**，不受搜索词影响（搜索是"我在找什么"，不该改变"按一下要动几份"）。',
   'presets.tree.status.applied': '在用',
   'presets.tree.status.ready': '本地有',
   'presets.tree.status.missing': '待下载',
@@ -2030,7 +2035,7 @@ export const zhCN = {
   'download.tick.transferringPct': '{name}：{pct}%（{received} / {total}）',
   'download.tick.transferringBytes': '{name}：{received}',
   'download.tick.done': '{name}：已下载',
-  'download.tick.failed': '{name}：没成',
+  'download.tick.failed': '{name}：失败',
   'download.tick.failedWhy': '{name}：失败 —— {message}',
   'download.outcome.failed': '{name}：失败，原因未知',
   'download.outcome.failedWhy': '{name}：{message}',

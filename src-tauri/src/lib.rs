@@ -72,6 +72,10 @@ pub mod obs;
 /// 记进执行记录（`archive::Meta::slicer_pid`），引导层据此认"我刚才切的那一份"。
 pub mod parent;
 pub mod presetdata;
+/// **起子进程时不弹控制台窗口**（Windows）：`powershell` / `cmd` 那几处一律走 `.quiet()`。
+///
+/// 不加这一位，后处理跑完发系统通知时旁边会冒出一扇黑框（2026-11-18 作者截图）。
+pub mod quiet;
 /// **执行记录的自动清理**：设置页那个开关打开时，按「条数 + 空间」双限静默清掉
 /// `gcode_history` 里最旧的记录（**最新那条永远不删** —— 不按日历天数清，
 /// 停用多久都不会把用户最后一次的记录带走）。见 [`retention`] 模块头。
@@ -431,7 +435,20 @@ pub fn run() {
                             }
                         });
                         for_setup.attach_writer(writer);
+                        /* 问句落盘那条路的根（窗口被钩子拉起来时，前端晚一步靠它捞问句） */
+                        for_setup.set_root(&root);
                         tracing::info!(root = %root.display(), "后处理通道已就位");
+
+                        /* ★ **盯盘**（2026-11-18）：窗口被钩子拉起来时，前端订阅比钩子发消息晚
+                        一秒多，那一问会掉进缝里；钩子那边同时把它写到了
+                        `run/pending-question.json`。这里每 [`hook_ui::POLL_EVERY`] 看一次 ——
+                        只在"界面还没有这一趟"时才看，正常跑着的那一趟零成本。 */
+                        let watcher_view = for_setup.clone();
+                        let watcher_app = handle.clone();
+                        std::thread::spawn(move || loop {
+                            std::thread::sleep(hook_ui::POLL_EVERY);
+                            watcher_view.poll_pending(&watcher_app);
+                        });
                     }
                     None => tracing::info!("已经有一扇窗在做显示，这一条只当界面"),
                 },
@@ -648,6 +665,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 读者是前端那一条"换完使用中之后顺手抄一遍"，后端不读它
         ipc::prefs::get_auto_copy_script,
         ipc::prefs::set_auto_copy_script,
+        // 「下载之后自动设为使用中」（2026-11-18）：同一格的第三项 ——
+        // 读者是预设页「云端 → MKP 配置」那颗「下载」，后端不读它
+        ipc::prefs::get_auto_use_after_download,
+        ipc::prefs::set_auto_use_after_download,
         ipc::prefs::get_postproc_prefs,
         ipc::app::open_preset_folder,
         // 清理数据（只清不卸）/ 卸载（可点名连数据一起清）—— 两条都清完就退
@@ -849,6 +870,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 「使用之后自动复制后处理脚本」（2026-11-01）—— 与上面那份清单一字不差
         ipc::prefs::get_auto_copy_script,
         ipc::prefs::set_auto_copy_script,
+        // 「下载之后自动设为使用中」（2026-11-18）—— 与上面那份清单一字不差
+        ipc::prefs::get_auto_use_after_download,
+        ipc::prefs::set_auto_use_after_download,
         ipc::prefs::get_postproc_prefs,
         ipc::app::open_preset_folder,
         // 清理数据 / 卸载 —— 与上面那份清单一字不差

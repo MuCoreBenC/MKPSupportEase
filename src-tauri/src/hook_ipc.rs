@@ -45,7 +45,7 @@ use std::io::{BufRead, BufReader, Write};
 // loopback 通道住在 `runtime::net::loopback`（判据 ①：网络字节只许住那一处）——
 // 这里只拿两个包装类型，不直接碰 `std::net`。
 use crate::runtime::net::loopback::{LoopbackListener, LoopbackStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -57,8 +57,17 @@ use postprocess::diag::CancelToken;
 /// 端点文件（相对内部根）。
 pub const PORT_FILE: &str = "run/hook.port";
 
-/// 连不上界面时，自己起一个并等它把端点挂出来 —— 上限（旧世代同值）。
-pub const SPAWN_WAIT: Duration = Duration::from_millis(1500);
+/// 连不上界面时，自己起一个并等它把端点挂出来 —— 上限。
+///
+/// ★★ 2026-11-18 真机（作者截图 + 钩子日志 `W_CALIB_MODE_001`，2026-11-18T12:18）：
+/// 原来是 **1500ms**（旧世代同值），而绿色版**冷启动实测要 1.05s** —— 空载时刚够，
+/// Bambu 正在切片、机器一忙就超一两百毫秒。于是"界面正在启动"被判成"没有界面"，
+/// 校准件那一问**永远问不到人**，最后只看到 Bambu 那句 `Error code: 1`。
+/// 用户的期望是"软件没开也要自己起来"，那就得真的等它起来 —— 15 秒足够冷启动
+/// （实测 1.05s，留一个数量级的余量）。
+///
+/// 代价只在"界面真的起不来"时才付：已经开着的那扇窗，第一次探测就连上了（毫秒级）。
+pub const SPAWN_WAIT: Duration = Duration::from_secs(15);
 
 /// 等用户答一句的上限（旧世代 180s；我们问的只有"机型不匹配还跑不跑"）。
 pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(120);
@@ -71,6 +80,19 @@ pub const ANSWER_STAKE: Duration = Duration::from_secs(110);
 
 /// 每次 connect 的短超时：只是"探一探有没有人在听"，不该卡住。
 const CONNECT_PROBE: Duration = Duration::from_millis(200);
+
+/// 连上新拉起的界面之后，**等它把前端挂上**再发消息的静默期。
+///
+/// 2026-11-18 实测（作者截图那次）：钩子 0.49s 就连上了端口，界面那侧直到 **32.0s**
+/// 才读第一份快照 —— 中间发出去的 `Hello` / 问句全落在"端点已挂、事件还没订阅"那条缝里，
+/// 表现就是"窗口拉起来了，里面是首页，什么也没问"。1.6 秒覆盖冷启动那一段（实测 1.0~1.2s）。
+const UI_SETTLE: Duration = Duration::from_millis(1600);
+
+/// 问句**重推**的间隔（见 [`Client::ask_answer`] 里那段）。
+///
+/// 界面那侧把问句存进状态是幂等的（同一问再收到一遍 = 还是这一问），所以重推只是保险：
+/// 冷启动的窗在第一问落进缝里之后，2 秒内一定能看见第二问。
+const QUESTION_REPUSH: Duration = Duration::from_secs(2);
 
 /* ---------- 消息 ---------- */
 
@@ -452,6 +474,82 @@ pub struct Client {
     answers: Mutex<Option<Receiver<Answer>>>,
     /// 取消线（读线程收到 `cancel` 直接置位 —— 这样它能**打断**等答复那个等待）
     cancel: CancelToken,
+    /// 内部根（**只在"到时候可能要把界面叫起来"时才存**，见 [`Client::ensure_ui`]）：
+    /// 静默档下这里也有值 —— 进度不弹窗，但"要人答的问题"还得有地方问。
+    /// `None` = 这条线不许自己起进程（假钩子 / 判据）。
+    root: Option<PathBuf>,
+    /// **补课用**：开场那条 `Hello` 与最近一条 `Progress`（见 [`Client::install`]）。
+    ///
+    /// 静默档里界面是**跑到一半**才被叫起来的（[`Self::ensure_ui`]），而它一接上就只
+    /// 看见一条"问句"—— 于是停在首页、问句画不出来（2026-11-18 作者截图：窗口拉起来了，
+    /// 里面是首页，什么也没问）。新接上的窗必须先知道"这一趟在跑什么、跑到哪儿了"。
+    replay: Mutex<Replay>,
+}
+
+/// `install` 时补发给新接上的界面的那两条（顺序：开场 → 最近一条进度）。
+#[derive(Default)]
+struct Replay {
+    hello: Option<FromHook>,
+    progress: Option<FromHook>,
+}
+
+/// **「这一问在等谁答」的落盘版**（2026-11-18）。
+///
+/// # 为什么要落到盘上
+///
+/// 界面是钩子**自己拉起来**的时候，端点（Rust 侧）一挂出来钩子就连上了，可前端那侧
+/// 还要一秒多才把事件订阅挂上 —— 这一秒里发的 `Hello` 与问句全掉进缝里：真机表现是
+/// **窗口起来了、里面是首页、什么也不问**（作者截图）。socket 那条线不解决"界面还没
+/// 准备好"这件事，所以问句再落一份盘：
+///
+/// - 钩子问之前写 `run/pending-question.json`（含开场那几条事实，界面据此能进"后处理"那一屏）；
+/// - 界面**读快照**时若内存里没有这一趟，就读这份盘（`HookView::snapshot`）；
+/// - 答完 / 超时 / 取消，钩子把文件删掉（[`PendingGuard`] 的 Drop）。
+///
+/// 只写**问句在等的那一刻**，不写进度 —— 进度掉几条没人看得出来，问句掉一条就是卡住。
+pub const PENDING_FILE: &str = "run/pending-question.json";
+
+/// 超过这个岁数就当过期（钩子被强杀时留下的残档，不许下次开窗再问一遍）。
+const PENDING_TTL_MS: u64 = 10 * 60 * 1000;
+
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingQuestion {
+    /// 开场那几条（界面拿它进"后处理"那一屏；空串 = 还没说 hello 就问上了，极少）
+    pub preset_name: String,
+    pub gcode_name: String,
+    pub facts: Option<FactsPayload>,
+    pub question: QuestionPayload,
+    /// 写它的进程（排查用；不强求校验存活 —— 端口那套也没有）
+    pub pid: u32,
+    pub at_unix_ms: u64,
+}
+
+impl PendingQuestion {
+    /// 读 `<root>/run/pending-question.json`：没有 / 读不动 / 过期 ⇒ `None`。
+    pub fn load(root: &Path) -> Option<Self> {
+        let text = std::fs::read_to_string(root.join(PENDING_FILE)).ok()?;
+        let pending: Self = serde_json::from_str(&text).ok()?;
+        (now_ms().saturating_sub(pending.at_unix_ms) < PENDING_TTL_MS).then_some(pending)
+    }
+}
+
+/// 问完就把那份盘删掉（任何出口：答了、超时、取消、panic 展开都会 Drop）。
+struct PendingGuard(Option<PathBuf>);
+
+impl Drop for PendingGuard {
+    fn drop(&mut self) {
+        if let Some(path) = &self.0 {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 impl Client {
@@ -460,24 +558,37 @@ impl Client {
     /// 起不来 / 等不到 ⇒ 返回一条"没有界面"的线：钩子照常干活，只是没人看进度
     /// （旧世代同一条取舍：头几步可能没人看见，产物不会少一个字节）。
     pub fn connect_or_spawn(internal_root: &Path, cancel: &CancelToken) -> Self {
-        let deadline = Instant::now() + SPAWN_WAIT;
+        let started = Instant::now();
+
+        /* ★ 静默档（设置页「静默 / GUI 界面」选静默）**不为进度拉窗**：既不起进程也不等。
+        2026-10-17 那一刀只做到"不起窗"，但循环还在空等 1500ms —— 静默用户白等一趟。
+        ★★ 但**不是整趟都无头**：静默只挡"看进度"那件事；校准件怎么跑、塔挡着了要不要挪
+        这类**必须有人答**的问题不能静默（2026-11-18 作者：「就算我设置静默也要弹出来让我
+        选择」）。所以这里返回一条 `armed` 的线：不拉窗，但记住根，等真要问的时候由
+        [`Client::ensure_ui`] 把界面叫起来。 */
+        if !wants_display(internal_root) {
+            return Self::armed_but_silent(internal_root, cancel);
+        }
+
+        let deadline = started + SPAWN_WAIT;
         let mut spawned = false;
 
         loop {
             if let Some(conn) = connect(internal_root) {
-                return Self::with_conn(conn, cancel);
+                return Self::with_conn(conn, cancel, Some(internal_root));
             }
-            /* 先把界面拉起来，再每 25ms 试一次（总预算 SPAWN_WAIT）。
-            ★ 只有 `ui_mode == gui` 才起窗（2026-10-17）：设置页「静默 / GUI 界面」
-            那一档以前只是存了个值，钩子照旧会把窗拉起来 —— 勾了静默也没用。
-            静默档下钩子照常干活、照常发消息，只是没有窗来接（`headless` 那一条）。 */
+            /* 先把界面拉起来，再每 25ms 试一次（总预算 SPAWN_WAIT —— 冷启动要一两秒，
+            见那条常量的注释）。 */
             if !spawned {
-                if wants_display(internal_root) {
-                    spawn_display();
-                }
+                spawn_display();
                 spawned = true;
             }
             if Instant::now() >= deadline {
+                /* 说清楚"等过、等不到"，别让下一次只剩 Bambu 那句 `Error code: 1` */
+                tracing::warn!(
+                    waited_ms = started.elapsed().as_millis() as u64,
+                    "界面没挂出端点（这一趟没有界面，产物照旧）"
+                );
                 return Self::headless(cancel);
             }
             std::thread::sleep(Duration::from_millis(25));
@@ -491,42 +602,173 @@ impl Client {
     /// 对假钩子来说就是它自己（一跑就套娃）。
     pub fn connect_or_headless(internal_root: &Path, cancel: &CancelToken) -> Self {
         match connect(internal_root) {
-            Some(conn) => Self::with_conn(conn, cancel),
+            Some(conn) => Self::with_conn(conn, cancel, None),
             None => Self::headless(cancel),
         }
     }
 
-    /// 一条没有界面的线（无头场景 / 判据用）。
+    /// 一条没有界面的线（无头场景 / 判据用）—— **不会自己起进程**。
     pub fn headless(cancel: &CancelToken) -> Self {
+        Self::empty(cancel, None)
+    }
+
+    /// 静默档的线：现在没有界面，但**要问的时候可以把界面叫起来**（见 [`Self::ensure_ui`]）。
+    pub fn armed_but_silent(internal_root: &Path, cancel: &CancelToken) -> Self {
+        Self::empty(cancel, Some(internal_root.to_path_buf()))
+    }
+
+    fn empty(cancel: &CancelToken, root: Option<PathBuf>) -> Self {
         Self {
             conn: Mutex::new(None),
             answers: Mutex::new(None),
             cancel: cancel.clone(),
+            root,
+            replay: Mutex::new(Replay::default()),
         }
     }
 
-    fn with_conn(conn: LoopbackStream, cancel: &CancelToken) -> Self {
-        let cancel = cancel.clone();
+    fn with_conn(conn: LoopbackStream, cancel: &CancelToken, root: Option<&Path>) -> Self {
+        let client = Self::empty(cancel, root.map(Path::to_path_buf));
+        client.install(conn);
+        client
+    }
+
+    /// 把一条已连上的线装进来（读线程也在这一处起 —— 装线只有这一个入口）。
+    ///
+    /// 只装线，**不补课** —— 补课在 [`Self::replay_open`]，由调用方决定时机（新拉起的
+    /// 那扇窗要先等它把前端挂上，见 [`Self::ensure_ui`]）。
+    fn install(&self, conn: LoopbackStream) {
+        let cancel = self.cancel.clone();
         let answers = conn.try_clone().ok().map(|read_side| {
             let (tx, rx) = mpsc::channel::<Answer>();
             let cancel = cancel.clone();
             std::thread::spawn(move || read_loop(read_side, tx, cancel));
             rx
         });
-        Self {
-            conn: Mutex::new(Some(conn)),
-            answers: Mutex::new(answers),
-            cancel,
+        *self.conn.lock().expect("锁没坏") = Some(conn);
+        *self.answers.lock().expect("锁没坏") = answers;
+    }
+
+    /// 把问句落一份盘（见 [`PendingQuestion`]）：返回的守卫一 Drop 就把文件删掉。
+    ///
+    /// 算不出根 / 写不进去 ⇒ 空守卫（只在 socket 上问，与以前一样）。
+    fn write_pending(&self, payload: &QuestionPayload) -> PendingGuard {
+        let Some(root) = self.root.as_deref() else {
+            return PendingGuard(None);
+        };
+        let (preset_name, gcode_name, facts) = {
+            let g = self.replay.lock().expect("锁没坏");
+            match g.hello.clone() {
+                Some(FromHook::Hello {
+                    preset_name,
+                    gcode_name,
+                    facts,
+                }) => (preset_name, gcode_name, facts),
+                _ => (String::new(), String::new(), None),
+            }
+        };
+        let pending = PendingQuestion {
+            preset_name,
+            gcode_name,
+            facts,
+            question: payload.clone(),
+            pid: std::process::id(),
+            at_unix_ms: now_ms(),
+        };
+        let Ok(bytes) = serde_json::to_vec(&pending) else {
+            return PendingGuard(None);
+        };
+        let path = root.join(PENDING_FILE);
+        match crate::fsx::atomic::atomic_write(&path, &bytes) {
+            Ok(()) => PendingGuard(Some(path)),
+            Err(_) => PendingGuard(None),
         }
     }
 
-    /// 有没有界面在听（决定要不要问那一句）。
+    /// 把"这一趟在跑什么、跑到哪儿了"补发给刚接上的那扇窗（开场 + 最近一条进度）。
+    fn replay_open(&self) {
+        let (hello, progress) = {
+            let g = self.replay.lock().expect("锁没坏");
+            (g.hello.clone(), g.progress.clone())
+        };
+        if let Some(hello) = hello {
+            self.send(&hello);
+        }
+        if let Some(progress) = progress {
+            self.send(&progress);
+        }
+    }
+
+    /// **有问句时把界面叫起来**（哪怕设置里选了静默）。
+    ///
+    /// 静默只该管"别为了看进度弹窗"；「这一盘是不是校准件、怎么跑」「塔挡着了要不要挪」
+    /// 这些**必须有人答**的问题不能静默 —— 静默掉的结果是钩子停在半路、原文件不动，
+    /// 而 Bambu 那边只会显示一句 `Error code: 1`（2026-11-18 作者真机）。
+    ///
+    /// 已经在听 ⇒ 什么都不做；这条线是"不许起进程"的那种（假钩子 / 判据）⇒ 也不做。
+    /// 起不来就留一条 WARN，让调用方按"没人答"收场。
+    fn ensure_ui(&self) {
+        if self.connected() {
+            return;
+        }
+        let Some(root) = self.root.as_deref() else {
+            return;
+        };
+        /* ★ **接上 ≠ 能看见**：界面那一侧的端点是一起来就挂好的（Rust 侧），但**前端
+        还要一秒左右**才把事件挂上（2026-11-18 实测：钩子 0.49s 就连上了，界面那侧
+        32.0s 才读第一份快照 —— 这中间发的问句全落进了缝里，于是"窗口起来了、什么也没问"）。
+        所以接上之后先等它把前端挂好，再补课、再问。 */
+        if let Some(conn) = connect(root) {
+            self.install(conn);
+            std::thread::sleep(UI_SETTLE);
+            self.replay_open();
+            return;
+        }
+        spawn_display();
+        let deadline = Instant::now() + SPAWN_WAIT;
+        while Instant::now() < deadline {
+            if let Some(conn) = connect(root) {
+                self.install(conn);
+                std::thread::sleep(UI_SETTLE);
+                self.replay_open();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        tracing::warn!(
+            waited_s = SPAWN_WAIT.as_secs(),
+            "这一问要人答，但界面没能起来（按没人答处理）"
+        );
+    }
+
+    /// 有没有界面在听（决定要不要推消息、交不交打印时间）。
     pub fn connected(&self) -> bool {
         self.conn.lock().expect("锁没坏").is_some()
     }
 
+    /// **这一趟能不能问到人**（决定"要问的那条路"是走问句还是走硬错）。
+    ///
+    /// 与 [`Self::connected`] 的差别就是静默档：现在没人听，但**根在**（[`Self::root`]），
+    /// 真到要问的时候 [`Self::ensure_ui`] 还能把界面叫起来。判"能不能问"必须用它 ——
+    /// 用 `connected()` 的话，静默用户一撞上机型不匹配就直接吃 `E_CFG_MISMATCH_001`
+    /// （2026-11-18 真机：钩子 30ms 就退出，用户看到的是 Bambu 那句 `Error code: 1`）。
+    pub fn can_ask(&self) -> bool {
+        self.connected() || self.root.is_some()
+    }
+
     /// 往界面写一行。**永不返回错误**：超时 / 对端关闭都只是"这条线到此为止"。
     pub fn send(&self, msg: &FromHook) {
+        /* 先记下"补课"要用的两条（**不管有没有界面**：静默档这一刻没人接，正是要补课的
+        那种情况）。只留开场与最近一条进度，其余不留内存。 */
+        {
+            let mut g = self.replay.lock().expect("锁没坏");
+            match msg {
+                FromHook::Hello { .. } => g.hello = Some(msg.clone()),
+                FromHook::Progress(_) => g.progress = Some(msg.clone()),
+                _ => {}
+            }
+        }
+
         let mut guard = self.conn.lock().expect("锁没坏");
         let Some(conn) = guard.as_mut() else {
             return;
@@ -608,19 +850,26 @@ impl Client {
         geo: Option<RelocateGeoPayload>,
         fields: Vec<QuestionField>,
     ) -> Option<Answer> {
+        /* ★ 要问了：静默档也得把界面叫起来（进度可以没人看，问题不能没人答）。
+        已经在听的话这一句什么都不做。 */
+        self.ensure_ui();
         if !self.connected() {
             return None;
         }
         /* 界面上那个倒计时读的就是它：**两段都算进去**（界面露面那 8 秒也等） */
         let deadline_unix_ms = unix_ms_now() + (ANSWER_GRACE + ANSWER_STAKE).as_millis() as u64;
-        self.send(&FromHook::Question(Box::new(QuestionPayload {
+        let payload = QuestionPayload {
             question_kind: question_kind.to_owned(),
             text: question.to_owned(),
             deadline_unix_ms,
             choices,
             geo,
             fields,
-        })));
+        };
+        /* 落盘 + socket 双写：socket 正常时界面照样即时弹；socket 那一秒的缝里，
+        界面读快照时会从这份盘把问句捞回来（见 `PendingQuestion`）。 */
+        let _pending = self.write_pending(&payload);
+        self.send(&FromHook::Question(Box::new(payload.clone())));
 
         /*
          * ★★ 两段倒计时（2026-10-17，作者真机踩到的那一版）：
@@ -637,6 +886,11 @@ impl Client {
         let appeared = Instant::now() + ANSWER_GRACE;
         let deadline = appeared + ANSWER_STAKE;
         let mut warned = false;
+        /* ★ 重推：界面那侧的事件订阅是**晚一步**挂上的（冷启动一两秒），第一问很容易落在
+        "端点已挂、界面还没订阅"那条缝里 —— 于是窗口拉起来了却什么也不问（2026-11-18）。
+        每 [`QUESTION_REPUSH`] 重推一次，直到有人答或超时。界面那侧是幂等状态机
+        （同一个 `question_kind` 再收到一遍就是"还是这一问"），不会画两屏。 */
+        let mut repushed = Instant::now();
         loop {
             /* 按停止 = 不跑：取消要能打断"等你决定"那个等待（读线程直接置位取消线） */
             if self.cancel.is_cancelled() {
@@ -653,6 +907,11 @@ impl Client {
                 }
                 Err(RecvTimeoutError::Timeout) => {
                     let now = Instant::now();
+                    /* 重推（见上面 `repushed` 那条注释）：答案还没来就一直重推 */
+                    if repushed.elapsed() >= QUESTION_REPUSH {
+                        repushed = now;
+                        self.send(&FromHook::Question(Box::new(payload.clone())));
+                    }
                     if now >= appeared && !warned {
                         warned = true;
                         /*
@@ -754,6 +1013,8 @@ fn wants_display(internal_root: &Path) -> bool {
 }
 
 fn spawn_display() {
+    use crate::quiet::Quiet as _;
+
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
@@ -761,6 +1022,8 @@ fn spawn_display() {
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
+        /* 拉起来的这扇窗是 GUI，本身没有控制台；这一位是兜底（见 `crate::quiet`） */
+        .quiet()
         .spawn();
 }
 
@@ -1112,6 +1375,31 @@ mod tests {
             bind_for_display(d.path()).is_some(),
             "没人听了就该能重新当显示"
         );
+    }
+
+    /// **静默档只是"不为进度拉窗"**：真要问的时候，界面还是会被叫起来。
+    ///
+    /// 作者 2026-11-18：「就算我设置静默也要弹出来让我选择」—— 校准件怎么跑、塔挡着了
+    /// 要不要挪，这些没人答就只能停在半路，而 Bambu 那边只显示一句 `Error code: 1`。
+    #[test]
+    fn a_silent_client_still_wakes_the_display_for_a_question() {
+        let d = tempfile::tempdir().expect("临时根");
+        let cancel = CancelToken::new();
+
+        let client = Client::armed_but_silent(d.path(), &cancel);
+        assert!(!client.connected(), "静默档一开始不该有界面");
+
+        /* 界面对着端点文件在听（用户自己开的 / 上一趟留下的那扇） */
+        let listener = bind_for_display(d.path()).expect("假界面该能当显示");
+        let _handle = listener.serve(|_msg| {});
+
+        client.ensure_ui();
+        assert!(client.connected(), "要问的时候必须把界面接上");
+
+        /* 反过来：无头线（假钩子 / 判据）**不许**自己起进程，ensure_ui 必须什么都不做 */
+        let deaf = Client::headless(&cancel);
+        deaf.ensure_ui();
+        assert!(!deaf.connected(), "无头线不许被叫醒");
     }
 
     /// 开发台那条演出指令也走这条线：`dev-scene` 一行 JSON 载得动、认得回。

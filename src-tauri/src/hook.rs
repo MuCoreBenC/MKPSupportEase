@@ -2190,7 +2190,10 @@ pub fn run_with_channel(job: &HookJob) -> ExitCode {
         last_step: None,
     };
     let mut asker = ChannelAsker { client: &client };
-    let mismatch = if client.connected() {
+    /* ★ 判据是 `can_ask()`，**不是 `connected()`**（2026-11-18 作者：「就算我设置静默也要
+    弹出来让我选择」）：静默档此刻没人听，但问句那一侧会把界面叫起来，所以这条路照样
+    走"问"，而不是直接吃一个 `E_CFG_MISMATCH_001` 硬错。 */
+    let mismatch = if client.can_ask() {
         MismatchPolicy::Ask(&mut asker)
     } else {
         MismatchPolicy::Refuse

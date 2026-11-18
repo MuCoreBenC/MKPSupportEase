@@ -592,7 +592,7 @@ pub struct PresetPrefs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copies_follow_cloud: Option<bool>,
 
-    /// **换上一份预设之后，自动把它的后处理脚本复制到剪贴板**（出厂 = 关）。
+    /// **换上一份预设之后，自动把它的后处理脚本复制到剪贴板**（出厂 = 开）。
     ///
     /// 开 ⇒ 只要「使用中」从一个文件换到另一个文件，就把**新的那一份**的后处理命令
     /// 抄进剪贴板并发一条通知（作者 2026-11-01：「只要变了那个使用的状态，就从一个
@@ -602,6 +602,15 @@ pub struct PresetPrefs {
     ///   所以判据只有一个读者 —— `src/app/postprocess/autoCopy.ts`，后端不参与。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_copy_script: Option<bool>,
+
+    /// **下载之后自动设为使用中**（出厂 = 开）。
+    ///
+    /// 开 ⇒ 在「云端 → MKP 配置」那一行点「下载」之后，除了落一份本地文件，还把它
+    /// 设为使用中（与首页「下载并使用」的第二步是同一件事）。
+    ///
+    /// ★ 与切片器配置无关：那一档的「生效」是放进切片器目录，下载时本来就会放。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_use_after_download: Option<bool>,
 }
 
 /// Z 轴校准停留时间的**出厂值镜像**与量程（秒）。
@@ -1555,13 +1564,16 @@ pub fn preset_prefs(root: &Path) -> Result<PresetPrefs, AppError> {
     Ok(load(root)?.presets.unwrap_or_default())
 }
 
-/// **复制出来的那一份跟不跟云端**（出厂 = 关）。
+/// **复制出来的那一份跟不跟云端**（出厂见 `presets/client-defaults.toml` 的 `[Client]`）。
 ///
 /// ★ 回的是**解析后的 `bool`**：盘上"没选过"是 `None`，而"没选过"该怎么解释是
 /// **后端的事** —— 界面不自己拿 `null` 去猜（猜出来的那一档迟早与真正执行排除的
 /// 那一侧漂开）。与 [`auto_clean_history`] 同一条口径。
 pub fn copies_follow_cloud(root: &Path) -> Result<bool, AppError> {
-    Ok(preset_prefs(root)?.copies_follow_cloud.unwrap_or(false))
+    let d = super::client_defaults::get();
+    Ok(preset_prefs(root)?
+        .copies_follow_cloud
+        .unwrap_or(d.copies_follow_cloud))
 }
 
 /// 记下「复制出来的也跟着云端更新」（整份状态原子替换，别的格一个不动）。
@@ -1574,12 +1586,15 @@ pub fn set_copies_follow_cloud(root: &Path, enabled: bool) -> Result<bool, AppEr
     })
 }
 
-/// **换上一份预设之后自动复制它的后处理脚本**（出厂 = 关）。
+/// **换上一份预设之后自动复制它的后处理脚本**（出厂见 `presets/client-defaults.toml`）。
 ///
 /// 与 [`copies_follow_cloud`] 同一条口径：盘上"没选过"是 `None`，
 /// "没选过怎么解释"是后端的事，界面不拿 `null` 去猜。
 pub fn auto_copy_script(root: &Path) -> Result<bool, AppError> {
-    Ok(preset_prefs(root)?.auto_copy_script.unwrap_or(false))
+    let d = super::client_defaults::get();
+    Ok(preset_prefs(root)?
+        .auto_copy_script
+        .unwrap_or(d.auto_copy_script))
 }
 
 /// 记下「使用之后自动复制后处理脚本」（整份状态原子替换，别的格一个不动）。
@@ -1587,6 +1602,24 @@ pub fn set_auto_copy_script(root: &Path, enabled: bool) -> Result<bool, AppError
     with_state(root, |state| {
         let mut prefs = state.presets.clone().unwrap_or_default();
         prefs.auto_copy_script = Some(enabled);
+        state.presets = Some(prefs);
+        Ok(enabled)
+    })
+}
+
+/// **下载之后自动设为使用中**（出厂见 `presets/client-defaults.toml`）。
+pub fn auto_use_after_download(root: &Path) -> Result<bool, AppError> {
+    let d = super::client_defaults::get();
+    Ok(preset_prefs(root)?
+        .auto_use_after_download
+        .unwrap_or(d.auto_use_after_download))
+}
+
+/// 记下「下载之后自动设为使用中」（整份状态原子替换，别的格一个不动）。
+pub fn set_auto_use_after_download(root: &Path, enabled: bool) -> Result<bool, AppError> {
+    with_state(root, |state| {
+        let mut prefs = state.presets.clone().unwrap_or_default();
+        prefs.auto_use_after_download = Some(enabled);
         state.presets = Some(prefs);
         Ok(enabled)
     })

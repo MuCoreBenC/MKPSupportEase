@@ -13,9 +13,10 @@ import {
   estimatedPrintTimeSeconds,
   postProcessScene,
   postProcessSettingsFold,
+  screenDismissed,
   showsPostProcessChip,
 } from './facts'
-import type { ChipState, SettingsFoldInput } from './facts'
+import type { ChipState, ScreenAwayInput, SettingsFoldInput } from './facts'
 import type {
   PostProcessFinished,
   PostProcessQuestion,
@@ -168,6 +169,38 @@ describe('设置页上的后处理那一屏', () => {
       postProcessScene(run({ finished: { ok: true } as PostProcessFinished })),
     ).toBe('finished')
     expect(postProcessScene(null)).toBeNull()
+  })
+})
+
+/* 有问句就一律露面（2026-11-18 作者：「就算我开静默，只要有提问它就需要拉起来」） */
+describe('这一屏现在收着没有', () => {
+  const away = (over: Partial<ScreenAwayInput> = {}) =>
+    screenDismissed({
+      dismissed: false,
+      silent: false,
+      forcedOpen: false,
+      questionOpen: false,
+      ...over,
+    })
+
+  it('GUI 档、没人关过 ⇒ 摆着', () => {
+    expect(away()).toBe(false)
+  })
+
+  it('静默档 ⇒ 收起（那一档就是不弹）', () => {
+    expect(away({ silent: true })).toBe(true)
+  })
+
+  it('静默档但用户点过胶囊 ⇒ 摆出来', () => {
+    expect(away({ silent: true, forcedOpen: true })).toBe(false)
+  })
+
+  it('**有问句 ⇒ 静默档也摆**（钩子停在原地等人答）', () => {
+    expect(away({ silent: true, questionOpen: true })).toBe(false)
+  })
+
+  it('**有问句 ⇒ 用户点过后台运行也摆**（那一问不兴被收掉）', () => {
+    expect(away({ dismissed: true, questionOpen: true })).toBe(false)
   })
 })
 

@@ -272,10 +272,27 @@ pub async fn read_downloaded_text(app: AppHandle, file_name: String) -> Result<S
     })?
 }
 
-/// **跟着换**：这一份本机换版之后，把切片器目录里那份也换掉（只换已经放入的）。
+/// **下载完顺便放进切片器**：这一份是切片器配置的话，写进它自己那个切片器的每个账号目录
+/// （目标已有同名就换掉）。
 ///
-/// 与「放入」是两件事：这一手不会新建任何文件，只看目标目录里有没有同名的那一份。
-/// 判据在 [`crate::ipc::presets::replace_placed_copies`]，这里只负责把字节取出来。
+/// 下载与「放入」在界面上本来是两步；作者 2026-11-18 定了口径：「在套餐里一起下载的，
+/// 就放入」—— 下到本机却没进切片器，用户还得再点一次，而那份副本躺在切片器看不见的地方。
+/// 写盘那一段在 [`crate::ipc::presets::place_copies`]，这里只负责把字节取出来。
+fn place_after_download(root: &Path, file: &runtime::catalog::CatalogFile) {
+    let Some(slicer) = crate::ipc::presets::slicer_of_kind(&file.kind) else {
+        return;
+    };
+    let Some(bytes) = runtime::delivery::stored_bytes(root, file) else {
+        return;
+    };
+    crate::ipc::presets::place_copies(slicer, &file.file_name, &bytes);
+}
+
+/// **跟着换**：这一份本机换版之后（用回归档那一版），把切片器目录里那份也换掉。
+///
+/// 与「放入」是两件事：这一手**不会新建**任何文件，只看目标目录里有没有同名的那一份 ——
+/// 换版本不该替用户往切片器里塞东西。判据在
+/// [`crate::ipc::presets::replace_placed_copies`]，这里只负责把字节取出来。
 fn sync_placed_copy(root: &Path, file: &runtime::catalog::CatalogFile) {
     let Some(slicer) = crate::ipc::presets::slicer_of_kind(&file.kind) else {
         return;
@@ -351,8 +368,8 @@ pub async fn download_runtime_file(
             }
 
             outcome?;
-            /* 已经放入切片器的那一份跟着换 —— 没放入的一份都不建 */
-            sync_placed_copy(&root, file);
+            /* 下完就能在切片器里选到它：写进每个账号目录 */
+            place_after_download(&root, file);
             /* 预设的真实落点是 `content/<sha>`，文件名一律报目录里的名字 */
             Ok(file.file_name.clone())
         })
@@ -477,10 +494,10 @@ pub async fn download_runtime_files(
             };
 
             let outcomes = runtime::delivery::deliver_all(&root, &wanted, &remote, &report);
-            /* 取到的那几份里，已经放入切片器的跟着换（没放入的不建） */
+            /* 取到的那几份里，切片器配置顺手放进切片器（每个账号目录一份） */
             for outcome in outcomes.iter().filter(|o| o.ok) {
                 if let Some(file) = wanted.iter().find(|f| f.file_name == outcome.file_name) {
-                    sync_placed_copy(&root, file);
+                    place_after_download(&root, file);
                 }
             }
             Ok(outcomes

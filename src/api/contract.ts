@@ -4047,7 +4047,7 @@ export interface MkpApi {
   setCopiesFollowCloud(enabled: boolean): Promise<boolean>
 
   /**
-   * **使用一份预设之后自动复制它的后处理脚本**（2026-11-01；出厂 = 关）。
+   * **使用一份预设之后自动复制它的后处理脚本**（2026-11-01；出厂 = 开）。
    *
    * 回的是**解析后的 `boolean`**：盘上那一格"没选过"是 `null`，
    * "没选过怎么解释"是后端的事（与上面两条同一条口径）。
@@ -4066,6 +4066,23 @@ export interface MkpApi {
    * `app/postprocess/copyScript.ts`）。
    */
   setAutoCopyScript(enabled: boolean): Promise<boolean>
+
+  /**
+   * **下载之后自动设为使用中**（2026-11-18；出厂 = 开）。
+   *
+   * 回的是**解析后的 `boolean`**（与上面两条同一条口径）。
+   *
+   * ★ 只对 MKP 预设（云端 → MKP 配置那一行的「下载」）有意义：那一步本来就只把
+   *   字节取到本机，开这一档后接着走「使用」。切片器配置的「生效」是放进切片器目录，
+   *   下载时本来就会放，与这一格无关。
+   */
+  getAutoUseAfterDownload(): Promise<boolean>
+
+  /**
+   * 开关「下载之后自动设为使用中」：**立即生效并落盘**
+   * （写 `run/app-state.json` 的 `presets.autoUseAfterDownload` 格）。
+   */
+  setAutoUseAfterDownload(enabled: boolean): Promise<boolean>
 
   /**
    * 设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块的当前值（2026-10-17）。
