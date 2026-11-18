@@ -327,7 +327,49 @@ pub fn process_gcode_offset(
 /// 提前粗检的余量（mm）：预扫的样本比逐行那套宽，留这一截防误拦。
 pub(crate) const EARLY_BOUNDARY_MARGIN_MM: f64 = 1.0;
 
-/// 跑管线之前的**粗检**：拿全文 X/Y 极值 + 笔偏移对一遍板范围，明显越界就立刻报。
+/// 哪些行属于**打印机自己的段**（机器起手 / 结束），不是模型。
+///
+/// 这些段里的坐标是机器动作：A1 的擦嘴位就是 `Y262.5`（比打印范围的 `maxY = 255`
+/// 还远 7.5mm），带上笔尖偏移 24.4 就是 286.9。把它们算进"模型边界"会把正常的
+/// A1 打印/校准整批拦下来。
+///
+/// 配对见 [`opens_machine_block`] / [`closes_machine_block`]：起点没等到终点的
+/// **整段不跳**（宁可多检查，不许漏）。
+fn machine_block_mask(content: &[String]) -> Vec<bool> {
+    let mut mask = vec![false; content.len()];
+    let mut open: Option<usize> = None;
+    for (i, line) in content.iter().enumerate() {
+        let head = line.trim_start();
+        if opens_machine_block(head) && open.is_none() {
+            open = Some(i);
+        } else if closes_machine_block(head)
+            && let Some(start) = open.take()
+        {
+            for slot in &mut mask[start..=i] {
+                *slot = true;
+            }
+        }
+    }
+    mask
+}
+
+/// 机器段的起点：Bambu 的 `;===== machine: …`、Orca 的 `; MACHINE_START_GCODE_START`、
+/// 以及结束段的 `; MACHINE_END_GCODE_START`。
+fn opens_machine_block(head: &str) -> bool {
+    head.starts_with(";===== machine:")
+        || head.starts_with("; MACHINE_START_GCODE_START")
+        || head.starts_with("; MACHINE_END_GCODE_START")
+}
+
+/// 机器段的终点。Bambu 的结束段没有 `MACHINE_END_GCODE_END`，只能靠
+/// `; EXECUTABLE_BLOCK_END` 收尾。
+fn closes_machine_block(head: &str) -> bool {
+    head.starts_with("; MACHINE_START_GCODE_END")
+        || head.starts_with("; MACHINE_END_GCODE_END")
+        || head.starts_with("; EXECUTABLE_BLOCK_END")
+}
+
+/// 跑管线之前的**粗检**：拿模型路径的 X/Y 极值 + 笔偏移对一遍板范围，明显越界就立刻报。
 ///
 /// # 它不替掉逐行那道闸
 ///
@@ -337,8 +379,9 @@ pub(crate) const EARLY_BOUNDARY_MARGIN_MM: f64 = 1.0;
 ///
 /// 收益：大文件不必等 Pass1 跑到出事那一行（实测 9 秒）才失败。
 ///
-/// # 两条与逐行一致的规矩
+/// # 三条与逐行一致的规矩
 ///
+/// - 机器起手 / 结束段不查（[`machine_block_mask`]）：那不是模型；
 /// - 调试那一趟不查：那一趟的产物只跑笔的动作，正式坐标本来就走出床外；
 /// - 只报 `E_GCODE_BOUNDARY_001`（打印板）：涂胶范围 `_002` 要按涂胶路径判，
 ///   极值不够用，留给逐行。
@@ -351,11 +394,15 @@ pub(crate) fn check_xy_bounds_early(
         return Ok(());
     }
 
+    let skip = machine_block_mask(content);
     let mut min_x = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_y = f64::NEG_INFINITY;
-    for line in content {
+    for (i, line) in content.iter().enumerate() {
+        if skip[i] {
+            continue;
+        }
         let head = line.trim_start();
         /* 切片器出来的坐标都在 G0 / G1 上，别的行不看 */
         if !(head.starts_with("G1") || head.starts_with("G0")) {
@@ -511,6 +558,71 @@ mod early_boundary_tests {
         assert!(
             check_xy_bounds_early(&content, &ir_data, EARLY_BOUNDARY_MARGIN_MM).is_ok(),
             "调试那一趟不许被模型的边界挡住"
+        );
+    }
+
+    /// A1 的机器起手段真的会走到 `Y262.5`（擦嘴），加笔尖偏移 24.4 就是 286.9 ——
+    /// 那不是模型，粗检不许拿它判越界（2026-11-18 实机：校准件就是这么被拦下的）。
+    #[test]
+    fn early_check_skips_the_machine_start_block() {
+        let mut ir_data = ir_with_pen_y_offset(24.4);
+        ir_data.machine.max_y = 255.0;
+        let content = lines(concat!(
+            ";===== machine: A1 =========================\n",
+            "G1 Y250 F30000\n",
+            "G1 Y262.5 F6000\n",
+            "; MACHINE_START_GCODE_END\n",
+            "G1 X10 Y100 F3000\n",
+        ));
+        assert!(
+            check_xy_bounds_early(&content, &ir_data, EARLY_BOUNDARY_MARGIN_MM).is_ok(),
+            "机器起手段的擦嘴位不是模型"
+        );
+    }
+
+    /// 机器结束段同理（AMS 拉丝 / 归位都在那段里，坐标同样走出板外）。
+    #[test]
+    fn early_check_skips_the_machine_end_block() {
+        let ir_data = ir_with_pen_y_offset(0.0);
+        let content = lines(concat!(
+            "G1 X10 Y100 F3000\n",
+            "; MACHINE_END_GCODE_START\n",
+            "G1 X267 F15000\n",
+            "; EXECUTABLE_BLOCK_END\n",
+        ));
+        assert!(
+            check_xy_bounds_early(&content, &ir_data, EARLY_BOUNDARY_MARGIN_MM).is_ok(),
+            "机器结束段不是模型"
+        );
+    }
+
+    /// 段外同样的坐标仍要拦：跳过只看段边界，不碰判据本身。
+    #[test]
+    fn early_check_still_reports_outside_the_machine_block() {
+        let mut ir_data = ir_with_pen_y_offset(24.4);
+        ir_data.machine.max_y = 255.0;
+        let content = lines(concat!(
+            ";===== machine: A1 =====\n",
+            "; MACHINE_START_GCODE_END\n",
+            "G1 Y262.5 F6000\n",
+        ));
+        let err = check_xy_bounds_early(&content, &ir_data, EARLY_BOUNDARY_MARGIN_MM)
+            .expect_err("起手段之后的 262.5 是模型坐标，仍要报");
+        match err {
+            PostprocError::Boundary { code, .. } => assert_eq!(code, "E_GCODE_BOUNDARY_001"),
+            other => panic!("该报边界错，实际 {other:?}"),
+        }
+    }
+
+    /// 起点没等到终点 ⇒ **整段不跳**（宁可多检查，不许把整个文件漏过去）。
+    #[test]
+    fn an_unclosed_machine_block_is_not_skipped() {
+        let mut ir_data = ir_with_pen_y_offset(24.4);
+        ir_data.machine.max_y = 255.0;
+        let content = lines(";===== machine: A1 =====\nG1 Y262.5 F6000\n");
+        assert!(
+            check_xy_bounds_early(&content, &ir_data, EARLY_BOUNDARY_MARGIN_MM).is_err(),
+            "没有收尾标记就照常检查"
         );
     }
 }

@@ -178,6 +178,8 @@ function devPostProcessRun(): PostProcessRun | null {
     slicer: 'BambuStudio 02.08.02.60',
     slicerPrintTimeSeconds: 7800,
   }
+  /** 点位测试那一趟：开场事实里就带动作参数（下方「说明」页要摆全） */
+  const debugFacts = { ...facts, debug: PREVIEW_DEBUG_PLAN }
   const base = {
     presetName: 'A1-standard.toml',
     gcodeName: '.5926.0.gcode',
@@ -312,12 +314,13 @@ function devPostProcessRun(): PostProcessRun | null {
   }
 
   /*
-   * **调试那一趟**的结果屏（2026-11-18）：`result.debug` 有值 ⇒ 下方默认摆「调试动作」
-   * （一行一项），两栏事实收在左下角「信息」后面；涂胶速度 / 时间 / 胶总长摆「—」。
+   * **调试那一趟**的结果屏：`result.debug` 有值 ⇒ 左下角那颗钮在「信息 / 说明」之间翻
+   * （默认信息）；涂胶速度 / 时间 / 胶总长摆「—」。
    */
   if (which === 'debug') {
     return {
       ...base,
+      facts: debugFacts,
       question: null,
       finished: {
         ok: true,
@@ -455,6 +458,7 @@ function devPostProcessRun(): PostProcessRun | null {
   if (which === 'debug-ask') {
     return {
       ...base,
+      facts: debugFacts,
       finished: null,
       question: {
         questionKind: 'debug-plan',
@@ -3400,7 +3404,40 @@ export const mockApi: MkpApi = {
    * 出厂档**照抄后端那一份**（`runtime::app_state::PostprocPrefs::resolved`），
    * 量程也照抄；这里不另发明一套默认值，否则浏览器里看到的样子会与真机不同。
    */
+  /**
+   * 浏览器预览里的「默认点位」。
+   *
+   * 真机那份从随包预设解析（`ipc::prefs::get_debug_anchors`）；预览没有内核，
+   * 这里给两台机器的样子，别让那张表空着。值取自随包预设，改预设时顺手同步。
+   */
+  /** 预览里没有真实偏好可读：两列都给同一份出厂档（点「恢复默认」看不出差别） */
+  async getClientPrefsView() {
+    const factory = {
+      theme: 'system',
+      locale: 'system',
+      autoCleanHistory: true,
+      autoCheckUpdate: true,
+      copiesFollowCloud: false,
+      autoCopyScript: true,
+      autoUseAfterDownload: true,
+      source: 'gitee',
+    }
+    return { current: factory, factory }
+  },
+
+  /* 预览里没有盘上状态要清：界面靠随后那次回读刷新 */
+  async resetClientPrefs() {
+    return { ok: true }
+  },
+  async getDebugAnchors() {
+    return [
+      { machine: 'A1', rows: [{ variant: 'fast261111', mountWaitX: 256, mountWaitY: null, mountX: 267, unmountWaitX: 256, unmountWaitY: null, unmountX: 274 }] },
+      { machine: 'P1S', rows: [{ variant: 'lite', mountWaitX: 20, mountWaitY: 7, mountX: 1, unmountWaitX: 246, unmountWaitY: 0, unmountX: 256 }] },
+    ]
+  },
   async getPostprocPrefs() {
+    /* 与后端 `resolved()` 同一个口径：没选过 = 2 秒，0 = 关了 */
+    const dwell = mockPostproc.debugDwellSec
     const resolved: ResolvedPostprocPrefs = {
       notifyOnFinish: mockPostproc.notifyOnFinish ?? true,
       uiMode: mockPostproc.uiMode ?? 'gui',
@@ -3425,7 +3462,8 @@ export const mockApi: MkpApi = {
       debugUnmountY: mockPostproc.debugUnmountY ?? null,
       debugMoveY: mockPostproc.debugMoveY ?? false,
       debugRepeat: mockPostproc.debugRepeat ?? 1,
-      debugTravelSpeed: mockPostproc.debugTravelSpeed ?? 30000,
+      debugDwellSec: dwell === undefined || dwell === null ? 2 : dwell > 0 ? dwell : null,
+      debugTravelSpeed: mockPostproc.debugTravelSpeed ?? 20000,
       debugUseTravelSpeed: mockPostproc.debugUseTravelSpeed ?? false,
       debugCustomGcode: mockPostproc.debugCustomGcode ?? null,
       zCalibrationDwellSec: mockPostproc.zCalibrationDwellSec ?? 2,

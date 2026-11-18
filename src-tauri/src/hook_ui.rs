@@ -1514,6 +1514,7 @@ mod tests {
                     glue_speed: None,
                     slicer: None,
                     slicer_print_time_seconds: None,
+                    debug: None,
                 }),
                 progress: Some(ProgressPayload {
                     step: "pass1".to_owned(),

@@ -354,7 +354,7 @@ pub struct PostprocPrefs {
     /// **高级模式：整段动作块自己写**。`None` = 按字段生成。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_custom_gcode: Option<String>,
-    /// 到驻点 / 回驻点的速度（mm/min）。`None` = 30000。
+    /// 到驻点 / 回驻点的速度（mm/min）。`None` = 20000。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_travel_speed: Option<f64>,
     /// 要不要单独用驻点速度。`None` = false（全用落笔速度）。
@@ -363,6 +363,9 @@ pub struct PostprocPrefs {
     /// **这一趟重复几遍**。`None` = 1。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_repeat: Option<u32>,
+    /// **动作到位后停几秒**。`None` = 不停（那一格开关就是它）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_dwell_sec: Option<f64>,
     /// **调试时动不动 Y 轴**。`None` = 出厂 false（Y 保持原地）。
     /// 不按机型猜：猜错就是把工具头横甩到某个 Y 上。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -551,9 +554,17 @@ impl PostprocPrefs {
             debug_unmount_wait_y: self.debug_unmount_wait_y,
             debug_unmount_y: self.debug_unmount_y,
             debug_custom_gcode: self.debug_custom_gcode.clone(),
-            debug_travel_speed: self.debug_travel_speed.unwrap_or(30000.0),
+            debug_travel_speed: self
+                .debug_travel_speed
+                .unwrap_or(DEBUG_TRAVEL_SPEED_DEFAULT),
             debug_use_travel_speed: self.debug_use_travel_speed.unwrap_or(false),
             debug_repeat: self.debug_repeat.unwrap_or(1),
+            /* 等待那一格：没选过 = 出厂 2 秒（开）；显式 0 = 用户关了 */
+            debug_dwell_sec: match self.debug_dwell_sec {
+                Some(v) if v > 0.0 => Some(v),
+                Some(_) => None,
+                None => Some(DEBUG_DWELL_SEC_DEFAULT),
+            },
             debug_move_y: self.debug_move_y.unwrap_or(false),
             z_calibration_dwell_sec: self
                 .z_calibration_dwell_sec
@@ -655,6 +666,12 @@ pub const DEBUG_WAIT_X_DEFAULT: f64 = 20.0;
 pub const DEBUG_MOUNT_X_DEFAULT: f64 = 267.0;
 pub const DEBUG_UNMOUNT_X_DEFAULT: f64 = 276.0;
 pub const DEBUG_SPEED_DEFAULT: f64 = 10000.0;
+/// 驻点速度的出厂值：三万太吵，两万够快又不吓人。
+pub const DEBUG_TRAVEL_SPEED_DEFAULT: f64 = 20000.0;
+/// 「动作后等待」的出厂秒数：没选过就是开、2 秒。
+///
+/// 显式 `0` 是「用户关了」——与「没选过」分得开（见 `resolved()` 里那一支）。
+pub const DEBUG_DWELL_SEC_DEFAULT: f64 = 2.0;
 
 /// [`PostprocPrefs::resolved`] 的结果：每一项都是**确定的**值（`Option` 已经解掉、量程已经夹住）。
 ///
@@ -702,6 +719,8 @@ pub struct ResolvedPostprocPrefs {
     pub debug_travel_speed: f64,
     pub debug_use_travel_speed: bool,
     pub debug_repeat: u32,
+    /// `None` = 不停（见 [`PostprocPrefs::debug_dwell_sec`]）
+    pub debug_dwell_sec: Option<f64>,
     pub debug_move_y: bool,
     pub z_calibration_dwell_sec: i64,
     pub xy_calibration_dwell_sec: i64,
@@ -1438,6 +1457,28 @@ pub fn record_param_origins(
     })
 }
 
+/* ---------- 客户端壳偏好的「恢复默认」（2026-11-18） ---------- */
+
+/// 「恢复默认」的另一半：把**客户端壳那几格**清回"没选过"（`None`）。
+///
+/// 写死出厂值会让以后改 `presets/client-defaults.toml` 不再惠及老用户 ——
+/// 清 `None` 与后处理那 15 项同一条口径（`null` = 没设过 ⇒ 读出厂）。
+///
+/// 动的是：主题、语言、自动清理、自动检查更新、预设页那三项（整格 `presets`）、
+/// 数据源覆盖。**不动**窗口几何 / 置顶 / 使用中指针 / 草稿 —— 那些是"现在长什么样"，
+/// 不是偏好。
+pub fn clear_client_prefs(root: &Path) -> Result<(), AppError> {
+    with_state(root, |state| {
+        state.theme = None;
+        state.locale = None;
+        state.auto_clean_history = None;
+        state.auto_check_update = None;
+        state.presets = None;
+        state.preset_source = None;
+        Ok(())
+    })
+}
+
 /* ---------- presetSource：数据源设置 ---------- */
 
 /// 读数据源设置。没有 → `None`（**没配过是合法状态**）
@@ -1723,6 +1764,60 @@ mod tests {
             sha256: Some(hex(&Sha256::digest(content))),
             size: Some(content.len() as u64),
         }
+    }
+
+    /// 「动作后等待」的出厂档是开、2 秒；显式 0 表示用户关了（不是"等 0 秒"）。
+    #[test]
+    fn the_default_dwell_is_two_seconds_and_zero_means_off() {
+        let d = PostprocPrefs::default().resolved();
+        assert_eq!(d.debug_dwell_sec, Some(DEBUG_DWELL_SEC_DEFAULT));
+
+        let off = PostprocPrefs {
+            debug_dwell_sec: Some(0.0),
+            ..Default::default()
+        }
+        .resolved();
+        assert_eq!(off.debug_dwell_sec, None, "0 秒是关，不是一条 G4 S0");
+
+        let on = PostprocPrefs {
+            debug_dwell_sec: Some(5.0),
+            ..Default::default()
+        }
+        .resolved();
+        assert_eq!(on.debug_dwell_sec, Some(5.0));
+    }
+
+    /// 「恢复默认」清的是"没设过"，不是写死出厂值：清完盘上那几格都是 `None`，
+    /// 读回来就是 `client-defaults.toml` 那一档；以后改默认值仍能惠及它。
+    #[test]
+    fn clearing_client_prefs_returns_to_the_shipped_defaults() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        set_theme(root, ThemePref::Dark).unwrap();
+        set_locale(root, LocalePref::En).unwrap();
+        set_auto_clean_history(root, false).unwrap();
+        set_auto_check_update(root, false).unwrap();
+        set_copies_follow_cloud(root, true).unwrap();
+        set_preset_source(
+            root,
+            crate::runtime::source::make_source(
+                crate::runtime::source::SourceMode::Custom,
+                Some("https://example.com/presets/delivery"),
+                crate::runtime::source::CustomShape::Unset,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        clear_client_prefs(root).unwrap();
+
+        let file = load(root).unwrap();
+        assert!(file.theme.is_none(), "主题该清回没设过");
+        assert!(file.locale.is_none());
+        assert!(file.auto_clean_history.is_none());
+        assert!(file.auto_check_update.is_none());
+        assert!(file.presets.is_none(), "预设页三项该清回没设过");
+        assert!(file.preset_source.is_none(), "数据源覆盖该撤掉");
     }
 
     /// **`parse` 与 `wire` 必须互相对得上**：`wire()` 出来的一定要 `parse` 得回去。

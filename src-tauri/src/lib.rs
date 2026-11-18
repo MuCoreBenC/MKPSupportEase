@@ -669,6 +669,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 读者是预设页「云端 → MKP 配置」那颗「下载」，后端不读它
         ipc::prefs::get_auto_use_after_download,
         ipc::prefs::set_auto_use_after_download,
+        ipc::prefs::get_client_prefs_view,
+        ipc::prefs::reset_client_prefs,
+        ipc::prefs::get_debug_anchors,
         ipc::prefs::get_postproc_prefs,
         // 前端自己那两格偏好（切片器 / 重新切片提示）的出厂档 —— 它们住 localStorage，
         // 壳读不到，所以出厂值从 `presets/client-defaults.toml` 的 `[Client]` 段递过去
@@ -876,6 +879,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 「下载之后自动设为使用中」（2026-11-18）—— 与上面那份清单一字不差
         ipc::prefs::get_auto_use_after_download,
         ipc::prefs::set_auto_use_after_download,
+        ipc::prefs::get_client_prefs_view,
+        ipc::prefs::reset_client_prefs,
+        ipc::prefs::get_debug_anchors,
         ipc::prefs::get_postproc_prefs,
         // 前端那两格偏好的出厂档 —— 与上面那份清单一字不差
         ipc::prefs::get_client_defaults,

@@ -398,6 +398,10 @@ export const bridgeApi: MkpApi = {
   /* 后处理偏好（2026-10-17）：设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块。
      读回的是**解析后**的值 + 量程；写是**整格覆盖**（改一项传全量） */
   getPostprocPrefs: () => call('getPostprocPrefs', 'get_postproc_prefs'),
+  /* 调试窗的「默认点位」：随包预设的 [toolhead] 段（零网络、零文件写） */
+  getDebugAnchors: () => call('getDebugAnchors', 'get_debug_anchors'),
+  getClientPrefsView: () => call('getClientPrefsView', 'get_client_prefs_view'),
+  resetClientPrefs: () => call('resetClientPrefs', 'reset_client_prefs'),
   setPostprocPrefs: (prefs) => call('setPostprocPrefs', 'set_postproc_prefs', { prefs }),
   /* 重置后处理状态（设置页那一颗按钮）：先让钩子别等，再清界面状态 */
   resetPostProcessState: () => call('resetPostProcessState', 'reset_post_process_state'),

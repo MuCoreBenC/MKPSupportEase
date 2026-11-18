@@ -361,6 +361,266 @@ pub async fn set_auto_use_after_download(app: AppHandle, enabled: bool) -> Resul
     })
 }
 
+/* ---------- 调试窗「默认点位」（2026-11-18） ---------- */
+
+/// 「收落笔点位测试」窗里那张参照表的一行：一台机型的一个版本。
+///
+/// # 数据源是随包预设的 `[toolhead]` 段
+///
+/// `preset::BUILTIN_PRESETS`（`build.rs` 按 `crates/preset/assets/presets/` 生成，
+/// 与工作台产物同一批字节）。这里**不抄任何数字**：版本 id、落笔位、收笔位、
+/// 等待位（含 Y）都从预设文本里解析。
+///
+/// 以前这张表是前端手写的快照，2026-11-18 作者实测指出三处已经漂了：
+/// A1 的收笔位走到 274、A1 mini 261111 的落笔位是 182、P 系列的等待位 Y（7 / 0）
+/// 压根没进那张表。手抄的东西没有门禁，过期了看不出来。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugAnchorRow {
+    /// 版本 id：预设文件名里 `机型-` 之后那一段（`fast261111`）
+    pub variant: String,
+    pub mount_wait_x: f64,
+    /// 预设里没写这一格 ⇒ `null`（界面上显示「跟随驻点位」）
+    pub mount_wait_y: Option<f64>,
+    pub mount_x: f64,
+    pub unmount_wait_x: f64,
+    /// 预设里没写这一格 ⇒ `null`
+    pub unmount_wait_y: Option<f64>,
+    pub unmount_x: f64,
+}
+
+/// 一台机型的全部版本（组内顺序 = 随包预设的文件名顺序）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugAnchorMachine {
+    pub machine: String,
+    pub rows: Vec<DebugAnchorRow>,
+}
+
+/// 调试窗那张参照表：从随包预设现读。
+#[tauri::command]
+pub fn get_debug_anchors() -> Result<Vec<DebugAnchorMachine>, AppError> {
+    traced("getDebugAnchors", |_| {
+        Ok(debug_anchors_from(preset::BUILTIN_PRESETS))
+    })
+}
+
+/// `[toolhead]` 里的一格数字：整数与浮点都收（预设里 `pen_mount_wait_y = 7` 是整数）。
+fn anchor_number(doc: &toml_edit::DocumentMut, key: &str) -> Option<f64> {
+    let item = doc.get("toolhead")?.as_table()?.get(key)?;
+    item.as_float()
+        .or_else(|| item.as_integer().map(|v| v as f64))
+}
+
+/// [`get_debug_anchors`] 的领域体：输入是 `(文件名, 全文)`，判据可以直接喂假数据。
+fn debug_anchors_from(files: &[(&str, &str)]) -> Vec<DebugAnchorMachine> {
+    let mut out: Vec<DebugAnchorMachine> = Vec::new();
+    for (name, text) in files {
+        let Some((machine, variant)) = split_preset_name(name) else {
+            continue;
+        };
+        let Ok(doc) = text.parse::<toml_edit::DocumentMut>() else {
+            continue;
+        };
+        /* 落笔位 / 收笔位是必填（缺了这份就不是这一套笔预设）；等待位缺 = 跟随目标位 */
+        let (Some(mount_x), Some(unmount_x)) = (
+            anchor_number(&doc, "pen_mount_x"),
+            anchor_number(&doc, "pen_unmount_x"),
+        ) else {
+            continue;
+        };
+        let row = DebugAnchorRow {
+            variant,
+            mount_wait_x: anchor_number(&doc, "pen_mount_wait_x").unwrap_or(mount_x),
+            mount_wait_y: anchor_number(&doc, "pen_mount_wait_y"),
+            mount_x,
+            unmount_wait_x: anchor_number(&doc, "pen_unmount_wait_x").unwrap_or(unmount_x),
+            unmount_wait_y: anchor_number(&doc, "pen_unmount_wait_y"),
+            unmount_x,
+        };
+        match out.iter_mut().find(|m| m.machine == machine) {
+            Some(m) => m.rows.push(row),
+            None => out.push(DebugAnchorMachine {
+                machine,
+                rows: vec![row],
+            }),
+        }
+    }
+    out.sort_by(|a, b| a.machine.cmp(&b.machine));
+    out
+}
+
+/// `A1_MINI-fast261111.toml` → (`A1_MINI`, `fast261111`)
+fn split_preset_name(name: &str) -> Option<(String, String)> {
+    let stem = name.strip_suffix(".toml")?;
+    let (machine, variant) = stem.rsplit_once('-')?;
+    if machine.is_empty() || variant.is_empty() {
+        return None;
+    }
+    Some((machine.to_owned(), variant.to_owned()))
+}
+
+#[cfg(test)]
+mod debug_anchor_tests {
+    use super::*;
+
+    /// 随包预设里每一份都出一行 —— 少一份就是这张表又漏了一台机器。
+    #[test]
+    fn every_builtin_preset_yields_a_row() {
+        let anchors = debug_anchors_from(preset::BUILTIN_PRESETS);
+        let total: usize = anchors.iter().map(|m| m.rows.len()).sum();
+        assert_eq!(
+            total,
+            preset::BUILTIN_PRESETS.len(),
+            "有预设没进参照表：{anchors:?}"
+        );
+    }
+
+    /// P 系列的等待位 Y 必须来自文件（作者 2026-11-18：表里原来只有 X，Y 全是 0）。
+    #[test]
+    fn the_p_series_wait_y_comes_from_the_file() {
+        let anchors = debug_anchors_from(preset::BUILTIN_PRESETS);
+        let p1s = anchors
+            .iter()
+            .find(|m| m.machine == "P1S")
+            .expect("随包预设里应当有 P1S");
+        assert!(
+            p1s.rows.iter().all(|r| r.mount_wait_y == Some(7.0)),
+            "P1S 的落笔等待位 Y 应读成 7：{:?}",
+            p1s.rows
+        );
+        assert!(
+            anchors
+                .iter()
+                .filter(|m| m.machine.starts_with("A1"))
+                .all(|m| m.rows.iter().all(|r| r.mount_wait_y.is_none())),
+            "A 系列预设没写等待位 Y ⇒ 该是 null（跟随驻点位）"
+        );
+    }
+
+    /// 前端按 camelCase 取值 —— 这一条钉住 DTO 的线上形状。
+    #[test]
+    fn the_dto_speaks_camel_case() {
+        let json = serde_json::to_value(DebugAnchorRow {
+            variant: "fast261111".into(),
+            mount_wait_x: 256.0,
+            mount_wait_y: None,
+            mount_x: 267.0,
+            unmount_wait_x: 256.0,
+            unmount_wait_y: None,
+            unmount_x: 274.0,
+        })
+        .expect("序列化");
+        for key in [
+            "mountWaitX",
+            "mountWaitY",
+            "mountX",
+            "unmountWaitX",
+            "unmountWaitY",
+            "unmountX",
+        ] {
+            assert!(json.get(key).is_some(), "缺 {key}：{json}");
+        }
+    }
+}
+/* ---------- 「恢复默认」的第二半（2026-11-18） ---------- */
+
+/// 客户端壳那几格偏好的线上形状（`current` 与 `factory` 用同一个 DTO）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPrefsSliceDto {
+    pub theme: String,
+    pub locale: String,
+    pub auto_clean_history: bool,
+    pub auto_check_update: bool,
+    pub copies_follow_cloud: bool,
+    pub auto_copy_script: bool,
+    pub auto_use_after_download: bool,
+    /// 数据源那一格：`gitee` / `github` / `custom:<地址>`
+    pub source: String,
+}
+
+/// 「恢复默认」对话框要摆的两侧：现在是什么、出厂是什么。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientPrefsViewDto {
+    pub current: ClientPrefsSliceDto,
+    pub factory: ClientPrefsSliceDto,
+}
+
+/// 数据源那一格的线上说法（`custom` 带地址 —— 用户填的那一份）。
+fn source_wire(root: &std::path::Path) -> Result<String, AppError> {
+    use crate::runtime::source::{SourceMode, DEFAULT_MODE};
+    let stored = runtime::app_state::preset_source(root)?;
+    Ok(match stored {
+        Some(s) if s.mode == SourceMode::Custom => {
+            format!("custom:{}", s.custom_url.unwrap_or_default())
+        }
+        Some(s) => s.mode.wire().to_owned(),
+        None => DEFAULT_MODE.wire().to_owned(),
+    })
+}
+
+/// 读「恢复默认」要摆的那两列（一次读完，别让对话框发七八个请求）。
+#[tauri::command]
+pub async fn get_client_prefs_view(app: AppHandle) -> Result<ClientPrefsViewDto, AppError> {
+    traced("getClientPrefsView", |_| {
+        let root = internal_root(&app)?;
+        let d = runtime::client_defaults::client_defaults();
+        let current = ClientPrefsSliceDto {
+            theme: runtime::app_state::theme(&root)?
+                .unwrap_or(d.theme)
+                .wire()
+                .to_owned(),
+            locale: runtime::app_state::locale(&root)?
+                .unwrap_or(d.locale)
+                .wire()
+                .to_owned(),
+            auto_clean_history: runtime::app_state::auto_clean_history(&root)?,
+            auto_check_update: runtime::app_state::auto_check_update(&root)?,
+            copies_follow_cloud: runtime::app_state::copies_follow_cloud(&root)?,
+            auto_copy_script: runtime::app_state::auto_copy_script(&root)?,
+            auto_use_after_download: runtime::app_state::auto_use_after_download(&root)?,
+            source: source_wire(&root)?,
+        };
+        let factory = ClientPrefsSliceDto {
+            theme: d.theme.wire().to_owned(),
+            locale: d.locale.wire().to_owned(),
+            auto_clean_history: d.auto_clean_history,
+            auto_check_update: d.auto_check_update,
+            copies_follow_cloud: d.copies_follow_cloud,
+            auto_copy_script: d.auto_copy_script,
+            auto_use_after_download: d.auto_use_after_download,
+            source: crate::runtime::source::DEFAULT_MODE.wire().to_owned(),
+        };
+        Ok(ClientPrefsViewDto { current, factory })
+    })
+}
+
+/// 「恢复默认」：客户端壳那几格一起清回"没选过"，并当场生效（语言 / 主题）。
+///
+/// 与 [`get_client_prefs_view`] 配对：那边摆两列，这边真动手。
+#[tauri::command]
+pub async fn reset_client_prefs(app: AppHandle) -> Result<serde_json::Value, AppError> {
+    traced("resetClientPrefs", |_| {
+        let root = internal_root(&app)?;
+        runtime::app_state::clear_client_prefs(&root)?;
+        /* 语言：出厂档要在本进程里也生效（后端那几句提示跟着换） */
+        runtime::app_state::apply_lang(None);
+        /* 主题：原生那一层（圆角窗外那圈填色 / 工作台标题栏）跟着回出厂 */
+        let theme = runtime::client_defaults::client_defaults().theme;
+        if let Some(win) = app.get_webview_window("main") {
+            crate::chrome::repaint_corner_fill(&win, resolved_dark(Some(theme), &win));
+        }
+        #[cfg(feature = "workbench")]
+        if let Some(win) = app.get_webview_window(crate::workbench::WINDOW_LABEL) {
+            apply_native_theme(&win, Some(theme));
+        }
+        notify_app_state(&app);
+        Ok(serde_json::json!({ "ok": true }))
+    })
+}
+
 /* ---------- 后处理偏好（2026-10-17）：设置页那一整块 ---------- */
 /// 读后处理偏好 —— 回的是**解析后**的值（`None` 已经解成出厂档、量程已经夹住）。
 ///
@@ -418,6 +678,7 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "debugTravelSpeed": r.debug_travel_speed,
                 "debugUseTravelSpeed": r.debug_use_travel_speed,
                 "debugRepeat": r.debug_repeat,
+                "debugDwellSec": r.debug_dwell_sec,
                 "debugMoveY": r.debug_move_y,
             },
             /*

@@ -91,10 +91,21 @@ fn push_move(out: &mut Vec<String>, d: &DebugIr, at: &mut Option<At>, p: At, f: 
     *at = Some(p);
 }
 
-/// 动作块：驻点位 →（落笔等待位 → 落笔位 → 落笔等待位）→（收笔等待位 → 收笔位 → 收笔等待位）→ 驻点位。
+/// 到位后的等待：`G4 S<n>`（没开或 0 秒不写）。
+fn dwell_line(d: &DebugIr) -> Option<String> {
+    let sec = d.dwell_sec?;
+    (sec > 0.0).then(|| format!("G4 S{}", num(sec)))
+}
+
+/// 动作块：驻点位 →（落笔等待位 → 落笔位 → 落笔等待位 → 驻点位）
+/// →（收笔等待位 → 收笔位 → 收笔等待位 → 驻点位）。
 ///
-/// 两段各有自己的等待位：没填就跟随驻点位，于是默认那一趟仍是
-/// 「驻点 → 落笔 → 驻点 → 收笔 → 驻点」这五条（见 [`push_move`] 的去重）。
+/// 落笔、收笔各是一趟**从驻点出发、回驻点收**的往返，中间不从一个等待位直接
+/// 跨到另一个：两个等待位 X 相同时那一步会被 [`push_move`] 的去重吃掉，
+/// 产物里就成了 `261 → 274`，看着像漏了收笔等待位。
+///
+/// 等待位没填就跟随驻点位，往返的出点与落点重合，去重把多余的两条吃掉，
+/// 于是默认那一趟仍是「驻点 → 落笔 → 驻点 → 收笔 → 驻点」这五条。
 fn action_block(d: &DebugIr) -> Vec<String> {
     let speed = num(d.speed);
     /* 到等待位 / 回驻点那一档：开了单独的驻点速度才换，否则与落笔同速 */
@@ -174,17 +185,21 @@ fn action_block(d: &DebugIr) -> Vec<String> {
 
     let mut at: Option<At> = None;
     push_move(&mut out, d, &mut at, wait, &travel);
-    /* 落笔、收笔各自的「去 → 回」整段按 `repeat` 跑几遍 */
+    /* 落笔、收笔各自的「去 → 回」整段按 `repeat` 跑几遍；每段回驻点收口 */
     for _ in 0..d.repeat.max(1) {
         if d.test_mount {
             push_move(&mut out, d, &mut at, mount_wait, &travel);
             push_move(&mut out, d, &mut at, mount, &speed);
+            out.extend(dwell_line(d));
             push_move(&mut out, d, &mut at, mount_wait, &travel);
+            push_move(&mut out, d, &mut at, wait, &travel);
         }
         if d.test_unmount {
             push_move(&mut out, d, &mut at, unmount_wait, &travel);
             push_move(&mut out, d, &mut at, unmount, &speed);
+            out.extend(dwell_line(d));
             push_move(&mut out, d, &mut at, unmount_wait, &travel);
+            push_move(&mut out, d, &mut at, wait, &travel);
         }
     }
     /* 收口：回到驻点位（上一段已经停在这里就不重复写） */
@@ -279,6 +294,7 @@ mod tests {
             mount_y: None,
             unmount_y: None,
             repeat: 1,
+            dwell_sec: None,
             custom_gcode: None,
             travel_speed: 42000.0,
             use_travel_speed: false,
@@ -380,6 +396,81 @@ mod tests {
         );
     }
 
+    /// 两个等待位同在一个 X（261）：来回都写出来，中间那趟回驻点不能省。
+    ///
+    /// 20 → 261 → 266 → 261 → 20 → 261 → 274 → 261 → 20
+    #[test]
+    fn park_return_survives_equal_wait_points() {
+        let mut d = params();
+        d.wait_x = 20.0;
+        d.mount_wait_x = Some(261.0);
+        d.mount_x = 266.0;
+        d.unmount_wait_x = Some(261.0);
+        d.unmount_x = 274.0;
+        let out = build_debug_gcode(&startup(), &d);
+        let seq: Vec<&str> = out
+            .iter()
+            .filter(|l| l.starts_with("G1 X") && !l.contains('E'))
+            .map(|s| s.as_str())
+            .collect();
+        assert_eq!(
+            seq,
+            vec![
+                "G1 X20 F10000",
+                "G1 X261 F10000",
+                "G1 X266 F10000",
+                "G1 X261 F10000",
+                "G1 X20 F10000",
+                "G1 X261 F10000",
+                "G1 X274 F10000",
+                "G1 X261 F10000",
+                "G1 X20 F10000",
+            ],
+            "{out:?}"
+        );
+    }
+
+    /// 测几遍 = 2：每一遍是两趟独立的往返，遍与遍之间也回驻点。
+    #[test]
+    fn each_repeat_is_a_round_trip() {
+        let mut d = params();
+        d.wait_x = 20.0;
+        d.mount_wait_x = Some(261.0);
+        d.mount_x = 266.0;
+        d.unmount_wait_x = Some(261.0);
+        d.unmount_x = 274.0;
+        d.repeat = 2;
+        let out = build_debug_gcode(&startup(), &d);
+        let seq: Vec<&str> = out
+            .iter()
+            .filter(|l| l.starts_with("G1 X") && !l.contains('E'))
+            .map(|s| s.as_str())
+            .collect();
+        assert_eq!(
+            seq,
+            vec![
+                "G1 X20 F10000",
+                "G1 X261 F10000",
+                "G1 X266 F10000",
+                "G1 X261 F10000",
+                "G1 X20 F10000",
+                "G1 X261 F10000",
+                "G1 X274 F10000",
+                "G1 X261 F10000",
+                "G1 X20 F10000",
+                "G1 X261 F10000",
+                "G1 X266 F10000",
+                "G1 X261 F10000",
+                "G1 X20 F10000",
+                "G1 X261 F10000",
+                "G1 X274 F10000",
+                "G1 X261 F10000",
+                "G1 X20 F10000",
+            ],
+            "{out:?}"
+        );
+    }
+
     /// 等待位可以各带一个 Y；落笔 / 收笔位的 Y 没填就跟随各自那一档等待位。
     #[test]
     fn wait_points_carry_their_own_y() {
@@ -410,6 +501,38 @@ mod tests {
             ],
             "{out:?}"
         );
+    }
+
+    /// 开了等待：落笔位与收笔位各停一次；两遍就是每条动作各停一次。
+    #[test]
+    fn dwell_is_emitted_after_each_action() {
+        let mut d = params();
+        d.dwell_sec = Some(3.0);
+        let out = build_debug_gcode(&startup(), &d);
+        let g4: Vec<&str> = out
+            .iter()
+            .filter(|l| l.starts_with("G4 S"))
+            .map(|s| s.as_str())
+            .collect();
+        assert_eq!(g4, vec!["G4 S3", "G4 S3"], "{out:?}");
+
+        /* 两遍之间自然也有：每遍落笔、收笔各一次 */
+        d.repeat = 2;
+        let out = build_debug_gcode(&startup(), &d);
+        assert_eq!(
+            out.iter().filter(|l| l.starts_with("G4 S")).count(),
+            4,
+            "两遍 ⇒ 四条等待"
+        );
+    }
+
+    /// 没开、0 秒：一条 `G4` 都不写。
+    #[test]
+    fn dwell_off_writes_nothing() {
+        let mut d = params();
+        d.dwell_sec = Some(0.0);
+        let out = build_debug_gcode(&startup(), &d);
+        assert!(!out.iter().any(|l| l.starts_with("G4 S")), "{out:?}");
     }
 
     /// 只勾一个动作时另一个不出现；两个都不勾只走驻点。

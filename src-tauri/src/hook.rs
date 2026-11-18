@@ -612,6 +612,9 @@ fn facts_from(
         /* 切片器自报的预估总时长（输入头里 `; total estimated time` 那一行）：
          * 跑着的时候那一格摆它；跑完换成内核重算的（`result.printTimeSeconds`） */
         slicer_print_time_seconds: postprocess::postproc::printtime::slicer_estimated_seconds(raw),
+        /* 点位测试那一趟：动作参数一开场就带给界面（开跑前的「说明」页要摆全）。
+         * 正常那一趟 IR 里没有这一格 ⇒ `None`，界面照旧只摆机型与切片两栏 */
+        debug: ir.debug.clone(),
     }
 }
 

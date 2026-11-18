@@ -348,6 +348,8 @@ pub fn drive(sink: &dyn Sink, opts: &Options, cancel: &CancelToken) -> bool {
             glue_speed: Some(70.0),
             slicer: Some("BambuStudio".to_owned()),
             slicer_print_time_seconds: Some(12_175.0), // 3h 22m 55s
+            /* 这一套演示是普通后处理，不是点位测试 */
+            debug: None,
         }),
     });
 

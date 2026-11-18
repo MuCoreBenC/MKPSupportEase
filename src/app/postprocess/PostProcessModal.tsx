@@ -353,16 +353,28 @@ function baseGroup(
  * 「预估打印时间」这一刻给的是**切片器自报的**（输入头 `; total estimated time` 那一行）——
  * 内核重算的那个要跑完才有（而且有界面时还延后）；涂胶速度 / 切片软件开跑就确定。
  * 缺哪格不摆哪格。
+ *
+ * ★ 点位测试（`facts.debug` 有值）**不打印模型**：打印时间与文件大小都是从原模型算的，
+ *   摆在"这一趟"旁边会被读成"这次要打印多久" ⇒ 两格一律 `—`
+ *   （作者 2026-11-18：点位测试这两行要变成横杠）。
  */
 function runGroup(tr: Tr, facts: PostProcessFacts | null): FactGroup {
+  const debug = facts?.debug != null
   const rows: FactRow[] = [
     {
       label: tr('postproc.facts.printTime'),
-      value: facts?.slicerPrintTimeSeconds === undefined ? '—' : printTimeText(facts.slicerPrintTimeSeconds),
+      value:
+        debug || facts?.slicerPrintTimeSeconds === undefined
+          ? '—'
+          : printTimeText(facts.slicerPrintTimeSeconds),
     },
-    { label: tr('postproc.facts.fileSize'), value: facts === null ? '—' : sizeText(facts.fileSizeBytes) },
+    {
+      label: tr('postproc.facts.fileSize'),
+      value: debug || facts === null ? '—' : sizeText(facts.fileSizeBytes),
+    },
     { label: tr('report.glue.speed'), value: facts?.glueSpeed === undefined ? '—' : speedText(facts.glueSpeed) },
-    /* 切片软件也是"长度不可控"那类（`BambuStudio 02.08.02.60` + 别的切片器更长的串） */
+    /* 切片软件也是"长度不可控"那类（`BambuStudio 02.08.02.60` + 别的切片器更长的串）
+       —— 点位测试也照摆：这一趟确实是它导出的 */
     { label: tr('report.slicer.software'), value: facts?.slicer ?? '—', grey: true, tip: facts?.slicer },
   ]
   return { title: tr('postproc.facts.runTitle'), rows }
@@ -890,7 +902,7 @@ function RelocateDoneNote({
 }
 
 /**
- * **调试那一趟的「调试动作」页**（`result.debug` 有值才摆）。
+ * **调试那一趟的「说明」页**（跑完读 `result.debug`，开跑前读 `facts.debug`）。
  *
  * 与信息页**同构的两组表**：左栏这一趟走过哪几个位置，右栏这一趟测的范围。
  * 每栏恒四行 ⇒ 翻到信息页时框高不变（信息页也是两组四行）。
@@ -1363,15 +1375,19 @@ export default function PostProcessModal({
    */
   const [pageTab, setPageTab] = useState<PageTab>('facts')
   /*
-   * **调试那一屏的两栏事实默认收起**：那一屏是"去真机试点位"的确认，摆着机型 / 预估打印
-   * 时间只会让它看起来像正常后处理。左下角那颗钮开合，收起时框跟着变矮。
+   * 点位测试那两屏（开跑前确认 / 跑完结果）下方摆哪一页：`true` = 信息，`false` = 说明
+   * （调试动作 / 测试范围）。
+   *
+   * ★ **默认信息**（作者 2026-11-18：「默认是显示这个信息的，也没必要折起来；点击下面的
+   *   说明，它才变成这个说明」）—— 机型与切片那两栏一进来就在，说明页由左下角那颗钮翻。
    */
-  const [debugFactsOpen, setDebugFactsOpen] = useState(false)
+  const [debugFactsOpen, setDebugFactsOpen] = useState(true)
   const questionKind = run?.question?.questionKind
   useEffect(() => {
-    /* 换一问（或这一问结束）就翻回"说明"那页 —— 别把上一问的翻页状态带过来 */
+    /* 换一问（或这一问结束）就翻回"说明"那页（问句正文住那儿），
+       点位测试那两屏同时回到"信息"页 —— 别把上一轮的翻页状态带过来 */
     setPageTab('note')
-    setDebugFactsOpen(false)
+    setDebugFactsOpen(true)
   }, [questionKind])
   /*
    * **成功但有事要说 ⇒ 翻到警告页**：热床预涂胶、内核警告都是这一趟要紧的话，
@@ -1413,8 +1429,9 @@ export default function PostProcessModal({
   /**
    * **调试那一屏**（`debug-plan`）：这一趟只走路、不打印模型。
    *
-   * 版式与正常后处理**故意不同**：hero 走警告琥珀、页脚写「开始测试」、两栏事实默认收起
-   * （左下角那颗钮展开）。不这么分，用户会把它当成一次普通后处理、直接点绿按钮往下跑。
+   * 版式与正常后处理**故意不同**：hero 走警告琥珀、页脚写「开始测试」、下方默认摆信息页
+   * （左下角那颗钮翻到「说明」看调试动作）。不这么分，用户会把它当成一次普通后处理、
+   * 直接点绿按钮往下跑。
    */
   const isDebugPlan =
     showAsk && run.question !== null && run.question.questionKind === 'debug-plan'
@@ -1424,7 +1441,7 @@ export default function PostProcessModal({
 
   /**
    * 调试相关的那两屏（开跑前确认 / 跑完结果）共用一套版式：
-   * 默认摆"调试动作"那一页，两栏事实收在左下角那颗钮后面。
+   * 下方默认信息页，左下角那颗钮在「信息 ↔ 说明（调试动作）」之间翻。
    */
   const isDebug = isDebugPlan || isDebugResult
 
@@ -1543,12 +1560,10 @@ export default function PostProcessModal({
 
   /**
    * 调试那两屏的左下角那颗钮：**钮面写"点它会去哪"** ——
-   * 问句屏收起时去「信息」、展开后「收起」；结果屏收起时去「信息」、展开后回「说明」。
+   * 信息页上写「说明」，说明页上写「信息」（问句屏与结果屏同一套词）。
    */
   const debugToggle: { label: StringKey; aria: StringKey } = debugFactsOpen
-    ? isDebugPlan
-      ? { label: 'postproc.debug.hide', aria: 'postproc.debug.hideAria' }
-      : { label: 'postproc.relocate.note', aria: 'postproc.debug.backAria' }
+    ? { label: 'postproc.relocate.note', aria: 'postproc.debug.backAria' }
     : { label: 'postproc.relocate.facts', aria: 'postproc.debug.factsAria' }
 
   /**
@@ -1602,9 +1617,17 @@ export default function PostProcessModal({
       ? [baseGroup(tr, facts, layerHeights), runGroup(tr, facts)]
       : [baseGroup(tr, facts, layerHeights), doneGroup(tr, finished as PostProcessFinished, facts)]
 
-  /** 调试那一趟默认那一页的两组（`debugFactsOpen` 收起时摆它，不是信息页） */
-  const debugPageGroups =
-    isDebugResult && finished?.result?.debug != null ? debugGroups(tr, finished.result.debug) : []
+  /**
+   * 「说明」那一页的两组（调试动作 / 测试范围）—— 两个来源：跑完读 `result.debug`，
+   * 开跑前读开场事实里的 `facts.debug`（同一份动作参数，钩子一开场就送）。
+   */
+  const debugPlan: DebugPlan | null =
+    isDebugResult
+      ? (finished?.result?.debug ?? null)
+      : isDebugPlan
+        ? (facts?.debug ?? null)
+        : null
+  const debugPageGroups = debugPlan === null ? [] : debugGroups(tr, debugPlan)
 
   /** 两条命令（停止 / 答复）都要等后端，失败要说出来 —— 界面不许"点了没反应" */
   const act = (fn: () => Promise<void>) => {
@@ -1866,7 +1889,7 @@ export default function PostProcessModal({
             {/*
               翻页那颗小钮（共用件 `PageToggle`）：**问句那一屏不摆** —— 那一屏
               强制停在说明页（见上面 `wantTab`），钮翻不动，摆一颗点了没反应的钮更糟。
-              调试那一屏是例外：两栏事实默认收起，这颗钮只开合那一块。
+              调试那一屏是例外：这颗钮在「信息 ↔ 说明（调试动作）」之间翻。
             */}
             {isDebug ? (
               <PageToggle
@@ -2022,12 +2045,12 @@ export default function PostProcessModal({
          */}
         {isDebug ? (
           /*
-           * 调试那两屏：下方默认摆「调试动作」（结果屏，一行一项才读得全）/ 什么都不摆
-           * （问句屏，hero 里已经把那几个数说了）；两栏事实收在左下角那颗钮后面。
+           * 调试那两屏：下方**默认摆信息**（机型与切片 / 结果读数），左下角那颗钮翻到
+           * 「说明」（调试动作 / 测试范围，一行一项才读得全）。
            */
           debugFactsOpen ? (
             <FactsGroups groups={factsPageGroups} />
-          ) : isDebugResult ? (
+          ) : debugPageGroups.length > 0 ? (
             <FactsGroups groups={debugPageGroups} />
           ) : null
         ) : pages.length > 1 ? (

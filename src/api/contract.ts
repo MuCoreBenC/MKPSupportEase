@@ -2436,6 +2436,8 @@ export interface ResolvedPostprocPrefs {
   debugMoveY: boolean
   /** 这一趟重复几遍（1 = 一遍） */
   debugRepeat: number
+  /** 动作到位后停几秒；`null` = 不停（那一格开关就是它） */
+  debugDwellSec: number | null
   /** 到驻点的速度（mm/min），`debugUseTravelSpeed` 为真时才生效 */
   debugTravelSpeed: number
   debugUseTravelSpeed: boolean
@@ -2491,6 +2493,8 @@ export interface PostprocPrefsWire {
   debugUnmountY?: number | null
   debugMoveY?: boolean | null
   debugRepeat?: number | null
+  /** 动作到位后停几秒：`null` = 不停 */
+  debugDwellSec?: number | null
   debugTravelSpeed?: number | null
   debugUseTravelSpeed?: boolean | null
   debugCustomGcode?: string | null
@@ -2502,6 +2506,55 @@ export interface PostprocPrefsWire {
   forceCalibrationMode?: boolean | null
   /** **智能塔位置**（2026-11-04 三档）：`null` = 回到出厂档（`off`） */
   autoTowerPosition?: TowerRelocateMode | null
+}
+
+/**
+ * 调试窗「默认点位」的一行。
+ *
+ * 数据来自随包预设的 `[toolhead]` 段（`preset::BUILTIN_PRESETS`），
+ * 不是前端抄的一份快照 —— 版本 id、落笔位、收笔位、等待位 Y 都跟着预设走。
+ */
+export interface DebugAnchorRow {
+  /** 版本 id（预设文件名里 `机型-` 之后那段，小写） */
+  variant: string
+  mountWaitX: number
+  /** `null` = 预设没写这一格（跟随驻点位） */
+  mountWaitY: number | null
+  mountX: number
+  unmountWaitX: number
+  /** `null` = 预设没写这一格 */
+  unmountWaitY: number | null
+  unmountX: number
+}
+
+/** 一台机型的全部版本，组内顺序 = 随包预设的文件名顺序 */
+export interface DebugAnchorMachine {
+  machine: string
+  rows: DebugAnchorRow[]
+}
+
+/**
+ * 「恢复默认」对话框里客户端壳那几项的一侧（当前 / 出厂）。
+ *
+ * 与 `PostprocPrefsView` 分开：那 15 项走 `getPostprocPrefs`，这几项是 app-state 的
+ * 其它格（主题 / 语言 / 自动清理 / 自动检查更新 / 预设页三项 / 数据源覆盖）。
+ */
+export interface ClientPrefsSlice {
+  theme: string
+  locale: string
+  autoCleanHistory: boolean
+  autoCheckUpdate: boolean
+  copiesFollowCloud: boolean
+  autoCopyScript: boolean
+  autoUseAfterDownload: boolean
+  /** 数据源：`gitee` / `github` / `custom:<地址>` */
+  source: string
+}
+
+/** `getClientPrefsView` 的回执：两列并排（左边现在、右边出厂） */
+export interface ClientPrefsView {
+  current: ClientPrefsSlice
+  factory: ClientPrefsSlice
 }
 
 /** `getPostprocPrefs` 的回执：盘上原样 + 解析后 + 量程。 */
@@ -2734,6 +2787,13 @@ export interface PostProcessFacts {
    * 那是内核说的**（报告页也是两个都摆）。头里没有这一行就不摆。
    */
   slicerPrintTimeSeconds?: number
+  /**
+   * **点位测试那一趟的动作参数**（正常那一趟缺键）。
+   *
+   * 开跑前那一屏的「说明」页要摆的就是它（驻点 / 落笔 / 收笔 / 速度 / 测哪些）——
+   * 与跑完的 `result.debug` 同一份结构，只是这一份在开场就送到了。
+   */
+  debug?: DebugPlan | null
 }
 
 /** 一条进度。**全局百分比不在这里** —— 阶段名与权重是界面的事（见 `app/postprocess/steps.ts`） */
@@ -4120,6 +4180,12 @@ export interface MkpApi {
    * `raw` 是盘上原样那一格：界面用它判断"这一项动过没有"。
    * `limits` 是后端那边量的量程，界面**不另写一份**在 TS 里。
    */
+  /** 收落笔点位测试窗的「默认点位」：从随包预设现读 */
+  getDebugAnchors(): Promise<DebugAnchorMachine[]>
+  /** 「恢复默认」对话框要摆的两列（客户端壳那几项） */
+  getClientPrefsView(): Promise<ClientPrefsView>
+  /** 「恢复默认」：客户端壳那几项一起清回出厂（语言 / 主题当场生效） */
+  resetClientPrefs(): Promise<unknown>
   getPostprocPrefs(): Promise<PostprocPrefsView>
 
   /**

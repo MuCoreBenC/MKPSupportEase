@@ -272,6 +272,12 @@ pub struct FactsPayload {
     /// 内核自己重算的（[`ResultFacts::print_time_seconds`]，含后增设）—— 两个数不一样正常。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slicer_print_time_seconds: Option<f64>,
+    /// **点位测试那一趟的动作参数**（正常那一趟是 `None`）。
+    ///
+    /// 开跑前那一屏的「说明」页要摆的就是它（驻点 / 落笔 / 收笔 / 速度 / 测哪些）；
+    /// 从前这份只在跑完的 [`ResultFacts::debug`] 里，开跑前只能看问句那一行概要。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<postprocess::ir::types::DebugIr>,
 }
 
 /// 那一趟的结论（成功 / 失败 / 取消都走这一条）。
