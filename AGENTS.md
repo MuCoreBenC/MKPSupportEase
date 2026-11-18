@@ -136,6 +136,21 @@ presets/…（源）→ crates/preset/assets/presets/*（include_str! 进客户�
 理由：2026-11-12 复用一个早开着的 PR，squash 进 main 的提交标题成了上一轮的内容，
 `git log` 从此指着别的东西。判据本身有自检（`node scripts/check-pr.mjs`，在 `npm run lint` 里）。
 
+### 5.7 AI 执行发版：一句话 → 一条命令
+
+作者原话（2026-11-18）：「我以后能不能一句话，你就按照固定的流程做好？打包发布。」
+
+- **入口只有 `npm run ship -- --what <档>`**，`--what` 取自人当次那句话。
+- **不许自己拼 `git tag` / `gh release` / 手写清单**。2026-11-18 就是手工拼
+  `release.mjs`，结果 tag 与 Release 都发了、**清单没写、版本号没推进**，
+  `npm run ship -- --check` 第三格一直红。
+- **补平台（tag 已存在，只缺某个平台的包）CLI 走不通** —— `release.mjs` 会以
+  「号已用过」拒绝。那是工作台「发布软件版本」对话框的事，别用 CLI 硬绕。
+- **发完必须贴 `npm run ship -- --check` 的输出**给作者看；三格（tag / Release /
+  main 上的清单）不等就是没生效。
+- 细节看 `docs/RELEASE-RUNBOOK.md`（两条分岔、CI 红了三步定位、三类最常红的：
+  clippy 版本漂移 / 本地口径小于 CI / 判据资产过期）。
+
 ## 6. 判定口径
 
 ```text
