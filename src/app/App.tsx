@@ -517,47 +517,60 @@ export default function App() {
             postProcess={postProcess}
           />
 
-          {/* 导入结果条（in-flow，标签栏下面一条）：有结果才出现，不是会自己消失的提示 */}
-          <ImportBanner />
+          {/*
+           * **内容区**（标题栏以下那一整块）—— 浮层的坐标系。
+           *
+           * 之前这些浮层直接挂在 `.shell` 上（整扇窗、含标题栏），绝对定位的
+           * `inset: 0` 量到的是**整窗**：通用模态框于是居中在"窗口高度"上，
+           * Windows 的标题栏是一条实心白条，框一眼看过去就是偏下（作者 2026-11-18 截图）。
+           *
+           * 内容区单独成一层之后，`inset: 0` 天然等于"标题栏以下" —— 居中不用减任何
+           * 高度、也不用问平台（两平台的外壳结构本来就一样，见 `App.module.css` 的 `.stage`）。
+           */}
+          <div className={s.stage}>
+            {/* 导入结果 / 重名那一格（2026-10-13 起是模态框，不再是标签栏下面那条横幅）：
+                有结果才出现；遮罩跟着 `.stage` 走 —— 与其它模态框同一条中线 */}
+            <ImportBanner />
 
-          <main className={s.body}>
-            <PageSlot hidden={tab !== 'machine'}>
-              <PageHome density={density} />
-            </PageSlot>
-            <PageSlot hidden={tab !== 'preset'} page="presets" layout="list">
-              <PagePresets
-                density={density}
-                onOpenBbs={openBbs}
-                onOpenSettings={openSettings}
-                pending={pendingPresets}
-              />
-            </PageSlot>
-            <PageSlot hidden={tab !== 'calib'} page="calib" layout="wizard">
-              <PageCalib />
-            </PageSlot>
-            <PageSlot hidden={tab !== 'bbs'} page="bbs" layout="split">
-              <PageBbs
-                density={density}
-                pending={pendingBbs}
-                onNeedDownload={openPresetsForSlicer}
-              />
-            </PageSlot>
-            <PageSlot hidden={tab !== 'report'} page="report" layout="list">
-              {/* 碰撞那一趟会多一句"去设置里打开智能塔位置"—— 出口由外壳给，与预设页同一条规矩 */}
-              <PageReport onOpenSettings={openSettings} />
-            </PageSlot>
-            <PageSlot hidden={tab !== 'settings'} page="settings" layout="form">
-              {/* 落点：从报告页的「去设置」跳进来时滚到「智能塔位置」那一行并闪一下 */}
-              <PageSettings target={settingsTarget} />
-            </PageSlot>
-          </main>
-          {/* 设置页上「完成」那一幕由上面那条 effect 折成胶囊；跑着 / 问句照常弹。
-              ★ 这里不再按页签拦渲染：「完成」先摆 10 秒再折，那就得让它真的渲出来 */}
-          <PostProcessModal
-            view={postProcess}
-            onOpenReport={openReport}
-            onOpenSettings={openSettings}
-          />
+            <main className={s.body}>
+              <PageSlot hidden={tab !== 'machine'}>
+                <PageHome density={density} />
+              </PageSlot>
+              <PageSlot hidden={tab !== 'preset'} page="presets" layout="list">
+                <PagePresets
+                  density={density}
+                  onOpenBbs={openBbs}
+                  onOpenSettings={openSettings}
+                  pending={pendingPresets}
+                />
+              </PageSlot>
+              <PageSlot hidden={tab !== 'calib'} page="calib" layout="wizard">
+                <PageCalib />
+              </PageSlot>
+              <PageSlot hidden={tab !== 'bbs'} page="bbs" layout="split">
+                <PageBbs
+                  density={density}
+                  pending={pendingBbs}
+                  onNeedDownload={openPresetsForSlicer}
+                />
+              </PageSlot>
+              <PageSlot hidden={tab !== 'report'} page="report" layout="list">
+                {/* 碰撞那一趟会多一句"去设置里打开智能塔位置"—— 出口由外壳给，与预设页同一条规矩 */}
+                <PageReport onOpenSettings={openSettings} />
+              </PageSlot>
+              <PageSlot hidden={tab !== 'settings'} page="settings" layout="form">
+                {/* 落点：从报告页的「去设置」跳进来时滚到「智能塔位置」那一行并闪一下 */}
+                <PageSettings target={settingsTarget} />
+              </PageSlot>
+            </main>
+            {/* 设置页上「完成」那一幕由上面那条 effect 折成胶囊；跑着 / 问句照常弹。
+                ★ 这里不再按页签拦渲染：「完成」先摆 10 秒再折，那就得让它真的渲出来 */}
+            <PostProcessModal
+              view={postProcess}
+              onOpenReport={openReport}
+              onOpenSettings={openSettings}
+            />
+          </div>
         </FieldLayer>
       </FileImportProvider>
       </DevPreviewProvider>
