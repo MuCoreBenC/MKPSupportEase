@@ -88,6 +88,7 @@ fn try_notify(title: &str, body: &str) -> Result<(), String> {
 #[allow(unsafe_code)] /* 四五个 msg_send，全是定长消息，见下面 SAFETY */
 fn deliver_native(title: &str, body: &str) -> bool {
     use objc2::msg_send;
+    use objc2::rc::{Allocated, Retained};
     use objc2::runtime::{AnyClass, AnyObject};
     use objc2_foundation::NSString;
 
@@ -102,7 +103,15 @@ fn deliver_native(title: &str, body: &str) -> bool {
     // 三个 setter 只传本帧里活得比调用久的 `NSString`，最后交给通知中心并 `release` 掉
     // 我们自己那份 +1。类名取不到时上面已经提前返回，不会把空指针传进消息。
     unsafe {
-        let note: *mut AnyObject = msg_send![msg_send![note_cls, alloc], init];
+        /*
+         * ★ `alloc` / `init` 的返回类型必须写出来（2026-11-18 CI 在 macOS 上红的那处）：
+         *   `msg_send!` 推不出这条消息的所有权语义（`E0283`），`objc2` 0.6 的官方写法是
+         *   `Allocated<T>` 接 `alloc`、`Retained<T>` 接 `init`。取回裸指针之后仍是我们自己
+         *   那一份 +1、结尾自己 `release`。
+         */
+        let alloc: Allocated<AnyObject> = msg_send![note_cls, alloc];
+        let at: Retained<AnyObject> = msg_send![alloc, init];
+        let note: *mut AnyObject = Retained::into_raw(at);
         if note.is_null() {
             return false;
         }
