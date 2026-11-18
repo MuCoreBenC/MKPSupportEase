@@ -2410,12 +2410,16 @@ mod tests {
 
     /* ---------- theme ---------- */
 
-    /// 存得下、读得回、覆盖得住；**没选过 = None**（不是"浅色"）——
-    /// 界面据此区分"跟随系统"与"用户没碰过"（`ipc::prefs` 那两条命令的口径）
+    /// 存得下、读得回、覆盖得住；**没选过 = 出厂档**（`[Client] Theme`，出厂「跟随系统」）——
+    /// 出口已经解成出厂值，界面不必拿 `null` 自己猜（`ipc::prefs` 那两条命令的口径）
     #[test]
-    fn theme_roundtrips_and_starts_as_none() {
+    fn theme_roundtrips_and_starts_at_the_shipped_default() {
         let d = tempfile::tempdir().unwrap();
-        assert_eq!(theme(d.path()).unwrap(), None, "没选过就是 None");
+        assert_eq!(
+            theme(d.path()).unwrap(),
+            Some(ThemePref::System),
+            "没选过就是出厂档（跟随系统）"
+        );
 
         assert_eq!(
             set_theme(d.path(), ThemePref::Dark).unwrap(),
@@ -2442,7 +2446,7 @@ mod tests {
         assert!(set_auto_clean_history(d.path(), true).unwrap());
         assert!(auto_clean_history(d.path()).unwrap());
         /* 与主题那格互不踩：关掉自动清理不该动主题 */
-        assert_eq!(theme(d.path()).unwrap(), None);
+        assert_eq!(theme(d.path()).unwrap(), Some(ThemePref::System));
     }
 
     /* ---------- autoCheckUpdate（2026-11-05） ---------- */
@@ -2505,7 +2509,7 @@ mod tests {
         assert!(compact(d.path()).unwrap());
         assert_eq!(last_window_box(d.path()).unwrap(), Some(box_));
         /* 三格同住一份状态文件，但一个都不许被邻居改写 */
-        assert_eq!(theme(d.path()).unwrap(), None);
+        assert_eq!(theme(d.path()).unwrap(), Some(ThemePref::System));
         assert!(auto_clean_history(d.path()).unwrap());
 
         set_pin(d.path(), PinPref::Page).unwrap();
