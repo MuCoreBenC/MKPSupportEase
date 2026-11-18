@@ -732,7 +732,7 @@ pub fn run(
     不然界面根本不开窗，用户只能对着切片器那句退出码发呆。
     那一刻表里全是 `—`（`facts: None`），但"这一趟失败了"那句人话摆得出来。 */
     let mut hello_sent = false;
-    let mut say_hello = |facts: Option<crate::hook_ipc::FactsPayload>| {
+    let mut say_hello = |facts: Option<Box<crate::hook_ipc::FactsPayload>>| {
         if hello_sent {
             return;
         }
@@ -865,7 +865,7 @@ pub fn run(
     let opening_slicer = opening.slicer.clone().unwrap_or_default();
     let opening_layer_height = opening.layer_height;
     let opening_nozzle = opening.nozzle_diameter;
-    say_hello(Some(opening));
+    say_hello(Some(Box::new(opening)));
 
     /*
      * 校准件身份探测（2026-10-18）：**必须在这里跑，且只跑这一次**。

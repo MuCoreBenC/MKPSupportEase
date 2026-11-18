@@ -402,7 +402,11 @@ pub enum FromHook {
         preset_name: String,
         gcode_name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        facts: Option<FactsPayload>,
+        ///
+        /// ★ `Box`：`FactsPayload` 2026-11-18 多了调试动作参数（点位测试那一屏要摆），
+        /// 不装箱这个枚举就撑过 200 字节阈值（clippy `large_enum_variant`，
+        /// 与 `Question` 同一个原因）。线上形状不变 —— `Box` 不参与序列化。
+        facts: Option<Box<FactsPayload>>,
     },
     Progress(ProgressPayload),
     /// 问句（带倒计时与可选答项）。
@@ -669,7 +673,7 @@ impl Client {
                     preset_name,
                     gcode_name,
                     facts,
-                }) => (preset_name, gcode_name, facts),
+                }) => (preset_name, gcode_name, facts.map(|f| *f)),
                 _ => (String::new(), String::new(), None),
             }
         };

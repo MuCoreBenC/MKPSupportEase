@@ -398,7 +398,7 @@ impl HookView {
             FromHook::Hello {
                 preset_name: pending.preset_name,
                 gcode_name: pending.gcode_name,
-                facts: pending.facts,
+                facts: pending.facts.map(Box::new),
             },
         );
         self.apply(app, FromHook::Question(Box::new(pending.question)));
@@ -442,7 +442,7 @@ impl HookView {
                     *g = Shared {
                         preset_name: Some(preset_name.clone()),
                         gcode_name: Some(gcode_name.clone()),
-                        facts: facts.clone(),
+                        facts: facts.as_deref().cloned(),
                         ..Shared::default()
                     };
                 }
@@ -456,7 +456,7 @@ impl HookView {
                 );
                 /* 事实照旧单独推一条事件：前端那格表的"值"走它（快照里也有，两条路同源） */
                 if let Some(facts) = facts {
-                    let _ = app.emit(FACTS_EVENT, facts);
+                    let _ = app.emit(FACTS_EVENT, *facts);
                 }
             }
             FromHook::Progress(progress) => {
@@ -803,7 +803,7 @@ impl HookView {
                     g.gcode_name = Some(gcode_name.clone());
                     g.preview = true;
                     /* 事实与开场同一条落到（与真钩子那条 [`Self::apply`] 同一口径） */
-                    g.facts = facts.clone();
+                    g.facts = facts.as_deref().cloned();
                 }
                 let _ = app.emit(
                     STARTED_EVENT,
@@ -814,7 +814,7 @@ impl HookView {
                     },
                 );
                 if let Some(facts) = facts {
-                    let _ = app.emit(FACTS_EVENT, facts);
+                    let _ = app.emit(FACTS_EVENT, *facts);
                 }
             }
             other => self.apply(app, other),
