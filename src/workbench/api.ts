@@ -103,14 +103,18 @@ export type BulkKind = 'detaching' | 'changing' | 'noChange'
  *
  * `value` 只有三种形态：开关（boolean）、数字（number）、枚举（string）——
  * 后端也只认这三种，多一种就会在写盘前被拒。
+ *
+ * `section` 是 `Prefs` / `Client` 两段之一：**键名全局唯一**，界面按 `key` 找，
+ * `section` 只在排查时看（它说的就是"这一格写在哪一段"）。
  */
 export interface DefaultsField {
+  section: string
   key: string
   label: string
   value: string | number | boolean
 }
 
-/** `workbench::app::defaults::DefaultsView` —— 整页：文件路径 + 11 行 `[Prefs]` */
+/** `workbench::app::defaults::DefaultsView` —— 整页：文件路径 + 两段里那些可配的键 */
 export interface DefaultsView {
   path: string
   fields: DefaultsField[]
@@ -2936,7 +2940,7 @@ export const wb = {
     }),
   words: () => invoke<Words>('wb_words'),
 
-  /** 默认配置：读 `presets/client-defaults.toml` 的 `[Prefs]` 段（影子树优先） */
+  /** 默认配置：读 `presets/client-defaults.toml` 的两段（`[Prefs]` + `[Client]`，影子树优先） */
   defaultsView: () => invoke<DefaultsView>('wb_defaults_view'),
 
   /**

@@ -659,10 +659,10 @@
   text-decoration: underline;
 }
 
+/* 焦点跟悬停一样：加下划线（不画外圈 —— 全站口径） */
 .axisFrom[data-act='revert']:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-radius: 2px;
+  outline: none;
+  text-decoration: underline;
 }
 
 /* 值行的输入框：宽度固定、tabular-nums，位数变化不改宽度。
@@ -747,9 +747,8 @@
 }
 
 /*
- * 只留一圈：global.css 里有一条全局 `input:focus-visible { outline: 2px solid var(--accent) }`，
- * 与上面那圈 accent 边框叠起来就是两圈。global.css 跨版本共用（v001-v019 都吃它），不动它，
- * 只在这个输入框上关掉外圈 —— 留边框那一圈：它在盒内，不会把旁边的「mm」往外推。
+ * 焦点只有上面那一圈 accent 边框（全站口径，global.css 那条已经不画外圈了）——
+ * 边框在盒内，不会把旁边的「mm」往外推。
  */
 .axisInput:focus-visible {
   outline: none;

@@ -27,9 +27,10 @@
   border-color: var(--warn-ink);
 }
 
+/* 聚焦与悬停同一条：边框换到 `--warn-ink`（不画外圈、不加粗） */
 .chip:focus-visible {
-  outline: 2px solid var(--warn-ink);
-  outline-offset: 1px;
+  outline: none;
+  border-color: var(--warn-ink);
 }
 
 .chip:disabled {

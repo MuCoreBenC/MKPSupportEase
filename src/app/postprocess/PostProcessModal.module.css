@@ -332,6 +332,7 @@
  * 打架：作者真机那片留空就是这么来的）。
  */
 .relocateSlot {
+  position: relative;
   display: grid;
 }
 
@@ -340,6 +341,19 @@
   min-width: 0;
 }
 
+/*
+ * **第二页（说明）不参与撑高**：槽高只由第一页（信息 / 红卡那两栏）决定。
+ *
+ * 按 grid 叠两页时槽高 = **较高**的那一页 —— 两页内容只要差几个像素（字体 / 缩放下
+ * 的亚像素舍入），切页那一刻框就跟着长一点。作者：「不要改变我的高度」。
+ * 绝对定位之后这句话是数学上成立的：翻到说明页，框高一个像素都不动；
+ * 说明比信息高的话在这一格里自己滚（幽灵滚动条，不占宽）。
+ */
+.relocatePage:nth-child(2) {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+}
 
 /* 藏起来的那一页仍然占格（高度不被抽走），只是看不见也点不到 */
 .relocatePageOff {
@@ -393,9 +407,36 @@
   line-height: 1.75;
 }
 
-/* 那颗「去设置」贴着句子尾巴走（折行时也不掉到单独一行） */
-.collisionNoteGo {
+/*
+ * 说明页里的**文字动作**（「去设置」）：跟在句尾走、折行时也不掉到单独一行。
+ *
+ * 原来直接摆页脚那颗胶囊（32px 高、带底色），夹在一行 12px 的句子里像塞了一块砖。
+ * 这里只留字与下划线 —— 它是这一页的附带出口，不该跟页脚的主按钮抢分量。
+ */
+.noteLink {
   flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.noteLink:hover {
+  color: var(--accent-deep);
+}
+
+/*
+ * 说明页里那句**"这一趟没成"**：红字。
+ *
+ * 深浅两套各有一档 `--danger`（浅色偏暗、深色提亮），落在框身底上都读得清 ——
+ * 不用 `--danger-ink` 那种"淡红"，这一句要人看见。
+ */
+.noteFail {
+  color: var(--danger);
 }
 
 /*
@@ -918,6 +959,14 @@
      那一行整行比栏宽多 3px（实测四语种里只有日语这一行），收 4px 让那串版本号
      一个字符都不被省略号吃掉 —— 值那一格宁可窄一点也不许截数据。 */
   gap: 18px 14px;
+}
+
+/*
+ * 单组说明页（挪塔成功那一页）：**一张表铺满整行** —— 按两栏排只会占左半，
+ * 右半空一块（作者：「单纯的靠左摆放不太好看」）。
+ */
+.groupsOne {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 @media (width <= 560px) {

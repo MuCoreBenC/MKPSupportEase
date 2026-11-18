@@ -670,6 +670,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::prefs::get_auto_use_after_download,
         ipc::prefs::set_auto_use_after_download,
         ipc::prefs::get_postproc_prefs,
+        // 前端自己那两格偏好（切片器 / 重新切片提示）的出厂档 —— 它们住 localStorage，
+        // 壳读不到，所以出厂值从 `presets/client-defaults.toml` 的 `[Client]` 段递过去
+        ipc::prefs::get_client_defaults,
         ipc::app::open_preset_folder,
         // 清理数据（只清不卸）/ 卸载（可点名连数据一起清）—— 两条都清完就退
         ipc::app::clear_app_data,
@@ -874,6 +877,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::prefs::get_auto_use_after_download,
         ipc::prefs::set_auto_use_after_download,
         ipc::prefs::get_postproc_prefs,
+        // 前端那两格偏好的出厂档 —— 与上面那份清单一字不差
+        ipc::prefs::get_client_defaults,
         ipc::app::open_preset_folder,
         // 清理数据 / 卸载 —— 与上面那份清单一字不差
         ipc::app::clear_app_data,

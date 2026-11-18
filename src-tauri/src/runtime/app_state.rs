@@ -210,11 +210,12 @@ impl LocalePref {
     }
 }
 
-/// 「还没选过」在语言这一格上的落地 = **跟随系统**（与主题那一格同一个口径）。
+/// 「还没选过」在语言这一格上的落地 = `presets/client-defaults.toml` 的 `[Client] Locale`。
 ///
-/// 于是新装的机器上，后端那几句提示跟着系统语言走；用户点过一次之后照他点的来。
+/// 出厂是「跟随系统」：新装的机器上后端那几句提示跟着系统语言走；用户点过一次之后照他点的来。
 pub fn apply_lang(pref: Option<LocalePref>) {
-    messages::set_lang(pref.unwrap_or(LocalePref::System).lang());
+    let fallback = super::client_defaults::client_defaults().locale;
+    messages::set_lang(pref.unwrap_or(fallback).lang());
 }
 
 /// **主窗置顶档位**（2026-10-17「工艺页加一颗置顶开关」那一刀）。
@@ -506,12 +507,16 @@ impl PostprocPrefs {
     ///
     /// 与内核 `PrefsIr::default()` 读**同一份** `presets/client-defaults.toml`，
     /// 本文件不再写字面量 —— 要改默认值只有那一个地方。
+    ///
+    /// 通知 / 显示方式 / 置顶 / 强制校准这四项不在 `[Prefs]` 段（它们不改 G-code），
+    /// 出厂档取自同一份文件的 `[Client]` 段（[`super::client_defaults`]）。
     pub fn resolved(&self) -> ResolvedPostprocPrefs {
         let d = postprocess::ir::client_prefs_default();
+        let c = super::client_defaults::client_defaults();
         ResolvedPostprocPrefs {
-            notify_on_finish: self.notify_on_finish.unwrap_or(true),
-            ui_mode: self.ui_mode.unwrap_or(PostprocUiMode::Gui),
-            auto_top_on_ask: self.auto_top_on_ask.unwrap_or(true),
+            notify_on_finish: self.notify_on_finish.unwrap_or(c.notify_on_finish),
+            ui_mode: self.ui_mode.unwrap_or(c.ui_mode),
+            auto_top_on_ask: self.auto_top_on_ask.unwrap_or(c.auto_top_on_ask),
             glue_bottom_enabled: self.glue_bottom_enabled.unwrap_or(d.glue_bottom_enabled),
             under_support_enabled: self
                 .under_support_enabled
@@ -560,7 +565,9 @@ impl PostprocPrefs {
                 .clamp(XY_DWELL_MIN, XY_DWELL_MAX),
             bed_glue_enabled: self.bed_glue_enabled.unwrap_or(d.bed_glue_enabled),
             bed_glue_all_models: self.bed_glue_all_models.unwrap_or(d.bed_glue_all_models),
-            force_calibration_mode: self.force_calibration_mode.unwrap_or(false),
+            force_calibration_mode: self
+                .force_calibration_mode
+                .unwrap_or(c.force_calibration_mode),
             /* 三档一一对应；映射写在这里，别再各写一份默认值 */
             auto_tower_position: self
                 .auto_tower_position
@@ -787,14 +794,15 @@ pub struct AppStateFile {
     /// 空的格不写进文件（`skip_serializing_if`）—— 没改过参数的应用，状态文件与以前一样。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub param_origins: BTreeMap<String, BTreeMap<String, ParamOrigin>>,
-    /// **界面主题偏好**（浅 / 深 / 跟随系统）。`None` = 还没选过 ⇒ 界面按"跟随系统"。
+    /// **界面主题偏好**（浅 / 深 / 跟随系统）。`None` = 还没选过 ⇒ `[Client] Theme`
+    /// （出厂「跟随系统」，见 [`super::client_defaults`]）。
     ///
     /// 它是"应用当前记着的界面状态"，不是另一份偏好文件 —— 所以照
     /// [`super::provenance`] 那条界住在这里；前端也不另存副本（读口只有
     /// `src/app/state/appState.ts` 一处，与 activePreset 同一套广播）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<ThemePref>,
-    /// **界面语言**（2026-10-25）。`None` = 还没选过 ⇒ 跟随系统。
+    /// **界面语言**（2026-10-25）。`None` = 还没选过 ⇒ `[Client] Locale`（出厂跟随系统）。
     ///
     /// 与 `theme` 同一族（"用户点出来的界面状态"）：它记在盘上是因为**重启后还要生效**，
     /// 而且后端那几句提示（`messages::text`）用的是同一个值 —— 语言只有一个真值。
@@ -803,11 +811,11 @@ pub struct AppStateFile {
     /// **后处理记录自动清理**（2026-10-13）：开着时按「条数 + 空间」双限静默清掉最旧的
     /// 执行记录（见 [`crate::retention`]）。
     ///
-    /// `None` = **还没选过 ⇒ 开着**（出厂默认）。与主题那一格同一个读法（"没选过"
-    /// 与"明确选了"要分得开），但默认值不同 —— 盘空间是稀缺的那一侧。
+    /// `None` = **还没选过 ⇒ `[Client] AutoCleanHistory`**（出厂开着）。与主题那一格
+    /// 同一个读法（"没选过"与"明确选了"要分得开），但默认值不同 —— 盘空间是稀缺的那一侧。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_clean_history: Option<bool>,
-    /// **自动检查软件更新**（2026-11-05）：`None` = 还没选过 ⇒ **开着**（出厂默认）。
+    /// **自动检查软件更新**（2026-11-05）：`None` = 还没选过 ⇒ `[Client] AutoCheckUpdate`（出厂开）。
     ///
     /// 开 = 客户端**成功拉到云端目录之后**，顺路查一次 `release.json`；发现新版
     /// 在右上角通知里弹一条（点击跳设置页「软件更新」）。查失败一律静默。
@@ -1455,9 +1463,14 @@ pub fn clear_preset_source(root: &Path) -> Result<(), AppError> {
 
 /* ---------- theme：界面主题偏好 ---------- */
 
-/// 读主题偏好。`None` = **还没选过**（与"选了跟随系统"两码事，见 [`ThemePref`] 的模块注释）。
+/// 读主题偏好。**还没选过** ⇒ `[Client] Theme` 那一格（出厂「跟随系统」）。
+///
+/// 盘上"没选过"与"选了跟随系统"仍是两码事（见 [`ThemePref`] 的模块注释），只是
+/// 出口这里已经把前一种解成了出厂档 —— 界面不必拿 `null` 自己猜（猜的那一份迟早与
+/// 后端落地的那一份漂开）。
 pub fn theme(root: &Path) -> Result<Option<ThemePref>, AppError> {
-    Ok(load(root)?.theme)
+    let fallback = super::client_defaults::client_defaults().theme;
+    Ok(Some(load(root)?.theme.unwrap_or(fallback)))
 }
 
 /// 记下主题偏好（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
@@ -1470,9 +1483,10 @@ pub fn set_theme(root: &Path, pref: ThemePref) -> Result<ThemePref, AppError> {
 
 /* ---------- locale：界面语言 ---------- */
 
-/// 界面语言偏好。`None` = **还没选过** ⇒ 跟随系统。
+/// 界面语言偏好。**还没选过** ⇒ `[Client] Locale` 那一格（出厂「跟随系统」），与 [`theme`] 同一条。
 pub fn locale(root: &Path) -> Result<Option<LocalePref>, AppError> {
-    Ok(load(root)?.locale)
+    let fallback = super::client_defaults::client_defaults().locale;
+    Ok(Some(load(root)?.locale.unwrap_or(fallback)))
 }
 
 /// 记下界面语言（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
@@ -1488,12 +1502,13 @@ pub fn set_locale(root: &Path, pref: LocalePref) -> Result<LocalePref, AppError>
 
 /* ---------- autoCleanHistory：执行记录的自动清理开关 ---------- */
 
-/// 自动清理开着吗。**`None` = 还没选过 ⇒ 开着**（出厂默认，见字段注释）。
+/// 自动清理开着吗。**还没选过 ⇒ `[Client] AutoCleanHistory`**（出厂开）。
 ///
 /// 读者是清理那两条入口（[`crate::retention`]）—— 界面不直接读它，
 /// 设置页那一格走 `ipc::prefs` 的命令。
 pub fn auto_clean_history(root: &Path) -> Result<bool, AppError> {
-    Ok(load(root)?.auto_clean_history.unwrap_or(true))
+    let fallback = super::client_defaults::client_defaults().auto_clean_history;
+    Ok(load(root)?.auto_clean_history.unwrap_or(fallback))
 }
 
 /// 记下自动清理开关（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
@@ -1506,11 +1521,12 @@ pub fn set_auto_clean_history(root: &Path, enabled: bool) -> Result<bool, AppErr
 
 /* ---------- autoCheckUpdate：软件更新的自动检查开关 ---------- */
 
-/// 自动检查开着吗。**`None` = 还没选过 ⇒ 开着**（出厂默认，见字段注释）。
+/// 自动检查开着吗。**还没选过 ⇒ `[Client] AutoCheckUpdate`**（出厂开）。
 ///
 /// 读者是 [`crate::runtime::update_check`] —— 界面不直接读它，设置页那格走 `ipc::prefs`。
 pub fn auto_check_update(root: &Path) -> Result<bool, AppError> {
-    Ok(load(root)?.auto_check_update.unwrap_or(true))
+    let fallback = super::client_defaults::client_defaults().auto_check_update;
+    Ok(load(root)?.auto_check_update.unwrap_or(fallback))
 }
 
 /// 记下自动检查开关（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
@@ -1570,10 +1586,8 @@ pub fn preset_prefs(root: &Path) -> Result<PresetPrefs, AppError> {
 /// **后端的事** —— 界面不自己拿 `null` 去猜（猜出来的那一档迟早与真正执行排除的
 /// 那一侧漂开）。与 [`auto_clean_history`] 同一条口径。
 pub fn copies_follow_cloud(root: &Path) -> Result<bool, AppError> {
-    let d = super::client_defaults::get();
-    Ok(preset_prefs(root)?
-        .copies_follow_cloud
-        .unwrap_or(d.copies_follow_cloud))
+    let fallback = super::client_defaults::client_defaults().copies_follow_cloud;
+    Ok(preset_prefs(root)?.copies_follow_cloud.unwrap_or(fallback))
 }
 
 /// 记下「复制出来的也跟着云端更新」（整份状态原子替换，别的格一个不动）。
@@ -1591,10 +1605,8 @@ pub fn set_copies_follow_cloud(root: &Path, enabled: bool) -> Result<bool, AppEr
 /// 与 [`copies_follow_cloud`] 同一条口径：盘上"没选过"是 `None`，
 /// "没选过怎么解释"是后端的事，界面不拿 `null` 去猜。
 pub fn auto_copy_script(root: &Path) -> Result<bool, AppError> {
-    let d = super::client_defaults::get();
-    Ok(preset_prefs(root)?
-        .auto_copy_script
-        .unwrap_or(d.auto_copy_script))
+    let fallback = super::client_defaults::client_defaults().auto_copy_script;
+    Ok(preset_prefs(root)?.auto_copy_script.unwrap_or(fallback))
 }
 
 /// 记下「使用之后自动复制后处理脚本」（整份状态原子替换，别的格一个不动）。
@@ -1609,10 +1621,10 @@ pub fn set_auto_copy_script(root: &Path, enabled: bool) -> Result<bool, AppError
 
 /// **下载之后自动设为使用中**（出厂见 `presets/client-defaults.toml`）。
 pub fn auto_use_after_download(root: &Path) -> Result<bool, AppError> {
-    let d = super::client_defaults::get();
+    let fallback = super::client_defaults::client_defaults().auto_use_after_download;
     Ok(preset_prefs(root)?
         .auto_use_after_download
-        .unwrap_or(d.auto_use_after_download))
+        .unwrap_or(fallback))
 }
 
 /// 记下「下载之后自动设为使用中」（整份状态原子替换，别的格一个不动）。

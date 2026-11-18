@@ -1,6 +1,6 @@
 import { bridgeApi } from './bridge'
 import type { MkpApi } from './contract'
-import { mockApi } from './mock'
+import { listenMock, mockApi } from './mock'
 
 export type { AppError, Axes, CalibModel, ErrorCode, MkpApi, Preset } from './contract'
 export { isAppError } from './contract'
@@ -34,14 +34,15 @@ export const api: MkpApi = inTauri ? bridgeApi : mockApi
 /**
  * 订阅后端事件（**只订阅这一处**，别处别直接摸 `@tauri-apps/api/event`）。
  *
- * 浏览器（mock）里返回一个**空取消函数**：没有事件可听，但调用方的 cleanup 照样
- * 成立 —— 界面代码不必知道自己跑在哪儿。
+ * 浏览器（mock）里接 `mock.ts` 的**内存总线**：预览（`?pp=`）那一趟的答复 / 停止
+ * 要能推事件回来，界面上点按钮才有反应。没有预览时总线没人发，等于空订阅 ——
+ * 界面代码不必知道自己跑在哪儿。
  */
 export async function listen<T>(
   event: string,
   onEvent: (payload: T) => void,
 ): Promise<() => void> {
-  if (!inTauri) return () => {}
+  if (!inTauri) return listenMock<T>(event, onEvent)
   const { listen: tauriListen } = await import('@tauri-apps/api/event')
   const un = await tauriListen<T>(event, (e) => onEvent(e.payload))
   return () => {

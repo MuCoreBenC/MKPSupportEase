@@ -3,21 +3,23 @@
  *
  * # 它改的是哪一份
  *
- * `presets/client-defaults.toml`。那份是唯一源：内核 `PrefsIr::default()`、客户端
- * `PostprocPrefs::resolved()` 与 `runtime::client_defaults` 都 `include_str!` 它。
- * 所以这里改完**不影响已装好的客户端**，要重新构建才进包 —— 顶上那句话就是为这个。
+ * `presets/client-defaults.toml`。那份是唯一源：
+ *   · `[Prefs]` 段那 11 项 —— 内核 `PrefsIr::default()` 与客户端 `PostprocPrefs::resolved()` 都读它；
+ *   · `[Client]` 段 —— 主题 / 语言 / 切片器 / 引导提示 / 通知 / 显示方式 / 预设页那三项 …
+ *     （客户端 `runtime::client_defaults` 读它）。
+ * 这里改完**不影响已装好的客户端**，要重新构建才进包 —— 顶上那句话就是为这个。
  *
  * # 为什么能撤销、能保存
  *
  * 写入走 `with_struct_ctx`（一个文件、一条撤销点），落的是影子树；
  * 外壳的「保存改动」才把影子树写进真仓库。这一页不画自己的保存按钮。
  *
- * # 哪些能改
+ * # 分组照客户端的设置页
  *
- * `[Prefs]` 那 11 个键是「真改变切出来 G-code」的全部；`[Client]` 那 2 个键是客户端
- * 预设页那两步（下载后自动使用 / 使用后自动复制脚本）。两段都在这一份文件里、
- * 都能在这里改。外观 / 切片 / 备份 / 高级 / 引导图是客户端私有偏好，不在这个文件里 ——
- * 照客户端顺序摆出来、标一句「只在客户端设置」，不假装它们能在这里改。
+ * 卡片顺序、卡片标题、行标签、选项用词**全部照客户端**（`src/app/settings/**`）：
+ * 同一个设置在两边叫两个名字时，配默认值的人对不上号（作者 2026-11-18 点过名）。
+ * 客户端里那些**没有偏好**的入口（备份与恢复、最近删除、打开日志目录、导出日志…）
+ * 不在这页上 —— 它们不是"能配的默认值"。
  */
 import { useCallback, useEffect, useState } from 'react'
 
@@ -32,7 +34,7 @@ interface Props {
   onBookRefresh: () => void
 }
 
-/** 卡里的一小节：同一张卡换一层小标题（校准动作 / 涂胶与塔） */
+/** 卡里的一小节：同一张卡换一层小标题（与客户端那几张卡的次级分组对应） */
 interface Section {
   /** 空串 = 不分小节 */
   note: string
@@ -47,21 +49,37 @@ interface EditGroup {
 }
 
 /**
- * 可编辑的两张卡。**顺序照客户端设置页**：校准与补偿在前、下方支撑余量在后。
- *
- * 11 个键里 `GlueBottomEnabled` / `BedGlueEnabled` / `BedGlueAllModels` /
- * `AutoTowerPosition` 在客户端不在「校准与补偿」那一段，这里收进同一张卡的第二小节
- * —— 它们同属「影响产物、但不是下方支撑余量」，单独占一张卡会把客户端那 7 组的顺序打乱。
+ * 卡片顺序 = 客户端设置页的正文顺序：外观与语言 → 切片与引导 → 后处理（四张）→
+ * 预设 → 数据与维护 → 软件更新。键名是 `presets/client-defaults.toml` 里那个键。
  */
-const EDIT_GROUPS: EditGroup[] = [
+const GROUPS: EditGroup[] = [
+  {
+    id: 'appearance',
+    title: '外观与语言',
+    desc: '主题与界面语言',
+    sections: [{ note: '', keys: ['Theme', 'Locale'] }],
+  },
+  {
+    id: 'slicer',
+    title: '切片与引导',
+    desc: '打开模型用哪个应用',
+    sections: [{ note: '', keys: ['Slicer', 'GuideShow'] }],
+  },
+  {
+    id: 'postproc',
+    title: '后处理',
+    desc: '完成后的通知与显示',
+    sections: [{ note: '', keys: ['NotifyOnFinish', 'UiMode', 'AutoTopOnAsk', 'GlueBottomEnabled', 'AutoTowerPosition'] }],
+  },
   {
     id: 'calib',
     title: '校准与补偿',
-    desc: '切出来之前那些校准动作、收笔与停留时间。',
+    desc: '会改写 G-code',
     sections: [
       {
         note: '',
         keys: [
+          'ForceCalibrationMode',
           'SkipVibrationCalibration',
           'BeginStageRetractEnabled',
           'BeginStageRetractZLiftMm',
@@ -69,57 +87,42 @@ const EDIT_GROUPS: EditGroup[] = [
           'XyCalibrationDwellSec',
         ],
       },
-      {
-        note: '涂胶与塔',
-        keys: ['GlueBottomEnabled', 'BedGlueEnabled', 'BedGlueAllModels', 'AutoTowerPosition'],
-      },
     ],
   },
   {
     id: 'under',
     title: '下方支撑余量',
-    desc: '笔下方支撑够宽时不让它抬；贴合实验判据。',
+    desc: '笔下面有支撑、且离边够远时就不抬',
     sections: [{ note: '', keys: ['UnderSupportEnabled', 'UnderSupportMm'] }],
+  },
+  {
+    id: 'glue',
+    title: '热床预涂胶',
+    desc: '可能划伤打印板',
+    sections: [{ note: '', keys: ['BedGlueEnabled', 'BedGlueAllModels'] }],
   },
   {
     id: 'presets',
     title: '预设',
-    desc: '下载与使用之后，那两步替不替用户做掉。',
-    sections: [{ note: '', keys: ['AutoUseAfterDownload', 'AutoCopyScript'] }],
-  },
-]
-
-/** 只读的五组：照客户端顺序排，标一句「只在客户端设置」 */
-const READONLY_GROUPS: { id: string; title: string; desc: string; rows: string[] }[] = [
-  {
-    id: 'appearance',
-    title: '外观',
-    desc: '主题、语言与界面密度。',
-    rows: ['主题', '语言', '界面密度'],
+    desc: '下载、复制与脚本的默认行为',
+    sections: [
+      {
+        note: '',
+        keys: ['AutoUseAfterDownload', 'CopiesFollowCloud', 'AutoCopyScript'],
+      },
+    ],
   },
   {
-    id: 'slicer',
-    title: '切片',
-    desc: '切片器程序与预设文件的位置。',
-    rows: ['切片器程序', '预设文件目录'],
+    id: 'history',
+    title: '数据与维护',
+    desc: '执行记录怎么清',
+    sections: [{ note: '', keys: ['AutoCleanHistory'] }],
   },
   {
-    id: 'backup',
-    title: '备份',
-    desc: '备份目录与手动备份。',
-    rows: ['备份目录', '自动备份'],
-  },
-  {
-    id: 'advanced',
-    title: '高级',
-    desc: '预设数据源、调试偏好与诊断入口。',
-    rows: ['预设数据源', '调试偏好', '打开日志目录'],
-  },
-  {
-    id: 'guide',
-    title: '引导图',
-    desc: '引导图资源与生成。',
-    rows: ['引导图目录', '生成引导图'],
+    id: 'update',
+    title: '软件更新',
+    desc: '检查新版本的时机',
+    sections: [{ note: '', keys: ['AutoCheckUpdate'] }],
   },
 ]
 
@@ -131,11 +134,40 @@ const NUM_META: Record<string, { unit: string; step: number; min: number; max: n
   XyCalibrationDwellSec: { unit: '秒', step: 1, min: 1, max: 3 },
 }
 
-const TOWER_MODES = [
-  { value: 'ask', label: '问一句' },
-  { value: 'auto', label: '自动挪塔' },
-  { value: 'off', label: '不挪' },
-]
+/**
+ * 选项用词：**逐字照客户端**（`src/i18n/zh-CN.ts`）。
+ *
+ * 判据是"同一个人在两边看到的是同一个词"：塔位在客户端叫「每次提问 / 自动挪塔 / 不处理」，
+ * 这里就不能写「问一句 / 不挪」。
+ */
+const CHOICES: Record<string, { value: string; label: string }[]> = {
+  Theme: [
+    { value: 'system', label: '跟随系统' },
+    { value: 'light', label: '浅色' },
+    { value: 'dark', label: '深色' },
+  ],
+  Locale: [
+    { value: 'system', label: '跟随系统' },
+    { value: 'zh-CN', label: '简体中文' },
+    { value: 'zh-TW', label: '繁體中文' },
+    { value: 'ja', label: '日本語' },
+    { value: 'en', label: 'English' },
+  ],
+  Slicer: [
+    { value: 'system', label: '跟随系统默认' },
+    { value: 'bambu', label: 'Bambu Studio' },
+    { value: 'orca', label: 'OrcaSlicer' },
+  ],
+  UiMode: [
+    { value: 'silent', label: '静默' },
+    { value: 'gui', label: 'GUI 界面' },
+  ],
+  AutoTowerPosition: [
+    { value: 'ask', label: '每次提问' },
+    { value: 'auto', label: '自动挪塔' },
+    { value: 'off', label: '不处理' },
+  ],
+}
 
 export default function DefaultsPage({ tick, onBookRefresh }: Props) {
   const [view, setView] = useState<DefaultsView | null>(null)
@@ -241,9 +273,9 @@ export default function DefaultsPage({ tick, onBookRefresh }: Props) {
         disabled={busy}
         onChange={(e) => change(field.key, e.currentTarget.value)}
       >
-        {TOWER_MODES.map((m) => (
-          <option key={m.value} value={m.value}>
-            {m.label}
+        {(CHOICES[field.key] ?? []).map((c) => (
+          <option key={c.value} value={c.value}>
+            {c.label}
           </option>
         ))}
       </select>
@@ -264,7 +296,7 @@ export default function DefaultsPage({ tick, onBookRefresh }: Props) {
 
       {view === null && err === null && <p className={s.empty}>正在读 {`presets/client-defaults.toml`}…</p>}
 
-      {EDIT_GROUPS.map((g) => (
+      {GROUPS.map((g) => (
         <section key={g.id} className={s.group} aria-label={g.title}>
           <header className={s.groupHead}>
             <h2 className={s.groupTitle}>{g.title}</h2>
@@ -275,25 +307,6 @@ export default function DefaultsPage({ tick, onBookRefresh }: Props) {
               <div key={`${g.id}-${sec.note || 'main'}`}>
                 {sec.note !== '' && <div className={s.sectionNote}>{sec.note}</div>}
                 {sec.keys.map((k) => row(k))}
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
-
-      {READONLY_GROUPS.map((g) => (
-        <section key={g.id} className={s.group} aria-label={g.title}>
-          <header className={s.groupHead}>
-            <h2 className={s.groupTitle}>{g.title}</h2>
-            <span className={s.groupDesc}>{g.desc}</span>
-          </header>
-          <div className={s.body}>
-            {g.rows.map((r) => (
-              <div key={r} className={`${s.row} ${s.readonly}`}>
-                <span className={s.label}>{r}</span>
-                <span className={s.control}>
-                  <span className={s.onlyClient}>只在客户端设置</span>
-                </span>
               </div>
             ))}
           </div>

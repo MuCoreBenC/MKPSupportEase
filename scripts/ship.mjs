@@ -314,13 +314,23 @@ async function main() {
   /* preview / stable */
   const summary = (note ?? '').trim() || `发 ${choice.label} ${version}`
   info(`调用：npm run release -- ${version} "${summary}" --channel ${choice.key} --confirm`)
-  sh('npm', [
-    'run', 'release', '--',
-    version,
-    summary,
-    `--channel=${choice.key}`,
-    '--confirm',
-  ])
+  /*
+   * `MKP_SHIP=1` 是「这一趟是 ship 发起的」的凭据 —— `release.mjs` 见到它才肯真发版。
+   * 反过来，直接 `npm run release` 会被它当场拒掉：2026-11-18 就是这么出的错，
+   * 跑完整趟、tag 与 Release 都发了，清单没写、`ship --check` 第三格一直红。
+   */
+  process.env.MKP_SHIP = '1'
+  try {
+    sh('npm', [
+      'run', 'release', '--',
+      version,
+      summary,
+      `--channel=${choice.key}`,
+      '--confirm',
+    ])
+  } finally {
+    delete process.env.MKP_SHIP
+  }
 
   console.log('')
   const r = checkEffective(choice, version)

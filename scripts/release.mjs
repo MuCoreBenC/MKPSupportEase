@@ -175,6 +175,30 @@ const flagArgsOnly = cliArgs.includes('--args-only')
    只能人工敲的脚本没法进任何自动化，也就更容易长期带着 bug 不被发现。 */
 const flagConfirmed = cliArgs.includes('--confirm')
 const flagDryRun = cliArgs.includes('--dry-run')
+
+/*
+ * **入口唯一**（2026-11-18 作者：「你这么说而已，下次其他人做还是一样不看一样自己写」）。
+ *
+ * 写文档拦不住任何人 —— 这一条是机械的：真发版只认 `MKP_SHIP=1`，而它只有
+ * `npm run ship` 会设。直接 `npm run release ... --confirm` 在这里当场退出，
+ * 一个字节都不动。
+ *
+ * 那次错的不是命令本身，是**它少了事后核对**：tag 与 Release 都发了，
+ * `release-preview.json` 没写、版本号没推进，而 `ship` 的三格核对才能发现。
+ *
+ * 只拦真发版：`--dry-run` / `--args-only` 是自检路径（`check-release-cli.mjs` 在
+ * `npm run lint` 里天天跑），不能拦。
+ */
+if (flagConfirmed && !flagDryRun && !flagArgsOnly && process.env.MKP_SHIP !== '1') {
+  console.error('')
+  console.error('停在这里：`npm run release` 不能直接拿来发版。')
+  console.error('')
+  console.error('  用唯一入口：npm run ship -- --what <local|preview|stable|presets>')
+  console.error('  它发完会用可核对的事实回答「到底生效没有」—— 直接跑 release 少了这一步。')
+  console.error('  细节：docs/RELEASE-RUNBOOK.md')
+  console.error('')
+  process.exit(1)
+}
 /* 只解析参数、算出版本号就退出：**零写入、不联网、不碰 git**。
  * 存在的理由：发版脚本的其余路径只有真发版才跑，bug 只能在那时候暴露。
  * 这条路径进 `scripts/check-release-cli.mjs`，跟着每个 PR 跑一遍。 */

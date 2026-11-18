@@ -39,9 +39,9 @@ pub mod baseline;
 /// 见 [`branch_dir`] 的模块头。
 pub mod branch_dir;
 pub mod catalog;
-/// **客户端预设偏好的出厂值**（2026-11-18）：`presets/client-defaults.toml` 的
-/// `[Client]` 段 —— 下载后自动使用 / 使用后自动复制脚本。工作台「默认配置」页改的
-/// 也是这一份。
+/// **客户端壳的偏好初值**（主题 / 语言 / 切片器 / 引导 / 预设那两步）：读
+/// `presets/client-defaults.toml` 的 `[Client]` 段 —— 与 `[Prefs]` 同一份文件、同一份纪律
+/// （出厂值只有一个地方可改）。盘上那些格仍是 `Option`，`None` 才落到这里。
 pub mod client_defaults;
 pub mod content;
 pub mod delivery;

@@ -1,0 +1,11 @@
+/*
+ * 清单页的滚动容器。
+ *
+ * `html / body` 都是 `overflow: hidden`（整扇窗不滚，见 `global.css`），
+ * 所以这一页要自己带一个滚动容器 —— 场景多了不能靠"窗口够高"。
+ */
+.scroll {
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
