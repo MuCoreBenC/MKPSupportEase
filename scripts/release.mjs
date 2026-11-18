@@ -76,8 +76,21 @@ function run(cmd, args, opts = {}) {
  * 读掉（或直接读到 EOF），于是后面 readline 的提问永远等不到答案 ——
  * 实测表现是 node 报 `Detected unsettled top-level await` 然后静默退出。
  */
+/**
+ * Windows 上 `npm` / `npx` 是 `.cmd`，`execFileSync` 认不出裸名（ENOENT）。
+ * 经 cmd 走一遍；含空格的参数补引号（`ship` 的说明文字就带空格）。
+ */
+function nativeCommand(cmd, args) {
+  if (process.platform !== 'win32' || (cmd !== 'npm' && cmd !== 'npx')) {
+    return { cmd, args }
+  }
+  const q = (a) => (/\s/.test(a) ? `"${a}"` : a)
+  return { cmd: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', [cmd, ...args.map(q)].join(' ')] }
+}
+
 function runLive(cmd, args, opts = {}) {
-  execFileSync(cmd, args, { stdio: ['ignore', 'inherit', 'inherit'], cwd: opts.cwd ?? ROOT })
+  const c = nativeCommand(cmd, args)
+  execFileSync(c.cmd, c.args, { stdio: ['ignore', 'inherit', 'inherit'], cwd: opts.cwd ?? ROOT })
 }
 
 function tryRun(cmd, args, opts = {}) {
