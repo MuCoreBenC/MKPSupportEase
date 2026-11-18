@@ -105,8 +105,21 @@ function tryRun(cmd, args, cwd = REPO) {
     return null
   }
 }
+/**
+ * Windows 上 `npm` / `npx` 是 `.cmd`，`execFileSync` 认不出裸名（ENOENT）。
+ * 经 cmd 走一遍；含空格的参数补引号（`ship` 的说明文字就带空格）。
+ */
+function nativeCommand(cmd, args) {
+  if (process.platform !== 'win32' || (cmd !== 'npm' && cmd !== 'npx')) {
+    return { cmd, args }
+  }
+  const q = (a) => (/\s/.test(a) ? `"${a}"` : a)
+  return { cmd: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', [cmd, ...args.map(q)].join(' ')] }
+}
+
 function sh(cmd, args) {
-  execFileSync(cmd, args, { cwd: REPO, stdio: 'inherit' })
+  const c = nativeCommand(cmd, args)
+  execFileSync(c.cmd, c.args, { cwd: REPO, stdio: 'inherit' })
 }
 function die(msg, hints = []) {
   console.error(`\n\x1b[31m✗ ${msg}\x1b[0m\n`)
