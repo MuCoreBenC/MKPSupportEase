@@ -1647,8 +1647,15 @@ export default function PageSettings({
           {/*
            * 「上次更新没成」+ **安装日志在哪儿**：安装脚本在应用退出之后才跑，那时界面上
            * 没有任何东西能报错；下一次启动只能靠 `run/update-result.json` 这本账。
+           *
+           * ★★ 判空是 `!= null`，**不是 `!== undefined`**（2026-11-18 白屏那一刀）。
+           * 后端 `UpdateInfoDto.last_result` 是 `Option`，没那本账时**序列化成 `null`**
+           * （不是缺键）—— 只判 `undefined` 时 `null` 会一路走到 `!null.ok`，抛
+           * `Cannot read properties of null`。这一页在 `App` 里是**常驻挂载**的
+           * （页槽只切显示），于是这一抛把整棵 React 树卸掉：窗口一片白、一条字都没有，
+           * 首次安装（还没有 update-result.json）的机器 100% 命中。
            */}
-          {installMeta?.lastResult !== undefined && !installMeta.lastResult.ok && (
+          {installMeta?.lastResult != null && !installMeta.lastResult.ok && (
             <p className={s.fieldNote}>
               {tr('settings.update.lastFailed', {
                 detail: installMeta.lastResult.reason,

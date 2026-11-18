@@ -81,6 +81,14 @@ pub mod retention;
 /// 客户端首屏（九条预设读命令）从这里出数 —— 首屏唯一数据源 = catalog
 /// （docs/DATA-ARCHITECTURE.md 判据 4；旧世界 `client/` 的 include_str! 铺盘已退役）。
 pub mod runtime;
+/// **绿色版的第一道门**（Windows）：这台机器有没有 WebView2 运行时。
+///
+/// 安装包会替用户装它；绿色版（单 exe / zip）没有那一层 —— 缺了就在建窗之前用系统消息框
+/// 说清楚、把人送到微软的下载页，而不是"双击了、什么都没发生"。
+///
+/// ★ 只有 Windows 需要判（macOS 用系统自带的 WKWebView）。
+#[cfg(target_os = "windows")]
+pub mod webview2;
 /// **切片器窗口的跟随信号**（Windows）：细定时回读（700ms 一次本地窗口列表查询 +
 /// 键比较，没变就返回）—— macOS 是"AX 推送 + 兜底回读"，这里没有等价的轻量推送，
 /// 直接用同一频率的回读当唯一信号（为什么这不算"频繁的轮询"，见模块头）。

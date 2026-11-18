@@ -21,7 +21,7 @@ npm run build && npm run check:bundle        # 前端构建 + 判据 1（安装�
 npx eslint <改过的文件>                       # CI 跑全量 lint
 ```
 
-改了 `presets/` 源或交付产物后必须 `cargo run --bin gen-catalog` 重生成，否则判据测试 `embedded_matches_rebuild` 红。
+改了 `presets/` 源或交付产物后必须 `cargo run --features workbench --bin gen-catalog` 重生成，否则判据测试 `embedded_matches_rebuild` 红。
 
 ## 2. 纪律 / 判据 / 仓库状态
 
@@ -132,7 +132,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 - 未入库的 untracked：无（`workbench/.draft/` 被 ignore 属预期）。
 - **下载要配数据源**：真机上在 **设置 → 高级设置 → 预设数据源** 填地址（官方源 / Gitee / 本地 `python3 -m http.server` 都行），下载与检查更新才能跑；没填时它们拒绝执行并说明去哪儿填——不猜 URL、不假装成功。`MKPSE_PRESET_SOURCE=<url>` 可把默认值编进二进制（设置页的「恢复内置默认」撤掉用户覆盖、回到它）。
 - 前端底账全在 Internal 根（C4 后）：真机调试时 WebView 的 localStorage 只住偏好（置顶/搜索词），清掉不影响任何底账；旧的 `mkp.a40.*` 三格已无人读，残留可删。
-- **预设页现在读 catalog**（`<appDataDir>/catalog.json`）：改了 `presets/` 源要重跑 `cargo run --bin gen-catalog`，否则判据红；真机调试时删掉旧的 `<appDataDir>/presets/` 目录不会再有影响（没人读它了）。
+- **预设页现在读 catalog**（`<appDataDir>/catalog.json`）：改了 `presets/` 源要重跑 `cargo run --features workbench --bin gen-catalog`，否则判据红；真机调试时删掉旧的 `<appDataDir>/presets/` 目录不会再有影响（没人读它了）。
 - **界面素材全在 `src/app/assets/`**（2026-10-01 起）：品牌 logo `bambuLogo.ts`、机型整机图 `printers/`、测试模型合影 `hero/`。换一张图 = 换一个文件（引用方改成 `import`），不重跑 `gen-catalog`、不改 `presets/`、不碰资产台账。`public/` 里只该有：台账管的载荷根 `assets/{bbs,icons,models}` 与 BBS 页元数据 `bbs/`。
 - **资产去哪一档看一把尺子**：产品数据资源（用户下载 / 更新 / 管理）→ `public/assets/` + `presets/assets.toml` + catalog；界面展示素材（程序自己看一眼）→ `src/app/assets/` 或 `public/`，不进台账。台账里今天 15 条 = 9 BBS + 3 图标 + 3 模型。
 - **临时编辑那条链的落点**：编辑中的正文住 `<appDataDir>/run/draft-preset.json`
@@ -215,7 +215,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 
 | 判据 | 现状 / 修法 |
 |---|---|
-| `runtime::tests::embedded_matches_rebuild` | 工作区里 `presets/**` 与 `crates/preset/assets/presets/*.toml` 有一批未提交的数据改动，`catalog.generated.json` 与"按现在的源重建"不一致（那份文件本身也被改过，仍不合）。修法 `cargo run --bin gen-catalog`。 |
+| `runtime::tests::embedded_matches_rebuild` | 工作区里 `presets/**` 与 `crates/preset/assets/presets/*.toml` 有一批未提交的数据改动，`catalog.generated.json` 与"按现在的源重建"不一致（那份文件本身也被改过，仍不合）。修法 `cargo run --features workbench --bin gen-catalog`。 |
 | `workbench::app::delivery::tests::delivery_catalog_matches_rebuild` | 同一批数据的连带：`presets/delivery/catalog.json` 与重建不一致。修法 `npm run presets -- generate`（生成不推进序号）。 |
 
 两条都是**生成物**，改它们算发东西，等作者点头再跑。

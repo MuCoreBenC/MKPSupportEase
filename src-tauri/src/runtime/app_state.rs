@@ -402,7 +402,18 @@ pub struct PostprocPrefs {
     /// ★ 出厂是 `ask`（2026-11-04 作者：「软件安装的时候默认就是问」）—— 新装用户第一次
     ///   撞上时能看见"可以自动挪"这件事，而不是静默停下。
     /// ★ 只改这一趟的 IR，预设文件一个字不动。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ///
+    /// ★★ **这一格自己读得懂上一代写下的布尔**（2026-11-18 真机白窗那一刀）：
+    /// 2026-11-04 之前它是 `Option<bool>`，盘上真写着 `"autoTowerPosition": true`。
+    /// serde 是**整份结构一个字段错就整份失败**的，于是老档一升级就是"应用状态读不出来"
+    /// （所有读 AppState 的命令一起报 `CORRUPTED`，自动清理也跟着停跑）。
+    /// 旧真值映射见 [`de_tower_mode`]：`true` = 当年那个"开"（`auto`）、`false` = `off`。
+    /// 只管**读**：写回一律三档字符串，老档在第一次写入时自然归一（不另设迁移步骤）。
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "de_tower_mode"
+    )]
     pub auto_tower_position: Option<TowerRelocateMode>,
 }
 
@@ -431,6 +442,32 @@ impl TowerRelocateMode {
             Self::Auto => "auto",
             Self::Ask => "ask",
         }
+    }
+}
+
+/// 读「智能塔位置」那一格：**三档字符串照常，也认上一代的布尔**。
+///
+/// 2026-11-04 之前这一格是 `Option<bool>`，盘上留下的就是 `true` / `false`。
+/// 当年的语义与现在这一档一一对应：`true` = 撞了就自动挪（= 今天的 `auto`）、
+/// `false` = 不管（= 今天的 `off`）。**不猜成 `ask`** —— 用户当年关掉是有意的，
+/// 替他打开"撞了就问我"会在真机上多停一次。
+///
+/// 三档字符串 / 缺键 / 显式 `null` 都按原样走（缺键与 `null` 都是"没动过" ⇒ 出厂档）。
+fn de_tower_mode<'de, D>(d: D) -> Result<Option<TowerRelocateMode>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+    match Option::<serde_json::Value>::deserialize(d)? {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Bool(on)) => Ok(Some(if on {
+            TowerRelocateMode::Auto
+        } else {
+            TowerRelocateMode::Off
+        })),
+        Some(other) => serde_json::from_value(other)
+            .map(Some)
+            .map_err(D::Error::custom),
     }
 }
 
@@ -1826,6 +1863,47 @@ mod tests {
             std::fs::read(state_file(d.path())).unwrap(),
             broken,
             "报错不写盘、不重置"
+        );
+    }
+
+    /// **上一代写下的布尔 `autoTowerPosition` 不许把整份状态带塌**（2026-11-18 真机白窗）。
+    ///
+    /// 2026-11-04 之前这一格是 `Option<bool>`，盘上真写着 `true`。serde 一个字段错就整份
+    /// 解析失败 ⇒ 所有读 AppState 的命令一起报 `CORRUPTED`、自动清理停跑、白窗。
+    /// 这里同时咬住：布尔按老语义落到档上（`true` = 直接挪），并且**同格的其他项也读得进**。
+    #[test]
+    fn a_legacy_bool_tower_mode_still_reads() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        let json = r#"{ "appStateSchema": 2,
+               "postproc": { "uiMode": "gui", "autoTowerPosition": true } }"#;
+        atomic_write(&state_file(d.path()), json.as_bytes()).unwrap();
+
+        let st = load(d.path()).expect("老布尔必须读得动，不能整份 Corrupted");
+        let post = st.postproc.expect("postproc 那一格在");
+        assert_eq!(post.ui_mode, Some(PostprocUiMode::Gui));
+        assert_eq!(
+            post.auto_tower_position,
+            Some(TowerRelocateMode::Auto),
+            "当年那个 true 就是「撞了直接挪」"
+        );
+
+        /* 反过来也得认：`false` = 当年关着，不许替用户打开「撞了就问」 */
+        let json = r#"{ "appStateSchema": 2, "postproc": { "autoTowerPosition": false } }"#;
+        atomic_write(&state_file(d.path()), json.as_bytes()).unwrap();
+        let st = load(d.path()).expect("false 同样读得动");
+        assert_eq!(
+            st.postproc.unwrap().auto_tower_position,
+            Some(TowerRelocateMode::Off)
+        );
+
+        /* 三档字符串照旧（写回去的那一份就是它） */
+        let json = r#"{ "appStateSchema": 2, "postproc": { "autoTowerPosition": "ask" } }"#;
+        atomic_write(&state_file(d.path()), json.as_bytes()).unwrap();
+        let st = load(d.path()).expect("三档字符串是现役写法");
+        assert_eq!(
+            st.postproc.unwrap().auto_tower_position,
+            Some(TowerRelocateMode::Ask)
         );
     }
 

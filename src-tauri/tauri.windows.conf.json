@@ -2,7 +2,17 @@
   "app": {
     "windows": [
       {
-        "decorations": false
+        "label": "main",
+        "title": "SupportEase",
+        "width": 900,
+        "height": 640,
+        "minWidth": 600,
+        "minHeight": 500,
+        "resizable": true,
+        "fullscreen": false,
+        "transparent": false,
+        "decorations": false,
+        "additionalBrowserArgs": "--disable-component-update --disable-background-networking --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"
       }
     ]
   }

@@ -2222,7 +2222,13 @@ export interface UpdateInfo {
   notes?: string
   url?: string
   asset?: ReleaseAsset
-  lastResult?: UpdateResult
+  /**
+   * 上一次安装的结果。**没有那本账时是真 `null`**（后端 `Option` 序列化成了 `null`，
+   * 不是缺键）；mock 里没装过时给的是 `undefined`。两种"没有"都得认 ——
+   * 判空写 `!== undefined` 会漏掉 `null`，而这一页是常驻挂载的，一抛就整窗白（见
+   * `PageSettings` 那条注释）。
+   */
+  lastResult?: UpdateResult | null
   /** 安装日志的绝对路径（点「重启并安装」没反应时要看的就是它） */
   installLog: string
 }

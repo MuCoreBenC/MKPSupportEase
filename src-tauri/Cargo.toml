@@ -1,6 +1,6 @@
 [package]
 name = "mkp-support-ease"
-version = "0.0.11-preview.2"
+version = "0.0.11-preview.3"
 description = "SupportEase —— MKP 支撑辅助桌面端"
 authors = ["MuCoreBenC"]
 license = "AGPL-3.0-only"
@@ -58,6 +58,19 @@ required-features = ["workbench"]
 [[bin]]
 name = "clear-stale"
 path = "src/bin/clear-stale.rs"
+required-features = ["workbench"]
+
+# 随包 catalog 的生成器（`presets/` 源 + `crates/preset/assets/presets/` → `runtime/catalog.generated.json`）。
+#
+# ★ 为什么也要这道闸（2026-11-18 作者真机）：Tauri 打包时会把本包在**默认 feature 下
+#   会编出来的所有 bin** 一并塞进安装目录 —— 生成的 `nsis/x64/installer.nsi` 里就是一句
+#   `File /a "/oname=gen-catalog.exe"`。于是每个用户装完都多出 4.2 MB 一个构建工具，
+#   双击它也只会报错（它按仓库根有 `presets/` 的布局找文件）。
+#   挡到 workbench 那一档之后：跑生成器改成
+#   `cargo run --features workbench --bin gen-catalog`（发布构建不带这个 feature ⇒ 不进包）。
+[[bin]]
+name = "gen-catalog"
+path = "src/bin/gen-catalog.rs"
 required-features = ["workbench"]
 
 [build-dependencies]
