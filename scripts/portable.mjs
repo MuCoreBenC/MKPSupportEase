@@ -31,7 +31,15 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -74,6 +82,64 @@ rmSync(zip, { force: true })
 mkdirSync(stage, { recursive: true })
 /* 对用户叫 SupportEase.exe：文件名不参与任何判据（程序自己认的是可执行文件路径） */
 copyFileSync(exe, join(stage, 'SupportEase.exe'))
+
+/*
+ * **卸载脚本**（2026-11-18）：`app-data/EBWebView` 里的 profile 文件带着 WebView2
+ * 自己加的 `Everyone:(DENY)(X)`（Chromium 的防注入加固，不是我们写的）。资源管理器
+ * 删到那一片会弹「你需要来自 <用户> 的权限」—— 普通用户没有 takeown 那一套，就以为
+ * 删不掉。这个 cmd 替他把那几步做掉：关程序 → 收回权限 → 删程序与数据 → 自己退出后
+ * 由新进程把整个文件夹清掉。
+ *
+ * 文件名用中文（用户双击的那一栏）；正文按 cmd 的口径落 CRLF + UTF-8，首行 chcp 65001。
+ */
+const uninstallCmd = [
+  '@echo off',
+  'chcp 65001 >nul',
+  'setlocal',
+  'cd /d "%~dp0"',
+  '',
+  'if /i "%~1"=="/y" goto :go',
+  '',
+  'echo.',
+  'echo   SupportEase - 卸载',
+  'echo   --------------------------------',
+  'echo   这会删除本文件夹里的程序与它的全部数据（预设 / 执行记录 / 缓存）。',
+  'echo.',
+  'set /p ans="继续？输入 Y 回车："',
+  'if /i not "%ans%"=="Y" goto :cancel',
+  '',
+  ':go',
+  'echo.',
+  'echo   正在关闭 SupportEase...',
+  'taskkill /f /im SupportEase.exe >nul 2>&1',
+  'ping 127.0.0.1 -n 2 >nul',
+  '',
+  'echo   正在收回 app-data 的权限...',
+  'takeown /f "%~dp0app-data" /r /d y >nul 2>&1',
+  'icacls "%~dp0app-data" /reset /t /c /q >nul 2>&1',
+  '',
+  'echo   正在删除程序与数据...',
+  'rd /s /q "%~dp0app-data" >nul 2>&1',
+  'del /f /q "%~dp0SupportEase.exe" >nul 2>&1',
+  '',
+  'echo   正在清理这个文件夹...',
+  'echo.',
+  'echo   完成，窗口会自己关掉。',
+  'ping 127.0.0.1 -n 3 >nul',
+  '',
+  'for %%i in ("%~dp0.") do set "DIR=%%~fi"',
+  /* 新进程不能把工作目录留在被删的那个文件夹里，否则删自己会失败 */
+  'cd /d "%SystemRoot%"',
+  'start "" /min powershell -NoProfile -Command "Start-Sleep -Seconds 2; Remove-Item -LiteralPath \'%DIR%\' -Recurse -Force -ErrorAction SilentlyContinue"',
+  'exit /b 0',
+  '',
+  ':cancel',
+  'echo   已取消。',
+  'ping 127.0.0.1 -n 3 >nul',
+  'exit /b 1',
+  '',
+].join('\r\n')
+writeFileSync(join(stage, '卸载 SupportEase.cmd'), uninstallCmd, 'utf8')
 
 /* ---------- 3. 压成 zip ---------- */
 const zipped = spawnSync(
