@@ -33,7 +33,7 @@
   color: var(--accent-deep);
 }
 
+/* 聚焦与悬停同一条：边与字转强调色，不画外圈 */
 .dot:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
 }

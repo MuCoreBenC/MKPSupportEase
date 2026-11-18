@@ -36,8 +36,13 @@ export type NoticeTone = 'warn' | 'ask'
 
 export interface NoticeHeroProps {
   tone: NoticeTone
-  /** 卡上那行题目（「警告 · 2 条」「预设与机型不匹配 · 等你决定」） */
-  title: string
+  /**
+   * 卡上那行题目（「预设与机型不匹配 · 等你决定」）。
+   *
+   * 不给就不摆那一行 —— 正文自己已经说清"是什么事"的时候，多一行标题只是重复
+   * （内核警告那一页就是这样：一句话本来就是全部）。
+   */
+  title?: string
   /** 正文：一条一个段落，多了在卡里滚 —— 后端 / 内核原话照抄，不在这里另编 */
   lines?: string[]
   /** 最弱一档的那一句（倒计时 / "不答会怎样"） */
@@ -62,7 +67,7 @@ export function NoticeHero({ tone, title, lines = [], hint, glyph, role = 'statu
       <div className={s.copy}>
         {/* 一叠（题目 + 正文 + 兜底句）在卡内滚：内容短就居中，超高**从第一行开始滚** */}
         <div className={s.scroll}>
-          <span className={s.title}>{title}</span>
+          {title !== undefined && <span className={s.title}>{title}</span>}
           {lines.map((line, i) => (
             <span className={s.line} key={`${i}:${line}`}>
               {line}

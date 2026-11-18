@@ -360,6 +360,9 @@ export const bridgeApi: MkpApi = {
   setPresetSource: (mode, customUrl) =>
     call('setPresetSource', 'set_preset_source', { mode, customUrl: customUrl ?? null }),
   clearPresetSource: () => call('clearPresetSource', 'clear_preset_source'),
+  /* 前端那两格偏好的出厂档（2026-11-18）：切片器 / 重新切片提示住在 localStorage，
+     壳读不到 ⇒ 出厂值从 `presets/client-defaults.toml` 的 `[Client]` 段递过来 */
+  getClientDefaults: () => call('getClientDefaults', 'get_client_defaults'),
   /* 界面偏好（2026-10-12）：主题（浅 / 深 / 跟随系统）—— 落 AppState 的 theme 格 */
   getTheme: () => call('getTheme', 'get_theme'),
   setTheme: (theme) => call('setTheme', 'set_theme', { theme }),

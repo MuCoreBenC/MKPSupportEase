@@ -401,10 +401,15 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
              * 出厂档 = 全 `null` 解析出来的那一份。
              *
              * 恢复默认的对比要用它：只写「出厂」两个字，用户看不出点完会变成开还是关、
-             * 数字是多少。这里只给那 11 项（`PrefsIr` 的全部），与 `resetDefaults` 的
-             * 补丁一一对应；调试动作那组有自己那颗恢复，不在这里。
+             * 数字是多少。这里给「有出厂值的那几项」：`[Prefs]` 段的 11 项 + 通知 /
+             * 显示方式 / 置顶 / 强制校准这 4 项（它们的出厂档在同一份文件的 `[Client]` 段），
+             * 与 `resetDefaults` 的补丁一一对应；调试动作那组有自己那颗恢复，不在这里。
              */
             "factory": {
+                "notifyOnFinish": f.notify_on_finish,
+                "uiMode": f.ui_mode.wire(),
+                "autoTopOnAsk": f.auto_top_on_ask,
+                "forceCalibrationMode": f.force_calibration_mode,
                 "skipVibrationCalibration": f.skip_vibration_calibration,
                 "beginStageRetractEnabled": f.begin_stage_retract_enabled,
                 "beginStageRetractZLiftMm": f.begin_stage_retract_z_lift_mm,
@@ -448,5 +453,32 @@ pub async fn set_postproc_prefs(
         runtime::app_state::set_postproc_prefs(&root, prefs)?;
         notify_app_state(&app);
         Ok(serde_json::json!({ "ok": true }))
+    })
+}
+
+/* ---------- 前端那两格偏好的出厂档（2026-11-18） ---------- */
+
+/// 前端自己拿着的两格偏好（切片器 / 保存后的重新切片提示）在"没设过"时用什么。
+///
+/// ★ 这两格住在 webview 的 localStorage（`mkp.A40.slicer` / `mkp.A40.guide.show`），
+///   壳读不到它们，所以出厂值只能**从这里递过去**：前端启动时问一次，之后按它兜底。
+///   判据仍是 `presets/client-defaults.toml` 的 `[Client]` 段，前端不另写一份。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientDefaultsDto {
+    /// `system` / `bambu` / `orca` —— 与 `open_model` 认的那套 id 同字
+    pub slicer: String,
+    /// 保存参数后要不要弹「回切片器重新切片」那一屏
+    pub guide_show: bool,
+}
+
+#[tauri::command]
+pub async fn get_client_defaults() -> Result<ClientDefaultsDto, AppError> {
+    traced("getClientDefaults", |_| {
+        let d = runtime::client_defaults::client_defaults();
+        Ok(ClientDefaultsDto {
+            slicer: d.slicer.wire().to_owned(),
+            guide_show: d.guide_show,
+        })
     })
 }

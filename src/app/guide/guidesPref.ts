@@ -25,20 +25,23 @@
 
 import { STORAGE } from '../../api/storageKeys'
 import { useSyncedStickyState } from '../../hooks/useSyncedStickyState'
+/* 「没设过」用哪一档：出厂值只有 `presets/client-defaults.toml` 一份，启动时递进来 */
+import { clientDefaults } from '../state/clientDefaults'
 
 function isBool(v: unknown): v is boolean {
   return typeof v === 'boolean'
 }
 
-/** 现在要不要弹这类引导提示（**读盘上真值**，没设过 / 读坏了 = 显示） */
+/** 现在要不要弹这类引导提示（**读盘上真值**，没设过 / 读坏了 = 出厂档） */
 export function guidesEnabled(): boolean {
+  const fallback = clientDefaults().guideShow
   try {
     const raw = localStorage.getItem(STORAGE.clientShowGuides)
-    if (raw === null) return true
+    if (raw === null) return fallback
     const v = JSON.parse(raw) as unknown
-    return typeof v === 'boolean' ? v : true
+    return typeof v === 'boolean' ? v : fallback
   } catch {
-    return true
+    return fallback
   }
 }
 
@@ -48,5 +51,5 @@ export function guidesEnabled(): boolean {
  * 不广播就会"这边关了、那边还显示开着"。
  */
 export function useGuidesPref(): [boolean, (v: boolean) => void] {
-  return useSyncedStickyState<boolean>(STORAGE.clientShowGuides, true, isBool)
+  return useSyncedStickyState<boolean>(STORAGE.clientShowGuides, clientDefaults().guideShow, isBool)
 }

@@ -214,10 +214,23 @@ button {
   white-space: nowrap;
 }
 
+/*
+ * 焦点只有一套：**不画外圈**。
+ *
+ * 控件自己的边框变一档色（有边框的）、或底色变一档（没边框的）就够了；文字输入框
+ * 还有光标在闪。全局这条只负责把浏览器默认那圈（Chromium 在 macOS 上是 2px 的
+ * `-webkit-focus-ring-color`）压掉 —— 不写 `none` 等于把画框的活交回给 UA。
+ *
+ * ★ 为什么不留一圈细的：控件形状各不相同（胶囊 / 圆角框 / 直角盒），一圈 outline
+ *   沿的是元素的盒子，不是控件的形状，于是 999px 的胶囊外面会套出一个绿方块，
+ *   而 1px 的输入框边框旁边会多出第二道线 —— 同一屏里两种"选中"。
+ * ★ 组件要自己给焦点：`border-color` / `background` 挑一个变，别再加 outline。
+ */
 button:focus-visible,
-input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
 }
 
 input[type='range'] {

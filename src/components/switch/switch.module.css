@@ -55,8 +55,8 @@
   cursor: default;
 }
 
-/* 焦点环：走全站那一套（键盘才亮，鼠标点不亮） */
+/* 焦点：只把那道 1px 边换深（键盘才亮，鼠标点不亮）—— 与全站同一条，不画外圈 */
 .track:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline: none;
+  border-color: var(--text-1);
 }
