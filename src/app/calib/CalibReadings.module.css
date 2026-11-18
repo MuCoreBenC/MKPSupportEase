@@ -141,10 +141,10 @@
   text-decoration: underline;
 }
 
+/* 焦点跟悬停一样：加下划线（不画外圈 —— 全站口径） */
 .axisFrom[data-act='revert']:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-radius: 2px;
+  outline: none;
+  text-decoration: underline;
 }
 
 /*

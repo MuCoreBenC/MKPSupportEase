@@ -52,13 +52,16 @@
  *   记录本身坏了 照进列表（红标）—— 藏起失败就是替钩子瞒了一次事故；原因在
  *               详情「结论 → 原因」那一行等着（V13：那句话不进列表）
  *
- * # 动作只有三件
+ * # 动作只有四件（外加一颗标星开关）
  *
  *   刷新   重读一遍磁盘（钩子随时可能又跑了一次）—— **后处理一跑完会自己重读一次**
  *          （订阅 `postprocess-finished`，见下面那条 effect），这颗按钮是手动补一刀；
  *          **右栏详情一起重读**（列表重读了、详情还停在旧值，是最容易看出来的不一致）
  *   导出   把选中的那一条的三件套复制到用户点名的目录（`ExportModal.tsx`）
  *   选一条 看这一条的详情（结论 / 打印 / 管线 / 文件）—— 左栏点一下就是选中
+ *   星标   给一条记录做个记号，方便回头找（纯前端偏好，落 `STORAGE.clientReportStarred`）。
+ *          左栏行首那颗（文件图标 ↔ 星）与页头那颗开关改的是同一份表；筛选里多一档
+ *          「星标」。**它不是业务动作**，所以只有它带图形。
  *
  * # 打印时间是**延后**算的（2026-10-20）
  *
@@ -96,6 +99,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { api, errorText, listen } from '../../api'
+import { STORAGE } from '../../api/storageKeys'
 import { msg, useLocale, useT, type StringKey, type Tr } from '../../i18n'
 import type {
   CatalogParamDef,
@@ -165,15 +169,47 @@ const READING_MSG = msg(READING_NOTE)
 
 const TAB_ALL = 'all'
 
-/** 左栏状态筛选的三档（`all` 是「全部」，与详情页签那个 TAB_ALL 无关） */
-type StatusFilter = 'all' | 'ok' | 'bad'
+/**
+ * 左栏筛选的几档（`all` 是「全部」，与详情页签那个 TAB_ALL 无关）。
+ *
+ * `star` 是**自己标的那几条**（见 `STORAGE.clientReportStarred`），与成败两档并列：
+ * 作者要的是"标了星的方便找"，入口就该与"成功 / 失败"同一排，而不是另开一颗开关。
+ */
+type StatusFilter = 'all' | 'ok' | 'bad' | 'star'
 
-/** 三颗筛选胶囊（顺序就是摆放顺序）；计数按 id 从 `counts` 取 */
+/** 筛选胶囊（顺序就是摆放顺序）；计数按 id 从 `counts` 取 */
 const FILTERS: [StatusFilter, StringKey][] = [
   ['all', 'report.filter.all'],
   ['ok', 'report.filter.ok'],
   ['bad', 'report.filter.bad'],
+  ['star', 'report.filter.star'],
 ]
+
+/**
+ * 星标表（记录 id 的集合）读一遍。
+ *
+ * 坏值当作空的：它是**偏好**，读不出来最多这一栏没有星，不该让整页跟着报错。
+ * 记录被删之后这里会留着没人认领的 id —— 渲染时按现有列表现取，不会多出一行。
+ */
+function readStarred(): ReadonlySet<string> {
+  try {
+    const raw = window.localStorage.getItem(STORAGE.clientReportStarred)
+    if (raw === null) return new Set()
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.filter((x): x is string => typeof x === 'string'))
+  } catch {
+    return new Set()
+  }
+}
+
+function writeStarred(ids: ReadonlySet<string>): void {
+  try {
+    window.localStorage.setItem(STORAGE.clientReportStarred, JSON.stringify([...ids]))
+  } catch {
+    /* 存储不可用（隐私模式 / 配额满）：这一次会话里仍然能标，只是关掉页面就没了 */
+  }
+}
 
 /** 文件名短于这个长度就整条铺开，不拆头尾 */
 const FILE_SHORT_MAX = 22
@@ -1789,6 +1825,8 @@ export default function PageReport({
    */
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<StatusFilter>('all')
+  /** 标了星的记录 id（落 localStorage，见 `readStarred`） */
+  const [starred, setStarred] = useState<ReadonlySet<string>>(readStarred)
   const [collapsedDays, setCollapsedDays] = useState<ReadonlySet<string>>(new Set())
   /** 导出框开着没有（它的内务全在 `ExportModal` 里，页面只管这一格开关） */
   const [exportOpen, setExportOpen] = useState(false)
@@ -2072,24 +2110,36 @@ export default function PageReport({
    *
    * 搜索只认**行上看得见的那两个字**（G-code 文件名）—— 拿 3MF 模型名去匹配
    * 就会出现"打「帕姆」跳出一行 `.63288.1.gcode`"这种对不上的事。
-   * 大小写不敏感；筛选按成败两档。两样都空就是原样一张表。
+   * 大小写不敏感；筛选按成败两档 + 星标一档。两样都空就是原样一张表。
    */
   const q = query.trim().toLowerCase()
   const visible = (rows ?? []).filter((r) => {
     if (filter === 'ok' && !r.ok) return false
     if (filter === 'bad' && r.ok) return false
+    if (filter === 'star' && !starred.has(r.id)) return false
     if (q === '') return true
     return (r.gcodeName ?? '').toLowerCase().includes(q)
   })
 
   /*
-   * 三颗胶囊的计数看**全量**，不随搜索变：它回答的是"这批记录里有多少条失败"，
+   * 胶囊计数看**全量**，不随搜索变：它回答的是"这批记录里有多少条失败"，
    * 不是"我现在看得见几条"（后者会让"失败 3"在打字时一路缩，读起来像在丢记录）。
+   * 星标那一格同理，数的是"这批记录里有几条标了星"，不是筛出来的。
    */
   const counts = {
     all: (rows ?? []).length,
     ok: (rows ?? []).filter((r) => r.ok).length,
     bad: (rows ?? []).filter((r) => !r.ok).length,
+    star: (rows ?? []).filter((r) => starred.has(r.id)).length,
+  }
+
+  /** 标 / 取消星标一颗。只改这一格偏好，**不动选中**（标星不是"打开这条"） */
+  const toggleStar = (id: string) => {
+    const next = new Set(starred)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    writeStarred(next)
+    setStarred(next)
   }
 
   const days: string[] = []
@@ -2124,6 +2174,8 @@ export default function PageReport({
       )
   const activeTab = groups.some((g) => g.id === tab) ? tab : TAB_ALL
   const sel = (rows ?? []).find((r) => r.id === selId) ?? null
+  /** 右栏这一条标了星没有 —— 页头那颗开关与左栏行首那颗读同一份表 */
+  const selStarred = selId !== null && starred.has(selId)
 
   /*
    * 左栏 = **一个面板**（2026-10-27 作者第三次改口径：「不要有两个的感觉，就感觉是
@@ -2256,47 +2308,77 @@ export default function PageReport({
                 </button>
                 {!collapsed && (
                   <ul className={s.dayList}>
-                    {(byDay.get(day) ?? []).map((row) => (
-                      <li key={row.id}>
-                        <button
-                          type="button"
-                          className={s.sideRow}
-                          data-ok={row.ok}
-                          data-on={row.id === selId}
-                          data-tip={`${row.gcodeName ?? tr('report.row.noName')} · ${row.startedAt ?? row.day} · ${elapsedText(tr, row.elapsedMs)}`}
-                          onClick={() => pick(row)}
-                        >
-                          <span className={s.rowIcon} aria-hidden="true">
-                            <svg
-                              width={15}
-                              height={15}
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth={1.7}
-                            >
-                              <path d="M7 3h7l4.5 4.5V20a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V4.5A1.5 1.5 0 0 1 7 3z" />
-                              <path d="M13.5 3v5h5" />
-                            </svg>
-                          </span>
-                          <span className={s.rowMain}>
-                            <span className={s.rowTop}>
-                              <span className={s.sideFile}>
-                                <FileName name={row.gcodeName} />
+                    {(byDay.get(day) ?? []).map((row) => {
+                      const on = starred.has(row.id)
+                      return (
+                        <li key={row.id} className={s.sideItem} data-on={row.id === selId}>
+                          {/*
+                            左边那枚 = **标星**（作者 2026-11-18）：平时是文件图标，
+                            鼠标落到这一行 / 键盘停上来时换成空心星，点一下标上；
+                            标过的那条常驻一颗橙黄实心星。
+                            它与整行是**两颗按钮**（按钮不能套按钮），所以选中底与悬停底
+                            都挂在 `.sideItem` 那条通长色带上，两半各自透明。
+                          */}
+                          <button
+                            type="button"
+                            className={s.starBtn}
+                            data-starred={on}
+                            aria-pressed={on}
+                            aria-label={tr(on ? 'report.row.unstar' : 'report.row.star')}
+                            data-tip={tr(on ? 'report.row.unstar' : 'report.row.star')}
+                            onClick={() => toggleStar(row.id)}
+                          >
+                            <span className={s.starFile} aria-hidden="true">
+                              <svg
+                                width={15}
+                                height={15}
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth={1.7}
+                              >
+                                <path d="M7 3h7l4.5 4.5V20a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V4.5A1.5 1.5 0 0 1 7 3z" />
+                                <path d="M13.5 3v5h5" />
+                              </svg>
+                            </span>
+                            <span className={s.starGlyph} aria-hidden="true">
+                              <svg width={16} height={16} viewBox="0 0 24 24">
+                                <path
+                                  d="M12 3.4l2.65 5.37 5.93.86-4.29 4.18 1.01 5.9L12 16.92l-5.3 2.79 1.01-5.9-4.29-4.18 5.93-.86z"
+                                  fill="currentColor"
+                                  stroke="currentColor"
+                                  strokeWidth={1.4}
+                                  strokeLinejoin="round"
+                                />
+                              </svg>
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            className={s.sideRow}
+                            data-ok={row.ok}
+                            data-tip={`${row.gcodeName ?? tr('report.row.noName')} · ${row.startedAt ?? row.day} · ${elapsedText(tr, row.elapsedMs)}`}
+                            onClick={() => pick(row)}
+                          >
+                            <span className={s.rowMain}>
+                              <span className={s.rowTop}>
+                                <span className={s.sideFile}>
+                                  <FileName name={row.gcodeName} />
+                                </span>
+                                <span className={s.rowStatus} data-ok={row.ok}>
+                                  <span className={s.stDot} aria-hidden="true" />
+                                  {row.ok ? tr('report.row.ok') : tr('report.row.bad')}
+                                </span>
                               </span>
-                              <span className={s.rowStatus} data-ok={row.ok}>
-                                <span className={s.stDot} aria-hidden="true" />
-                                {row.ok ? tr('report.row.ok') : tr('report.row.bad')}
+                              <span className={s.rowSub}>
+                                <span className={s.rowMeta}>{rowMeta(row)}</span>
+                                <span className={s.sideDur}>{elapsedText(tr, row.elapsedMs)}</span>
                               </span>
                             </span>
-                            <span className={s.rowSub}>
-                              <span className={s.rowMeta}>{rowMeta(row)}</span>
-                              <span className={s.sideDur}>{elapsedText(tr, row.elapsedMs)}</span>
-                            </span>
-                          </span>
-                        </button>
-                      </li>
-                    ))}
+                          </button>
+                        </li>
+                      )
+                    })}
                   </ul>
                 )}
               </li>
@@ -2344,7 +2426,34 @@ export default function PageReport({
             ★ 2026-10-26 起用 `size="sm"`：这一行要与工艺页工具条同高（41px，见
               `--head-h`），而那两枚胶囊是 24px 高 —— 它们一大一小的话，两页顶条
               怎么调都对不齐（作者：「改小报告的胶囊按钮和工艺的一样」）。
+
+            ★ 星标那颗是**唯一带图形的**（作者 2026-11-18：「右上角也需要星标按钮」）：
+              它是一颗状态开关，不是业务动作 —— 图形就是它的名字，文字留在气泡里。
+              不标星时是灰的空心星，标了是橙黄实心星（与左栏行首那颗同一个长相）。
           */}
+          <Btn
+            size="sm"
+            disabled={selId === null}
+            title={tr(selStarred ? 'report.row.unstar' : 'report.row.star')}
+            onClick={() => {
+              if (selId !== null) toggleStar(selId)
+            }}
+          >
+            <span className={s.headStar} data-on={selStarred}>
+              <svg
+                width={14}
+                height={14}
+                viewBox="0 0 24 24"
+                fill={selStarred ? 'currentColor' : 'none'}
+                stroke="currentColor"
+                strokeWidth={1.6}
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 3.4l2.65 5.37 5.93.86-4.29 4.18 1.01 5.9L12 16.92l-5.3 2.79 1.01-5.9-4.29-4.18 5.93-.86z" />
+              </svg>
+            </span>
+          </Btn>
           <Btn size="sm" disabled={selId === null} onClick={() => setExportOpen(true)}>
             {tr('report.action.export')}
           </Btn>

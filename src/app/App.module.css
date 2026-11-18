@@ -3,7 +3,8 @@
  *
  * ```text
  *   96  通知停泊区（右上角卡片）／ **提示气泡 `TipLayer`**（纯展示、不吃鼠标）
- *   95  后处理那一屏「跑着」的拖窗带（整条标题栏归它，窗控键都点不着）
+ *   95  后处理那一屏「跑着」的拖窗带（标题栏其余部分归它；Windows 的窗控键那一格
+ *       让出来，照旧按得着 —— 见 `PostProcessModal.module.css` 的 `.dragShield`）
  *   94  标题栏右侧的窗控键那组（`.controls`）
  *   93  窗口内侧那圈 resize 命中条 ／ **标题栏本身**（`TopTabs` 的 `.bar`，它是窗口把手）
  *   92  后处理那一屏的层（**铺满内容区 `.stage`** —— 标题栏抬到 93 之后仍点得着）
@@ -29,6 +30,19 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+
+  /*
+   * 窗控键**每一颗**多宽。三处要用它，所以只有这一份值：
+   *   · 标题栏那三个键（`TopTabs.module.css` 的 `.ctrl`）；
+   *   · 后处理「跑着」的拖窗带 —— Windows 那一侧要给它们让出这一格
+   *     （否则拖窗带压在关闭键上，后处理期间窗口关不掉，见 `PostProcessModal.module.css`）。
+   * 密度由外壳分档（那边 `data-density` 与本变量的两个值同一套）。
+   */
+  --winctrl-w: 46px;
+}
+
+.shell[data-density='mini'] {
+  --winctrl-w: 40px;
 }
 
 /*

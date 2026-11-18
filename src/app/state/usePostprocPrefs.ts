@@ -74,6 +74,14 @@ function merge(raw: PostprocPrefsWire, patch: PostprocPrefsPatch): PostprocPrefs
   return { ...raw, ...patch }
 }
 
+/**
+ * 「动作后等待」的出厂秒数（与后端 `DEBUG_DWELL_SEC_DEFAULT` 同一个数）。
+ *
+ * 后端 `resolved()` 把 `0` 折成 `null`（用户关了），`null` 当出厂 2 秒。
+ * 乐观值必须按同一口径算，否则点一下会先显示成"开、0 秒"。
+ */
+export const DWELL_DEFAULT_SEC = 2
+
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
@@ -164,6 +172,15 @@ export function usePostprocPrefs(): PostprocPrefsApi {
           debugUnmountY: wire.debugUnmountY !== undefined ? wire.debugUnmountY : before.resolved.debugUnmountY,
           debugMoveY: wire.debugMoveY ?? before.resolved.debugMoveY,
           debugRepeat: wire.debugRepeat ?? before.resolved.debugRepeat,
+          debugDwellSec:
+            wire.debugDwellSec === undefined
+              ? before.resolved.debugDwellSec
+              : /* 0 = 关（后端折成 null）；null = 回出厂 2 秒 */
+                wire.debugDwellSec === null
+                ? DWELL_DEFAULT_SEC
+                : wire.debugDwellSec > 0
+                  ? wire.debugDwellSec
+                  : null,
           debugTravelSpeed: wire.debugTravelSpeed ?? before.resolved.debugTravelSpeed,
           debugUseTravelSpeed: wire.debugUseTravelSpeed ?? before.resolved.debugUseTravelSpeed,
           debugCustomGcode:
@@ -186,6 +203,9 @@ export function usePostprocPrefs(): PostprocPrefsApi {
       pending = pending.then(async () => {
         try {
           await api.setPostprocPrefs(merge(view?.raw ?? wire, patch))
+          /* 落盘后回读一次：`null` 的项由后端解成出厂值（坐标就是），
+             只看乐观值会一直停在旧数上，直到重开这一页。 */
+          await read()
         } catch (e: unknown) {
           /* ③ 失败：退回改之前那一份，并把原因交出去（不静默） */
           publish(before)
@@ -194,7 +214,7 @@ export function usePostprocPrefs(): PostprocPrefsApi {
       })
       await pending
     },
-    [],
+    [read],
   )
 
   return { prefs: snap, loadError: err, set }

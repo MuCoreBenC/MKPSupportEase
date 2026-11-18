@@ -2333,6 +2333,21 @@ export type ThemePref = 'light' | 'dark' | 'system'
  */
 export type LocalePref = 'system' | 'zh-CN' | 'zh-TW' | 'ja' | 'en'
 
+/* ---------- 前端那两格偏好的出厂档（2026-11-18） ---------- */
+
+/**
+ * [`MkpApi.getClientDefaults`] 的形状 —— 与 Rust `ipc::prefs::ClientDefaultsDto` 一一对应。
+ *
+ * 只有**前端自己拿着**的那两格（切片器 / 重新切片提示）需要它：其余偏好的出厂档都在
+ * 后端解（`None` 直接落成出厂值），界面拿到的就是最终值。
+ */
+export interface ClientDefaultsDto {
+  /** `system` / `bambu` / `orca` —— 出厂档不会给 `custom`（那要一条本机路径） */
+  slicer: SlicerId
+  /** 保存参数后要不要弹「回切片器重新切片」那一屏 */
+  guideShow: boolean
+}
+
 /* ---------- 主窗怎么摆（2026-10-17） ---------- */
 
 /**
@@ -2421,6 +2436,8 @@ export interface ResolvedPostprocPrefs {
   debugMoveY: boolean
   /** 这一趟重复几遍（1 = 一遍） */
   debugRepeat: number
+  /** 动作到位后停几秒；`null` = 不停（那一格开关就是它） */
+  debugDwellSec: number | null
   /** 到驻点的速度（mm/min），`debugUseTravelSpeed` 为真时才生效 */
   debugTravelSpeed: number
   debugUseTravelSpeed: boolean
@@ -2476,6 +2493,8 @@ export interface PostprocPrefsWire {
   debugUnmountY?: number | null
   debugMoveY?: boolean | null
   debugRepeat?: number | null
+  /** 动作到位后停几秒：`null` = 不停 */
+  debugDwellSec?: number | null
   debugTravelSpeed?: number | null
   debugUseTravelSpeed?: boolean | null
   debugCustomGcode?: string | null
@@ -2489,17 +2508,71 @@ export interface PostprocPrefsWire {
   autoTowerPosition?: TowerRelocateMode | null
 }
 
+/**
+ * 调试窗「默认点位」的一行。
+ *
+ * 数据来自随包预设的 `[toolhead]` 段（`preset::BUILTIN_PRESETS`），
+ * 不是前端抄的一份快照 —— 版本 id、落笔位、收笔位、等待位 Y 都跟着预设走。
+ */
+export interface DebugAnchorRow {
+  /** 版本 id（预设文件名里 `机型-` 之后那段，小写） */
+  variant: string
+  mountWaitX: number
+  /** `null` = 预设没写这一格（跟随驻点位） */
+  mountWaitY: number | null
+  mountX: number
+  unmountWaitX: number
+  /** `null` = 预设没写这一格 */
+  unmountWaitY: number | null
+  unmountX: number
+}
+
+/** 一台机型的全部版本，组内顺序 = 随包预设的文件名顺序 */
+export interface DebugAnchorMachine {
+  machine: string
+  rows: DebugAnchorRow[]
+}
+
+/**
+ * 「恢复默认」对话框里客户端壳那几项的一侧（当前 / 出厂）。
+ *
+ * 与 `PostprocPrefsView` 分开：那 15 项走 `getPostprocPrefs`，这几项是 app-state 的
+ * 其它格（主题 / 语言 / 自动清理 / 自动检查更新 / 预设页三项 / 数据源覆盖）。
+ */
+export interface ClientPrefsSlice {
+  theme: string
+  locale: string
+  autoCleanHistory: boolean
+  autoCheckUpdate: boolean
+  copiesFollowCloud: boolean
+  autoCopyScript: boolean
+  autoUseAfterDownload: boolean
+  /** 数据源：`gitee` / `github` / `custom:<地址>` */
+  source: string
+}
+
+/** `getClientPrefsView` 的回执：两列并排（左边现在、右边出厂） */
+export interface ClientPrefsView {
+  current: ClientPrefsSlice
+  factory: ClientPrefsSlice
+}
+
 /** `getPostprocPrefs` 的回执：盘上原样 + 解析后 + 量程。 */
 export interface PostprocPrefsView {
   raw: PostprocPrefsWire
   resolved: ResolvedPostprocPrefs
   /**
-   * **出厂档**（全 `null` 解析出来的那一份），只含 `PrefsIr` 那 11 项。
+   * **出厂档**（全 `null` 解析出来的那一份）：`[Prefs]` 那 11 项 + 通知 / 显示方式 /
+   * 置顶 / 强制校准这 4 项（后者来自同一份文件的 `[Client]` 段）。
    *
    * 设置页「恢复默认」的对比要用它 —— 只写「出厂」两个字，用户看不出点完变成
    * 开还是关、数字多少。调试动作那组不在这里（它有自己的恢复）。
    */
   factory: {
+    notifyOnFinish: boolean
+    uiMode: PostprocUiMode
+    autoTopOnAsk: boolean
+    forceCalibrationMode: boolean
     skipVibrationCalibration: boolean
     beginStageRetractEnabled: boolean
     beginStageRetractZLiftMm: number
@@ -2714,6 +2787,13 @@ export interface PostProcessFacts {
    * 那是内核说的**（报告页也是两个都摆）。头里没有这一行就不摆。
    */
   slicerPrintTimeSeconds?: number
+  /**
+   * **点位测试那一趟的动作参数**（正常那一趟缺键）。
+   *
+   * 开跑前那一屏的「说明」页要摆的就是它（驻点 / 落笔 / 收笔 / 速度 / 测哪些）——
+   * 与跑完的 `result.debug` 同一份结构，只是这一份在开场就送到了。
+   */
+  debug?: DebugPlan | null
 }
 
 /** 一条进度。**全局百分比不在这里** —— 阶段名与权重是界面的事（见 `app/postprocess/steps.ts`） */
@@ -3967,10 +4047,17 @@ export interface MkpApi {
   clearPresetSource(): Promise<PresetSource | null>
 
   /**
-   * 当前主题偏好。`null` = **还没选过**（界面按"跟随系统"）。
+   * **前端自己那两格偏好的出厂档**（2026-11-18）。
    *
-   * 与 `'system'` 意思不同：那是用户明确点了跟随系统 —— 界面上两者长得一样
-   * （都跟随系统），但盘上分得开，将来改出厂默认档时还能重新解释。
+   * 切片器与「保存后的重新切片提示」住在 webview 的 localStorage，壳读不到，
+   * 于是出厂值由后端从 `presets/client-defaults.toml` 的 `[Client]` 段递过来：
+   * 启动时问一次，之后"没设过"就按它兜底。**前端不另写一份默认值**。
+   */
+  getClientDefaults(): Promise<ClientDefaultsDto>
+
+  /**
+   * 当前主题偏好。**没选过** ⇒ 出厂档（也是 `system`，但由后端按
+   * `presets/client-defaults.toml` 解释 —— "没选过怎么解释"不归界面猜）。
    */
   getTheme(): Promise<ThemePref | null>
 
@@ -4047,7 +4134,7 @@ export interface MkpApi {
   setCopiesFollowCloud(enabled: boolean): Promise<boolean>
 
   /**
-   * **使用一份预设之后自动复制它的后处理脚本**（2026-11-01；出厂 = 关）。
+   * **使用一份预设之后自动复制它的后处理脚本**（2026-11-01；出厂 = 开）。
    *
    * 回的是**解析后的 `boolean`**：盘上那一格"没选过"是 `null`，
    * "没选过怎么解释"是后端的事（与上面两条同一条口径）。
@@ -4068,6 +4155,23 @@ export interface MkpApi {
   setAutoCopyScript(enabled: boolean): Promise<boolean>
 
   /**
+   * **下载之后自动设为使用中**（2026-11-18；出厂 = 开）。
+   *
+   * 回的是**解析后的 `boolean`**（与上面两条同一条口径）。
+   *
+   * ★ 只对 MKP 预设（云端 → MKP 配置那一行的「下载」）有意义：那一步本来就只把
+   *   字节取到本机，开这一档后接着走「使用」。切片器配置的「生效」是放进切片器目录，
+   *   下载时本来就会放，与这一格无关。
+   */
+  getAutoUseAfterDownload(): Promise<boolean>
+
+  /**
+   * 开关「下载之后自动设为使用中」：**立即生效并落盘**
+   * （写 `run/app-state.json` 的 `presets.autoUseAfterDownload` 格）。
+   */
+  setAutoUseAfterDownload(enabled: boolean): Promise<boolean>
+
+  /**
    * 设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块的当前值（2026-10-17）。
    *
    * 回的是**解析后**的值（盘上 `null` 已经解成出厂档、量程已经夹住）——
@@ -4076,6 +4180,12 @@ export interface MkpApi {
    * `raw` 是盘上原样那一格：界面用它判断"这一项动过没有"。
    * `limits` 是后端那边量的量程，界面**不另写一份**在 TS 里。
    */
+  /** 收落笔点位测试窗的「默认点位」：从随包预设现读 */
+  getDebugAnchors(): Promise<DebugAnchorMachine[]>
+  /** 「恢复默认」对话框要摆的两列（客户端壳那几项） */
+  getClientPrefsView(): Promise<ClientPrefsView>
+  /** 「恢复默认」：客户端壳那几项一起清回出厂（语言 / 主题当场生效） */
+  resetClientPrefs(): Promise<unknown>
   getPostprocPrefs(): Promise<PostprocPrefsView>
 
   /**

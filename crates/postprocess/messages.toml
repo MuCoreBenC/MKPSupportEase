@@ -27,7 +27,7 @@
 #                  「这样就方便我给 AI 去看啊，这样子，就算信息不全，也能通过错误码找到对应的」。
 #                  前三个字母是**类别**，一眼分得出"出故障"还是"你自己让它停的"：
 #
-#                    E_*  故障  —— 系统判定这件事没成（解析失败、写盘失败、内核报错…）
+#                    E_*  故障  —— 系统判定这件事失败（解析失败、写盘失败、内核报错…）
 #                    W_*  停下  —— **不是故障**：用户按了停止 / 在问句里选了停 / 某一步降级了
 #                                  （归档没落成但 G-code 是好的那几条也归这儿）
 #                    N_*  成功  —— 跑完了。几种"都算成功但结果不同"的情形各有各的码
@@ -3542,9 +3542,9 @@ text_ja = "{new_name} というファイルが既にあります — 別の名�
 params = ["new_name"]
 
 ["ui.runtime.local.406"]
-text = "{rel} 改名没成"
+text = "{rel} 改名失败"
 text_en = "Renaming {rel} failed"
-text_zh_tw = "{rel} 改名沒成"
+text_zh_tw = "{rel} 改名失敗"
 text_ja = "{rel} の改名に失敗"
 params = ["rel"]
 
@@ -4655,9 +4655,9 @@ text_zh_tw = "後處理完成"
 text_ja = "後処理が完了しました"
 
 ["ui.hook_ui.notify.title_bad"]
-text = "后处理没成"
+text = "后处理失败"
 text_en = "Post-processing did not finish"
-text_zh_tw = "後處理沒成"
+text_zh_tw = "後處理失敗"
 text_ja = "後処理に失敗しました"
 
 ["ui.hook_ui.notify.this_plate"]

@@ -103,6 +103,8 @@ pub async fn clear_app_data(app: AppHandle) -> Result<(), AppError> {
 fn remove_data_root(root: &Path) -> Result<(), AppError> {
     #[cfg(target_os = "windows")]
     {
+        use crate::quiet::Quiet as _;
+
         std::process::Command::new("cmd")
             .args([
                 "/c",
@@ -117,6 +119,8 @@ fn remove_data_root(root: &Path) -> Result<(), AppError> {
                 "/q",
                 &root.display().to_string(),
             ])
+            /* 别在用户眼前开一扇黑框（`cmd` 是控制台程序，见 `crate::quiet`） */
+            .quiet()
             .spawn()
             .map_err(|e| {
                 AppError::io(messages::text("ui.ipc.app.038", &[]))
@@ -187,6 +191,8 @@ pub async fn uninstall(app: AppHandle, clean_data: bool) -> Result<(), AppError>
 
         #[cfg(target_os = "windows")]
         {
+            use crate::quiet::Quiet as _;
+
             /* 正在跑的 exe 删不掉 ⇒ 交给一个 detach 的 cmd：等两秒、删目录、删自己 */
             let dir = exe
                 .parent()
@@ -206,6 +212,8 @@ pub async fn uninstall(app: AppHandle, clean_data: bool) -> Result<(), AppError>
                     "/q",
                     &dir.display().to_string(),
                 ])
+                /* 别开黑框（见 `crate::quiet`） */
+                .quiet()
                 .spawn()
                 .map_err(|e| {
                     AppError::io(messages::text("ui.ipc.app.035", &[]))

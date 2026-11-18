@@ -612,6 +612,9 @@ fn facts_from(
         /* 切片器自报的预估总时长（输入头里 `; total estimated time` 那一行）：
          * 跑着的时候那一格摆它；跑完换成内核重算的（`result.printTimeSeconds`） */
         slicer_print_time_seconds: postprocess::postproc::printtime::slicer_estimated_seconds(raw),
+        /* 点位测试那一趟：动作参数一开场就带给界面（开跑前的「说明」页要摆全）。
+         * 正常那一趟 IR 里没有这一格 ⇒ `None`，界面照旧只摆机型与切片两栏 */
+        debug: ir.debug.clone(),
     }
 }
 
@@ -729,7 +732,7 @@ pub fn run(
     不然界面根本不开窗，用户只能对着切片器那句退出码发呆。
     那一刻表里全是 `—`（`facts: None`），但"这一趟失败了"那句人话摆得出来。 */
     let mut hello_sent = false;
-    let mut say_hello = |facts: Option<crate::hook_ipc::FactsPayload>| {
+    let mut say_hello = |facts: Option<Box<crate::hook_ipc::FactsPayload>>| {
         if hello_sent {
             return;
         }
@@ -862,7 +865,7 @@ pub fn run(
     let opening_slicer = opening.slicer.clone().unwrap_or_default();
     let opening_layer_height = opening.layer_height;
     let opening_nozzle = opening.nozzle_diameter;
-    say_hello(Some(opening));
+    say_hello(Some(Box::new(opening)));
 
     /*
      * 校准件身份探测（2026-10-18）：**必须在这里跑，且只跑这一次**。
@@ -2190,7 +2193,10 @@ pub fn run_with_channel(job: &HookJob) -> ExitCode {
         last_step: None,
     };
     let mut asker = ChannelAsker { client: &client };
-    let mismatch = if client.connected() {
+    /* ★ 判据是 `can_ask()`，**不是 `connected()`**（2026-11-18 作者：「就算我设置静默也要
+    弹出来让我选择」）：静默档此刻没人听，但问句那一侧会把界面叫起来，所以这条路照样
+    走"问"，而不是直接吃一个 `E_CFG_MISMATCH_001` 硬错。 */
+    let mismatch = if client.can_ask() {
         MismatchPolicy::Ask(&mut asker)
     } else {
         MismatchPolicy::Refuse

@@ -10,18 +10,17 @@ import { Tip } from '../../components/tooltip'
 import { useModalHeadSlot } from '../../components/modal/modalHeadSlot'
 import { Btn } from '../ui/Controls'
 import { useT } from '../../i18n'
-import { usePostprocPrefs } from '../state/usePostprocPrefs'
-import type { ResolvedPostprocPrefs } from '../../api/contract'
+import { api, errorText } from '../../api'
+import { DWELL_DEFAULT_SEC, usePostprocPrefs } from '../state/usePostprocPrefs'
+import type { DebugAnchorMachine, DebugAnchorRow, ResolvedPostprocPrefs } from '../../api/contract'
 import {
   clearPresets,
-  FACTORY_ANCHORS,
   fmt,
   loadPresets,
   removePreset,
   savePreset,
   summarize,
   type DebugPreset,
-  type FactoryAnchorRow,
 } from './debugPresets'
 import s from './PageSettings.module.css'
 
@@ -75,20 +74,29 @@ export default function DebugPrefsModal({ open, onClose }: { open: boolean; onCl
         debugUnmountX: p.unmountX,
         debugUnmountY: p.unmountY,
         debugSpeed: p.speed,
+        debugDwellSec: p.dwellSec,
         debugMoveY: p.moveY,
       },
       () => {},
     )
   }
 
-  /** 把一行出厂点位填进右栏：两个等待位 + 落笔位 + 收笔位；驻点位不动 */
-  const applyAnchor = (row: FactoryAnchorRow) => {
+  /**
+   * 把一行出厂点位填进右栏：两个等待位 + 落笔位 + 收笔位（含 Y）；驻点位不动。
+   *
+   * 「移动 Y」跟着这一行走：带 Y 的行（P/X 系列）打开，不带 Y 的（A 系列）关掉 ——
+   * 那是这台机的笔动作动不动 Y，不是用户的偏好，套用点位时就该一起定。
+   */
+  const applyAnchor = (row: DebugAnchorRow) => {
     void set(
       {
         debugMountWaitX: row.mountWaitX,
+        debugMountWaitY: row.mountWaitY,
         debugMountX: row.mountX,
         debugUnmountWaitX: row.unmountWaitX,
+        debugUnmountWaitY: row.unmountWaitY,
         debugUnmountX: row.unmountX,
+        debugMoveY: row.mountWaitY !== null || row.unmountWaitY !== null,
       },
       () => {},
     )
@@ -108,6 +116,7 @@ export default function DebugPrefsModal({ open, onClose }: { open: boolean; onCl
         unmountX: r.debugUnmountX,
         unmountY: r.debugUnmountY,
         speed: r.debugSpeed,
+        dwellSec: r.debugDwellSec,
         moveY: r.debugMoveY,
       }),
     )
@@ -376,6 +385,25 @@ export default function DebugPrefsModal({ open, onClose }: { open: boolean; onCl
                 onChange={(next) => void set({ debugRepeat: Math.round(next) }, () => {})}
               />
               <SwitchRow
+                label={tr('settings.calib.debugDwell')}
+                tip={tr('settings.calib.debugDwellNote')}
+                checked={r.debugDwellSec !== null}
+                disabled={!on}
+                onChange={(next) =>
+                  void set({ debugDwellSec: next ? DWELL_DEFAULT_SEC : null }, () => {})
+                }
+              />
+              <NumRow
+                label={tr('settings.calib.debugDwellSec')}
+                unit={tr('settings.calib.debugDwellUnit')}
+                value={r.debugDwellSec ?? DWELL_DEFAULT_SEC}
+                min={0.5}
+                max={60}
+                step={0.5}
+                disabled={!on || r.debugDwellSec === null}
+                onChange={(next) => void set({ debugDwellSec: next }, () => {})}
+              />
+              <SwitchRow
                 label={tr('settings.calib.debugUseTravel')}
                 tip={tr('settings.calib.debugUseTravelNote')}
                 checked={r.debugUseTravelSpeed}
@@ -461,17 +489,34 @@ function HeadAnchorsButton({ active, onClick }: { active: boolean; onClick: () =
 /**
  * 左栏的「出厂点位」参照表：点「默认点位」才出来，默认位置是代码预览。
  *
- * 每行末尾那颗「用」把这一行的三组 X 填进右栏 —— 参照表同时是取数入口，
- * 不用照着数字一个个手敲。
+ * 数据从 `getDebugAnchors` 现读 —— 来源是随包预设的 `[toolhead]` 段，不是前端抄的快照。
+ * 每行末尾那颗「用」把这一行的等待位与目标位（含 Y）填进右栏。
  */
-function AnchorTable({ onUse }: { onUse: (row: FactoryAnchorRow) => void }) {
+function AnchorTable({ onUse }: { onUse: (row: DebugAnchorRow) => void }) {
   const tr = useT()
   const wrapRef = useRef<HTMLDivElement | null>(null)
+  const [groups, setGroups] = useState<DebugAnchorMachine[] | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    api
+      .getDebugAnchors()
+      .then((v) => {
+        if (alive) setGroups(v)
+      })
+      .catch((e: unknown) => {
+        if (alive) setErr(errorText(e))
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   /*
    * 矮窗里开关那几行就把左栏占满了，表格被顶到视野外 —— 点开却看不到东西。
    * 只在"整张表落在可视区下面"时把左栏滚过去；正常窗高一点不动，
-   * 免得把上面的开关滚走。
+   * 免得把上面的开关滚走。数据一到就再算一次（首帧表格还是空的）。
    */
   useEffect(() => {
     const el = wrapRef.current
@@ -481,7 +526,12 @@ function AnchorTable({ onUse }: { onUse: (row: FactoryAnchorRow) => void }) {
     const r = el.getBoundingClientRect()
     const b = box.getBoundingClientRect()
     if (r.top >= b.bottom - 24) box.scrollTop += r.top - b.top
-  }, [])
+  }, [groups])
+
+  if (err !== null) return <p className={s.anchorLegend}>{err}</p>
+  if (groups === null) {
+    return <p className={s.anchorLegend}>{tr('settings.calib.debugAnchorsLoading')}</p>
+  }
 
   return (
     <div ref={wrapRef} className={s.anchorWrap}>
@@ -492,29 +542,22 @@ function AnchorTable({ onUse }: { onUse: (row: FactoryAnchorRow) => void }) {
         <span className={s.anchorHead}>{tr('settings.calib.debugUnmountPath')}</span>
         <span />
       </div>
-      {FACTORY_ANCHORS.map((g) => (
+      {groups.map((g) => (
         <Fragment key={g.machine}>
-          {/* 组头：机型只写这一次，右边的「开始收笔」按机型，组内各版本相同 */}
+          {/* 组头：机型只写这一次，组内各版本相同 */}
           <div className={s.anchorGroup}>
             <span className={s.anchorGroupName}>{g.machine}</span>
-            <span className={s.anchorGroupNote}>
-              {tr('settings.calib.debugAnchorStart')} {g.startPath}
-            </span>
           </div>
           {g.rows.map((row) => (
-            <div key={row.version || 'base'} className={s.anchorRow}>
-              <span className={s.anchorVersion}>{row.version || '—'}</span>
+            <div key={row.variant} className={s.anchorRow}>
+              <span className={s.anchorVersion}>{row.variant.toUpperCase()}</span>
               <span className={s.anchorNum}>
-                {fmt(row.mountWaitX)} → {fmt(row.mountX)}
+                {anchorPath(row.mountWaitX, row.mountWaitY, row.mountX)}
               </span>
               <span className={s.anchorNum}>
-                {fmt(row.unmountWaitX)} → {fmt(row.unmountX)}
+                {anchorPath(row.unmountWaitX, row.unmountWaitY, row.unmountX)}
               </span>
-              <button
-                type="button"
-                className={s.anchorUse}
-                onClick={() => onUse(row)}
-              >
+              <button type="button" className={s.anchorUse} onClick={() => onUse(row)}>
                 {tr('settings.calib.debugAnchorUse')}
               </button>
             </div>
@@ -526,6 +569,10 @@ function AnchorTable({ onUse }: { onUse: (row: FactoryAnchorRow) => void }) {
   )
 }
 
+/** `256 → 267`；预设带等待位 Y 的那几台写成 `20,7 → 1` */
+function anchorPath(waitX: number, waitY: number | null, x: number): string {
+  return waitY === null ? `${fmt(waitX)} → ${fmt(x)}` : `${fmt(waitX)},${fmt(waitY)} → ${fmt(x)}`
+}
 /** 右栏换成存档列表：点一条就套用，左边代码立刻变 */
 function PresetList({
   presets,
@@ -730,13 +777,19 @@ function FollowRow({
 /** 「清空」第一下变确认，三秒不动就退回（与「最近删除」那颗同一个口径） */
 const CONFIRM_MS = 3000
 
+
 /**
- * 「恢复默认」的那一份补丁：全给 `null`，由后端按出厂常量重算。
+ * 「恢复默认」的那一份补丁。
  *
- * 不在这里写死 20 / 267 / 276 —— 那是 P1S 一档的数，写死就等于把
- * 「恢复默认」变成「恢复成 P1S」，A1 用户点一下反而更错。
+ * 坐标与数字给 `null`（后端按出厂常量重算）—— 不在这里写死 20 / 267 / 276，
+ * 那是 P1S 一档的数，写死就等于把「恢复默认」变成「恢复成 P1S」。
+ *
+ * 开关给 `false`：这一颗的语义是「把测试相关的东西全关掉」。其中「动作后等待」
+ * 的出厂档是开 2 秒，给 `null` 会把它又开回来，所以只能显式写 0（= 关）。
  */
 const RESET_PATCH = {
+  /* 连「收落笔点位测试」总开关一起关掉 */
+  debugModeEnabled: false,
   debugWaitX: null,
   debugWaitY: null,
   debugMountWaitX: null,
@@ -749,9 +802,11 @@ const RESET_PATCH = {
   debugUnmountY: null,
   debugSpeed: null,
   debugRepeat: null,
+  /* 恢复默认是「全关」：等待显式写 0（出厂档是开 2 秒，写 null 会又开回来） */
+  debugDwellSec: 0,
   debugTravelSpeed: null,
-  debugUseTravelSpeed: null,
-  debugMoveY: null,
+  debugUseTravelSpeed: false,
+  debugMoveY: false,
   debugCustomGcode: null,
 } as const
 
@@ -827,6 +882,7 @@ function previewLines(r: ResolvedPostprocPrefs): string[] {
     debugTravelSpeed,
     debugUseTravelSpeed,
     debugRepeat,
+    debugDwellSec,
     debugMoveY,
   } = r
 
@@ -840,6 +896,9 @@ function previewLines(r: ResolvedPostprocPrefs): string[] {
   const unmount = { x: debugUnmountX, y: debugUnmountY ?? unmountWait.y }
   /* 到等待位那一档：开了「驻点速度单独调」就用它，否则与落笔同速 */
   const travelF = debugUseTravelSpeed ? debugTravelSpeed : debugSpeed
+  /* 到位后的等待：与内核同一口径（`None` / 0 = 不写） */
+  const dwell =
+    debugDwellSec !== null && debugDwellSec > 0 ? `G4 S${n(debugDwellSec)}` : null
 
   const lines: string[] = ['G28 X', 'G28 Y']
   let at: { x: number; y: number } | null = null
@@ -855,14 +914,18 @@ function previewLines(r: ResolvedPostprocPrefs): string[] {
   }
 
   go(wait, travelF)
-  /* 与内核同一个循环：落笔 → 回落笔等待位 → 收笔 → 回收笔等待位，跑 `repeat` 遍 */
+  /* 与内核同一个循环：每趟从驻点出发、回驻点收（落笔一趟、收笔一趟），跑 `repeat` 遍 */
   for (let i = 0; i < Math.max(1, debugRepeat); i++) {
     go(mountWait, travelF)
     go(mount, debugSpeed)
+    if (dwell !== null) lines.push(dwell)
     go(mountWait, travelF)
+    go(wait, travelF)
     go(unmountWait, travelF)
     go(unmount, debugSpeed)
+    if (dwell !== null) lines.push(dwell)
     go(unmountWait, travelF)
+    go(wait, travelF)
   }
   go(wait, travelF)
   return lines

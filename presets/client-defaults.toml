@@ -1,16 +1,17 @@
 # 客户端偏好的出厂值 —— **只此一份**。
 #
-# 两个消费者都 `include_str!` 这一份：
+# 三个消费者都 `include_str!` 这一份：
 #   · 内核 `postprocess::ir::PrefsIr::default()`（决定切出来的 G-code）
 #   · 客户端 `runtime::app_state` 的 `PostprocPrefs::resolved()`（设置页没填时的初值）
+#   · 客户端 `runtime::client_defaults` 的 `[Client]` 段（主题 / 语言 / 切片器 / 引导 / 预设那两步）
 #
 # 改这里 = 改**新装**的默认值。已经装好的客户端不受影响，直到用户自己点
-# 设置页的「恢复默认」；改完要重新构建才进二进制。
+# 设置页的「恢复默认」（只覆盖后处理那几项）；改完要重新构建才进二进制。
 #
 # 它不是机型 / 参数预设：不参与 `presets generate` 的三层生成物，
 # 也不是工作台参数表里那个 `default`（那个归参数注册表管）。
 #
-# 键名是内核 IR 的 PascalCase（`PrefsIr` 的 serde 口径），枚举值小写。
+# 键名是 PascalCase，枚举值就是客户端盘上那个字符串（`ask` / `zh-CN` / `gui` …）。
 
 [Prefs]
 GlueBottomEnabled = false
@@ -24,3 +25,22 @@ XyCalibrationDwellSec = 3
 BedGlueEnabled = false
 BedGlueAllModels = false
 AutoTowerPosition = "ask"
+
+# 客户端壳自己的偏好 —— **不进 G-code**，读者是客户端（`runtime::client_defaults`）。
+#
+# 与上面那 11 项同一条纪律：这里写什么，新装就是什么；缺一个键就是读不出来（不兜底）。
+# 量程与取值也就是客户端盘上那几个字符串，多一个都算错。
+[Client]
+Theme = "system"
+Locale = "system"
+Slicer = "system"
+GuideShow = true
+NotifyOnFinish = true
+UiMode = "gui"
+AutoTopOnAsk = true
+ForceCalibrationMode = false
+CopiesFollowCloud = false
+AutoCopyScript = true
+AutoUseAfterDownload = true
+AutoCleanHistory = true
+AutoCheckUpdate = true

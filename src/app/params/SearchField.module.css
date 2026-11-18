@@ -49,10 +49,7 @@
   color: var(--text-1);
 }
 
-/*
- * 盖掉 global.css 里那条全局 input 聚焦环：它跟着 input 自己的直角盒走、还往外推 2px，
- * 聚焦时会变成「套在圆角框外面的绿方块」。聚焦看 .field 的边框变色就够。
- */
+/* 聚焦看 `.field` 那道边框变色，输入框自己不画框 */
 .input:focus,
 .input:focus-visible {
   outline: none;

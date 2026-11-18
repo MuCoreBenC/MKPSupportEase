@@ -648,7 +648,24 @@ impl Git {
     ///
     /// 只在凭据已由别处提供时用；发布事务走 [`Self::push_ref_authenticated`]。
     pub fn push_tag(&self, name: &str) -> Result<(), AppError> {
-        self.run(&["push", "origin", &format!("refs/tags/{name}")])?;
+        /*
+         * `MKP_RELEASE_TX=1` 是给 `pre-push` 闸⑤ 看的凭据：「这趟 tag 是发布事务推的」。
+         *
+         * 2026-11-18 作者：「任何文件都拦不住」。闸⑤ 原来只查名字 / annotated / 在 main 上，
+         * 查不出 tag 是人手打的还是事务打的 —— 手工 `git tag -a && git push` 照样过，
+         * 于是绕开清单写入与事后核对。这里打标记，闸⑤ 只认标记，手工那条当场被拒。
+         */
+        let out = Command::new("git")
+            .args(["push", "origin", &format!("refs/tags/{name}")])
+            .env("MKP_RELEASE_TX", "1")
+            .current_dir(&self.repo)
+            .output()
+            .map_err(|e| spawn_failed(&self.repo, e))?;
+        if !out.status.success() {
+            let err = String::from_utf8_lossy(&out.stderr);
+            return Err(AppError::io(format!("推到远端的 tag {name} 失败了"))
+                .with_detail(format!("{}（退出码 {:?}）", err.trim(), out.status.code())));
+        }
         Ok(())
     }
 

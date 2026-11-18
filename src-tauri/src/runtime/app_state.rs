@@ -210,11 +210,12 @@ impl LocalePref {
     }
 }
 
-/// 「还没选过」在语言这一格上的落地 = **跟随系统**（与主题那一格同一个口径）。
+/// 「还没选过」在语言这一格上的落地 = `presets/client-defaults.toml` 的 `[Client] Locale`。
 ///
-/// 于是新装的机器上，后端那几句提示跟着系统语言走；用户点过一次之后照他点的来。
+/// 出厂是「跟随系统」：新装的机器上后端那几句提示跟着系统语言走；用户点过一次之后照他点的来。
 pub fn apply_lang(pref: Option<LocalePref>) {
-    messages::set_lang(pref.unwrap_or(LocalePref::System).lang());
+    let fallback = super::client_defaults::client_defaults().locale;
+    messages::set_lang(pref.unwrap_or(fallback).lang());
 }
 
 /// **主窗置顶档位**（2026-10-17「工艺页加一颗置顶开关」那一刀）。
@@ -353,7 +354,7 @@ pub struct PostprocPrefs {
     /// **高级模式：整段动作块自己写**。`None` = 按字段生成。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_custom_gcode: Option<String>,
-    /// 到驻点 / 回驻点的速度（mm/min）。`None` = 30000。
+    /// 到驻点 / 回驻点的速度（mm/min）。`None` = 20000。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_travel_speed: Option<f64>,
     /// 要不要单独用驻点速度。`None` = false（全用落笔速度）。
@@ -362,6 +363,9 @@ pub struct PostprocPrefs {
     /// **这一趟重复几遍**。`None` = 1。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_repeat: Option<u32>,
+    /// **动作到位后停几秒**。`None` = 不停（那一格开关就是它）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_dwell_sec: Option<f64>,
     /// **调试时动不动 Y 轴**。`None` = 出厂 false（Y 保持原地）。
     /// 不按机型猜：猜错就是把工具头横甩到某个 Y 上。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -506,12 +510,16 @@ impl PostprocPrefs {
     ///
     /// 与内核 `PrefsIr::default()` 读**同一份** `presets/client-defaults.toml`，
     /// 本文件不再写字面量 —— 要改默认值只有那一个地方。
+    ///
+    /// 通知 / 显示方式 / 置顶 / 强制校准这四项不在 `[Prefs]` 段（它们不改 G-code），
+    /// 出厂档取自同一份文件的 `[Client]` 段（[`super::client_defaults`]）。
     pub fn resolved(&self) -> ResolvedPostprocPrefs {
         let d = postprocess::ir::client_prefs_default();
+        let c = super::client_defaults::client_defaults();
         ResolvedPostprocPrefs {
-            notify_on_finish: self.notify_on_finish.unwrap_or(true),
-            ui_mode: self.ui_mode.unwrap_or(PostprocUiMode::Gui),
-            auto_top_on_ask: self.auto_top_on_ask.unwrap_or(true),
+            notify_on_finish: self.notify_on_finish.unwrap_or(c.notify_on_finish),
+            ui_mode: self.ui_mode.unwrap_or(c.ui_mode),
+            auto_top_on_ask: self.auto_top_on_ask.unwrap_or(c.auto_top_on_ask),
             glue_bottom_enabled: self.glue_bottom_enabled.unwrap_or(d.glue_bottom_enabled),
             under_support_enabled: self
                 .under_support_enabled
@@ -546,9 +554,17 @@ impl PostprocPrefs {
             debug_unmount_wait_y: self.debug_unmount_wait_y,
             debug_unmount_y: self.debug_unmount_y,
             debug_custom_gcode: self.debug_custom_gcode.clone(),
-            debug_travel_speed: self.debug_travel_speed.unwrap_or(30000.0),
+            debug_travel_speed: self
+                .debug_travel_speed
+                .unwrap_or(DEBUG_TRAVEL_SPEED_DEFAULT),
             debug_use_travel_speed: self.debug_use_travel_speed.unwrap_or(false),
             debug_repeat: self.debug_repeat.unwrap_or(1),
+            /* 等待那一格：没选过 = 出厂 2 秒（开）；显式 0 = 用户关了 */
+            debug_dwell_sec: match self.debug_dwell_sec {
+                Some(v) if v > 0.0 => Some(v),
+                Some(_) => None,
+                None => Some(DEBUG_DWELL_SEC_DEFAULT),
+            },
             debug_move_y: self.debug_move_y.unwrap_or(false),
             z_calibration_dwell_sec: self
                 .z_calibration_dwell_sec
@@ -560,7 +576,9 @@ impl PostprocPrefs {
                 .clamp(XY_DWELL_MIN, XY_DWELL_MAX),
             bed_glue_enabled: self.bed_glue_enabled.unwrap_or(d.bed_glue_enabled),
             bed_glue_all_models: self.bed_glue_all_models.unwrap_or(d.bed_glue_all_models),
-            force_calibration_mode: self.force_calibration_mode.unwrap_or(false),
+            force_calibration_mode: self
+                .force_calibration_mode
+                .unwrap_or(c.force_calibration_mode),
             /* 三档一一对应；映射写在这里，别再各写一份默认值 */
             auto_tower_position: self
                 .auto_tower_position
@@ -592,7 +610,7 @@ pub struct PresetPrefs {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copies_follow_cloud: Option<bool>,
 
-    /// **换上一份预设之后，自动把它的后处理脚本复制到剪贴板**（出厂 = 关）。
+    /// **换上一份预设之后，自动把它的后处理脚本复制到剪贴板**（出厂 = 开）。
     ///
     /// 开 ⇒ 只要「使用中」从一个文件换到另一个文件，就把**新的那一份**的后处理命令
     /// 抄进剪贴板并发一条通知（作者 2026-11-01：「只要变了那个使用的状态，就从一个
@@ -602,6 +620,15 @@ pub struct PresetPrefs {
     ///   所以判据只有一个读者 —— `src/app/postprocess/autoCopy.ts`，后端不参与。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_copy_script: Option<bool>,
+
+    /// **下载之后自动设为使用中**（出厂 = 开）。
+    ///
+    /// 开 ⇒ 在「云端 → MKP 配置」那一行点「下载」之后，除了落一份本地文件，还把它
+    /// 设为使用中（与首页「下载并使用」的第二步是同一件事）。
+    ///
+    /// ★ 与切片器配置无关：那一档的「生效」是放进切片器目录，下载时本来就会放。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_use_after_download: Option<bool>,
 }
 
 /// Z 轴校准停留时间的**出厂值镜像**与量程（秒）。
@@ -639,6 +666,12 @@ pub const DEBUG_WAIT_X_DEFAULT: f64 = 20.0;
 pub const DEBUG_MOUNT_X_DEFAULT: f64 = 267.0;
 pub const DEBUG_UNMOUNT_X_DEFAULT: f64 = 276.0;
 pub const DEBUG_SPEED_DEFAULT: f64 = 10000.0;
+/// 驻点速度的出厂值：三万太吵，两万够快又不吓人。
+pub const DEBUG_TRAVEL_SPEED_DEFAULT: f64 = 20000.0;
+/// 「动作后等待」的出厂秒数：没选过就是开、2 秒。
+///
+/// 显式 `0` 是「用户关了」——与「没选过」分得开（见 `resolved()` 里那一支）。
+pub const DEBUG_DWELL_SEC_DEFAULT: f64 = 2.0;
 
 /// [`PostprocPrefs::resolved`] 的结果：每一项都是**确定的**值（`Option` 已经解掉、量程已经夹住）。
 ///
@@ -686,6 +719,8 @@ pub struct ResolvedPostprocPrefs {
     pub debug_travel_speed: f64,
     pub debug_use_travel_speed: bool,
     pub debug_repeat: u32,
+    /// `None` = 不停（见 [`PostprocPrefs::debug_dwell_sec`]）
+    pub debug_dwell_sec: Option<f64>,
     pub debug_move_y: bool,
     pub z_calibration_dwell_sec: i64,
     pub xy_calibration_dwell_sec: i64,
@@ -778,14 +813,15 @@ pub struct AppStateFile {
     /// 空的格不写进文件（`skip_serializing_if`）—— 没改过参数的应用，状态文件与以前一样。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub param_origins: BTreeMap<String, BTreeMap<String, ParamOrigin>>,
-    /// **界面主题偏好**（浅 / 深 / 跟随系统）。`None` = 还没选过 ⇒ 界面按"跟随系统"。
+    /// **界面主题偏好**（浅 / 深 / 跟随系统）。`None` = 还没选过 ⇒ `[Client] Theme`
+    /// （出厂「跟随系统」，见 [`super::client_defaults`]）。
     ///
     /// 它是"应用当前记着的界面状态"，不是另一份偏好文件 —— 所以照
     /// [`super::provenance`] 那条界住在这里；前端也不另存副本（读口只有
     /// `src/app/state/appState.ts` 一处，与 activePreset 同一套广播）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<ThemePref>,
-    /// **界面语言**（2026-10-25）。`None` = 还没选过 ⇒ 跟随系统。
+    /// **界面语言**（2026-10-25）。`None` = 还没选过 ⇒ `[Client] Locale`（出厂跟随系统）。
     ///
     /// 与 `theme` 同一族（"用户点出来的界面状态"）：它记在盘上是因为**重启后还要生效**，
     /// 而且后端那几句提示（`messages::text`）用的是同一个值 —— 语言只有一个真值。
@@ -794,11 +830,11 @@ pub struct AppStateFile {
     /// **后处理记录自动清理**（2026-10-13）：开着时按「条数 + 空间」双限静默清掉最旧的
     /// 执行记录（见 [`crate::retention`]）。
     ///
-    /// `None` = **还没选过 ⇒ 开着**（出厂默认）。与主题那一格同一个读法（"没选过"
-    /// 与"明确选了"要分得开），但默认值不同 —— 盘空间是稀缺的那一侧。
+    /// `None` = **还没选过 ⇒ `[Client] AutoCleanHistory`**（出厂开着）。与主题那一格
+    /// 同一个读法（"没选过"与"明确选了"要分得开），但默认值不同 —— 盘空间是稀缺的那一侧。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_clean_history: Option<bool>,
-    /// **自动检查软件更新**（2026-11-05）：`None` = 还没选过 ⇒ **开着**（出厂默认）。
+    /// **自动检查软件更新**（2026-11-05）：`None` = 还没选过 ⇒ `[Client] AutoCheckUpdate`（出厂开）。
     ///
     /// 开 = 客户端**成功拉到云端目录之后**，顺路查一次 `release.json`；发现新版
     /// 在右上角通知里弹一条（点击跳设置页「软件更新」）。查失败一律静默。
@@ -1421,6 +1457,28 @@ pub fn record_param_origins(
     })
 }
 
+/* ---------- 客户端壳偏好的「恢复默认」（2026-11-18） ---------- */
+
+/// 「恢复默认」的另一半：把**客户端壳那几格**清回"没选过"（`None`）。
+///
+/// 写死出厂值会让以后改 `presets/client-defaults.toml` 不再惠及老用户 ——
+/// 清 `None` 与后处理那 15 项同一条口径（`null` = 没设过 ⇒ 读出厂）。
+///
+/// 动的是：主题、语言、自动清理、自动检查更新、预设页那三项（整格 `presets`）、
+/// 数据源覆盖。**不动**窗口几何 / 置顶 / 使用中指针 / 草稿 —— 那些是"现在长什么样"，
+/// 不是偏好。
+pub fn clear_client_prefs(root: &Path) -> Result<(), AppError> {
+    with_state(root, |state| {
+        state.theme = None;
+        state.locale = None;
+        state.auto_clean_history = None;
+        state.auto_check_update = None;
+        state.presets = None;
+        state.preset_source = None;
+        Ok(())
+    })
+}
+
 /* ---------- presetSource：数据源设置 ---------- */
 
 /// 读数据源设置。没有 → `None`（**没配过是合法状态**）
@@ -1446,9 +1504,14 @@ pub fn clear_preset_source(root: &Path) -> Result<(), AppError> {
 
 /* ---------- theme：界面主题偏好 ---------- */
 
-/// 读主题偏好。`None` = **还没选过**（与"选了跟随系统"两码事，见 [`ThemePref`] 的模块注释）。
+/// 读主题偏好。**还没选过** ⇒ `[Client] Theme` 那一格（出厂「跟随系统」）。
+///
+/// 盘上"没选过"与"选了跟随系统"仍是两码事（见 [`ThemePref`] 的模块注释），只是
+/// 出口这里已经把前一种解成了出厂档 —— 界面不必拿 `null` 自己猜（猜的那一份迟早与
+/// 后端落地的那一份漂开）。
 pub fn theme(root: &Path) -> Result<Option<ThemePref>, AppError> {
-    Ok(load(root)?.theme)
+    let fallback = super::client_defaults::client_defaults().theme;
+    Ok(Some(load(root)?.theme.unwrap_or(fallback)))
 }
 
 /// 记下主题偏好（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
@@ -1461,9 +1524,10 @@ pub fn set_theme(root: &Path, pref: ThemePref) -> Result<ThemePref, AppError> {
 
 /* ---------- locale：界面语言 ---------- */
 
-/// 界面语言偏好。`None` = **还没选过** ⇒ 跟随系统。
+/// 界面语言偏好。**还没选过** ⇒ `[Client] Locale` 那一格（出厂「跟随系统」），与 [`theme`] 同一条。
 pub fn locale(root: &Path) -> Result<Option<LocalePref>, AppError> {
-    Ok(load(root)?.locale)
+    let fallback = super::client_defaults::client_defaults().locale;
+    Ok(Some(load(root)?.locale.unwrap_or(fallback)))
 }
 
 /// 记下界面语言（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
@@ -1479,12 +1543,13 @@ pub fn set_locale(root: &Path, pref: LocalePref) -> Result<LocalePref, AppError>
 
 /* ---------- autoCleanHistory：执行记录的自动清理开关 ---------- */
 
-/// 自动清理开着吗。**`None` = 还没选过 ⇒ 开着**（出厂默认，见字段注释）。
+/// 自动清理开着吗。**还没选过 ⇒ `[Client] AutoCleanHistory`**（出厂开）。
 ///
 /// 读者是清理那两条入口（[`crate::retention`]）—— 界面不直接读它，
 /// 设置页那一格走 `ipc::prefs` 的命令。
 pub fn auto_clean_history(root: &Path) -> Result<bool, AppError> {
-    Ok(load(root)?.auto_clean_history.unwrap_or(true))
+    let fallback = super::client_defaults::client_defaults().auto_clean_history;
+    Ok(load(root)?.auto_clean_history.unwrap_or(fallback))
 }
 
 /// 记下自动清理开关（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
@@ -1497,11 +1562,12 @@ pub fn set_auto_clean_history(root: &Path, enabled: bool) -> Result<bool, AppErr
 
 /* ---------- autoCheckUpdate：软件更新的自动检查开关 ---------- */
 
-/// 自动检查开着吗。**`None` = 还没选过 ⇒ 开着**（出厂默认，见字段注释）。
+/// 自动检查开着吗。**还没选过 ⇒ `[Client] AutoCheckUpdate`**（出厂开）。
 ///
 /// 读者是 [`crate::runtime::update_check`] —— 界面不直接读它，设置页那格走 `ipc::prefs`。
 pub fn auto_check_update(root: &Path) -> Result<bool, AppError> {
-    Ok(load(root)?.auto_check_update.unwrap_or(true))
+    let fallback = super::client_defaults::client_defaults().auto_check_update;
+    Ok(load(root)?.auto_check_update.unwrap_or(fallback))
 }
 
 /// 记下自动检查开关（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
@@ -1555,13 +1621,14 @@ pub fn preset_prefs(root: &Path) -> Result<PresetPrefs, AppError> {
     Ok(load(root)?.presets.unwrap_or_default())
 }
 
-/// **复制出来的那一份跟不跟云端**（出厂 = 关）。
+/// **复制出来的那一份跟不跟云端**（出厂见 `presets/client-defaults.toml` 的 `[Client]`）。
 ///
 /// ★ 回的是**解析后的 `bool`**：盘上"没选过"是 `None`，而"没选过"该怎么解释是
 /// **后端的事** —— 界面不自己拿 `null` 去猜（猜出来的那一档迟早与真正执行排除的
 /// 那一侧漂开）。与 [`auto_clean_history`] 同一条口径。
 pub fn copies_follow_cloud(root: &Path) -> Result<bool, AppError> {
-    Ok(preset_prefs(root)?.copies_follow_cloud.unwrap_or(false))
+    let fallback = super::client_defaults::client_defaults().copies_follow_cloud;
+    Ok(preset_prefs(root)?.copies_follow_cloud.unwrap_or(fallback))
 }
 
 /// 记下「复制出来的也跟着云端更新」（整份状态原子替换，别的格一个不动）。
@@ -1574,12 +1641,13 @@ pub fn set_copies_follow_cloud(root: &Path, enabled: bool) -> Result<bool, AppEr
     })
 }
 
-/// **换上一份预设之后自动复制它的后处理脚本**（出厂 = 关）。
+/// **换上一份预设之后自动复制它的后处理脚本**（出厂见 `presets/client-defaults.toml`）。
 ///
 /// 与 [`copies_follow_cloud`] 同一条口径：盘上"没选过"是 `None`，
 /// "没选过怎么解释"是后端的事，界面不拿 `null` 去猜。
 pub fn auto_copy_script(root: &Path) -> Result<bool, AppError> {
-    Ok(preset_prefs(root)?.auto_copy_script.unwrap_or(false))
+    let fallback = super::client_defaults::client_defaults().auto_copy_script;
+    Ok(preset_prefs(root)?.auto_copy_script.unwrap_or(fallback))
 }
 
 /// 记下「使用之后自动复制后处理脚本」（整份状态原子替换，别的格一个不动）。
@@ -1587,6 +1655,24 @@ pub fn set_auto_copy_script(root: &Path, enabled: bool) -> Result<bool, AppError
     with_state(root, |state| {
         let mut prefs = state.presets.clone().unwrap_or_default();
         prefs.auto_copy_script = Some(enabled);
+        state.presets = Some(prefs);
+        Ok(enabled)
+    })
+}
+
+/// **下载之后自动设为使用中**（出厂见 `presets/client-defaults.toml`）。
+pub fn auto_use_after_download(root: &Path) -> Result<bool, AppError> {
+    let fallback = super::client_defaults::client_defaults().auto_use_after_download;
+    Ok(preset_prefs(root)?
+        .auto_use_after_download
+        .unwrap_or(fallback))
+}
+
+/// 记下「下载之后自动设为使用中」（整份状态原子替换，别的格一个不动）。
+pub fn set_auto_use_after_download(root: &Path, enabled: bool) -> Result<bool, AppError> {
+    with_state(root, |state| {
+        let mut prefs = state.presets.clone().unwrap_or_default();
+        prefs.auto_use_after_download = Some(enabled);
         state.presets = Some(prefs);
         Ok(enabled)
     })
@@ -1678,6 +1764,60 @@ mod tests {
             sha256: Some(hex(&Sha256::digest(content))),
             size: Some(content.len() as u64),
         }
+    }
+
+    /// 「动作后等待」的出厂档是开、2 秒；显式 0 表示用户关了（不是"等 0 秒"）。
+    #[test]
+    fn the_default_dwell_is_two_seconds_and_zero_means_off() {
+        let d = PostprocPrefs::default().resolved();
+        assert_eq!(d.debug_dwell_sec, Some(DEBUG_DWELL_SEC_DEFAULT));
+
+        let off = PostprocPrefs {
+            debug_dwell_sec: Some(0.0),
+            ..Default::default()
+        }
+        .resolved();
+        assert_eq!(off.debug_dwell_sec, None, "0 秒是关，不是一条 G4 S0");
+
+        let on = PostprocPrefs {
+            debug_dwell_sec: Some(5.0),
+            ..Default::default()
+        }
+        .resolved();
+        assert_eq!(on.debug_dwell_sec, Some(5.0));
+    }
+
+    /// 「恢复默认」清的是"没设过"，不是写死出厂值：清完盘上那几格都是 `None`，
+    /// 读回来就是 `client-defaults.toml` 那一档；以后改默认值仍能惠及它。
+    #[test]
+    fn clearing_client_prefs_returns_to_the_shipped_defaults() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        set_theme(root, ThemePref::Dark).unwrap();
+        set_locale(root, LocalePref::En).unwrap();
+        set_auto_clean_history(root, false).unwrap();
+        set_auto_check_update(root, false).unwrap();
+        set_copies_follow_cloud(root, true).unwrap();
+        set_preset_source(
+            root,
+            crate::runtime::source::make_source(
+                crate::runtime::source::SourceMode::Custom,
+                Some("https://example.com/presets/delivery"),
+                crate::runtime::source::CustomShape::Unset,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        clear_client_prefs(root).unwrap();
+
+        let file = load(root).unwrap();
+        assert!(file.theme.is_none(), "主题该清回没设过");
+        assert!(file.locale.is_none());
+        assert!(file.auto_clean_history.is_none());
+        assert!(file.auto_check_update.is_none());
+        assert!(file.presets.is_none(), "预设页三项该清回没设过");
+        assert!(file.preset_source.is_none(), "数据源覆盖该撤掉");
     }
 
     /// **`parse` 与 `wire` 必须互相对得上**：`wire()` 出来的一定要 `parse` 得回去。
@@ -2270,12 +2410,16 @@ mod tests {
 
     /* ---------- theme ---------- */
 
-    /// 存得下、读得回、覆盖得住；**没选过 = None**（不是"浅色"）——
-    /// 界面据此区分"跟随系统"与"用户没碰过"（`ipc::prefs` 那两条命令的口径）
+    /// 存得下、读得回、覆盖得住；**没选过 = 出厂档**（`[Client] Theme`，出厂「跟随系统」）——
+    /// 出口已经解成出厂值，界面不必拿 `null` 自己猜（`ipc::prefs` 那两条命令的口径）
     #[test]
-    fn theme_roundtrips_and_starts_as_none() {
+    fn theme_roundtrips_and_starts_at_the_shipped_default() {
         let d = tempfile::tempdir().unwrap();
-        assert_eq!(theme(d.path()).unwrap(), None, "没选过就是 None");
+        assert_eq!(
+            theme(d.path()).unwrap(),
+            Some(ThemePref::System),
+            "没选过就是出厂档（跟随系统）"
+        );
 
         assert_eq!(
             set_theme(d.path(), ThemePref::Dark).unwrap(),
@@ -2302,7 +2446,7 @@ mod tests {
         assert!(set_auto_clean_history(d.path(), true).unwrap());
         assert!(auto_clean_history(d.path()).unwrap());
         /* 与主题那格互不踩：关掉自动清理不该动主题 */
-        assert_eq!(theme(d.path()).unwrap(), None);
+        assert_eq!(theme(d.path()).unwrap(), Some(ThemePref::System));
     }
 
     /* ---------- autoCheckUpdate（2026-11-05） ---------- */
@@ -2365,7 +2509,7 @@ mod tests {
         assert!(compact(d.path()).unwrap());
         assert_eq!(last_window_box(d.path()).unwrap(), Some(box_));
         /* 三格同住一份状态文件，但一个都不许被邻居改写 */
-        assert_eq!(theme(d.path()).unwrap(), None);
+        assert_eq!(theme(d.path()).unwrap(), Some(ThemePref::System));
         assert!(auto_clean_history(d.path()).unwrap());
 
         set_pin(d.path(), PinPref::Page).unwrap();

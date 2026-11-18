@@ -336,7 +336,7 @@ pub fn drive(sink: &dyn Sink, opts: &Options, cancel: &CancelToken) -> bool {
         preset_name: ::postprocess::diag::messages::text("ui.devsim.preview.preset", &[])
             .to_owned(),
         gcode_name: "（假钩子）演示.gcode".to_owned(),
-        facts: Some(FactsPayload {
+        facts: Some(Box::new(FactsPayload {
             gcode_machine: gcode_machine.to_owned(),
             preset_machine: preset_machine.to_owned(),
             filament_type: "PETG".to_owned(),
@@ -348,7 +348,9 @@ pub fn drive(sink: &dyn Sink, opts: &Options, cancel: &CancelToken) -> bool {
             glue_speed: Some(70.0),
             slicer: Some("BambuStudio".to_owned()),
             slicer_print_time_seconds: Some(12_175.0), // 3h 22m 55s
-        }),
+            /* 这一套演示是普通后处理，不是点位测试 */
+            debug: None,
+        })),
     });
 
     /* 「那一问」在真钩子里排在管线的**前面**（机型核对先做）—— 这里同一个位置 */

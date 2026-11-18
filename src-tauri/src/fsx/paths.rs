@@ -101,14 +101,51 @@ pub const APP_IDENTIFIER: &str = "SupportEase";
 /// 这样"钩子"与"界面"在同一棵树上看同一份端点文件。
 pub const DATA_ROOT_ENV: &str = "MKP_SUPPORT_EASE_DATA";
 
+/// 绿色版（zip 解压即用）的数据目录名 —— 就在可执行文件旁边。
+///
+/// 它与 `src-tauri/tauri.portable.conf.json` 里的
+/// `app.appDirectoriesOverride = "./app-data"` **必须是同一个名字**
+/// （判据 `the_portable_override_matches_the_headless_rule` 钉着）。
+const PORTABLE_ROOT_DIR: &str = "app-data";
+
+/// 绿色版的数据根：**exe 旁边的 `app-data`**（没有就是 `None`）。
+///
+/// 界面那一侧不用这个函数 —— 那条路是 Tauri 自己按 `appDirectoriesOverride` 算的，
+/// 相对路径的基准正是"可执行文件所在目录"。钩子这一侧没有 `AppHandle`，只能把同一条
+/// 规则再走一遍。
+///
+/// ★ 为什么非认不可（2026-11-18 真机）：两套根的时候，界面把端点写在
+/// `<解压目录>\app-data\run\hook.port`，钩子却去读 `%APPDATA%\SupportEase\run\hook.port`
+/// —— 拿到的是上一次安装版留下的旧端口，连上去没人听。校准件那一问于是**永远问不到人**，
+/// 按"不替用户决定"停下（`W_CALIB_MODE_001`，Bambu 只显示 `Error code: 1`）；
+/// 执行记录与日志也跟着写错了树（绿色版的报告页里看不见）。
+///
+/// 判据只有一条：exe 同级真的有一个 `app-data` 目录。安装版不会误判（安装目录里没有它，
+/// 数据在 `%APPDATA%\SupportEase`），开发构建也不会（`target/release/` 里没有）。
+fn portable_root_near(exe: &Path) -> Option<PathBuf> {
+    let dir = exe.parent()?.join(PORTABLE_ROOT_DIR);
+    dir.is_dir().then_some(dir)
+}
+
 /// 钩子进程那侧的内部根（没有 `AppHandle` 时用）。
 ///
 /// 平台规则与 Tauri 的 `app_data_dir()` 对齐（Windows `%APPDATA%\<标识符>`、
-/// macOS `~/Library/Application Support/<标识符>`、Linux `$XDG_DATA_HOME/<标识符>`）。
+/// macOS `~/Library/Application Support/<标识符>`、Linux `$XDG_DATA_HOME/<标识符>`），
+/// **外加绿色版那一档**（见 [`portable_root_near`]）：exe 旁边有 `app-data` 就用它。
+///
 /// 算不出来 / 建不出来 ⇒ `None`：钩子那侧**没有界面也不影响干活**，只是这次没人看进度。
 pub fn internal_root_headless() -> Option<PathBuf> {
     if let Some(over) = std::env::var_os(DATA_ROOT_ENV) {
         let root = PathBuf::from(over);
+        ensure_dirs(&root, &INTERNAL_DIRS).ok()?;
+        return Some(root);
+    }
+    /* 绿色版：与界面的 `appDirectoriesOverride` 走同一个根（端点 / 日志 / 归档都在这里） */
+    if let Some(root) = std::env::current_exe()
+        .ok()
+        .as_deref()
+        .and_then(portable_root_near)
+    {
         ensure_dirs(&root, &INTERNAL_DIRS).ok()?;
         return Some(root);
     }
@@ -322,6 +359,40 @@ mod tests {
 
     fn root() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
+    }
+
+    /// **绿色版的数据根就是 exe 旁边的 `app-data`**（2026-11-18 真机：钩子读错了树，
+    /// 校准件那一问永远问不到人）。这里咬住"有没有那个目录"这唯一一条判据。
+    #[test]
+    fn a_portable_build_is_recognised_by_the_app_data_dir_next_to_the_exe() {
+        let d = root();
+        let exe = d.path().join("SupportEase.exe");
+        assert_eq!(portable_root_near(&exe), None, "没有 app-data 就不是绿色版");
+
+        std::fs::create_dir_all(d.path().join("app-data")).unwrap();
+        assert_eq!(
+            portable_root_near(&exe),
+            Some(d.path().join("app-data")),
+            "exe 旁边有 app-data 就必须认它（界面用的是同一个根）"
+        );
+
+        /* 只有文件、没有目录不算（同名文件不是数据根） */
+        let e2 = root();
+        crate::fsx::atomic::atomic_write(&e2.path().join("app-data"), b"x").unwrap();
+        assert_eq!(portable_root_near(&e2.path().join("SupportEase.exe")), None);
+    }
+
+    /// 名字**不许漂**：界面那份配置里写的就是 `./app-data`，改一边不改另一边 =
+    /// 又回到"两个根"，而那种坏法在界面上只是"校准件那一问没反应"。
+    #[test]
+    fn the_portable_override_matches_the_headless_rule() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.portable.conf.json")).unwrap();
+        assert_eq!(
+            conf["app"]["appDirectoriesOverride"], "./app-data",
+            "tauri.portable.conf.json 里的覆盖目录必须是 ./{PORTABLE_ROOT_DIR}"
+        );
+        assert_eq!(PORTABLE_ROOT_DIR, "app-data");
     }
 
     #[test]

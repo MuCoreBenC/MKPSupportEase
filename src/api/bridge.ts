@@ -360,6 +360,9 @@ export const bridgeApi: MkpApi = {
   setPresetSource: (mode, customUrl) =>
     call('setPresetSource', 'set_preset_source', { mode, customUrl: customUrl ?? null }),
   clearPresetSource: () => call('clearPresetSource', 'clear_preset_source'),
+  /* 前端那两格偏好的出厂档（2026-11-18）：切片器 / 重新切片提示住在 localStorage，
+     壳读不到 ⇒ 出厂值从 `presets/client-defaults.toml` 的 `[Client]` 段递过来 */
+  getClientDefaults: () => call('getClientDefaults', 'get_client_defaults'),
   /* 界面偏好（2026-10-12）：主题（浅 / 深 / 跟随系统）—— 落 AppState 的 theme 格 */
   getTheme: () => call('getTheme', 'get_theme'),
   setTheme: (theme) => call('setTheme', 'set_theme', { theme }),
@@ -386,9 +389,19 @@ export const bridgeApi: MkpApi = {
   getAutoCopyScript: () => call('getAutoCopyScript', 'get_auto_copy_script'),
   setAutoCopyScript: (enabled) =>
     call('setAutoCopyScript', 'set_auto_copy_script', { enabled }),
+  /* 预设页偏好第三项（2026-11-18）：「下载之后自动设为使用中」—— 同一格 presets。
+     读者是预设页「云端 → MKP 配置」那颗「下载」，后端不读它 */
+  getAutoUseAfterDownload: () =>
+    call('getAutoUseAfterDownload', 'get_auto_use_after_download'),
+  setAutoUseAfterDownload: (enabled) =>
+    call('setAutoUseAfterDownload', 'set_auto_use_after_download', { enabled }),
   /* 后处理偏好（2026-10-17）：设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块。
      读回的是**解析后**的值 + 量程；写是**整格覆盖**（改一项传全量） */
   getPostprocPrefs: () => call('getPostprocPrefs', 'get_postproc_prefs'),
+  /* 调试窗的「默认点位」：随包预设的 [toolhead] 段（零网络、零文件写） */
+  getDebugAnchors: () => call('getDebugAnchors', 'get_debug_anchors'),
+  getClientPrefsView: () => call('getClientPrefsView', 'get_client_prefs_view'),
+  resetClientPrefs: () => call('resetClientPrefs', 'reset_client_prefs'),
   setPostprocPrefs: (prefs) => call('setPostprocPrefs', 'set_postproc_prefs', { prefs }),
   /* 重置后处理状态（设置页那一颗按钮）：先让钩子别等，再清界面状态 */
   resetPostProcessState: () => call('resetPostProcessState', 'reset_post_process_state'),

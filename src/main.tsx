@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import './styles/tokens.css'
 import './styles/global.css'
 
+import { seedClientDefaults } from './app/state/clientDefaults'
 import { applyTheme, readStoredTheme } from './app/state/theme'
 
 /*
@@ -65,6 +66,20 @@ if (isGuide) document.documentElement.dataset.guide = '1'
 applyTheme(readStoredTheme())
 
 void (async () => {
+  /*
+   * 后处理弹框的预览清单（`/?pp=list`，只在开发构建里）：那一屏在浏览器里到不了，
+   * `mock.ts` 按 `?pp=<名字>` 造快照；清单页把全部场景列出来，省得记名字。
+   */
+  if (import.meta.env.DEV && new URLSearchParams(window.location.search).get('pp') === 'list') {
+    const [{ default: PpPreviewIndex }, { hideBootSkeleton }] = await Promise.all([
+      import('./dev/PpPreviewIndex'),
+      import('./app/bootSkeleton'),
+    ])
+    createRoot(host).render(<PpPreviewIndex />)
+    /* 骨架是 `#root` 的兄弟（见 `bootSkeleton.ts`），这一页不走首页那条"就绪才收"的路 */
+    hideBootSkeleton()
+    return
+  }
   if (isGuide) {
     /*
      * ★★ **引导窗口得自己落一次 `data-theme`**（2026-10-15）：这一扇窗**不跑 appState**
@@ -107,13 +122,20 @@ void (async () => {
     import('./app/state/theme'),
     import('./i18n'),
   ])
-  const [themePref, localePref, active] = await Promise.all([
+  const [themePref, localePref, active, clientDefaults] = await Promise.all([
     api.getTheme().catch(() => null),
     api.getLocale().catch(() => null),
     api.getActivePreset().catch(() => null),
+    /*
+     * 前端自己那两格偏好（切片器 / 重新切片提示）的出厂档：它们住在 localStorage，
+     * 出厂值只能由后端从 `presets/client-defaults.toml` 递过来。挂 React 之前拿到，
+     * 首次渲染的 `useSyncedStickyState` 才有正确的初值可用。
+     */
+    api.getClientDefaults().catch(() => null),
   ])
   applyTheme(themePref)
   i18n.setActiveLocale(i18n.resolveLocale(localePref))
+  if (clientDefaults !== null) seedClientDefaults(clientDefaults)
 
   /*
    * 骨架中间那台机器按**正在用的机型**换（2026-10-31）。

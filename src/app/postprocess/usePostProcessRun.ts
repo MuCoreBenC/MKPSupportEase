@@ -43,6 +43,7 @@ import {
   POSTPROCESS_QUESTION as QUESTION_EVENT,
   POSTPROCESS_STARTED as STARTED_EVENT,
 } from './events'
+import { screenDismissed } from './facts'
 
 /**
  * 静默档下，结论那枚胶囊在标题栏留多久（毫秒）。
@@ -90,7 +91,8 @@ export interface PostProcessRunView {
    * （`reopen` 仍然有效，那是一次主动动作，不算打扰）。
    *
    * ★ 与 `dismissed` 的区别：`dismissed` 是"用户关过这一屏"，`silent` 是"这一档根本不许弹"。
-   *   两者都不弹，但语义不同 —— 静默档下 `dismissed` 始终为 `true`（由这里统一置位）。
+   *   两者都不弹，但语义不同 —— 静默档下 `dismissed` 为 `true`（由这里统一置位；
+   *   只例外一条：**有问句挂着时一律露面**，见 `./facts` 的 `screenDismissed`）。
    */
   silent: boolean
   /**
@@ -140,6 +142,15 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
    * 新一趟开场 / 结论到达都清掉：下一次仍旧不许自己弹。
    */
   const [forcedOpen, setForcedOpen] = useState(false)
+  /*
+   * **有问句挂着，这一屏就必须露面**（2026-11-18 作者：「就算我开静默，只要有提问
+   * 它就需要拉起来……不然用户都不知道」）。
+   *
+   * 这笔账不另存一格：问句在不在就是 `run.question`（钩子收掉它的那一刻归零）。
+   * 它压过静默档、也压过"用户点过后台运行"—— 那一问收掉（答完 / 超时 / 结论到达），
+   * 屏幕就按原档位收回去，静默档仍旧回到右上角那枚胶囊。判据见 `screenDismissed`。
+   */
+  const questionOpen = run?.question != null
 
   /*
    * 档位**当场**换过来（2026-10-27，作者：「我一开始点了静默，后来切成 GUI，
@@ -275,7 +286,23 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
     /* 事实那一条紧跟在开场后面（左栏那张表），收不到就空着 —— 不编 */
     bind<PostProcessFacts>(FACTS_EVENT, (prev, facts) => ({ ...prev, facts }))
     bind<PostProcessProgress>(PROGRESS_EVENT, (prev, progress) => ({ ...prev, progress }))
-    bind<PostProcessQuestion>(QUESTION_EVENT, (prev, question) => ({ ...prev, question }))
+    /*
+     * **问到人头上，这一屏就得露面**（2026-11-18 作者：「就算我开静默，只要有提问
+     * 它就需要拉起来……不然用户都不知道」）。
+     *
+     * 露面这件事由 `run.question` 自己带出来（见下面 `effectiveDismissed` 那一段，
+     * 判据是 `./facts` 的 `screenDismissed`）；这一条多做的是把"结论留一分钟"的账
+     * 清掉（那一趟又回来了）—— **抬窗**在后端（`hook_ui::apply` 的 `Question` 那一支：
+     * 静默档也抬，只认新的一问）。
+     */
+    void listen<PostProcessQuestion>(QUESTION_EVENT, (question) => {
+      if (!alive) return
+      setRun((prev) => (prev === null ? prev : { ...prev, question }))
+      setQuietUntil(null)
+    }).then((off) => {
+      if (alive) offs.push(off)
+      else off()
+    })
     bind<PostProcessFinished>(FINISHED_EVENT, (prev, finished) => ({
       ...prev,
       finished,
@@ -348,7 +375,7 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
    *
    * ★★ 必须同时清掉 `forcedOpen`（2026-10-17）：静默档下，用户点了胶囊把那屏翻出来、
    *   看了一半再点「后台运行」——  只设 `dismissed` 是**收不回去的**
-   *   （`effectiveDismissed = dismissed || (silent && !forcedOpen)`，`forcedOpen`
+   *   （`screenDismissed` 只认 `dismissed || (silent && !forcedOpen)`，`forcedOpen`
    *   还挂着 true，模态框照样渲染）。两个状态要一起翻，否则"收起来"这条路断一半。
    *
    * 来回切（点开 → 后台 → 再点开 → 再后台）着走没问题：两个开关各归各位，
@@ -406,14 +433,20 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
   }, [])
 
   /*
-   * 对外那个 `dismissed` = **"这一屏现在该不该收着"**：
-   *   用户关过（`dismissed`）**或** 静默档（`silent`）。
+   * 对外那个 `dismissed` = **"这一屏现在该不该收着"**（判据住在 `./facts` 的
+   * `screenDismissed`，有回归）：
+   *   用户关过（`dismissed`）**或** 静默档（`silent`）—— 但**有问句时一律不收起**。
    *
-   * 静默档下它恒为 `true` ⇒ 模态框恒不渲染；而 `reopen` 仍然有效 ——
+   * 静默档下（没有问句时）它恒为 `true` ⇒ 模态框恒不渲染；而 `reopen` 仍然有效 ——
    * 用户点右上角那枚胶囊是主动动作，那时把这一屏叫出来是对的。
    * 为了让 `reopen` 在静默档下也能生效，`reopen` 里额外记一笔 `forcedOpen`。
    */
-  const effectiveDismissed = dismissed || (silent && !forcedOpen)
+  const effectiveDismissed = screenDismissed({
+    dismissed,
+    silent,
+    forcedOpen,
+    questionOpen,
+  })
 
   return {
     run,

@@ -26,7 +26,7 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const TABLE = path.join(here, '..', 'crates', 'postprocess', 'messages.toml')
 
 const CLASS_DESC = {
-  E: '故障 —— 系统判定这件事没成',
+  E: '故障 —— 系统判定这件事失败',
   W: '停下 / 降级 —— 不是故障：用户让它停的，或某一步降级了',
   N: '成功 —— 跑完了（不同结果各有一码）',
   Q: '提问 —— 钩子停下来问用户的那几句',

@@ -88,6 +88,7 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
             travel_speed: prefs.debug_travel_speed,
             use_travel_speed: prefs.debug_use_travel_speed,
             repeat: prefs.debug_repeat,
+            dwell_sec: prefs.debug_dwell_sec,
             move_y: prefs.debug_move_y,
         })
     } else {
@@ -221,6 +222,7 @@ mod tests {
             debug_travel_speed: 30000.0,
             debug_use_travel_speed: false,
             debug_repeat: 1,
+            debug_dwell_sec: Some(2.0),
             debug_move_y: false,
             z_calibration_dwell_sec: 7,
             xy_calibration_dwell_sec: 9,

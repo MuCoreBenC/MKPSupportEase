@@ -315,8 +315,11 @@ export interface PresetData {
    *
    * 与云端文件那颗「下载」（`api.downloadFiles()`，假后端必抛未实现）不同，
    * 这一条**真的能下**。失败照抛给页面说出来。
+   *
+   * 返回值 = 这一份现在是不是已经躺在切片器的每个账号目录里（下载会顺手放入；
+   * 本机没有切片器目录时是 `false`，页面照实说，不假装放好了）。
    */
-  downloadPreset: (fileName: string, onTick?: (tick: DownloadTick) => void) => Promise<void>
+  downloadPreset: (fileName: string, onTick?: (tick: DownloadTick) => void) => Promise<boolean>
   /**
    * **一次处理多份**（批量补齐 / 批量更新）。
    *
@@ -949,6 +952,17 @@ export function usePresetData(importRevision = 0): PresetData {
     void readLocalPresets().catch(() => {
       /* 读不到就保持旧列表 —— 与上面同一条纪律 */
     })
+    /*
+     * **「已放入」也要重读**（2026-11-18）：下载会顺手把切片器配置放进切片器目录
+     * （后端那一手），行上那枚「已放入」不跟着刷就会停在下载前的样子 ——
+     * 首页「下载并使用」下了套餐，切回本页还是「未放入」。
+     */
+    void api
+      .getSlicerCopied()
+      .then(setSlicerCopied)
+      .catch(() => {
+        /* 读不到就保持旧状态 —— 与窗口聚焦那一条同一条纪律 */
+      })
   }, [deliveryRevision, ready, readPresetFeedInto, readLocalPresets])
 
   /*
@@ -1162,16 +1176,25 @@ export function usePresetData(importRevision = 0): PresetData {
    *
    * 写完**只广播**（`deliveryMutated()`）：本页与别的页都从订阅里重读那一路 ——
    * 这里是"写下 / 移出投递面"的四个出口之一，不再各自显式重读一次（单一触发路径）。
+   *
+   * ★ 2026-11-18：下载**同时放进切片器**（后端 `download_runtime_file` 里那一手）。
+   * 回来重读「已放入」，并把结论交回页面 —— 提示条按它说实话：放进了 / 本机没有
+   * 切片器目录、得自己点「放入」。
    */
   const downloadPreset = useCallback(
-    async (fileName: string, onTick?: (tick: DownloadTick) => void) => {
+    async (fileName: string, onTick?: (tick: DownloadTick) => void): Promise<boolean> => {
+      let placed = false
       try {
         await api.downloadCatalogFile(fileName, onTick)
       } finally {
         /* 成没成都广播：`deliver` 是"先归档旧份、再换新"，失败也可能动过盘 ——
            宁可多读一次，不赌"失败 = 没变"（与首页 `applyCurrent` 同一条） */
         deliveryMutated()
+        const copied = await api.getSlicerCopied().catch(() => null)
+        if (copied !== null) setSlicerCopied(copied)
+        placed = copied?.includes(fileName) ?? false
       }
+      return placed
     },
     [],
   )

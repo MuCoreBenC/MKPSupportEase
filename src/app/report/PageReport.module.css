@@ -73,13 +73,24 @@
 }
 
 /*
- * 页头那两颗（导出 / 刷新）用**产品那一套** `.btn`（`ui/Controls`，槽上的
- * `[data-page] .btn` 已经给了胶囊圆角与内衬）—— 这里一条样式都不写。
+ * 页头那几颗（星标 / 导出 / 回放 / 刷新）用**产品那一套** `.btn`（`ui/Controls`，
+ * 槽上的 `[data-page] .btn` 已经给了胶囊圆角与内衬）—— 这里一条按钮样式都不写。
  *
  * V13 抽卡里给它们另配过一张皮（`rgb(255 255 255 / 60%)` 底 + `text-2` 字），
  * **没有搬**：全站按钮只许一套（同"模态框只许一套"那条），而这一页再开一套的话，
  * 下一个页面就会再开一套。要改圆角 / 深浅，改 `ui.module.css` 的 `[data-page] .btn`。
  */
+
+/* 页头星标那颗里的图形：灰空心 → 橙黄实心。只给图形上色，按钮的胶囊皮归 `.btn` */
+.headStar {
+  display: grid;
+  place-items: center;
+  color: var(--text-2);
+}
+
+.headStar[data-on='true'] {
+  color: var(--star);
+}
 
 /*
  * 提示条自己是一条通栏，得由外面这格给它头部的左右留白 ——
@@ -324,17 +335,19 @@
   color: var(--text-3);
 }
 
-/* 状态筛选：三颗胶囊，各带计数；当前那颗绿浅底 */
+/* 筛选：几颗胶囊各带计数，当前那颗绿浅底。多一只「星标」不掉到栏外 —— 允许折行 */
 .filterBar {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 5px;
 }
 
+/* 四颗要挤进 304px（面板 340 − 左右各 18）：内衬比从前收窄 1px，字与码不变 */
 .filterPill {
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 5px 13px;
+  padding: 5px 12px;
   border: 1px solid var(--line);
   border-radius: 999px;
   /* 实的白走 --surface-solid（2026-10-12 深色第二遍）：原先写死 #fff，
@@ -437,16 +450,36 @@
   padding: 0;
 }
 
-/* ---- 记录行：两层信息 ---- */
+/* ---- 记录行：标星一颗 + 两层信息 ---- */
 
-.sideRow {
-  width: 100%;
+/*
+ * 一行 = 两块（标星按钮 + 内容按钮）。底色 / 悬停 / 选中的色带挂在**这一层**，
+ * 两块各自透明 —— 色带才是通长的那一条，不会在按钮接缝处断开。
+ */
+.sideItem {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 11px;
   padding: 10px 18px;
-  border: 0;
   border-bottom: 1px solid var(--hairline);
+}
+
+.sideItem:hover {
+  background: var(--surface-sunken);
+}
+
+.sideItem[data-on='true'] {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.sideRow {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  border: 0;
   border-radius: 0;
   background: transparent;
   font: inherit;
@@ -454,27 +487,67 @@
   cursor: pointer;
 }
 
-.sideRow:hover {
-  background: var(--surface-sunken);
-}
-
-.sideRow[data-on='true'] {
-  background: var(--accent-soft);
-  box-shadow: inset 2px 0 0 var(--accent);
-}
-
-/* 左侧小文件图标：灰底圆角方块 */
-.rowIcon {
+/*
+ * 左边那颗方图标位：**未标星是文件、标了是星**（作者 2026-11-18：「左边那个文件图标
+ * 可以变成一个星星的图标，方便找」）。
+ *
+ * 未标星时鼠标落到这一行、或键盘停在它上面，才换成空心星 —— 不这样，谁也想不道
+ * 那颗文件图标能点；标过的常驻橙黄实心星，一眼扫得到。两颗字形叠在同一个格子里
+ * （只切 `display`），盒子尺寸全程不变。
+ */
+.starBtn {
   flex-shrink: 0;
   width: 28px;
   height: 28px;
-  margin-top: 1px;
   display: grid;
   place-items: center;
+  border: 0;
   border-radius: 8px;
   background: var(--surface-sunken);
   color: var(--text-3);
+  cursor: pointer;
 }
+
+.starBtn:hover {
+  color: var(--text-2);
+}
+
+.starBtn[data-starred='true'] {
+  color: var(--star);
+  background: var(--star-soft);
+}
+
+.starFile,
+.starGlyph {
+  grid-area: 1 / 1;
+  display: grid;
+  place-items: center;
+}
+
+.starGlyph {
+  display: none;
+}
+
+.sideItem:hover .starFile,
+.starBtn:focus-visible .starFile,
+.starBtn[data-starred='true'] .starFile {
+  display: none;
+}
+
+.sideItem:hover .starGlyph,
+.starBtn:focus-visible .starGlyph,
+.starBtn[data-starred='true'] .starGlyph {
+  display: grid;
+}
+
+/*
+ * 焦点不另画外圈（全站口径，见 `global.css` 那条）：键盘停上来时字形已经从文件
+ * 换成星，那就是"焦点在这里"的答案。
+ */
+.starBtn:focus-visible {
+  outline: none;
+}
+
 
 .rowMain {
   flex: 1;
@@ -1530,9 +1603,10 @@
   font-size: var(--fs-label);
 }
 
+/* 聚焦 = 那道 1px 边变绿（全站口径：不画外圈、不加粗） */
 .snapSearch:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  border-color: var(--accent);
 }
 
 .snapCount {

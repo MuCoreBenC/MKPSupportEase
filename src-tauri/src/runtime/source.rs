@@ -164,6 +164,14 @@ impl SourceMode {
         }
     }
 
+    /// 线上名（盘上写的就是它；DTO 也用它）。
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::Gitee => "gitee",
+            Self::Github => "github",
+            Self::Custom => "custom",
+        }
+    }
     /// 界面上给用户看的那一句（**产品文案只有这一处**）。
     pub fn label(self) -> String {
         match self {

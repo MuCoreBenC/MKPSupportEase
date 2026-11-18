@@ -20,7 +20,7 @@ export const DEV_PREVIEW_EVENT = 'dev-preview'
  * 层级（与各 CSS 里的 z-index 对应，**别按点击顺序**）：
  *
  * ```text
- *   最高  full     后处理那一屏（跑着时整扇窗都归它，含标题栏）      .layer 92 / .dragShield 95
+ *   最高  full     后处理那一屏（跑着时内容区归它，标题栏归拖窗带）  .layer 92 / .dragShield 95
  *         titlebar 标题栏上的东西（软件更新指示器 + 详情面板）       TopTabs 94 之上
  *         field    右键菜单 / 下拉（常在模态框里用，得压过模态框）   FieldLayer 90
  *         modal    居中模态框 / 抽屉（只盖**内容区**，不盖标题栏）   .scrim 40

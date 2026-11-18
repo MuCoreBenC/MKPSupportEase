@@ -159,19 +159,22 @@ export function slicerPlacements(fileName: string): {
 }
 
 /**
- * 把这份从**它自己那个切片器**的每个账号目录里删掉（删除确认框里那个勾）。
- * 返回删掉了几份；本来就不在 = 0。别的切片器与云端一概不碰。
+ * 把这份从**本机所有切片器**的每个账号目录里删掉（删除确认框里那个勾）。
+ * 返回删掉了几份；本来就不在 = 0。云端一概不碰。
+ *
+ * 与真机同一条口径（2026-11-18 作者：「他并没有真的把我全部删掉」）：框里能往另一个
+ * 切片器手动放同一份，只删自己那一档就会剩下一份，用户看到的还是"删了它还在"。
  */
 export function removeSlicerCopiesIn(fileName: string): number {
   const hit = allPresetFiles().find((f) => f.fileName === fileName)
   if (hit === undefined) return 0
-  const own = DEMO_SLICER_OF_KIND[hit.kind]
-  if (own === undefined) return 0
+  if (DEMO_SLICER_OF_KIND[hit.kind] === undefined) return 0
   let removed = 0
-  for (const account of DEMO_SLICER_ACCOUNTS[own]) {
-    const cell = `${own}/${account}`
-    const placed = DEMO_SLICER_PLACED.get(cell)
-    if (placed?.delete(fileName) === true) removed += 1
+  for (const slicer of Object.keys(DEMO_SLICER_ACCOUNTS) as SlicerTarget[]) {
+    for (const account of DEMO_SLICER_ACCOUNTS[slicer]) {
+      const placed = DEMO_SLICER_PLACED.get(`${slicer}/${account}`)
+      if (placed?.delete(fileName) === true) removed += 1
+    }
   }
   return removed
 }

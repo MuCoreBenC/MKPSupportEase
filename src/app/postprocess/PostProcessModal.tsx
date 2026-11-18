@@ -41,6 +41,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { api, errorText } from '../../api'
 import { t, useT, type StringKey, type Tr } from '../../i18n'
 import type {
+  DebugPlan,
   PostProcessFacts,
   PostProcessFinished,
   PostProcessResult,
@@ -352,16 +353,28 @@ function baseGroup(
  * 「预估打印时间」这一刻给的是**切片器自报的**（输入头 `; total estimated time` 那一行）——
  * 内核重算的那个要跑完才有（而且有界面时还延后）；涂胶速度 / 切片软件开跑就确定。
  * 缺哪格不摆哪格。
+ *
+ * ★ 点位测试（`facts.debug` 有值）**不打印模型**：打印时间与文件大小都是从原模型算的，
+ *   摆在"这一趟"旁边会被读成"这次要打印多久" ⇒ 两格一律 `—`
+ *   （作者 2026-11-18：点位测试这两行要变成横杠）。
  */
 function runGroup(tr: Tr, facts: PostProcessFacts | null): FactGroup {
+  const debug = facts?.debug != null
   const rows: FactRow[] = [
     {
       label: tr('postproc.facts.printTime'),
-      value: facts?.slicerPrintTimeSeconds === undefined ? '—' : printTimeText(facts.slicerPrintTimeSeconds),
+      value:
+        debug || facts?.slicerPrintTimeSeconds === undefined
+          ? '—'
+          : printTimeText(facts.slicerPrintTimeSeconds),
     },
-    { label: tr('postproc.facts.fileSize'), value: facts === null ? '—' : sizeText(facts.fileSizeBytes) },
+    {
+      label: tr('postproc.facts.fileSize'),
+      value: debug || facts === null ? '—' : sizeText(facts.fileSizeBytes),
+    },
     { label: tr('report.glue.speed'), value: facts?.glueSpeed === undefined ? '—' : speedText(facts.glueSpeed) },
-    /* 切片软件也是"长度不可控"那类（`BambuStudio 02.08.02.60` + 别的切片器更长的串） */
+    /* 切片软件也是"长度不可控"那类（`BambuStudio 02.08.02.60` + 别的切片器更长的串）
+       —— 点位测试也照摆：这一趟确实是它导出的 */
     { label: tr('report.slicer.software'), value: facts?.slicer ?? '—', grey: true, tip: facts?.slicer },
   ]
   return { title: tr('postproc.facts.runTitle'), rows }
@@ -372,36 +385,14 @@ function doneGroup(tr: Tr, finished: PostProcessFinished, facts: PostProcessFact
   const res = finished.result
   const rows: FactRow[] = []
   /*
-   * 调试那一趟只摆**这一趟真正跑过的坐标**（2026-11-12 作者：「把那些对应的坐标也显示出来」）。
-   *
-   * 「预估打印时间」「涂胶总长」这两格在调试这一趟是从**原文件**算出来的 ——
-   * 那份产物只跑笔的动作，既没有胶也没有模型，摆出来全是错的
-   * （作者：「预估打印时间、胶总长这些就是不要了」）。
+   * 调试那一趟的动作明细住在**说明页**（`DebugNote`）：那四项一行一项才读得全，
+   * 挤在这一格只会被省略号吃掉。这一页只留"这一趟真的发生过"的读数 ——
+   * 「预估打印时间」「涂胶总长」是从原文件算的，这一趟既没有胶也没有模型 ⇒ 「—」。
    */
   const dbg = res?.debug ?? null
   if (dbg !== null) {
-    const custom = dbg.custom_gcode ?? ''
-    if (custom.trim() !== '') {
-      /* 高级模式：整段动作由用户写，坐标字段不作数 —— 只报行数 */
-      const n = custom.split('\n').filter((l) => l.trim() !== '').length
-      rows.push({
-        label: tr('postproc.facts.debugPlan'),
-        value: tr('postproc.facts.debugPlanCustom', { n: String(n) }),
-      })
-    } else {
-      /* 等待位没填就跟随驻点 —— 与内核 `action_block` 同一条规矩（`?? wait_x`） */
-      const mw = dbg.mount_wait_x ?? dbg.wait_x
-      const uw = dbg.unmount_wait_x ?? dbg.wait_x
-      const value = tr('postproc.facts.debugPlanValue', {
-        wait: String(dbg.wait_x),
-        mw: String(mw),
-        mx: String(dbg.mount_x),
-        uw: String(uw),
-        ux: String(dbg.unmount_x),
-        speed: String(dbg.speed),
-      })
-      rows.push({ label: tr('postproc.facts.debugPlan'), value, tip: value })
-    }
+    rows.push({ label: tr('postproc.facts.printTime'), value: '—' })
+    rows.push({ label: tr('report.glue.total'), value: '—' })
   } else {
     /*
      * 「预估打印时间」**行永远在**，右侧的值看结论（2026-11-04 作者两句话定的口径）：
@@ -453,9 +444,9 @@ function doneGroup(tr: Tr, finished: PostProcessFinished, facts: PostProcessFact
  * 在外面拿到的永远是 `null`。
  */
 
-function FactsGroups({ groups }: { groups: FactGroup[] }) {
+function FactsGroups({ groups, single }: { groups: FactGroup[]; single?: boolean }) {
   return (
-    <div className={s.groups}>
+    <div className={single === true ? `${s.groups} ${s.groupsOne}` : s.groups}>
       {groups.map((g) => (
         <div className={s.group} key={g.title}>
           <div className={s.groupHead}>
@@ -613,9 +604,12 @@ function metricsReady(
 
 function MetricsStrip({
   res,
+  debug,
   onDoubleTap,
 }: {
   res: Required<Pick<PostProcessResult, 'penX' | 'penY' | 'penZ' | 'glueSpeed'>>
+  /** 调试那一趟**不涂胶**：涂胶速度那格是预设值，摆出来等于编 ⇒ 「—」 */
+  debug?: boolean
   /** 双击这一条：翻回 100% 那个 hero（"看一眼刚才走过去的那根条"） */
   onDoubleTap: () => void
 }) {
@@ -623,7 +617,7 @@ function MetricsStrip({
     [t('report.glue.offsetX'), mm2(res.penX)],
     [t('report.glue.offsetY'), mm2(res.penY)],
     [t('report.glue.offsetZ'), mm2(res.penZ)],
-    [t('report.glue.speed'), speedText(res.glueSpeed), true],
+    [t('report.glue.speed'), debug === true ? '—' : speedText(res.glueSpeed), true],
   ]
   /* 按一下弹一下（等结果时也能解压）+ 双击翻回 hero —— 见 `usePressFlash` */
   const press = usePressFlash<HTMLDivElement>(onDoubleTap)
@@ -754,9 +748,15 @@ function SparkMark() {
  */
 function CollisionNote({
   relocated,
+  conflictCount,
+  towerAt,
   onGoSettings,
 }: {
   relocated: boolean
+  /** 这一趟撞出来的冲突点数；`null` = 没带几何（不摆那一行） */
+  conflictCount: number | null
+  /** 塔的位置（mm）；`null` = 没带几何（不摆那一行） */
+  towerAt: [number, number] | null
   /**
    * 「去设置」这一下：跳设置页 + 滚到开关 + **把本屏收进右上角胶囊**
    * （三件由外壳那一层合成，见主件里的 `goTowerSettings`）。不给就不摆那颗钮。
@@ -764,21 +764,50 @@ function CollisionNote({
   onGoSettings?: () => void
 }) {
   const tr = useT()
+  /*
+   * 与「已自动挪塔」那一页**同一套版式**：题目 + 一张表 + 两句话。
+   * 纯文字那版只有三行，框里空一大块（作者：「这一个不好看」）。
+   */
+  const rows: FactRow[] = []
+  if (conflictCount !== null) {
+    rows.push({
+      label: tr('postproc.collision.conflictLabel'),
+      value: tr('postproc.collision.conflictValue', { n: String(conflictCount) }),
+    })
+  }
+  if (towerAt !== null) {
+    rows.push({
+      label: tr('postproc.collision.towerLabel'),
+      value: `(${towerAt[0].toFixed(1)}, ${towerAt[1].toFixed(1)})`,
+    })
+  }
   return (
     <div className={s.collisionNote}>
-      <p className={s.collisionNoteLead}>
-        {tr(relocated ? 'postproc.collision.triedTitle' : 'postproc.collision.title')}
-      </p>
+      {rows.length > 0 ? (
+        <FactsGroups
+          groups={[
+            {
+              title: tr(relocated ? 'postproc.collision.triedTitle' : 'postproc.collision.title'),
+              rows,
+            },
+          ]}
+          single
+        />
+      ) : (
+        <p className={s.collisionNoteLead}>
+          {tr(relocated ? 'postproc.collision.triedTitle' : 'postproc.collision.title')}
+        </p>
+      )}
       <p className={s.collisionNoteBody}>
         {tr(relocated ? 'postproc.collision.triedBody' : 'postproc.collision.body')}
       </p>
       <p className={s.collisionNoteBody}>
         {tr('postproc.collision.tip')}
         {onGoSettings !== undefined && (
-          /* ★ 包一层：别把鼠标事件当成落点 id（见 check-locate.mjs / eslint 那两道闸） */
-          <Btn className={s.collisionNoteGo} onClick={() => onGoSettings()}>
+          /* 说明页里的动作是**句尾一颗小链接**，不是页脚那种大胶囊（见 `.noteLink`） */
+          <button type="button" className={s.noteLink} onClick={() => onGoSettings()}>
             {tr('postproc.collision.go')}
-          </Btn>
+          </button>
         )}
       </p>
     </div>
@@ -795,24 +824,142 @@ function CollisionNote({
  * ★ 上一版成功那屏也复用了 `CollisionNote`，于是成功的记录里写出"塔已经挪过，
  *   但挪完还是撞"（作者截图）。判据要按**这一屏是不是失败**分，不能只看"有没有挪过塔"。
  */
-function RelocateDoneNote({ record }: { record: RelocationRecord | null }) {
+function RelocateDoneNote({
+  record,
+  ok,
+  onGoSettings,
+}: {
+  record: RelocationRecord | null
+  /**
+   * 这一趟最后成没成。
+   *
+   * ★ 挪了塔**不等于**这一趟成了：自动挪塔之后复检仍有冲突时，钩子照样判失败
+   *   （`W_COLLISION_RELOCATE_001`）。那时这一页若还写"无冲突，已继续处理"，
+   *   就是在失败屏上撒谎 —— 标题与那句话都要换成失败那一版。
+   */
+  ok: boolean
+  /** 「去设置」这一下：与碰撞说明页同一颗（句尾小链接），不给就不摆 */
+  onGoSettings?: () => void
+}) {
   const tr = useT()
   const to = record?.to ?? null
+  /** 句尾那颗「去设置」：跳到「智能塔位置」那一行，与碰撞说明页同一个动作 */
+  const goSettings =
+    onGoSettings === undefined ? null : (
+      <button type="button" className={s.noteLink} onClick={() => onGoSettings()}>
+        {tr('postproc.collision.go')}
+      </button>
+    )
+  if (record == null || to === null) {
+    return (
+      <div className={s.collisionNote}>
+        <p className={s.collisionNoteLead}>{tr('postproc.relocate.doneTitle')}</p>
+        <p className={s.collisionNoteBody}>{tr('postproc.relocate.doneBodyNoMove')}</p>
+        <p className={s.collisionNoteBody}>
+          {tr('postproc.relocate.doneTip')}
+          {goSettings}
+        </p>
+      </div>
+    )
+  }
+  /*
+   * 挪塔这一页：**位置一行「旧 → 新」**（与上面那两幅俯视图上的箭头同一句话），
+   * 再加上移动距离，共两行。单组跨两栏（`single`）—— 只占左半会让框里空一块。
+   *
+   * ★ 摊成"原位置 / 新位置 / 移动距离"三行会把槽撑过信息页（这一页不参与定高，
+   *   见 `.relocatePage:nth-child(2)`）—— 那两句说明就会被挤进滚动区里看不见。
+   */
+  const rows: FactRow[] = [
+    {
+      label: tr('postproc.relocate.posLabel'),
+      value: `(${record.from[0].toFixed(1)}, ${record.from[1].toFixed(1)}) → (${to[0].toFixed(1)}, ${to[1].toFixed(1)})`,
+    },
+    {
+      label: tr('postproc.relocate.movedLabel'),
+      value: `${(record.movedMm ?? 0).toFixed(1)} mm`,
+    },
+  ]
   return (
     <div className={s.collisionNote}>
-      <p className={s.collisionNoteLead}>{tr('postproc.relocate.doneTitle')}</p>
-      <p className={s.collisionNoteBody}>
-        {to !== null && record != null
-          ? tr('postproc.relocate.doneBody', {
-            from: `(${record.from[0].toFixed(1)}, ${record.from[1].toFixed(1)})`,
-            to: `(${to[0].toFixed(1)}, ${to[1].toFixed(1)})`,
-            moved: (record.movedMm ?? 0).toFixed(1),
-          })
-          : tr('postproc.relocate.doneBodyNoMove')}
+      <FactsGroups
+        groups={[
+          {
+            title: tr(ok ? 'postproc.relocate.doneTitle' : 'postproc.collision.triedTitle'),
+            rows,
+          },
+        ]}
+        single
+      />
+      <p className={ok ? s.collisionNoteBody : `${s.collisionNoteBody} ${s.noteFail}`}>
+        {tr(ok ? 'postproc.relocate.doneBody' : 'postproc.relocate.doneBodyFail')}
       </p>
-      <p className={s.collisionNoteBody}>{tr('postproc.relocate.doneTip')}</p>
+      <p className={s.collisionNoteBody}>
+        {tr('postproc.relocate.doneTip')}
+        {goSettings}
+      </p>
     </div>
   )
+}
+
+/**
+ * **调试那一趟的「说明」页**（跑完读 `result.debug`，开跑前读 `facts.debug`）。
+ *
+ * 与信息页**同构的两组表**：左栏这一趟走过哪几个位置，右栏这一趟测的范围。
+ * 每栏恒四行 ⇒ 翻到信息页时框高不变（信息页也是两组四行）。
+ *
+ * 高级模式（动作块由用户自己写）只报行数：那段代码住设置窗，不往这一页塞。
+ */
+function debugGroups(tr: Tr, plan: DebugPlan): FactGroup[] {
+  const custom = plan.custom_gcode ?? ''
+  if (custom.trim() !== '') {
+    const n = custom.split('\n').filter((l) => l.trim() !== '').length
+    return [
+      {
+        title: tr('postproc.facts.debugPlan'),
+        rows: [
+          {
+            label: tr('report.debug.actions'),
+            value: tr('postproc.facts.debugPlanCustom', { n: String(n) }),
+          },
+        ],
+      },
+    ]
+  }
+  /* 等待位没填就跟随驻点 —— 与内核 `action_block` 同一条规矩（`?? wait_x`） */
+  const mountFrom = plan.mount_wait_x ?? plan.wait_x
+  const unmountFrom = plan.unmount_wait_x ?? plan.wait_x
+  const no = tr('postproc.debug.no')
+  const yesNo = (on: boolean) => (on ? tr('postproc.debug.yes') : no)
+  return [
+    {
+      title: tr('postproc.facts.debugPlan'),
+      rows: [
+        {
+          label: tr('report.debug.wait'),
+          value: plan.move_y ? `X${plan.wait_x} Y${plan.wait_y}` : `X${plan.wait_x}`,
+        },
+        /* 只测一段的那一趟也留着另外那一行：写「否」，高度不跟着这一趟少一行 */
+        { label: tr('report.debug.mount'), value: plan.test_mount ? `${mountFrom} → ${plan.mount_x}` : no },
+        {
+          label: tr('report.debug.unmount'),
+          value: plan.test_unmount ? `${unmountFrom} → ${plan.unmount_x}` : no,
+        },
+        { label: tr('report.debug.speed'), value: `${plan.speed} mm/min` },
+      ],
+    },
+    {
+      title: tr('postproc.debug.scopeTitle'),
+      rows: [
+        { label: tr('postproc.debug.testMount'), value: yesNo(plan.test_mount) },
+        { label: tr('postproc.debug.testUnmount'), value: yesNo(plan.test_unmount) },
+        { label: tr('postproc.debug.moveY'), value: yesNo(plan.move_y) },
+        {
+          label: tr('postproc.debug.repeat'),
+          value: tr('postproc.debug.repeatValue', { n: String(Math.max(plan.repeat, 1)) }),
+        },
+      ],
+    },
+  ]
 }
 
 function ResultHero({
@@ -1191,9 +1338,9 @@ export default function PostProcessModal({
   /**
    * 这一屏是**开发台演出来的**（不是真钩子跑出来的）。
    *
-   * 那几颗真业务按钮（停止 / 后台运行 / 强制继续 / 终止）走的是真钩子回写线，
-   * 预览里没有那条线 —— 点了只会如实报"现在没有在跑后处理"（作者 2026-10-14：
-   * 预览就明确是预览，不许点出真业务）。所以预览里把它们**禁掉**，并标一句「预览模式」。
+   * 浏览器预览里那几颗真业务按钮照常摆：`mock.ts` 有一条内存事件总线，答复 / 停止
+   * 会把这一趟真的往下推（进度 → 结论）。标题旁边与左下角标「预览」只说明这是演出来的
+   * 那一趟，不代表按钮是死的。
    */
   const preview = run?.preview === true
   /* 回放（2026-10-27）：界面拿报告页那份归档造出来的"当时那一趟"。
@@ -1227,10 +1374,20 @@ export default function PostProcessModal({
    * 说明页 ⇒ 现在统一以"信息"开场，`warn` 由下面那条 effect 在有话要说时顶上来。
    */
   const [pageTab, setPageTab] = useState<PageTab>('facts')
+  /*
+   * 点位测试那两屏（开跑前确认 / 跑完结果）下方摆哪一页：`true` = 信息，`false` = 说明
+   * （调试动作 / 测试范围）。
+   *
+   * ★ **默认信息**（作者 2026-11-18：「默认是显示这个信息的，也没必要折起来；点击下面的
+   *   说明，它才变成这个说明」）—— 机型与切片那两栏一进来就在，说明页由左下角那颗钮翻。
+   */
+  const [debugFactsOpen, setDebugFactsOpen] = useState(true)
   const questionKind = run?.question?.questionKind
   useEffect(() => {
-    /* 换一问（或这一问结束）就翻回"说明"那页 —— 别把上一问的翻页状态带过来 */
+    /* 换一问（或这一问结束）就翻回"说明"那页（问句正文住那儿），
+       点位测试那两屏同时回到"信息"页 —— 别把上一轮的翻页状态带过来 */
     setPageTab('note')
+    setDebugFactsOpen(true)
   }, [questionKind])
   /*
    * **成功但有事要说 ⇒ 翻到警告页**：热床预涂胶、内核警告都是这一趟要紧的话，
@@ -1268,6 +1425,25 @@ export default function PostProcessModal({
   const shownPercent = answering === null ? percent : Math.max(percent, answering.from)
   const eta = running ? etaText(view.sinceMs, percent) : null
   const facts = run.facts
+
+  /**
+   * **调试那一屏**（`debug-plan`）：这一趟只走路、不打印模型。
+   *
+   * 版式与正常后处理**故意不同**：hero 走警告琥珀、页脚写「开始测试」、下方默认摆信息页
+   * （左下角那颗钮翻到「说明」看调试动作）。不这么分，用户会把它当成一次普通后处理、
+   * 直接点绿按钮往下跑。
+   */
+  const isDebugPlan =
+    showAsk && run.question !== null && run.question.questionKind === 'debug-plan'
+
+  /** 调试那一趟的结果屏：`result.debug` 有值 = 这一趟只跑笔的动作，没打印模型 */
+  const isDebugResult = finished?.ok === true && finished.result?.debug != null
+
+  /**
+   * 调试相关的那两屏（开跑前确认 / 跑完结果）共用一套版式：
+   * 下方默认信息页，左下角那颗钮在「信息 ↔ 说明（调试动作）」之间翻。
+   */
+  const isDebug = isDebugPlan || isDebugResult
 
   /** 挪塔那一问、且几何真带出来了 —— 这一屏的版式与别处不同（见上面的翻页状态） */
   const isAskingRelocate =
@@ -1352,7 +1528,9 @@ export default function PostProcessModal({
    */
   const pages: PageTab[] = isCollisionFail
     ? hasNotice ? ['fail', 'note', 'warn'] : ['fail', 'note']
-    : showsRelocateMaps
+    : isDebugResult
+      ? hasNotice ? ['note', 'facts', 'warn'] : ['note', 'facts']
+      : showsRelocateMaps
       ? hasNotice ? ['facts', 'note', 'warn'] : ['facts', 'note']
       : finished !== null && !finished.ok
         ? hasNotice ? ['facts', 'warn'] : []
@@ -1367,7 +1545,11 @@ export default function PostProcessModal({
    *   那一屏因此**不摆翻页钮**（摆了也翻不动，见页脚那段）。
    *   别的屏一律按 `pageTab`（默认 `facts` = 信息）。
    */
-  const wantTab: PageTab = isAskingRelocate ? 'note' : pageTab
+  const wantTab: PageTab = isAskingRelocate
+    ? 'note'
+    : isDebug
+      ? debugFactsOpen ? 'facts' : 'note'
+      : pageTab
   const activeTab: PageTab = pages.includes(wantTab) ? wantTab : (pages[0] ?? 'facts')
 
   /** 下一颗钮转到哪一页（按 `pages` 轮转） */
@@ -1375,6 +1557,14 @@ export default function PostProcessModal({
     pages.length < 2
       ? null
       : pages[(pages.indexOf(activeTab) + 1) % pages.length] ?? null
+
+  /**
+   * 调试那两屏的左下角那颗钮：**钮面写"点它会去哪"** ——
+   * 信息页上写「说明」，说明页上写「信息」（问句屏与结果屏同一套词）。
+   */
+  const debugToggle: { label: StringKey; aria: StringKey } = debugFactsOpen
+    ? { label: 'postproc.relocate.note', aria: 'postproc.debug.backAria' }
+    : { label: 'postproc.relocate.facts', aria: 'postproc.debug.factsAria' }
 
   /**
    * 钮上的词（`TAB_META` 一张表）：默认页写「说明」，说明页写「信息」。
@@ -1426,6 +1616,18 @@ export default function PostProcessModal({
     asking || running
       ? [baseGroup(tr, facts, layerHeights), runGroup(tr, facts)]
       : [baseGroup(tr, facts, layerHeights), doneGroup(tr, finished as PostProcessFinished, facts)]
+
+  /**
+   * 「说明」那一页的两组（调试动作 / 测试范围）—— 两个来源：跑完读 `result.debug`，
+   * 开跑前读开场事实里的 `facts.debug`（同一份动作参数，钩子一开场就送）。
+   */
+  const debugPlan: DebugPlan | null =
+    isDebugResult
+      ? (finished?.result?.debug ?? null)
+      : isDebugPlan
+        ? (facts?.debug ?? null)
+        : null
+  const debugPageGroups = debugPlan === null ? [] : debugGroups(tr, debugPlan)
 
   /** 两条命令（停止 / 答复）都要等后端，失败要说出来 —— 界面不许"点了没反应" */
   const act = (fn: () => Promise<void>) => {
@@ -1494,17 +1696,18 @@ export default function PostProcessModal({
       /*
        * 那一问的提示卡（共用件 `NoticeHero`，卡高恒 104、内容多了在卡里滚）：
        *
-       * - `machine-mismatch` = 警告橙：这是"结果可能出错"，要拦一下；
+       * - `machine-mismatch` / `debug-plan` = 警告橙：前者是"结果可能出错"，
+       *   后者是"接下来笔会真动、不是打印" —— 两种都要先拦住看一眼；
        * - `calibration-mode` = 中性绿：**不是出错**，是"这一盘怎么跑"的流程选择，
-       *   拿警告色去说它会让用户以为出了问题（作者：「这不是警告」）。
+       *   拿警告色去说它会让用户以为出了问题。
        *
        * ★ 种类串必须与后端常量**逐字一致**（`hook_ipc::QKIND_*`）：对不上就落到兜底
        *   那条橙框（校准那一问曾经被套上"预设与机型不匹配 · 等你决定"，2026-10-17）。
        * ★ 正文就是后端那一句问话（`question.text`），不另编文案；末行是倒计时。
        */
       <NoticeHero
-        /* `debug-plan` 与校准那问同一档：**不是出错**，是"这一盘怎么跑"的流程选择 */
-        tone={run.question.questionKind === 'machine-mismatch' ? 'warn' : 'ask'}
+        /* 只有校准那问用中性绿；调试那一趟是真动笔，绿卡会被读成"正常后处理" */
+        tone={run.question.questionKind === 'calibration-mode' ? 'ask' : 'warn'}
         title={tr(
           run.question.questionKind === 'debug-plan'
             ? 'postproc.ask.debugTitle'
@@ -1564,11 +1767,8 @@ export default function PostProcessModal({
         <div ref={leadBoxRef} key="leadWarn">
           <NoticeHero
             tone="warn"
-            title={
-              glueCaution
-                ? tr('postproc.glue.title')
-                : tr('postproc.warn.title', { n: warnings.length })
-            }
+            /* 内核警告**不顶题目**：那几句原话本身就是全部（「警告 · 1」只是重复一遍） */
+            title={glueCaution ? tr('postproc.glue.title') : undefined}
             lines={glueCaution ? [tr('postproc.glue.watch'), ...warnings] : warnings}
           />
         </div>
@@ -1594,7 +1794,11 @@ export default function PostProcessModal({
            出场（淡入 / 弹上来）由主件那个 effect 用 WAAPI 驱动 —— 同上；
            `key` 与 hero 那一层必须不同（见那边注释） */
         <div ref={leadBoxRef} key="leadBox">
-          <MetricsStrip res={finished.result} onDoubleTap={() => startFlip('hero')} />
+          <MetricsStrip
+            res={finished.result}
+            debug={isDebugResult}
+            onDoubleTap={() => startFlip('hero')}
+          />
           {/*
             校准件那一趟：**两种跑法都是成功**，同一屏，只有这一句按选择分开说
             （作者 2026-10-17：「两边一样的成功，但是文案可以区别一下」）。
@@ -1685,8 +1889,16 @@ export default function PostProcessModal({
             {/*
               翻页那颗小钮（共用件 `PageToggle`）：**问句那一屏不摆** —— 那一屏
               强制停在说明页（见上面 `wantTab`），钮翻不动，摆一颗点了没反应的钮更糟。
+              调试那一屏是例外：这颗钮在「信息 ↔ 说明（调试动作）」之间翻。
             */}
-            {pages.length > 1 && nextTab !== null && !isAskingRelocate && (
+            {isDebug ? (
+              <PageToggle
+                label={tr(debugToggle.label)}
+                ariaLabel={tr(debugToggle.aria)}
+                tip={tr(debugToggle.aria)}
+                onClick={() => setDebugFactsOpen((open) => !open)}
+              />
+            ) : pages.length > 1 && nextTab !== null && !isAskingRelocate ? (
               <PageToggle
                 label={tr(tabMeta[nextTab].label)}
                 ariaLabel={tr(tabMeta[nextTab].toAria)}
@@ -1698,7 +1910,7 @@ export default function PostProcessModal({
                   setPageTab(nextTab)
                 }}
               />
-            )}
+            ) : null}
             {replay && (
               <span className={s.previewTag}>{tr('postproc.replay.tag')}</span>
             )}
@@ -1710,15 +1922,9 @@ export default function PostProcessModal({
             )}
           </div>
           {replay ? (
-            /* 回放：与预览同一套——真业务按钮一个都不摆，只留「关闭回放」 */
+            /* 回放：真业务按钮一个都不摆，只留「关闭回放」 */
             <Btn variant="accent" onClick={finishForGood}>
               {tr('postproc.replay.close')}
-            </Btn>
-          ) : preview ? (
-            /* 预览模式：真业务按钮**一个都不摆**（它们走真钩子回写线，这里没有那条线）。
-               只留「关闭」—— 关掉预览、回工作台选下一屏（作者 2026-10-14 裁定）。 */
-            <Btn variant="accent" onClick={finishForGood}>
-              {tr('postproc.preview.close')}
             </Btn>
           ) : offerStopAndClose ? (
             /*
@@ -1768,15 +1974,16 @@ export default function PostProcessModal({
               </span>
             ) : run.question.questionKind === 'debug-plan' ? (
               /*
-               * 调试那一问：**继续优先**（2026-11-12 作者：「按钮换一下位置，继续优先」）。
-               * 这一趟只是去试位置，继续占强调位、放最右；停下退到左边、用普通皮肤。
+               * 调试那一问：**继续优先**（这一趟只是去试位置，继续占强调位、放最右），
+               * 但钮面写「开始测试」—— 这一屏不是"预设对不上还硬跑"，说「强制继续」
+               * 会把它读成一次普通后处理。
                */
               <>
                 <Btn disabled={busy} onClick={() => answer('stop')}>
                   {tr('postproc.choice.stop')}
                 </Btn>
                 <Btn variant="accent" disabled={busy} onClick={() => answer('keep')}>
-                  {tr('postproc.choice.keep')}
+                  {tr('postproc.choice.debugKeep')}
                 </Btn>
               </>
             ) : (
@@ -1836,7 +2043,17 @@ export default function PostProcessModal({
          * 口径反过来：**框一打开就是完整的**，没到手的值一律 `—`（两组里每一格都有固定标签，
          * 所以不会"少一格"，只会有"暂时是 —"），值到了原地换掉。
          */}
-        {pages.length > 1 ? (
+        {isDebug ? (
+          /*
+           * 调试那两屏：下方**默认摆信息**（机型与切片 / 结果读数），左下角那颗钮翻到
+           * 「说明」（调试动作 / 测试范围，一行一项才读得全）。
+           */
+          debugFactsOpen ? (
+            <FactsGroups groups={factsPageGroups} />
+          ) : debugPageGroups.length > 0 ? (
+            <FactsGroups groups={debugPageGroups} />
+          ) : null
+        ) : pages.length > 1 ? (
           /*
            * 下面这块**几页叠在同一格**（见上面 `pages` 那段）。
            *
@@ -1874,11 +2091,17 @@ export default function PostProcessModal({
                      成功那一趟也摆出了这句，因为说明页原来只看"有没有挪过塔" */
                   <CollisionNote
                     relocated={finished?.relocation?.to != null}
+                    conflictCount={finished?.geo?.collision?.conflictCount ?? null}
+                    towerAt={finished?.geo?.current ?? null}
                     onGoSettings={onOpenSettings !== undefined ? goTowerSettings : undefined}
                   />
                 ) : (
-                  /* 成功且挪过塔：说明页说的是**这一趟挪了塔**，不是"撞了" */
-                  <RelocateDoneNote record={finished?.relocation ?? null} />
+                  /*           成功且挪过塔：说明页说的是**这一趟挪了塔**，不是"撞了" */
+                  <RelocateDoneNote
+                    record={finished?.relocation ?? null}
+                    ok={finished?.ok === true}
+                    onGoSettings={onOpenSettings !== undefined ? goTowerSettings : undefined}
+                  />
                 )}
               </div>
             )}
@@ -1899,23 +2122,20 @@ export default function PostProcessModal({
   )
 
   /*
-   * 跑着的那一态：**整扇窗都归这一屏**（连顶栏那三颗窗控键）。
+   * 跑着的那一态：**内容区全归这一屏**，标题栏交给一条拖窗带。
    *
-   * 那三颗被 TopTabs 自己抬到了 `z-index: 94`（它要盖住外壳顶部那条 1px 高光，
-   * 也要压过窗口内侧那圈 resize 命中条 —— 见 `TopTabs.module.css` 的 `.controls`），
-   * 而通用模态框的遮罩是 `z-index: 40` —— 于是"模态框开着、右上角那颗关闭照样点得着"
-   * （作者 2026-10-11 点着的就是那一下）。这一层跑着的时候抬到 92（窗控键之上、
-   * 拖窗带之下），整扇窗的**内容**都归它。
+   * 通用模态框的遮罩是 `z-index: 40`，而这一层跑着的时候抬到 92（标题栏之下、
+   * 拖窗带之上）—— 于是"框开着、标题栏照样能拖"。
    *
-   * 顶上那条拖窗带是这一层的**兄弟**（不在里面）：它要压在所有东西之上 ——
-   * 包括那三颗窗控键（94）与窗口内侧那圈 resize 命中条（93）里落在标题栏上的那几条。
-   * 于是跑着的时候，整条标题栏就是窗口的把手：拖窗、双击最大化照旧，那三颗键点不着。
-   * 拖窗是窗口的基本动作，不该被一个正跑着的框锁死。
+   * 顶上那条拖窗带是这一层的**兄弟**（不在里面）：它要压过窗口内侧那圈 resize
+   * 命中条（93）里落在标题栏上的那几条，标题栏才整条都是窗口把手。
+   * ★ Windows 上它**只铺到窗控键左边**（右边让出三颗键那一格）：作者 2026-11-18
+   *   「后处理的时候这三个按钮还是能按的好吧，因为我在 macOS 上都可以按」——
+   *   macOS 那三颗在系统图层上，DOM 盖不着；Windows 这三颗是标题栏里的按钮，
+   *   压在拖窗带下面就点不着了。于是现在两边观感一致：能拖窗，也能按那三颗键。
    *
    * **窗口大小仍然改得动**（作者 2026-10-11 明确要的）：左右两条边（标题栏以下）、
-   * 下边一条与下面两个角那几块命中条（93）都在拖窗带之外，跑着的时候照旧能拖 ——
-   * 让给拖窗带的只有**标题栏那一格里的几块**（北边一条、上面两个角，以及左右两条边
-   * 顶上那 38px）：拖窗带必须整条盖住窗控键才管用，而那几块本来就在标题栏上。
+   * 下边一条与下面两个角那几块命中条（93）都在拖窗带之外，跑着的时候照旧能拖。
    *
    * 不跑的那一态（结论留在屏上）**层高不降**（2026-10-18：结果框要压过参数弹窗，
    * 它是这一屏的头等事），但仍低于窗控键（94）—— 看完结果顺手关窗照旧。

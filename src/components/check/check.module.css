@@ -166,10 +166,11 @@
   transform: none;
 }
 
-/* 键盘焦点：焦点环画在框上（原生 input 被收成 1px，默认焦点环是看不见的） */
+/* 键盘焦点：焦点环画在框上（原生 input 被收成 1px，默认焦点环是看不见的）。
+   只换边框的色，不加粗、不外扩 —— 与全站那一条同一个口径 */
 .input:focus-visible + .mark {
-  outline: 2px solid var(--text-1);
-  outline-offset: 2px;
+  outline: none;
+  border-color: var(--text-1);
 }
 
 .input:disabled + .mark {

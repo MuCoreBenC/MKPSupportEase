@@ -45,7 +45,7 @@
   color: var(--text-1);
 }
 
-/* 压掉 global.css 那条全局 input 聚焦环，聚焦看边框 */
+/* 聚焦 = 边框换绿（全站口径：不画外圈、不加粗） */
 .input:focus,
 .input:focus-visible {
   outline: none;

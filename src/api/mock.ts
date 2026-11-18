@@ -1,3 +1,11 @@
+import {
+  POSTPROCESS_FACTS,
+  POSTPROCESS_FINISHED,
+  POSTPROCESS_PROGRESS,
+  POSTPROCESS_QUESTION,
+  POSTPROCESS_STARTED,
+} from '../app/postprocess/events'
+import { resolvePpScene } from '../dev/ppScenes'
 import { t } from '../i18n'
 import { NotImplementedError } from './errors'
 
@@ -15,16 +23,148 @@ const demoLanded = new Set<string>()
  *
  * 为什么要有：作者连着两轮说「模态框尺寸变化了」，而那一屏在浏览器里**根本到不了**
  * （钩子那一趟是切片器带参数把桌面版拉起来的）。于是给 dev 开一个口子：
- * 打开 `/?pp=result` 或 `/?pp=relocate`（还有 `warn` / `glue` / `vh` / `mismatch`），
+ * 打开 `/?pp=result` 或 `/?pp=relocate`（还有 `warn` / `glue` / `vh` / `debug` / `mismatch`），
  * 快照就返回一份假的那一趟 —— 探针据此
  * 量两屏的 `.box` 高度，判"换一屏框就长大"（`scripts/probes/pp-modal-height.mjs`）。
  *
  * ★ 只在 `import.meta.env.DEV` 下生效；生产构建里整段被摇掉，`getPostProcessRun`
- *   仍如实答 `null`。快照 `preview: true` ⇒ 业务按钮禁用、标题标「预览模式」。
+ *   仍如实答 `null`。快照 `preview: true` ⇒ 标题标「预览模式」。
  */
+/**
+ * **预览那一趟的"活"状态**（`?pp=`，dev-only）。
+ *
+ * 浏览器里没有钩子那条回写线，`listen` 本来是空订阅。预览既然要能点按钮，这里补一条
+ * **内存事件总线**：答复 / 停止改这一格，再把它当事件发回去 —— 界面那一侧走的仍是
+ * 同一套 `usePostProcessRun`，一行都不用加。
+ */
+const previewListeners = new Map<string, Set<(payload: unknown) => void>>()
+
+/** 浏览器里的 `listen`（`api/index.ts` 非 Tauri 分支接它）：事件从这份总线来 */
+export function listenMock<T>(event: string, onEvent: (payload: T) => void): () => void {
+  let set = previewListeners.get(event)
+  if (set === undefined) {
+    set = new Set()
+    previewListeners.set(event, set)
+  }
+  const cb = onEvent as (payload: unknown) => void
+  set.add(cb)
+  return () => {
+    set?.delete(cb)
+  }
+}
+
+function previewEmit(event: string, payload: unknown): void {
+  previewListeners.get(event)?.forEach((cb) => cb(payload))
+}
+
+/** 这一屏现在的样子（`getPostProcessRun` 的答案；答复 / 停止之后换的也是它） */
+let previewRun: PostProcessRun | null = null
+let previewTimer = 0
+
+/** 调试那一趟的动作参数（问句与结果两屏共用一份） */
+const PREVIEW_DEBUG_PLAN: DebugPlan = {
+  wait_x: 20,
+  wait_y: 0,
+  mount_wait_x: 20,
+  mount_x: 267,
+  unmount_wait_x: 20,
+  unmount_x: 276,
+  speed: 10_000,
+  test_mount: true,
+  test_unmount: true,
+  repeat: 1,
+  move_y: false,
+  custom_gcode: null,
+}
+
+/** 假进度：`[阶段, 步内比例, 停多久再走下一步]` —— 阶段名认 `steps.ts` 那张表 */
+const PREVIEW_STEPS: Array<[string, number, number]> = [
+  ['input', 0.85, 260],
+  ['write', 1, 300],
+]
+
+/** 答复"继续"之后的结论：按那一问的种类补齐它自己的那几格 */
+function previewOkFinished(questionKind: string | null, choiceId: string): PostProcessFinished {
+  const finished: PostProcessFinished = {
+    ok: true,
+    cancelled: false,
+    message: t('mock.ask.done'),
+    code: null,
+    stage: null,
+    exitCode: 0,
+    elapsedMs: 11_840,
+    output: null,
+    warnings: [],
+    result: { penX: -1, penY: 18.6, penZ: 3.8, glueSpeed: 70 },
+  }
+  if (questionKind === 'calibration-mode') {
+    finished.calibChoice = choiceId === 'direct' ? 'direct' : 'print'
+  }
+  /* 调试那一趟跑完还是"调试结果"：动作 / 测试范围那两栏得跟着出来 */
+  if (questionKind === 'debug-plan') {
+    finished.result = { ...finished.result, debug: PREVIEW_DEBUG_PLAN }
+  }
+  const geo = previewRun?.question?.geo ?? null
+  if (questionKind === 'tower-relocation' && choiceId === 'relocate' && geo !== null) {
+    const to = geo.candidate ?? geo.current
+    finished.relocation = {
+      choice: 'relocate',
+      from: geo.current,
+      to,
+      movedMm: Math.hypot(to[0] - geo.current[0], to[1] - geo.current[1]),
+      beforeConflictCount: geo.collision?.conflictCount ?? 0,
+      afterConflictCount: 0,
+      verified: true,
+      towerHeightMm: 60,
+      before: geo.collision ?? null,
+    }
+  }
+  return finished
+}
+
+/** 把进度走一遍（几百毫秒），末尾给结论 —— 与真钩子那条"进度 → 结论"同形 */
+function previewPlay(finished: PostProcessFinished): void {
+  window.clearTimeout(previewTimer)
+  let i = 0
+  const tick = (): void => {
+    const next = PREVIEW_STEPS[i]
+    if (next === undefined) {
+      if (previewRun !== null) previewRun = { ...previewRun, progress: null, finished }
+      previewEmit(POSTPROCESS_FINISHED, finished)
+      return
+    }
+    const progress: PostProcessProgress = { step: next[0], fractionInStep: next[1], message: '' }
+    if (previewRun !== null) previewRun = { ...previewRun, progress, question: null }
+    previewEmit(POSTPROCESS_PROGRESS, progress)
+    i += 1
+    previewTimer = window.setTimeout(tick, next[2])
+  }
+  tick()
+}
+
+/** 这一趟收成"已停止"（那颗「停止」/「终止」按下来的样子） */
+function previewStop(message: string): void {
+  const finished: PostProcessFinished = {
+    ok: false,
+    cancelled: true,
+    message,
+    code: null,
+    stage: null,
+    exitCode: 1,
+    elapsedMs: 4_210,
+    output: null,
+    warnings: [],
+    result: null,
+  }
+  window.clearTimeout(previewTimer)
+  if (previewRun !== null) previewRun = { ...previewRun, question: null, progress: null, finished }
+  previewEmit(POSTPROCESS_FINISHED, finished)
+}
+
 function devPostProcessRun(): PostProcessRun | null {
   if (!import.meta.env.DEV) return null
-  const which = new URLSearchParams(window.location.search).get('pp')
+  /* 名字或序号都认（`?pp=relocate` / `?pp=5`），清单住在 `src/dev/ppScenes.ts` */
+  const which = resolvePpScene(new URLSearchParams(window.location.search).get('pp'))
   if (which === null) return null
 
   const facts = {
@@ -38,6 +178,8 @@ function devPostProcessRun(): PostProcessRun | null {
     slicer: 'BambuStudio 02.08.02.60',
     slicerPrintTimeSeconds: 7800,
   }
+  /** 点位测试那一趟：开场事实里就带动作参数（下方「说明」页要摆全） */
+  const debugFacts = { ...facts, debug: PREVIEW_DEBUG_PLAN }
   const base = {
     presetName: 'A1-standard.toml',
     gcodeName: '.5926.0.gcode',
@@ -46,6 +188,110 @@ function devPostProcessRun(): PostProcessRun | null {
     preview: true,
     /* 假快照里那句问话算"已经推过"（界面据此不再补推一次） */
     questionEmitted: true,
+  }
+
+  /** 撞塔那两屏共用一份几何（问句里 / 失败结论里形状是同一份） */
+  const relocateGeo: RelocateGeo = {
+    current: [78, 91],
+    candidate: [16.4, 90],
+    collision: {
+      kind: 'model',
+      target: 'model',
+      direction: '',
+      requiredMoveX: 0,
+      requiredMoveY: 0,
+      conflictCount: 97,
+      conflictPoints: [
+        [74.2, 88.4],
+        [75.1, 89.2],
+        [73.8, 87.6],
+        [76.4, 90.1],
+        [74.9, 88.9],
+      ],
+      towerBbox: { xMin: 70, xMax: 87.04, yMin: 84, yMax: 101.04 },
+      modelBbox: { xMin: 40, xMax: 96, yMin: 26, yMax: 88 },
+      /* 一个模型一个框（真机那趟是内核按占用格切出来的，这里给预览两件） */
+      modelBoxes: [
+        { xMin: 40, xMax: 96, yMin: 26, yMax: 58 },
+        { xMin: 52, xMax: 90, yMin: 62, yMax: 88 },
+      ],
+      /* 俯视图画轮廓（真机由内核算凸包；这里演两件不规则的） */
+      modelPolygons: [
+        [
+          [40, 26],
+          [70, 22],
+          [96, 30],
+          [94, 58],
+          [56, 58],
+          [40, 44],
+        ],
+        [
+          [52, 62],
+          [72, 60],
+          [90, 64],
+          [90, 88],
+          [52, 88],
+        ],
+      ],
+      printable: { xMin: 0, xMax: 256, yMin: 0, yMax: 256 },
+      tower: {
+        outerStructure: 'brim',
+        bodyMm: 19.58,
+        ribWidth: 3,
+        ribExtraLength: 4,
+        ribFilletWall: false,
+        sheathBaseExpand: 5,
+      },
+      forbiddenZones: [],
+      adviceCode: 'E_GCODE_COLLISION_002',
+      adviceText: t('mock.advice.collision'),
+    },
+  }
+
+  /** 一份成功的结论（各屏只在 `result` / `warnings` 上不同） */
+  const okFinished = (
+    result: PostProcessResult,
+    extra: Partial<PostProcessFinished> = {},
+  ): PostProcessFinished => ({
+    ok: true,
+    cancelled: false,
+    message: t('mock.ask.done'),
+    code: null,
+    stage: null,
+    exitCode: 0,
+    elapsedMs: 11_840,
+    output: null,
+    warnings: [],
+    result,
+    ...extra,
+  })
+
+  /** 一份没成的结论（失败 / 取消共用；`ok` 恒假） */
+  const failedFinished = (
+    message: string,
+    code: string | null,
+    extra: Partial<PostProcessFinished> = {},
+  ): PostProcessFinished => ({
+    ok: false,
+    cancelled: false,
+    message,
+    code,
+    stage: 'pass1',
+    exitCode: 1,
+    elapsedMs: 4_210,
+    output: null,
+    warnings: [],
+    result: null,
+    ...extra,
+  })
+
+  if (which === 'run') {
+    return {
+      ...base,
+      question: null,
+      finished: null,
+      progress: { step: 'pass1', fractionInStep: 0.42, message: '' },
+    }
   }
 
   if (which === 'result') {
@@ -63,6 +309,36 @@ function devPostProcessRun(): PostProcessRun | null {
         output: null,
         warnings: [],
         result: { penX: -1, penY: 18.6, penZ: 3.8, glueSpeed: 70 },
+      },
+    }
+  }
+
+  /*
+   * **调试那一趟**的结果屏：`result.debug` 有值 ⇒ 左下角那颗钮在「信息 / 说明」之间翻
+   * （默认信息）；涂胶速度 / 时间 / 胶总长摆「—」。
+   */
+  if (which === 'debug') {
+    return {
+      ...base,
+      facts: debugFacts,
+      question: null,
+      finished: {
+        ok: true,
+        cancelled: false,
+        message: t('mock.ask.done'),
+        code: null,
+        stage: null,
+        exitCode: 0,
+        elapsedMs: 29_480,
+        output: null,
+        warnings: [],
+        result: {
+          penX: -0.9,
+          penY: 23,
+          penZ: 4,
+          glueSpeed: 70,
+          debug: PREVIEW_DEBUG_PLAN,
+        },
       },
     }
   }
@@ -163,7 +439,111 @@ function devPostProcessRun(): PostProcessRun | null {
     }
   }
 
-  /* 默认 = 挪塔那一问 */
+  if (which === 'calib') {
+    return {
+      ...base,
+      finished: null,
+      question: {
+        questionKind: 'calibration-mode',
+        text: t('mock.ask.calib'),
+        deadlineUnixMs: Date.now() + 110_000,
+        choices: [
+          { id: 'print', label: t('mock.choice.print'), accent: true },
+          { id: 'direct', label: t('mock.choice.direct'), accent: false },
+        ],
+      },
+    }
+  }
+
+  if (which === 'debug-ask') {
+    return {
+      ...base,
+      facts: debugFacts,
+      finished: null,
+      question: {
+        questionKind: 'debug-plan',
+        text: t('mock.ask.debug'),
+        deadlineUnixMs: Date.now() + 110_000,
+        choices: [],
+      },
+    }
+  }
+
+  if (which === 'relocate-done') {
+    return {
+      ...base,
+      question: null,
+      finished: okFinished(
+        { penX: -1, penY: 18.6, penZ: 3.8, glueSpeed: 70 },
+        {
+          relocation: {
+            choice: 'relocate',
+            from: [20, 20],
+            to: [18.2, 50.9],
+            movedMm: 31,
+            beforeConflictCount: 97,
+            afterConflictCount: 0,
+            verified: true,
+            towerHeightMm: 60,
+            before: relocateGeo.collision,
+          },
+        },
+      ),
+    }
+  }
+
+  /*
+   * **挪了塔、但复检仍然撞**（`W_COLLISION_RELOCATE_001`）：`ok=false` + 有挪塔记录 ——
+   * 说明页那句必须说"仍然有冲突"，不能再写"无冲突，已继续处理"。
+   */
+  if (which === 'relocate-fail') {
+    return {
+      ...base,
+      question: null,
+      finished: failedFinished(t('mock.pp.relocateFail'), 'W_COLLISION_RELOCATE_001', {
+        geo: relocateGeo,
+        relocation: {
+          choice: 'relocate',
+          from: [20, 20],
+          to: [42.7, 50.9],
+          movedMm: 38.4,
+          beforeConflictCount: 97,
+          afterConflictCount: 3,
+          verified: false,
+          towerHeightMm: 60,
+          before: relocateGeo.collision,
+        },
+      }),
+    }
+  }
+
+  if (which === 'fail') {
+    return {
+      ...base,
+      question: null,
+      finished: failedFinished(t('mock.pp.fail'), 'E_GCODE_BOUNDARY_001'),
+    }
+  }
+
+  if (which === 'stop') {
+    return {
+      ...base,
+      question: null,
+      finished: failedFinished(t('mock.report.stopped'), null, { cancelled: true }),
+    }
+  }
+
+  if (which === 'collision') {
+    return {
+      ...base,
+      question: null,
+      finished: failedFinished(t('mock.pp.collision'), 'E_GCODE_COLLISION_001', {
+        geo: relocateGeo,
+      }),
+    }
+  }
+
+  /* 剩下的都是"撞塔那一问"（清单里没登记的名字也落到这一屏） */
   return {
     ...base,
     finished: null,
@@ -185,62 +565,7 @@ function devPostProcessRun(): PostProcessRun | null {
           accent: false,
         },
       ],
-      geo: {
-        current: [78, 91],
-        candidate: [16.4, 90],
-        collision: {
-          kind: 'model',
-          target: 'model',
-          direction: '',
-          requiredMoveX: 0,
-          requiredMoveY: 0,
-          conflictCount: 97,
-          conflictPoints: [
-            [74.2, 88.4],
-            [75.1, 89.2],
-            [73.8, 87.6],
-            [76.4, 90.1],
-            [74.9, 88.9],
-          ],
-          towerBbox: { xMin: 70, xMax: 87.04, yMin: 84, yMax: 101.04 },
-          modelBbox: { xMin: 40, xMax: 96, yMin: 26, yMax: 88 },
-          /* 一个模型一个框（真机那趟是内核按占用格切出来的，这里给预览两件） */
-          modelBoxes: [
-            { xMin: 40, xMax: 96, yMin: 26, yMax: 58 },
-            { xMin: 52, xMax: 90, yMin: 62, yMax: 88 },
-          ],
-          /* 俯视图画轮廓（真机由内核算凸包；这里演两件不规则的） */
-          modelPolygons: [
-            [
-              [40, 26],
-              [70, 22],
-              [96, 30],
-              [94, 58],
-              [56, 58],
-              [40, 44],
-            ],
-            [
-              [52, 62],
-              [72, 60],
-              [90, 64],
-              [90, 88],
-              [52, 88],
-            ],
-          ],
-          printable: { xMin: 0, xMax: 256, yMin: 0, yMax: 256 },
-          tower: {
-            outerStructure: 'brim',
-            bodyMm: 19.58,
-            ribWidth: 3,
-            ribExtraLength: 4,
-            ribFilletWall: false,
-            sheathBaseExpand: 5,
-          },
-          forbiddenZones: [],
-          adviceCode: 'E_GCODE_COLLISION_002',
-          adviceText: t('mock.advice.collision'),
-        },
-      },
+      geo: relocateGeo,
     },
   }
 }
@@ -251,6 +576,7 @@ import type {
   Axes,
   BasedOnFacts,
   CalibModel,
+  DebugPlan,
   MkpApi,
   CloudVersion,
   DownloadOutcome,
@@ -267,8 +593,12 @@ import type {
   PresetHistory,
   PresetSource,
   PinPref,
+  PostProcessFinished,
+  PostProcessProgress,
+  PostProcessResult,
   PostProcessRun,
   PostprocPrefsWire,
+  RelocateGeo,
   ResolvedPostprocPrefs,
   SoftwareUpdate,
   ThemePref,
@@ -419,10 +749,17 @@ let mockPostproc: PostprocPrefsWire = {}
 let mockCopiesFollowCloud = false
 
 /*
- * 「使用之后自动复制后处理脚本」那一档（2026-11-01）：内存镜像，出厂 = 关
- * （真数据在 Rust 侧 `run/app-state.json` 的 `presets.autoCopyScript`）。
+ * 「使用之后自动复制后处理脚本」那一档（2026-11-01）：内存镜像，出厂 = 开
+ * （真数据在 Rust 侧 `run/app-state.json` 的 `presets.autoCopyScript`，
+ * 出厂值来自 `presets/client-defaults.toml` 的 `[Client]` 段）。
  */
-let mockAutoCopyScript = false
+let mockAutoCopyScript = true
+
+/*
+ * 「下载之后自动设为使用中」那一档（2026-11-18）：内存镜像，出厂 = 开
+ * （真数据在 Rust 侧 `run/app-state.json` 的 `presets.autoUseAfterDownload`）。
+ */
+let mockAutoUseAfterDownload = true
 
 /*
  * **出处账**（2026-10-20）：真机那一本在用户根 `provenance.json`（`runtime::provenance`），
@@ -1567,6 +1904,16 @@ async function mockDeliver(
       ].join('\n'),
     )
   }
+  /*
+   * **下载即放入**（2026-11-18 作者：「就是在套餐里面一起下载的，就放入」）——
+   * 与真机 `download_runtime_file` 末尾那一手同一条口径：切片器配置写进它自己那一档的
+   * 每个账号目录；MKP 预设不进切片器（走「启用」），`copyToSlicerIn` 会抛，跳过就是。
+   */
+  try {
+    copyToSlicerIn(fileName)
+  } catch {
+    /* 不是切片器配置 —— 与真机一样什么都不做 */
+  }
 }
 
 export const mockApi: MkpApi = {
@@ -1665,34 +2012,54 @@ export const mockApi: MkpApi = {
    * ★ 只有 **dev 且 URL 带 `?pp=…`** 时给一份假快照 —— 那是给探针用的
    *   （`scripts/probes/pp-modal-height.mjs`：量「结果」与「挪塔那一问」两屏是不是一样高）。
    *   `?pp=result` / `?pp=warn` / `?pp=glue`（开了热床预涂胶）/ `?pp=vh`（可变层高）/
-   *   `?pp=relocate` / `?pp=mismatch`。
+   *   `?pp=debug`（调试那一趟）/ `?pp=relocate` / `?pp=mismatch`。
    *   生产构建里这函数直接 `null`
    *   （`import.meta.env.DEV` 在 build 里是常量 false，整段被摇掉）。
    */
   async getPostProcessRun(): Promise<PostProcessRun | null> {
-    return devPostProcessRun()
+    if (!import.meta.env.DEV) return null
+    /* 第一次问就定下这一屏；之后答复 / 停止换的是同一格（刷新页面即回到场景初始态） */
+    if (previewRun === null) previewRun = devPostProcessRun()
+    return previewRun
   },
 
   async cancelPostProcess() {
-    throw new NotImplementedError(
-      'cancelPostProcess',
-      t('mock.preview.noRun'),
-    )
+    if (previewRun === null) {
+      throw new NotImplementedError('cancelPostProcess', t('mock.preview.noRun'))
+    }
+    previewStop(t('mock.report.stopped'))
   },
 
-  async answerPostProcess() {
-    throw new NotImplementedError(
-      'answerPostProcess',
-      t('mock.preview.noRun'),
-    )
+  async answerPostProcess(questionKind: string, id: string) {
+    if (previewRun === null) {
+      throw new NotImplementedError('answerPostProcess', t('mock.preview.noRun'))
+    }
+    if (id === 'stop') {
+      previewStop(t('mock.report.stopped'))
+      return
+    }
+    /* 界面先让位给 hero（`answering`），这里把进度走一遍，末尾给结论 */
+    previewRun = { ...previewRun, question: null }
+    previewPlay(previewOkFinished(questionKind, id))
   },
 
   async replayPostProcessQuestion() {
-    /* 浏览器里没有钩子那一趟 —— 没有问句可补推，静默成功即可 */
+    const question = previewRun?.question ?? null
+    if (question !== null) previewEmit(POSTPROCESS_QUESTION, question)
   },
 
   async replayPostProcessRun() {
-    /* 浏览器里没有钩子那一趟 —— 没有这一趟可重推，静默成功即可 */
+    const run = previewRun
+    if (run === null) return
+    previewEmit(POSTPROCESS_STARTED, {
+      presetName: run.presetName,
+      gcodeName: run.gcodeName,
+      preview: run.preview,
+    })
+    if (run.facts !== null) previewEmit(POSTPROCESS_FACTS, run.facts)
+    if (run.progress !== null) previewEmit(POSTPROCESS_PROGRESS, run.progress)
+    if (run.question !== null) previewEmit(POSTPROCESS_QUESTION, run.question)
+    if (run.finished !== null) previewEmit(POSTPROCESS_FINISHED, run.finished)
   },
 
   /* ——— 「客户端接发布包」这一轮（P1）新增的十二个 ———
@@ -2938,6 +3305,14 @@ export const mockApi: MkpApi = {
   },
 
   /*
+   * 前端那两格偏好的出厂档（2026-11-18）：浏览器里没有二进制，回的就是出厂那一档 ——
+   * 与 `presets/client-defaults.toml` 的 `[Client]` 段同一个值（真机由壳递过来）。
+   */
+  async getClientDefaults() {
+    return { slicer: 'system', guideShow: true }
+  },
+
+  /*
    * 主题（设置页「外观」那一格）：与数据源同一套口径 —— 内存镜像。
    * 认得出三个字面量才收（消息照抄真机那两条命令的说法），别的如实拒绝。
    */
@@ -2996,7 +3371,7 @@ export const mockApi: MkpApi = {
 
   /*
    * 「使用之后自动复制后处理脚本」（2026-11-01）：与上面那条同一套口径 ——
-   * 内存镜像、回解析后的 boolean、出厂 = 关。
+   * 内存镜像、回解析后的 boolean、出厂 = 开。
    *
    * ★ 浏览器里它**真的会生效**（换「使用中」之后抄脚本那条链是前端的），
    *   但 preview 里没有本机可执行物与预设文件，`getPostProcessCommand` 会照实
@@ -3012,11 +3387,57 @@ export const mockApi: MkpApi = {
   },
 
   /*
+   * 「下载之后自动设为使用中」（2026-11-18）：同一套口径 —— 内存镜像、出厂 = 开。
+   * 读者是预设页「云端 → MKP 配置」那颗「下载」（下载完接着走 `applyActivePreset`）。
+   */
+  async getAutoUseAfterDownload() {
+    return mockAutoUseAfterDownload
+  },
+
+  async setAutoUseAfterDownload(enabled) {
+    mockAutoUseAfterDownload = enabled
+    return mockAutoUseAfterDownload
+  },
+
+  /*
    * 后处理偏好（2026-10-17）：与主题同一套口径 —— 内存镜像。
    * 出厂档**照抄后端那一份**（`runtime::app_state::PostprocPrefs::resolved`），
    * 量程也照抄；这里不另发明一套默认值，否则浏览器里看到的样子会与真机不同。
    */
+  /**
+   * 浏览器预览里的「默认点位」。
+   *
+   * 真机那份从随包预设解析（`ipc::prefs::get_debug_anchors`）；预览没有内核，
+   * 这里给两台机器的样子，别让那张表空着。值取自随包预设，改预设时顺手同步。
+   */
+  /** 预览里没有真实偏好可读：两列都给同一份出厂档（点「恢复默认」看不出差别） */
+  async getClientPrefsView() {
+    const factory = {
+      theme: 'system',
+      locale: 'system',
+      autoCleanHistory: true,
+      autoCheckUpdate: true,
+      copiesFollowCloud: false,
+      autoCopyScript: true,
+      autoUseAfterDownload: true,
+      source: 'gitee',
+    }
+    return { current: factory, factory }
+  },
+
+  /* 预览里没有盘上状态要清：界面靠随后那次回读刷新 */
+  async resetClientPrefs() {
+    return { ok: true }
+  },
+  async getDebugAnchors() {
+    return [
+      { machine: 'A1', rows: [{ variant: 'fast261111', mountWaitX: 256, mountWaitY: null, mountX: 267, unmountWaitX: 256, unmountWaitY: null, unmountX: 274 }] },
+      { machine: 'P1S', rows: [{ variant: 'lite', mountWaitX: 20, mountWaitY: 7, mountX: 1, unmountWaitX: 246, unmountWaitY: 0, unmountX: 256 }] },
+    ]
+  },
   async getPostprocPrefs() {
+    /* 与后端 `resolved()` 同一个口径：没选过 = 2 秒，0 = 关了 */
+    const dwell = mockPostproc.debugDwellSec
     const resolved: ResolvedPostprocPrefs = {
       notifyOnFinish: mockPostproc.notifyOnFinish ?? true,
       uiMode: mockPostproc.uiMode ?? 'gui',
@@ -3041,7 +3462,8 @@ export const mockApi: MkpApi = {
       debugUnmountY: mockPostproc.debugUnmountY ?? null,
       debugMoveY: mockPostproc.debugMoveY ?? false,
       debugRepeat: mockPostproc.debugRepeat ?? 1,
-      debugTravelSpeed: mockPostproc.debugTravelSpeed ?? 30000,
+      debugDwellSec: dwell === undefined || dwell === null ? 2 : dwell > 0 ? dwell : null,
+      debugTravelSpeed: mockPostproc.debugTravelSpeed ?? 20000,
       debugUseTravelSpeed: mockPostproc.debugUseTravelSpeed ?? false,
       debugCustomGcode: mockPostproc.debugCustomGcode ?? null,
       zCalibrationDwellSec: mockPostproc.zCalibrationDwellSec ?? 2,
@@ -3061,12 +3483,16 @@ export const mockApi: MkpApi = {
        * 否则「恢复默认」的对比框在预览里显示的是旧值（真机不受影响）。
        */
       factory: {
-        skipVibrationCalibration: false,
+        notifyOnFinish: true,
+        uiMode: 'gui',
+        autoTopOnAsk: true,
+        forceCalibrationMode: false,
+        skipVibrationCalibration: true,
         beginStageRetractEnabled: true,
         beginStageRetractZLiftMm: 5,
         zCalibrationDwellSec: 2,
         xyCalibrationDwellSec: 3,
-        underSupportEnabled: false,
+        underSupportEnabled: true,
         underSupportMm: 0.5,
         glueBottomEnabled: false,
         bedGlueEnabled: false,
@@ -3076,7 +3502,7 @@ export const mockApi: MkpApi = {
       limits: {
         zDwell: { min: 1, max: 20 },
         xyDwell: { min: 1, max: 10 },
-        zLift: { min: 20, max: 100 },
+        zLift: { min: 5, max: 30 },
         underSupport: { min: 0, max: 2 },
       },
     }

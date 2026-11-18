@@ -46,10 +46,14 @@ const APP_STATE_EVENT = 'app-state-changed'
 interface AppStateSnapshot {
   /** 使用中指针（null = 还没用任何一份） */
   active: ActivePreset | null
-  /** 主题档位（null = 还没选过 ⇒ 按"跟随系统"） */
+  /**
+   * 主题档位。后端已经把"没选过"解成出厂档（`presets/client-defaults.toml` 的
+   * `[Client] Theme`），所以 `null` 只剩"这一次没读到"那一种。
+   */
   theme: ThemePref | null
   /**
-   * 界面语言档（2026-10-25；null = 还没选过 ⇒ 按"跟随系统"）。
+   * 界面语言档（2026-10-25）。与 `theme` 同一条：后端已把"没选过"解成
+   * `[Client] Locale`（出厂跟随系统），`null` 只剩"这一次没读到"。
    *
    * ★ 这里存的是**用户选的那一档**，不是解析后的语言 —— "跟随系统"什么时候变成
    *   具体语言是 `i18n.resolveLocale` 的事（判据不许两个源）。
@@ -183,7 +187,8 @@ export function useActivePreset(): ActivePreset | null {
 }
 
 /**
- * 主题档位（AppState 的 theme 格）。`null` = **还没选过** ⇒ 按"跟随系统"。
+ * 主题档位（AppState 的 theme 格）。`null` = **这一次没读到**（那才按"跟随系统"兜）；
+ * "没选过"由后端解成出厂档（`[Client] Theme`），界面拿到的是最终那一档。
  *
  * 读者是设置页（「外观」那一块显示当前档）—— `<html data-theme>` 不用页面操心：
  * 每次快照落地由 `applyTheme` 写一次（含"跟随系统"时系统深浅的变化）。
@@ -197,7 +202,8 @@ function getThemePref(): ThemePref | null {
 }
 
 /**
- * 界面语言档（AppState 的 `locale` 格，2026-10-25）。`null` = 还没选过 ⇒ 跟随系统。
+ * 界面语言档（AppState 的 `locale` 格，2026-10-25）。`null` = 这一次没读到
+ * （"没选过"由后端解成 `[Client] Locale`）。
  *
  * 读者只有设置页那一行单选（显示当前档 / 发写命令）。
  * **界面文案不读它**：文案读 `i18n` 的 `useT()` —— 那一层已经把"跟随系统"解析成
