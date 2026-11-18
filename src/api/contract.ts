@@ -2327,6 +2327,21 @@ export type ThemePref = 'light' | 'dark' | 'system'
  */
 export type LocalePref = 'system' | 'zh-CN' | 'zh-TW' | 'ja' | 'en'
 
+/* ---------- 前端那两格偏好的出厂档（2026-11-18） ---------- */
+
+/**
+ * [`MkpApi.getClientDefaults`] 的形状 —— 与 Rust `ipc::prefs::ClientDefaultsDto` 一一对应。
+ *
+ * 只有**前端自己拿着**的那两格（切片器 / 重新切片提示）需要它：其余偏好的出厂档都在
+ * 后端解（`None` 直接落成出厂值），界面拿到的就是最终值。
+ */
+export interface ClientDefaultsDto {
+  /** `system` / `bambu` / `orca` —— 出厂档不会给 `custom`（那要一条本机路径） */
+  slicer: SlicerId
+  /** 保存参数后要不要弹「回切片器重新切片」那一屏 */
+  guideShow: boolean
+}
+
 /* ---------- 主窗怎么摆（2026-10-17） ---------- */
 
 /**
@@ -2488,12 +2503,17 @@ export interface PostprocPrefsView {
   raw: PostprocPrefsWire
   resolved: ResolvedPostprocPrefs
   /**
-   * **出厂档**（全 `null` 解析出来的那一份），只含 `PrefsIr` 那 11 项。
+   * **出厂档**（全 `null` 解析出来的那一份）：`[Prefs]` 那 11 项 + 通知 / 显示方式 /
+   * 置顶 / 强制校准这 4 项（后者来自同一份文件的 `[Client]` 段）。
    *
    * 设置页「恢复默认」的对比要用它 —— 只写「出厂」两个字，用户看不出点完变成
    * 开还是关、数字多少。调试动作那组不在这里（它有自己的恢复）。
    */
   factory: {
+    notifyOnFinish: boolean
+    uiMode: PostprocUiMode
+    autoTopOnAsk: boolean
+    forceCalibrationMode: boolean
     skipVibrationCalibration: boolean
     beginStageRetractEnabled: boolean
     beginStageRetractZLiftMm: number
@@ -3961,10 +3981,17 @@ export interface MkpApi {
   clearPresetSource(): Promise<PresetSource | null>
 
   /**
-   * 当前主题偏好。`null` = **还没选过**（界面按"跟随系统"）。
+   * **前端自己那两格偏好的出厂档**（2026-11-18）。
    *
-   * 与 `'system'` 意思不同：那是用户明确点了跟随系统 —— 界面上两者长得一样
-   * （都跟随系统），但盘上分得开，将来改出厂默认档时还能重新解释。
+   * 切片器与「保存后的重新切片提示」住在 webview 的 localStorage，壳读不到，
+   * 于是出厂值由后端从 `presets/client-defaults.toml` 的 `[Client]` 段递过来：
+   * 启动时问一次，之后"没设过"就按它兜底。**前端不另写一份默认值**。
+   */
+  getClientDefaults(): Promise<ClientDefaultsDto>
+
+  /**
+   * 当前主题偏好。**没选过** ⇒ 出厂档（也是 `system`，但由后端按
+   * `presets/client-defaults.toml` 解释 —— "没选过怎么解释"不归界面猜）。
    */
   getTheme(): Promise<ThemePref | null>
 

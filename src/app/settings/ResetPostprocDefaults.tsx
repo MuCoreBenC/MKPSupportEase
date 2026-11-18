@@ -3,10 +3,10 @@
  *
  * # 它恢复的是哪一份
  *
- * 后处理那 11 个偏好全部置回 `null`（= 没设过）。后端 `resolved()` 拿 `null` 去读
- * **出厂值**，而那份出厂值现在是可配的（工作台「默认配置」页写
- * `presets/client-defaults.toml`）。所以这一颗是「老用户套用新默认值」的入口：
- * 默认值只影响新装，已经装好的得自己点一下。
+ * 后处理那 15 个偏好（`[Prefs]` 的 11 项 + 通知 / 显示方式 / 置顶 / 强制校准）全部置回
+ * `null`（= 没设过）。后端 `resolved()` 拿 `null` 去读**出厂值**，而那份出厂值现在是可配的
+ * （工作台「默认配置」页写 `presets/client-defaults.toml`）。所以这一颗是「老用户套用新默认值」
+ * 的入口：默认值只影响新装，已经装好的得自己点一下。
  *
  * ★ 不写死任何数：写死就等于把「恢复默认」变成「恢复成上一版」，与
  *   `DebugPrefsModal` 那颗的取舍同一条理。
@@ -28,6 +28,7 @@ import type { PostprocPrefsView } from '../../api/contract'
 import { Modal } from '../../components/modal'
 import { Tip } from '../../components/tooltip'
 import { useT } from '../../i18n'
+import type { StringKey, Tr } from '../../i18n'
 import { usePostprocPrefs } from '../state/usePostprocPrefs'
 import { Btn } from '../ui/Controls'
 import ts from '../presets/TextDiffModal.module.css'
@@ -38,9 +39,14 @@ import s from './PageSettings.module.css'
 /**
  * 「恢复默认」的那一份补丁：全给 `null`，由后端按出厂重算。
  *
- * 键与 `postproc::ir::PrefsIr` 一一对应；漏一个就是「那一项恢复不了」。
+ * 键 = 「有出厂值的那 15 项」（`[Prefs]` 的 11 项 + 通知 / 显示方式 / 置顶 / 强制校准）；
+ * 漏一个就是「那一项恢复不了」。
  */
 const RESET_PATCH = {
+  notifyOnFinish: null,
+  uiMode: null,
+  autoTopOnAsk: null,
+  forceCalibrationMode: null,
   glueBottomEnabled: null,
   underSupportEnabled: null,
   underSupportMm: null,
@@ -54,29 +60,47 @@ const RESET_PATCH = {
   autoTowerPosition: null,
 } as const
 
-/** 对比表里的 11 行（顺序与设置页出现顺序一致） */
-const ITEMS: { key: keyof PostprocPrefsView['factory']; label: string }[] = [
-  { key: 'skipVibrationCalibration', label: '跳过震动校准检测' },
-  { key: 'beginStageRetractEnabled', label: '开始阶段收笔' },
-  { key: 'beginStageRetractZLiftMm', label: '收笔抬升高度' },
-  { key: 'zCalibrationDwellSec', label: 'Z 轴校准停留时间' },
-  { key: 'xyCalibrationDwellSec', label: 'XY 轴校准停留时间' },
-  { key: 'underSupportEnabled', label: '启用下方支撑余量' },
-  { key: 'underSupportMm', label: '下方支撑余量阈值' },
-  { key: 'glueBottomEnabled', label: '支撑面下方一层也涂胶' },
-  { key: 'bedGlueEnabled', label: '启用热床预涂胶' },
-  { key: 'bedGlueAllModels', label: '热床涂胶覆盖所有模型' },
-  { key: 'autoTowerPosition', label: '智能塔位置' },
+/** 对比表里的 15 行（顺序与设置页出现顺序一致；标签走文案表，与设置页同一句） */
+const ITEMS: { key: keyof PostprocPrefsView['factory']; label: StringKey }[] = [
+  { key: 'notifyOnFinish', label: 'settings.postproc.notify' },
+  { key: 'uiMode', label: 'settings.postproc.mode' },
+  { key: 'autoTopOnAsk', label: 'settings.postproc.topOnAsk' },
+  { key: 'forceCalibrationMode', label: 'settings.calib.forceCalib' },
+  { key: 'skipVibrationCalibration', label: 'settings.calib.skipVibration' },
+  { key: 'beginStageRetractEnabled', label: 'settings.calib.beginRetract' },
+  { key: 'beginStageRetractZLiftMm', label: 'settings.calib.lift' },
+  { key: 'zCalibrationDwellSec', label: 'settings.calib.zDwell' },
+  { key: 'xyCalibrationDwellSec', label: 'settings.calib.xyDwell' },
+  { key: 'underSupportEnabled', label: 'settings.under.enable' },
+  { key: 'underSupportMm', label: 'settings.under.margin' },
+  { key: 'glueBottomEnabled', label: 'settings.postproc.glueBottom' },
+  { key: 'bedGlueEnabled', label: 'settings.glue.enable' },
+  { key: 'bedGlueAllModels', label: 'settings.glue.allModels' },
+  { key: 'autoTowerPosition', label: 'settings.postproc.tower' },
 ]
 
-const TOWER_LABEL: Record<string, string> = { ask: '问一句', auto: '自动挪塔', off: '不挪' }
+/** 三档的说法与设置页那一排**同一套字**（`settings.postproc.towerMode*`），不另写一份 */
+const TOWER_LABEL: Record<string, StringKey> = {
+  ask: 'settings.postproc.towerModeAsk',
+  auto: 'settings.postproc.towerModeAuto',
+  off: 'settings.postproc.towerModeOff',
+}
+
+/** `uiMode` 两档同上（`settings.postproc.silent` / `gui`） */
+const UI_MODE_LABEL: Record<string, StringKey> = {
+  silent: 'settings.postproc.silent',
+  gui: 'settings.postproc.gui',
+}
 
 /** 一格的值怎么写成一行 */
-function valueText(v: boolean | number | string | null | undefined, dash: string): string {
+function valueText(tr: Tr, v: boolean | number | string | null | undefined, dash: string): string {
   if (v === null || v === undefined) return dash
   if (typeof v === 'boolean') return v ? '开' : '关'
   if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(2)
-  if (typeof v === 'string') return TOWER_LABEL[v] ?? v
+  if (typeof v === 'string') {
+    const key = TOWER_LABEL[v] ?? UI_MODE_LABEL[v]
+    return key === undefined ? v : tr(key)
+  }
   return String(v)
 }
 
@@ -96,10 +120,14 @@ export default function ResetPostprocDefaults({ host }: { host: HTMLElement | nu
    */
   const rows = useMemo(() => {
     if (prefs === null) return []
-    const left = ITEMS.map((it) => `${it.label} = ${valueText(prefs.resolved[it.key], dash)}`).join('\n')
-    const right = ITEMS.map((it) => `${it.label} = ${valueText(prefs.factory[it.key], dash)}`).join('\n')
+    const left = ITEMS.map(
+      (it) => `${tr(it.label)} = ${valueText(tr, prefs.resolved[it.key], dash)}`,
+    ).join('\n')
+    const right = ITEMS.map(
+      (it) => `${tr(it.label)} = ${valueText(tr, prefs.factory[it.key], dash)}`,
+    ).join('\n')
     return lineDiff(left, right)
-  }, [prefs, dash])
+  }, [prefs, dash, tr])
 
   const changed = rows.filter((r) => r.kind !== 'same').length
 

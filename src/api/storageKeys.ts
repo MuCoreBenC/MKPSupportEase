@@ -93,6 +93,15 @@ export const STORAGE = {
   clientReportExportDir: 'mkp.A40.report.exportDir',
 
   /**
+   * 报告页左栏**标了星的记录 id**（一串 `_meta.json` 基名，JSON 数组）。
+   *
+   * 纯前端偏好：星标只是"这条我要回头找"，不是账 —— 记录本身由后端只读那棵
+   * `gcode_history/` 树说了算。记录被删掉之后这里会留一条没人认领的 id，
+   * 渲染时按现有列表现取交集，不会冒出一行空的。
+   */
+  clientReportStarred: 'mkp.A40.report.starred',
+
+  /**
    * 导出框信息页那颗「导出时启用压缩」（布尔，2026-11-03）。纯前端偏好，**默认开**。
    *
    * 真 ⇒ 三件套打成一个 `<基名>.zip`；假 ⇒ 散着复制到 `<基名>/` 里。

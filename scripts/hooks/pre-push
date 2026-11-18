@@ -67,7 +67,16 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     refs/tags/*)
       name=${remote_ref#refs/tags/}
 
-      if [ -z "$VER" ]; then
+      #
+      # **只认发布事务推的 tag**（2026-11-18 作者：「任何文件都拦不住」，要机械的）。
+      #
+      # 内核 `Git::push_tag` 会带 `MKP_RELEASE_TX=1`；手工 `git tag -a && git push`
+      # 没有它，在这里当场拒 —— 那条路没写清单、不做事后核对，
+      # 结果就是「tag 与 Release 都发了，客户端看不到新版」。
+      if [ "${MKP_RELEASE_TX:-}" != "1" ]; then
+        tag_bad=1
+        tag_msg="tag '$name' 只能由发布事务推送（npm run ship / 工作台发布按钮）；手工 git tag + push 会绕开清单与核对"
+      elif [ -z "$VER" ]; then
         tag_bad=1
         tag_msg="读不到 package.json 的 version，无法判断 tag '$name' 对不对"
       elif [ "$name" != "v$VER" ]; then

@@ -332,6 +332,14 @@
   font-size: var(--fs-body);
 }
 
+/* 聚焦 = 那道 1px 边变绿（粗细不动）。作者 2026-11-18：「自定义地址的描边很粗，
+   我就希望文本框变个颜色」—— 原来靠 global.css 那圈 2px 外扩，盒子一变宽就显眼 */
+.input:focus,
+.input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
 /*
  * 「切片」那格的下拉（2026-10-13 第三刀）：外面这层只为**定宽** —— 共用件
  * `SelectField`（`shared-ui/field`）的 `.wrap` 是 inline-flex，自己不会伸；
@@ -674,12 +682,9 @@
 }
 
 /* 悬停别用 filter / opacity：那一类会在祖先链上摊平 3D，背面遮挡就失效了。
- * 焦点环用 `box-shadow` 做外扩，不用 `outline-offset` —— 那一格是定位高亮的判据词，
- * 而这条是键盘焦点，两件事不该互相绊住。 */
+ * 焦点也不画外圈（全站口径）：它是一颗能翻的牌，本身就是这一块里唯一的动作。 */
 .updArt:focus-visible {
-  outline: 2px solid var(--accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 25%, transparent);
-  border-radius: 28px;
+  outline: none;
 }
 
 /* 动作条：整组贴卡片右缘（`margin-left: auto`），窄窗折行后也靠右。

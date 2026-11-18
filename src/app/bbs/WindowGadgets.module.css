@@ -79,9 +79,8 @@
   color: var(--accent);
 }
 
-/* 焦点只加深描边、不发光，也不改变尺寸 */
+/* 焦点只换那道 1px 描边的色，不发光、不加粗、不改变尺寸 */
 .pill:focus-visible {
   border-color: var(--bbs-focus);
-  outline: 2px solid var(--bbs-focus);
-  outline-offset: 2px;
+  outline: none;
 }

@@ -21,6 +21,8 @@ import type { SlicerApp } from '../../api/contract'
 import { STORAGE } from '../../api/storageKeys'
 /* 多实例同步的 sticky 偏好：切片这一格与「引导提示」开关共用这一份（见 `hooks/`） */
 import { useSyncedStickyState } from '../../hooks/useSyncedStickyState'
+/* 「没设过」用哪一档：出厂值只有 `presets/client-defaults.toml` 一份，启动时递进来 */
+import { clientDefaults } from '../state/clientDefaults'
 import type { StringKey, Tr } from '../../i18n'
 
 /** 四档，**id 是给壳的契约**（跟随系统 = 交给系统关联程序，不指定具体应用） */
@@ -125,9 +127,15 @@ export function useSystemSlicerApp(): SlicerApp | null {
   return app
 }
 
-/** 默认那一份（设置页写，打开模型读）。值不合法时回落到跟随系统 */
+/**
+ * 默认那一份（设置页写，打开模型读）。
+ *
+ * 没设过 ⇒ `presets/client-defaults.toml` 的 `[Client] Slicer`（启动时由
+ * `api.getClientDefaults` 递过来，见 `state/clientDefaults.ts`）；
+ * 盘上那个值不合法时也落到同一档 —— 判据只有那一份 toml。
+ */
 export function useSlicerPref() {
-  return useSyncedStickyState<SlicerId>(STORAGE.clientSlicer, 'system', isSlicerId)
+  return useSyncedStickyState<SlicerId>(STORAGE.clientSlicer, clientDefaults().slicer, isSlicerId)
 }
 
 /**

@@ -124,7 +124,7 @@
   color: var(--text-1);
 }
 
-/* 盖掉 global.css 那条全局 input 聚焦环：它跟着 input 的直角盒走，会套出一个绿方块 */
+/* 聚焦看外面那圈胶囊壳（`.search:focus-within`），输入框自己不画框 */
 .input:focus,
 .input:focus-visible {
   outline: none;

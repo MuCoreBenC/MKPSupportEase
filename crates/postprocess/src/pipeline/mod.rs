@@ -578,6 +578,17 @@ fn run(
     checkpoint(cancel)?;
     timer.begin(Step::Collision, "碰撞检测...");
     executed.push(Step::Collision);
+    /*
+     * **明显越界先拦**（2026-11-18）：真正的闸是 `process_gcode_offset`，它要跑到
+     * Pass1 出事那一行才响。这里在这一步开头先看一眼全文 X/Y 极值 —— 越界就停，
+     * 这一步只花这次扫描的零点几秒（报告里写「避让检查 · 停在这一步」，语义就是
+     * "这一关没让过"）；放过的边缘情况仍交给逐行那道闸。
+     */
+    crate::postproc::offset::check_xy_bounds_early(
+        &content,
+        &ir,
+        crate::postproc::offset::EARLY_BOUNDARY_MARGIN_MM,
+    )?;
     /* 调试那一趟整段产物都要被替换掉，碰撞结论没有去处；而且它会在调试之前
      * 就把这一趟判成失败（作者 2026-11-12：调试模式下这些都别管）。 */
     if ir.debug.is_none() && crate::postproc::calibration::need_collision_check(calib_mode) {
