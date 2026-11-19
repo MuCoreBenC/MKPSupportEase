@@ -24,13 +24,18 @@
  *    按钮不渲染（待裁决项记在 C14-PORT-PLAN §4）。
  *  - **大小 / 修改时间不显示**：资产定义刻意不存它们（那是交付物的属性，
  *    发布时按真实字节算，Task 13.6）—— 原型里那格本来就标着「演示值」。
+ *  - **改名改的是显示名**（2026-11-19）：切片器 = 文件名（草稿里换、保存才进仓库），
+ *    其余 = 台账 `name`；MKP 预设的名字是版本名，这一页不给改（详情卡指路）。
+ *    引用一律按 id 走 ⇒ 一处改完，套餐 / 机型 / 分组看到的都跟上。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
 import { useScope } from '../scopeState'
-import type { AssetInspectView, AssetList, AssetView, Words } from '../api'
+import type { AssetInspectView, AssetList, AssetRenameInput, AssetView, Words } from '../api'
 import { assetsBus } from '../assetsBus'
+import AssetRenameModal from './AssetRenameModal'
+import { KIND_LABEL } from './assetKindLabel'
 import GroupManagerModal from './GroupManagerModal'
 import ImageZoom from '../components/ImageZoom'
 import { ContextMenu } from '../components/menu'
@@ -66,16 +71,6 @@ interface Props {
     patches: import('../api').Patch[],
     opts?: { quiet?: boolean },
   ) => Promise<void>
-}
-
-const KIND_LABEL: Record<string, string> = {
-  image: '机型图',
-  icon: '图标',
-  model: '模型',
-  slicerProfile: '切片器',
-  mkPreset: 'MKP 预设',
-  /* 引导图（2026-10-16）：图片引导那套里的系统窗口截图（浅 / 深各一张） */
-  guide: '引导图',
 }
 
 /** 字节数给人看的写法（检查面板「大小」那一格）：B / KB / MB 一位小数 */
@@ -191,6 +186,11 @@ export default function AssetsPage({
    */
   const [mgrAssets, setMgrAssets] = useState<AssetView[]>([])
   const [confirm, setConfirm] = useState<'archive' | 'delete' | null>(null)
+  /**
+   * 改名框开没开（2026-11-19）。`ids` = 打开时勾上的那几条（单条那一档就是一条）；
+   * 空数组 = 批量那一档，进去自己勾。落下去是一笔结构编辑（一条撤销，保存才落盘）。
+   */
+  const [rename, setRename] = useState<{ ids: string[]; single: boolean } | null>(null)
   const [pageErr, setPageErr] = useState<string | null>(null)
   /** 点开看大的那条（2026-10-16）：`null` = 没开。只看图，不动数据 */
   const [zoom, setZoom] = useState<AssetView | null>(null)
@@ -394,6 +394,28 @@ export default function AssetsPage({
     }
   }
 
+  /**
+   * 改名（2026-11-19）：**一笔结构编辑** —— 一条撤销、保存才落盘、放弃等于没改。
+   *
+   * 路径与名字的换算全在后端（`renamed_path` / `plan_renames`），这里只交
+   * "哪一条 → 新显示名"。回来的是**全量**清单（与其他结构命令同一条），
+   * 所以要把这一页的筛选再套回去。
+   */
+  const doRename = async (items: AssetRenameInput[]) => {
+    try {
+      await wb.renameAssets(items)
+      /* 清单动过了 ⇒ 敲一下信号：套餐页 / 标注台那些常驻页要重取 */
+      assetsBus.bump()
+      /* 这一笔进了结构事务：外壳那份「未保存 N」得当场跟上 */
+      onBookRefresh()
+      load(kind, assign, slicer, nozzle, layer, q, group)
+      toasts.push(`已改名 ${items.length} 条，保存后写入。`)
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+      throw e
+    }
+  }
+
   /*
    * 资产行右键（C06）。不引入新动作：删除、改可见性详情卡上都已经有按钮，
    * 右键只是熟手的第二条路，文案也照抄按钮上的字。
@@ -443,6 +465,16 @@ export default function AssetsPage({
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
+          {/* 批量改名：改的是**这一屏筛出来的那批**的名字（先筛好再进，比在一长串里勾快） */}
+          <button
+            type="button"
+            className={`${s.btn} ${s.btnSm}`}
+            onClick={() => setRename({ ids: [], single: false })}
+            disabled={listeds.length === 0}
+            data-tip="勾一批，按查找替换改显示名。"
+          >
+            批量改名…
+          </button>
         </div>
         {/*
          * 筛选行**显式分两排**（C14 第二十八轮，作者：「右边的全部身份要放到下面」）——
@@ -725,6 +757,16 @@ export default function AssetsPage({
               >
                 在访达中显示
               </button>
+              {/* 改名：MKP 预设不在这页改 —— 它的显示名是版本名（下面那一行已经指了路） */}
+              {cur.kind !== 'mkPreset' && (
+                <button
+                  type="button"
+                  className={`${s.btn} ${s.btnSm}`}
+                  onClick={() => setRename({ ids: [cur.id], single: true })}
+                >
+                  改名
+                </button>
+              )}
               <button type="button" className={`${s.btn} ${s.btnSm}`} onClick={() => setConfirm('delete')}>
                 删除
               </button>
@@ -1164,6 +1206,17 @@ export default function AssetsPage({
             toasts.push(isAppError(e) ? e.message : String(e))
           }
         }}
+      />
+
+      {/* **改名**（2026-11-19）：单条 = 一个输入框；批量 = 这一屏筛出来的那批里勾选 +
+          查找替换。判据（层高被改掉 / 重名 / 只差大小写 / MKP 预设）全在后端预览里 */}
+      <AssetRenameModal
+        open={rename !== null}
+        assets={list.assets}
+        initial={rename?.ids ?? []}
+        single={rename?.single ?? false}
+        onClose={() => setRename(null)}
+        onApply={doRename}
       />
 
       {/* 反查没回来之前不亮「删除」—— 旧结果不能拿来说话；回来之后：

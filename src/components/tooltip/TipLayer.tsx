@@ -18,6 +18,9 @@
  *
  * # 行为
  *
+ *   · **屏幕上已经写着的同一句不弹**（判据见 `saidAlready`）：导航项的名字、行里已经
+ *     整段显示的文件名/路径，悬停不会再念一遍。文字被 CSS 藏掉（图标档）或那行被省略号
+ *     截断时照常弹 —— 这两处气泡是唯一的字；
  *   · 悬停 320ms 才出（扫过一排按钮不会乱弹）；键盘 focus 立刻出；
  *   · **位置跟着鼠标**（2026-10-30 作者：「有一些悬停的 tooltip 位置不对，应该在
  *     鼠标的位置才对」）—— 锚点是**光标右下方** 14 / 18px，不是元素矩形；
@@ -47,6 +50,53 @@ interface Shown {
   /** 气泡**左上角**想要的落点（视口坐标）；出框时由下面那段 effect 平移回来 */
   x: number
   y: number
+}
+
+/** 比"同一句话"时忽略空白与句末句号：标签不写句号，气泡常写 */
+const norm = (s: string) => s.replace(/\s+/g, ' ').trim().replace(/。$/, '')
+
+/** 内容是否装不下（省略号 / 裁切）。包含滚动容器的元素也会命中，这里只往"别收"的方向错 */
+function overflows(el: HTMLElement): boolean {
+  return el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1
+}
+
+/** 这个元素此刻是否真的画在屏幕上（`display: none` 不算） */
+function showing(el: HTMLElement): boolean {
+  const fn = (el as HTMLElement & { checkVisibility?: () => boolean }).checkVisibility
+  if (typeof fn === 'function') return fn.call(el)
+  return el.getClientRects().length > 0
+}
+
+/**
+ * 这块元素是不是**已经把这句话写着了** —— 是就不弹。
+ *
+ * 判据两样：读得见（`display: none` 的标签不算）、没被截断。
+ * 两个都成立时，气泡只是把屏幕上同一句再念一遍，没有新信息。
+ *
+ * 为什么不直接在调用点删掉 `data-tip`：同一个按钮在别的密度下会收起成图标
+ * （标签 `display: none`），那时气泡就是唯一的字。判据放在这里，两种形态各自正确。
+ *
+ * 截断看文字所在的那一层（省略号常挂在里面的 `span` 上，外层按钮并没有溢出）——
+ * 截了就保留气泡：它是看到完整值的唯一入口。
+ */
+function saidAlready(host: HTMLElement, text: string): boolean {
+  const want = norm(text)
+  if (want === '') return false
+  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT)
+  for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+    if (norm(n.nodeValue ?? '') !== want) continue
+    const parent = n.parentElement
+    if (parent === null || !showing(parent)) continue
+    return !overflows(parent)
+  }
+  return false
+}
+
+/** 这个元素该弹的那句话；空串 = 不弹 */
+function tipOf(el: HTMLElement): string {
+  const text = el.dataset.tip ?? ''
+  if (text === '') return ''
+  return saidAlready(el, text) ? '' : text
 }
 
 export default function TipLayer() {
@@ -136,7 +186,7 @@ export default function TipLayer() {
 
     /** 鼠标路径：光标右下方 */
     const placeAtPointer = (el: HTMLElement) => {
-      const text = el.dataset.tip ?? ''
+      const text = tipOf(el)
       if (text === '') return
       if (pt === null) {
         placeAtElement(el)
@@ -150,7 +200,7 @@ export default function TipLayer() {
      * 只在 `pt === null`（这一趟压根没碰鼠标）时才会走到这里。
      */
     const placeAtElement = (el: HTMLElement) => {
-      const text = el.dataset.tip ?? ''
+      const text = tipOf(el)
       if (text === '') return
       const r = el.getBoundingClientRect()
       setShown({ text, x: r.left, y: r.bottom + 8 })

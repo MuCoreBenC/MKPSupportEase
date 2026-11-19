@@ -355,6 +355,25 @@
   overflow-y: auto;
 }
 
+/*
+ * **说明页排第一**（越界那一屏，2026-11-19 作者：「优先去显示这一个板子」）：
+ * 让它回到流里撑槽高，信息页退成绝对定位那一页（内容多就自己滚）。
+ * 两条页在 DOM 里的顺序不变（信息先），只把"谁定高"换过来 —— 用 `order` 顺手把
+ * 绘制顺序也对上（说明在上层时不会被下面那页的底色盖住）。
+ */
+.relocateSlot[data-note-first] > .relocatePage:nth-child(2) {
+  position: static;
+  overflow: visible;
+  order: 1;
+}
+
+.relocateSlot[data-note-first] > .relocatePage:nth-child(1) {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  order: 2;
+}
+
 /* 藏起来的那一页仍然占格（高度不被抽走），只是看不见也点不到 */
 .relocatePageOff {
   visibility: hidden;
@@ -405,6 +424,29 @@
   gap: 4px 10px;
   font-size: var(--fs-label);
   line-height: 1.75;
+}
+
+/*
+ * 越界那一屏的说明页（2026-11-19）：图在左、图例与那句"怎么挪"在右。
+ * 左右分布由 `CollisionMap` 的 `layout="row"` 排（图例是它的子节点，不能在这里拆）。
+ */
+.boundaryNote {
+  width: 100%;
+  padding: 2px 0;
+}
+
+/* 右栏那几条「n 号模型：沿箭头方向移动 xx.x mm」—— 与页内其它小字同档，编号靠文字说 */
+.boundaryList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
 }
 
 /*

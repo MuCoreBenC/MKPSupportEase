@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'node:url'
 import { mkpAssets } from './tools/assets/plugin.mjs'
 
 /*
@@ -65,6 +66,22 @@ import { mkpAssets } from './tools/assets/plugin.mjs'
  * - `BUILD_WORKBENCH=1`（doc 里写的形式，手动跑命令时方便；Windows 的 cmd/PowerShell
  *   没法在命令前置赋值环境变量，所以不能只靠它）
  */
+/* 仓库根（这份配置就住在它下面）：数据目录的判据必须**锚在它上面**，
+   不能拿裸段名去匹配 —— `workbench` / `presets` 同时也是 `src/` 下的目录名。
+   统一成 `/`：Windows 上 chokidar 传进来的是 `G:/project/…` 这种正斜杠路径。 */
+const ROOT = fileURLToPath(new URL('.', import.meta.url)).replace(/\\/g, '/').replace(/\/+$/, '')
+
+/** 把 ROOT 里的正则元字符转义掉再拼 */
+const literal = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** 仓库根下的纯数据目录：前端不 import，但工作台的整目录换位需要它们可被改名 */
+const DATA_DIRS_RE = new RegExp(
+  `^${literal(ROOT)}[/\\\\](workbench|dist-portable|tmp-port|\\.scratch)($|[/\\\\])`,
+)
+
+/** chokidar 的 `ignored` 谓词：两种分隔符都认 */
+const DATA_DIRS = (p: string): boolean => DATA_DIRS_RE.test(p.replace(/\\/g, '/'))
+
 export default defineConfig(({ mode }) => {
   const withWorkbench = mode === 'workbench' || process.env.BUILD_WORKBENCH === '1'
 
@@ -106,10 +123,21 @@ export default defineConfig(({ mode }) => {
        * 这些目录都**不由前端源码消费**：cargo 产物有自己的文件监视（Tauri CLI），
        * `dist` 只在 build 时产生，`client-assets` 由 `mkpAssets` 插件自己盯源目录同步。
        * 忽略它们不会少热更新；不忽略才会。
+       *
+       * ★ 仓库根的**纯数据目录**同样要排除（`DATA_DIRS`）：Windows 上 chokidar 逐目录建
+       *   句柄，而**有句柄的目录不能被改名**（`MoveFile` 要 DELETE 权限）。工作台的生成 /
+       *   保存 / 发布靠 `mirror` 整目录换位（`<repo>/presets` ↔ `workbench/.draft/presets`），
+       *   dev server 开着就会撞上 `os error 5`；报错出现在发布/生成里，根却在 watcher 上。
+       *   它们同样一个字节都不进前端，排除不影响热更新 —— 前提是**锚在仓库根**上：
+       *   裸段名 `workbench` / `presets` 会连 `src/workbench/`、`src/app/presets/` 一起误伤。
+       *
+       *   `presets/` 本身**不在**这张表里：随包资产插件要盯 `presets/assets`
+       *   （`server.watcher.add`），而真仓库那一侧只被读、只被逐份原子写，从不整目录换位。
        */
       watch: {
         ignored: [
           /[\\/](node_modules|\.git|target|target-workbench|dist|dist-presets|client-assets|tmp-shots)($|[\\/])/,
+          DATA_DIRS,
         ],
       },
 

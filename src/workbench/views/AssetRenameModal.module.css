@@ -1,0 +1,100 @@
+/* 改名框（2026-11-19）：批量那一档是"勾选 + 查找替换 → 预览 → 落"，
+   单条那一档就是一行输入。颜色一律走工作台 token（`--w-*`）。 */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.bar {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 180px;
+}
+
+.label {
+  font-size: var(--w-fs-sm);
+  color: var(--w-t2);
+}
+
+.hint {
+  font-size: var(--w-fs-sm);
+  color: var(--w-t3);
+  margin-left: auto;
+}
+
+/* 一屏放不下就自己滚 —— 勾选区不能把底下的按钮顶出窗口 */
+.list {
+  max-height: 44vh;
+  overflow: auto;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-input);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 22px 64px minmax(0, 1fr) 14px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--w-line);
+  font-size: var(--w-fs-sm);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.rowOff {
+  color: var(--w-t3);
+}
+
+.old {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--w-t2);
+}
+
+.new {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arrow {
+  color: var(--w-t3);
+  text-align: center;
+}
+
+/* 文件那一段（切片器才有）：与名字同一行下面，缩进对齐到名字那一列 */
+.fileLine {
+  grid-column: 3 / 6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--w-fs-xs);
+  color: var(--w-t3);
+  font-family: var(--w-mono);
+}
+
+.problem {
+  grid-column: 3 / 6;
+  font-size: var(--w-fs-xs);
+  color: var(--w-danger);
+}
+
+.blank {
+  color: var(--w-t-off);
+}

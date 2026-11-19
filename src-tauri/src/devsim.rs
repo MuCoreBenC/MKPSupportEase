@@ -489,22 +489,22 @@ fn finish(
         finished_payload(&err, "pass2", elapsed_ms)
     } else if mode == Mode::Fail {
         /* 作者 2026-10-11 实测到的那一条：模型超出打印边界（Y 181.4 > 180.0） */
+        let clause = postprocess::diag::messages::text(
+            "boundary.clause",
+            &[
+                ("axis", "Y"),
+                ("current", "181.4"),
+                (
+                    "limit",
+                    &postprocess::diag::messages::text("boundary.limit.max", &[("value", "180.0")]),
+                ),
+            ],
+        );
+        /* 超出量那一截也照真内核拼（2026-11-19）：演示屏少了它就跟真跑对不上 */
+        let over = postprocess::diag::messages::text("boundary.over", &[("mm", "1.4")]);
         let err = HookError::from(postprocess::diag::PostprocError::Boundary {
             code: "E_GCODE_BOUNDARY_001",
-            sides: postprocess::diag::messages::text(
-                "boundary.clause",
-                &[
-                    ("axis", "Y"),
-                    ("current", "181.4"),
-                    (
-                        "limit",
-                        &postprocess::diag::messages::text(
-                            "boundary.limit.max",
-                            &[("value", "180.0")],
-                        ),
-                    ),
-                ],
-            ),
+            sides: format!("{clause}{over}"),
         });
         finished_payload(&err, "pass1", elapsed_ms)
     } else {
@@ -560,6 +560,8 @@ fn finish(
             /* 这一档不演挪塔（要演就走真问句那一档）—— 与真钩子"没挪"同一个形状 */
             relocation: None,
             geo: None,
+            /* 越界几何只在失败那两档有（见下面的 `finished_payload`） */
+            boundary: None,
         }
     };
     sink.send(&FromHook::Finished(Box::new(payload)));
@@ -575,6 +577,8 @@ fn finished_payload(err: &HookError, stage: &str, elapsed_ms: u64) -> FinishedPa
         relocation: err.relocation().cloned(),
         /* 演出档不摆画布几何（真钩子那边由 `err.collision()` 给） */
         geo: None,
+        /* 越界几何照真钩子的取法（演出那条 Fail 档带着它） */
+        boundary: err.boundary().cloned(),
         ok: false,
         cancelled: err.cancelled(),
         message,

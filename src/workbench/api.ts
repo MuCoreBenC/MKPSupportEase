@@ -2443,6 +2443,38 @@ export interface GroupMemberView {
   role: string
 }
 
+/** 一次改名的输入（`assets::AssetRenameInput`）：一条资产 + 它**新的显示名** */
+export interface AssetRenameInput {
+  id: string
+  display: string
+}
+
+/**
+ * 改名计划里的一行（`assets::RenameRowView`）。
+ *
+ * **预览与落盘是同一份计划**（后端同一个 `plan_renames`）：这里说能改，落盘就不会
+ * 被同一件事拒。切片器那几条的 `oldPath` / `newPath` 就是盘上那份文件的旧 / 新名字。
+ */
+export interface AssetRenameRow {
+  id: string
+  /** 查不到这条资产时是 null（那一行只有 `problem` 有话说） */
+  kind: AssetKind | null
+  old: string
+  new: string
+  oldPath: string | null
+  newPath: string | null
+  /** 这一行真的会变（新名字与旧的逐字相同 = 不用动） */
+  changed: boolean
+  /** 改不了的原因；null = 可以改 */
+  problem: string | null
+}
+
+export interface AssetRenamePlan {
+  rows: AssetRenameRow[]
+  /** 每一行都能改，且至少有一条真会变 */
+  ok: boolean
+}
+
 /**
  * 一个框（**百分比**，相对整张图）—— 与客户端 `GuideMark.at` 同形
  */
@@ -3061,6 +3093,24 @@ export const wb = {
 
   /** 删一条资产。反查守卫在后端：有人引用整次拒绝（界面把它转成拦截页） */
   removeAsset: (assetId: string) => invoke<AssetList>('wb_remove_asset', { assetId }),
+
+  /**
+   * **改名预览**（只读）：这一批改完长什么样、哪一行拦得住。
+   *
+   * 与 [`renameAssets`] 是同一个判据 —— 前端不自己推文件名、也不自己判重名。
+   */
+  renameAssetsPreview: (items: AssetRenameInput[]) =>
+    invoke<AssetRenamePlan>('wb_rename_assets_preview', { items }),
+
+  /**
+   * **改名**（2026-11-19）：切片器换文件名、其余换台账 `name`，MKP 预设拒收。
+   *
+   * 机型 / 套餐 / 版本图 / 品牌 logo / 分组全按 **id** 引用资产（id 不改），
+   * 显示名从 `path` / `name` 派生 ⇒ 一处改完全都跟上。**一条命令 = 一条撤销**，
+   * 保存才落盘（与别的结构编辑同一条）。
+   */
+  renameAssets: (items: AssetRenameInput[]) =>
+    invoke<AssetList>('wb_rename_assets', { items }),
 
   /** 改一条资产的交付档位（download ↔ bundled）。走草稿（保存后写入）；mkPreset 不许随包 */
   /**

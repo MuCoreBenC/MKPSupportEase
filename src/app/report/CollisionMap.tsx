@@ -21,13 +21,14 @@
  *   没板规格（目录拉不到 / 机型没配板）：退回圆角矩形热床，事实照画 —— 不因为
  *   一层装饰缺席就把整块图吞掉。
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import TowerCoreSvg from '../params/TowerCoreSvg'
 import { api } from '../../api'
-import type { Machine, Plate, ReportBox4, ReportCollision } from '../../api'
+import type { Machine, Plate, ReportBoundaryPiece, ReportBox4, ReportCollision } from '../../api'
 import { useT } from '../../i18n'
 import ZoomLayer from '../../components/zoom/ZoomLayer'
+import { boundaryNumbering } from './boundaryNumbering'
 import s from './CollisionMap.module.css'
 
 interface Props {
@@ -70,6 +71,42 @@ interface Props {
    * 模型几何，那里不摆塔、不摆判据框，图例里也没有塔这一条。
    */
   noTower?: boolean
+  /**
+   * **越界那一屏的允许范围**（2026-11-19）：给了就把模型**超出这块**的部分再画一遍红色。
+   *
+   * 与 `collision.printable` 是两件事：那个是"板在哪"（映射基准），这个是"按哪块判"。
+   * `_001` 用机型打印范围、`_002` 用涂胶范围 —— 两者可能比板大（A1 系列 X 有悬出量），
+   * 所以不能拿它当画布基准。**不画那圈虚线框**（作者：大轮廓瞄着热床很怪）。
+   */
+  allowed?: ReportBox4 | null
+  /**
+   * **越界那一屏的每块模型**（2026-11-19）：轮廓 + 建议位移。
+   *
+   * 给了就按它画（每块一条凸包，**不按板裁** —— 板外那截正是要标红的东西），
+   * 且画布会**扩到能看见溢出的那块**（否则红块被画布边裁掉，只剩贴边一条）。
+   * 越界的块各一支白色箭头（中心 → 挪到位）。
+   */
+  pieces?: ReportBoundaryPiece[] | null
+  /**
+   * **笔尖相对喷嘴的偏移**（mm）：给了就多画一层"笔尖轮廓"。
+   *
+   * 与模型层重叠的那一段**不绘制**（裁剪掉）—— 两套虚线交错的话，图就废了。
+   */
+  pen?: [number, number] | null
+  /**
+   * **给越界块编号**（2026-11-19）：1、2、3… 与右侧那条逐条文案一一对应。
+   * 只有弹窗说明页要（报告页不传 —— 那边没有逐条文字，编号只会是噪音）。
+   */
+  numbered?: boolean
+  /**
+   * `row`：图在左，图例与 `children` 摆右边（越界说明页，2026-11-19 作者：
+   * 「你也不一定要把下面的内容放在下面，可以放在右侧，左右分布」）。
+   *
+   * 报告页仍是默认的 `stack`（图下面一行图例）—— 那边作者说「显示的很好」。
+   */
+  layout?: 'stack' | 'row'
+  /** `row` 档右栏里、图例下面的那几句说明（没有就不摆那一格） */
+  children?: ReactNode
 }
 /** 塔身固定画成 44px（与参数页同一个数 —— 两边比例一致，形状才是同一个形状） */
 const TOWER_CORE_PX = 44
@@ -119,6 +156,12 @@ export default function CollisionMap({
   height,
   label,
   noTower = false,
+  allowed = null,
+  pieces = null,
+  pen = null,
+  numbered = false,
+  layout = 'stack',
+  children,
 }: Props) {
   const tr = useT()
   const mapLabel = label ?? tr('report.map.label')
@@ -161,6 +204,11 @@ export default function CollisionMap({
   const [zoom, setZoom] = useState(false)
   const fromRef = useRef<DOMRect | null>(null)
   const mapBtnRef = useRef<HTMLButtonElement>(null)
+  /* 越界那一屏的裁剪路径 id：同一屏有行内与放大层两个实例，id 必须各不相同
+     （React 的 `useId` 带冒号，SVG 的 `url(#…)` 里用不了，先去掉） */
+  const outsideClipId = `collision-outside-${useId().replace(/:/g, '')}`
+  /* 笔尖层的裁剪路径：整块视窗减去模型轮廓（重叠的那一段不画） */
+  const penClipId = `collision-pen-${useId().replace(/:/g, '')}`
 
   /*
    * **可打印区**（映射的基准）：
@@ -190,6 +238,64 @@ export default function CollisionMap({
   ]
 
   /*
+   * **允许范围**（越界那一屏，笔尖坐标）→ 画布矩形：红层按它裁（不画框，见 props 注）。
+   * 模型画的是喷嘴坐标，所以范围要先**减去笔偏移**再映射 —— 这样"红的那部分"
+   * 仍然是"笔尖会越界的那部分模型"，与消息里那个数、箭头长度三者对得上。
+   */
+  const penX = pen?.[0] ?? 0
+  const penY = pen?.[1] ?? 0
+  const allowedBox = boxOf(allowed ?? undefined)
+  const allowedRect =
+    allowedBox !== null
+      ? (() => {
+          const [ax, ay] = bedPt(allowedBox.x - penX, allowedBox.y - penY + allowedBox.h)
+          return { x: ax, y: ay, w: allowedBox.w, h: allowedBox.h }
+        })()
+      : null
+
+  /*
+   * **画布要扩到能看见溢出的那块**（2026-11-19）：越界模型的轮廓在板外，画布仍按板定
+   * 就会被切掉（作者看到的就是"贴边一条红"）。给了 `pieces` 才扩 —— 否则 `pad` 全 0，
+   * 坐标与从前一字不差（碰撞 / 擦料塔那几屏不受影响）。
+   * ★ 笔尖那一层（`bbox + pen`）也要框进来，否则它被画布边切掉一半。
+   */
+  const pieceRects = (pieces ?? [])
+    .flatMap((p) => {
+      const b = boxOf(p.bbox ?? undefined)
+      if (b === null) return []
+      const rects = [b]
+      if (penX !== 0 || penY !== 0) {
+        rects.push({ x: b.x + penX, y: b.y + penY, w: b.w, h: b.h })
+      }
+      return rects
+    })
+    .map((b) => {
+      const [lx, ty] = bedPt(b.x, b.y + b.h)
+      return { x: lx, y: ty, w: b.w, h: b.h }
+    })
+  /* 真溢出的那一侧才外扩，并留一点余量给描边与箭镞（没溢出的方向一像素都不加） */
+  const GUTTER = 6
+  const pad =
+    pieceRects.length > 0
+      ? (() => {
+          const minX = Math.min(frame.x, ...pieceRects.map((r) => r.x))
+          const maxX = Math.max(frame.x + frame.w, ...pieceRects.map((r) => r.x + r.w))
+          const minY = Math.min(frame.y, ...pieceRects.map((r) => r.y))
+          const maxY = Math.max(frame.y + frame.h, ...pieceRects.map((r) => r.y + r.h))
+          const grow = (raw: number) => (raw > 0 ? raw + GUTTER : 0)
+          return {
+            l: grow(frame.x - minX),
+            t: grow(frame.y - minY),
+            r: grow(maxX - (frame.x + frame.w)),
+            b: grow(maxY - (frame.y + frame.h)),
+          }
+        })()
+      : { l: 0, t: 0, r: 0, b: 0 }
+  /* 画布坐标不变，只把视窗往外挪（`viewBox` 的 x/y 为负） */
+  const view = { x0: -pad.l, y0: -pad.t, w: canvasW + pad.l + pad.r, h: canvasH + pad.t + pad.b }
+  const pct = (v: number, total: number) => `${(v / total) * 100}%`
+
+  /*
    * 模型轮廓（2026-10-18 作者：「能不能真的做成俯视图，多边形的，可以用 12 边形，
    * 或者 24 边形」）—— 内核按占用格连通块切好、交给的是凸包（≤24 边）。
    * 空 / 旧记录 ⇒ 下面退回 `modelRects` 的矩形。
@@ -201,13 +307,57 @@ export default function CollisionMap({
    */
   const slicerTower = boxOf(collision.slicerTowerBbox)
 
-  const modelPolys = (collision.modelPolygons ?? [])
-    .map((poly) =>
-      poly
-        .filter((p): p is [number, number] => Array.isArray(p) && p.length === 2)
+  /* 越界那一屏给的是**不裁剪**的轮廓（板外那截也在）—— 有它就用它 */
+  const boundaryPolys = (pieces ?? [])
+    .map((p) =>
+      (p.polygon ?? [])
+        .filter((q): q is [number, number] => Array.isArray(q) && q.length === 2)
         .map(([x, y]) => bedPt(x, y)),
     )
     .filter((poly) => poly.length >= 3)
+  /*
+   * **笔尖那一层**（2026-11-19 作者：「用不同的虚线去显示模型的和我的那个喷嘴的」）：
+   * 同一批多边形整体平移一个笔偏移。与模型重叠的那一段不画（见下面的裁剪路径），
+   * 否则两套虚线交错，反而看不出哪条是哪条。
+   */
+  const penPolys =
+    boundaryPolys.length > 0 && (penX !== 0 || penY !== 0)
+      ? (pieces ?? [])
+          .map((p) =>
+            (p.polygon ?? [])
+              .filter((q): q is [number, number] => Array.isArray(q) && q.length === 2)
+              .map(([x, y]) => bedPt(x + penX, y + penY)),
+          )
+          .filter((poly) => poly.length >= 3)
+      : []
+  const modelPolys =
+    boundaryPolys.length > 0
+      ? boundaryPolys
+      : (collision.modelPolygons ?? [])
+          .map((poly) =>
+            poly
+              .filter((p): p is [number, number] => Array.isArray(p) && p.length === 2)
+              .map(([x, y]) => bedPt(x, y)),
+          )
+          .filter((poly) => poly.length >= 3)
+
+  /**
+   * 同一批模型几何画两遍：一遍正常色，一遍（越界那一屏）裁到"允许范围之外"再染红。
+   * 走得通是因为两份只差 `className` 与裁剪 —— 不许为红色另算一套几何。
+   */
+  const modelShapes = (cls: string) =>
+    modelPolys.length > 0
+      ? modelPolys.map((poly, i) => (
+          <polygon
+            key={`${cls}-p${i}`}
+            className={cls}
+            points={poly.map(([x, y]) => `${x},${y}`).join(' ')}
+          />
+        ))
+      : modelRects.map((b, i) => {
+          const [lx, ty] = bedPt(b.x, b.y + b.h)
+          return <rect key={`${cls}-r${i}`} className={cls} x={lx} y={ty} width={b.w} height={b.h} />
+        })
 
   /* `noTower` 时 `tower` 恒为 `null`（上面就这么定的），这一串只给要画塔的那两屏用 */
   const towerShape = noTower ? null : (collision.tower ?? null)
@@ -250,6 +400,54 @@ export default function CollisionMap({
    * 空白处**，压在框上的箭头没有信息量。长度同时夹在 [最小可见长度, 板内边界]
    * 之间 —— 短了看不清，长了戳出板。旧记录没这两格 / 挪不开那一档 ⇒ 不画。
    */
+  /** 一支**如实**的箭头：起点 → 目标（长度 = |vec|）。挪塔那一屏与越界那一屏共用。 */
+  const exactArrow = (
+    from: [number, number],
+    vec: [number, number],
+  ): { path: string; transform: string } | null => {
+    if (vec[0] === 0 && vec[1] === 0) return null
+    const [ox, oy] = bedPt(from[0], from[1])
+    const [gx, gy] = bedPt(from[0] + vec[0], from[1] + vec[1])
+    const len = Math.hypot(gx - ox, gy - oy)
+    const ang = Math.atan2(gy - oy, gx - ox)
+    /* 短箭要收镞：否则一支 2mm 的位移会被镞吃掉，看着像没画 */
+    const head = Math.min(Math.max(4, canvasW * 0.05), len * 0.45)
+    const w0 = Math.min(Math.max(3, canvasW * 0.02), len * 0.3)
+    const w1 = w0 * 0.55
+    const hw = head * 1.15
+    if (len <= head * 1.4) return null
+    const body = len - head
+    return {
+      path:
+        `M 0 ${-w0 / 2} L ${body} ${-w1 / 2} L ${body} ${-hw / 2} L ${len} 0` +
+        ` L ${body} ${hw / 2} L ${body} ${w1 / 2} L 0 ${w0 / 2} Z`,
+      transform: `translate(${ox} ${oy}) rotate(${(ang * 180) / Math.PI})`,
+    }
+  }
+
+  /* **越界那一屏**：每块越界的模型一支箭头（中心 → 挪到位的位置，长度就是建议位移） */
+  const boundaryArrows = (pieces ?? [])
+    .map((p) => {
+      const s = p.shift
+      const b = boxOf(p.bbox ?? undefined)
+      if (s === undefined || b === null) return null
+      return exactArrow([b.x + b.w / 2, b.y + b.h / 2], s)
+    })
+    .filter((a): a is { path: string; transform: string } => a !== null)
+
+  /* 序号徽标：与右栏那几条文字共用 `boundaryNumbering` 的排序（编号只有一个来源） */
+  const badgeR = Math.max(8, canvasW * 0.05)
+  const badges = numbered
+    ? boundaryNumbering(pieces ?? [])
+        .map(({ n, piece }) => {
+          const b = boxOf(piece.bbox ?? undefined)
+          if (b === null) return null
+          const [cx, cy] = bedPt(b.x + b.w / 2, b.y + b.h / 2)
+          return { n, x: cx, y: cy }
+        })
+        .filter((v): v is { n: number; x: number; y: number } => v !== null)
+    : []
+
   const arrowFrom = arrowOverride?.from ?? collision.arrowFrom
   const arrowVec = arrowOverride?.vec ?? collision.arrowVec
   let arrow: { path: string; transform: string } | null = null
@@ -325,22 +523,42 @@ export default function CollisionMap({
 
   /* 箭头单独一层（z-index 压过塔图 —— 上一版被塔压住，作者：「现在箭头被压住了」） */
   const arrowSvg =
-    arrow !== null ? (
+    arrow !== null || boundaryArrows.length > 0 || badges.length > 0 ? (
       <svg
         className={s.svg}
         style={{ zIndex: 3, pointerEvents: 'none' }}
-        viewBox={`0 0 ${canvasW} ${canvasH}`}
+        viewBox={`${view.x0} ${view.y0} ${view.w} ${view.h}`}
         preserveAspectRatio="xMidYMid meet"
         aria-hidden="true"
       >
-        <path className={s.arrow} d={arrow.path} transform={arrow.transform} />
+        {arrow !== null && (
+          <path className={s.arrow} d={arrow.path} transform={arrow.transform} />
+        )}
+        {boundaryArrows.map((a, i) => (
+          <path key={`ba${i}`} className={s.arrow} d={a.path} transform={a.transform} />
+        ))}
+        {/* 序号徽标画在箭头**之后**（这一层 z-index 3，盖在箭身上）：数字永远读得到 */}
+        {badges.map((b) => (
+          <g key={`bd${b.n}`} className={s.badge}>
+            <circle cx={b.x} cy={b.y} r={badgeR} />
+            <text
+              x={b.x}
+              y={b.y}
+              fontSize={badgeR * 1.25}
+              textAnchor="middle"
+              dominantBaseline="central"
+            >
+              {b.n}
+            </text>
+          </g>
+        ))}
       </svg>
     ) : null
 
   const factSvg = (
     <svg
       className={s.svg}
-      viewBox={`0 0 ${canvasW} ${canvasH}`}
+      viewBox={`${view.x0} ${view.y0} ${view.w} ${view.h}`}
       preserveAspectRatio="xMidYMid meet"
       aria-hidden="true"
     >
@@ -384,20 +602,58 @@ export default function CollisionMap({
           ★ **一个模型一块轮廓**，不是矩形（2026-10-18 作者：「图片的都是矩形的看着好像
             碰撞了一样，能不能真的做成俯视图，多边形的」）——矩形四个角会把模型旁边的空
             算进去。内核给的是凸包（≤24 边）；旧记录没有这一格 ⇒ 退回矩形。 */}
-      {modelPolys.length > 0
-        ? modelPolys.map((poly, i) => (
-            <polygon
-              key={`mp${i}`}
-              className={s.model}
-              points={poly.map(([x, y]) => `${x},${y}`).join(' ')}
-            />
-          ))
-        : modelRects.map((b, i) => {
-            const [lx, ty] = bedPt(b.x, b.y + b.h)
-            return (
-              <rect key={`m${i}`} className={s.model} x={lx} y={ty} width={b.w} height={b.h} />
-            )
-          })}
+      {modelShapes(s.model)}
+
+      {/* **笔尖那一层**（2026-11-19 作者：「用不同的虚线去显示模型的和我的那个喷嘴的」）：
+          同一批多边形整体平移一个笔偏移；与模型重叠的那一段裁掉不画 —— 两套虚线交错
+          就分不清哪条是哪条了。只有越界那一屏给 `pen`，别的屏这一层不存在。 */}
+      {penPolys.length > 0 && (
+        <>
+          <defs>
+            <clipPath id={penClipId} clipPathUnits="userSpaceOnUse">
+              <path
+                clipRule="evenodd"
+                d={
+                  `M${view.x0},${view.y0}H${view.x0 + view.w}V${view.y0 + view.h}H${view.x0}Z ` +
+                  modelPolys
+                    .map((poly) => `M${poly.map(([x, y]) => `${x},${y}`).join('L')}Z`)
+                    .join(' ')
+                }
+              />
+            </clipPath>
+          </defs>
+          <g clipPath={`url(#${penClipId})`}>
+            {penPolys.map((poly, i) => (
+              <polygon
+                key={`pen${i}`}
+                className={s.pen}
+                points={poly.map(([x, y]) => `${x},${y}`).join(' ')}
+              />
+            ))}
+          </g>
+        </>
+      )}
+
+      {/* **越界那一屏**（2026-11-19）：模型凸出允许范围的那一块染红。
+          裁剪路径 = 整个视窗减去允许范围（evenodd 两个子路径）——
+          于是"红的那片"与消息里那句"超出多少"是同一件事，不用另算一套。
+          ★ 不画允许范围的框（作者 2026-11-19：「不要再有一个大轮廓瞄着热床」）。 */}
+      {allowedRect !== null && (
+        <>
+          <defs>
+            <clipPath id={outsideClipId} clipPathUnits="userSpaceOnUse">
+              <path
+                clipRule="evenodd"
+                d={
+                  `M${view.x0},${view.y0}H${view.x0 + view.w}V${view.y0 + view.h}H${view.x0}Z ` +
+                  `M${allowedRect.x},${allowedRect.y}h${allowedRect.w}v${allowedRect.h}h${-allowedRect.w}Z`
+                }
+              />
+            </clipPath>
+          </defs>
+          <g clipPath={`url(#${outsideClipId})`}>{modelShapes(s.overflow)}</g>
+        </>
+      )}
 
       {/* 判据框：碰撞按这一块算（虚线，压在塔的真实形状外沿上）。
           `noTower`（模型俯视图）没有塔 ⇒ 这一层不画。 */}
@@ -459,7 +715,8 @@ export default function CollisionMap({
         <div
           className={s.mapPlate}
           style={{
-            aspectRatio: `${plate.w} / ${plate.d}`,
+            /* 视窗被越界几何撑大时按新的比例铺（否则那块被压扁） */
+            aspectRatio: `${view.w} / ${view.h}`,
             /* `height` 给了就**按高度定尺**（宽度反算）—— 两幅并排要比同高时用。
                ★ 放大档不认它（2026-10-18 真机）：放大层给的是"确定宽 + 高度上限"，
                  行内那个 104/132px 若照带进来，放大的仍是一张缩略图 ——
@@ -469,73 +726,85 @@ export default function CollisionMap({
               : null),
           }}
         >
-          <svg
-            className={s.plate}
-            viewBox={`0 0 ${plate.w} ${plate.d}`}
-            preserveAspectRatio="xMidYMid meet"
-            aria-hidden="true"
+          {/* 板画在自己的坐标系里，只按视窗里的占比定位 —— 视窗被越界几何撑大时它缩进去，
+              溢出那块就落在板外那块空白上（不缩的话会被画布边切掉）。 */}
+          <div
+            style={{
+              position: 'absolute',
+              left: pct(0 - view.x0, view.w),
+              top: pct(0 - view.y0, view.h),
+              width: pct(plate.w, view.w),
+              height: pct(plate.d, view.h),
+            }}
           >
-            {/* 不透明底**布尔裁剪成完整板轮廓**（作者：「这个不透明的背景需要裁剪布尔成
-                板子一样的大小包括舌」）—— 裁 `plate.path`（含卡舌的整块外轮廓，evenodd
-                带上把手的孔），不裁 bodyPath（第一稿裁板身 ⇒ 卡舌缺口漏了底）。
-                色是页面底 `--bg-1`（跟主题走，浅 #f7f9fa / 深 #1c1c1c），不是板自己的绿。
-                ★ `fill` 走 CSS 类：presentation attribute 里的 `var()` 不生效。 */}
-            {zoomed && (
-              <>
-                <clipPath id="collision-bed-clip">
-                  <path d={plate.path} clipRule="evenodd" />
-                </clipPath>
-                <rect
-                  className={s.bedSolid}
-                  x={0}
-                  y={0}
-                  width={plate.w}
-                  height={plate.d}
-                  clipPath="url(#collision-bed-clip)"
-                />
-              </>
-            )}
-            <path d={plate.path} fillRule="evenodd" />
-            {/* 板缘 → 可打印区之间的余量圈（与参数页同一画法：evenodd(板身, frame)） */}
-            <path
-              className={s.ring}
-              fillRule="evenodd"
-              d={`${plate.bodyPath} M${frame.x},${frame.y}h${frame.w}v${frame.h}h${-frame.w}Z`}
-            />
-          </svg>
-          {factSvg}
-          {/* 塔的真实形状（绝对定位盖在判据框上，百分比按板坐标算） */}
-          {towerShape !== null && tower !== null && (
-            <div
-              className={s.tower}
-              style={{
-                left: `${(towerLeftPlate / plate.w) * 100}%`,
-                top: `${(towerTopPlate / plate.d) * 100}%`,
-                width: `${(tower.w / plate.w) * 100}%`,
-                height: `${(tower.h / plate.d) * 100}%`,
-              }}
+            <svg
+              className={s.plate}
+              viewBox={`0 0 ${plate.w} ${plate.d}`}
+              preserveAspectRatio="xMidYMid meet"
+              aria-hidden="true"
             >
-              <TowerCoreSvg
-                outerVal={
-                  towerShape.outerStructure === 'rib' || towerShape.outerStructure === 'sheath'
-                    ? towerShape.outerStructure
-                    : 'brim'
-                }
-                isRibVisible={towerShape.outerStructure === 'rib' && (towerShape.ribWidth ?? 0) > 0}
-                ribWidthMm={towerShape.ribWidth ?? 0}
-                ribExtraLengthMm={towerShape.ribExtraLength ?? 0}
-                ribFilletWall={towerShape.ribFilletWall ?? false}
-                vbOffset={vbOffset}
-                vbSize={vbSize}
-                vm={vm}
-                brimLoopCount={BRIM_LOOP_COUNT}
-                /* 缩略图里塔只有 20px 上下，字按 0.34 只有 7px（糊）—— 小图放大一档，
-                   进放大层再回到正常比例（2026-10-21 作者：「字不见了」） */
-                labelScale={zoomed ? 0.34 : 0.42}
-                className={s.core}
+              {/* 不透明底**布尔裁剪成完整板轮廓**（作者：「这个不透明的背景需要裁剪布尔成
+                  板子一样的大小包括舌」）—— 裁 `plate.path`（含卡舌的整块外轮廓，evenodd
+                  带上把手的孔），不裁 bodyPath（第一稿裁板身 ⇒ 卡舌缺口漏了底）。
+                  色是页面底 `--bg-1`（跟主题走，浅 #f7f9fa / 深 #1c1c1c），不是板自己的绿。
+                  ★ `fill` 走 CSS 类：presentation attribute 里的 `var()` 不生效。 */}
+              {zoomed && (
+                <>
+                  <clipPath id="collision-bed-clip">
+                    <path d={plate.path} clipRule="evenodd" />
+                  </clipPath>
+                  <rect
+                    className={s.bedSolid}
+                    x={0}
+                    y={0}
+                    width={plate.w}
+                    height={plate.d}
+                    clipPath="url(#collision-bed-clip)"
+                  />
+                </>
+              )}
+              <path d={plate.path} fillRule="evenodd" />
+              {/* 板缘 → 可打印区之间的余量圈（与参数页同一画法：evenodd(板身, frame)） */}
+              <path
+                className={s.ring}
+                fillRule="evenodd"
+                d={`${plate.bodyPath} M${frame.x},${frame.y}h${frame.w}v${frame.h}h${-frame.w}Z`}
               />
-            </div>
-          )}
+            </svg>
+            {/* 塔的真实形状（绝对定位盖在判据框上，百分比按板坐标算） */}
+            {towerShape !== null && tower !== null && (
+              <div
+                className={s.tower}
+                style={{
+                  left: `${(towerLeftPlate / plate.w) * 100}%`,
+                  top: `${(towerTopPlate / plate.d) * 100}%`,
+                  width: `${(tower.w / plate.w) * 100}%`,
+                  height: `${(tower.h / plate.d) * 100}%`,
+                }}
+              >
+                <TowerCoreSvg
+                  outerVal={
+                    towerShape.outerStructure === 'rib' || towerShape.outerStructure === 'sheath'
+                      ? towerShape.outerStructure
+                      : 'brim'
+                  }
+                  isRibVisible={towerShape.outerStructure === 'rib' && (towerShape.ribWidth ?? 0) > 0}
+                  ribWidthMm={towerShape.ribWidth ?? 0}
+                  ribExtraLengthMm={towerShape.ribExtraLength ?? 0}
+                  ribFilletWall={towerShape.ribFilletWall ?? false}
+                  vbOffset={vbOffset}
+                  vbSize={vbSize}
+                  vm={vm}
+                  brimLoopCount={BRIM_LOOP_COUNT}
+                  /* 缩略图里塔只有 20px 上下，字按 0.34 只有 7px（糊）—— 小图放大一档，
+                     进放大层再回到正常比例（2026-10-21 作者：「字不见了」） */
+                  labelScale={zoomed ? 0.34 : 0.42}
+                  className={s.core}
+                />
+              </div>
+            )}
+          </div>
+          {factSvg}
           {arrowSvg}
         </div>
       ) : (
@@ -543,7 +812,8 @@ export default function CollisionMap({
         <div
           className={s.map}
           style={{
-            aspectRatio: `${bed.w} / ${bed.h}`,
+            /* 视窗被越界几何撑大时按新的比例铺 */
+            aspectRatio: `${view.w} / ${view.h}`,
             /* 同 `.mapPlate`：放大档按宽度铺满（行内才用固定高度） */
             ...(height !== undefined && !zoomed
               ? { height: `${height}px`, width: 'auto' }
@@ -555,10 +825,11 @@ export default function CollisionMap({
             <div
               className={s.tower}
               style={{
-                left: `${(bedPt(tower.x, tower.y + tower.h)[0] / canvasW) * 100}%`,
-                top: `${(bedPt(tower.x, tower.y + tower.h)[1] / canvasH) * 100}%`,
-                width: `${(tower.w / canvasW) * 100}%`,
-                height: `${(tower.h / canvasH) * 100}%`,
+                /* 百分比按**视窗**算（视窗被越界几何撑大时它会缩） */
+                left: pct(bedPt(tower.x, tower.y + tower.h)[0] - view.x0, view.w),
+                top: pct(bedPt(tower.x, tower.y + tower.h)[1] - view.y0, view.h),
+                width: pct(tower.w, view.w),
+                height: pct(tower.h, view.h),
               }}
             >
               <TowerCoreSvg
@@ -587,7 +858,7 @@ export default function CollisionMap({
       )
 
   return (
-    <div className={s.wrap}>
+    <div className={s.wrap} data-layout={layout}>
       {/* 小图可点（能点的意思只说给光标听，`cursor: zoom-in`）—— 皮扒干净，只留"能点" */}
       <button
         ref={mapBtnRef}
@@ -622,10 +893,22 @@ export default function CollisionMap({
             {tr('report.map.legendSlicerTower')}
           </li>
         )}
+        {allowedRect !== null && (
+          <li>
+            <span className={s.swOverflow} aria-hidden="true" />
+            {tr('report.map.legendOverflow')}
+          </li>
+        )}
         <li>
           <span className={s.swModel} aria-hidden="true" />
           {tr('report.map.legendModel')}
         </li>
+        {penPolys.length > 0 && (
+          <li>
+            <span className={s.swPen} aria-hidden="true" />
+            {tr('report.map.legendPen')}
+          </li>
+        )}
         {!noTower && (
           <li>
             <span className={s.swHit} aria-hidden="true" />
@@ -639,6 +922,9 @@ export default function CollisionMap({
         )}
       </ul>
       )}
+
+      {/* 横排档的右栏：图例下面那几句说明（图被挤成薄片就是因为它们原来住在图底下） */}
+      {children !== undefined && <div className={s.side}>{children}</div>}
 
       {/* 点开看大：报告页不在模态框 ⇒ portal 到 body；点任意处 / Esc 收起，滚轮 / 捏合缩放 */}
       {zoom &&

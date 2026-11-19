@@ -221,6 +221,15 @@ text_ja = "このファイルには総層数の記載がなかったため、実
 params = ["layers"]
 note = "层数声明补写：采集侧按实测层数写回去，报告与文件说同一个数（见 pipeline 的 `finalized.layers`）。**不写 G-code 里的注释名**（`; total layer number:` 是内部写法，用户看不懂）"
 
+["postproc.tower_layer_height"]
+code = "W_TOWER_LAYER_HEIGHT_001"
+text = "擦料塔有 {count} 层厚过 {max} mm（最厚 {worst} mm），层间会留缝"
+text_en = "The wipe tower has {count} layers thicker than {max} mm (up to {worst} mm); gaps will be left between layers"
+text_zh_tw = "擦料塔有 {count} 層厚過 {max} mm（最厚 {worst} mm），層間會留縫"
+text_ja = "パージタワーに {max} mm を超える層が {count} 層あります（最大 {worst} mm）。層の間にすき間ができます"
+params = ["count", "max", "worst"]
+note = "塔片的层高上限是 0.7 × 喷嘴（0.4 → 0.28、0.2 → 0.14）。塔片按本层 Z 增量打，只有模型层本身比上限还厚时才会触发 —— 那是切片那边的层高，不是塔的问题，所以只说后果（留缝），不指方向、不给处置"
+
 ["postproc.range_check.first_pen"]
 code = "W_RANGE_FIRST_PEN_001"
 text = "涂胶的路径超出了这台机器能走到的范围"
@@ -265,6 +274,15 @@ text = "，"
 text_en = ", "
 text_zh_tw = "，"
 text_ja = "、"
+
+# 越界那一句的**超出量**（2026-11-19）：只说"超出多少"，往哪挪交给报告页那张图上的箭头。
+# `{mm}` 是超出的量（内核已按 0.1mm 向上取整，与建议位移同一个数）。
+["boundary.over"]
+text = "，超出允许范围 {mm}mm"
+text_en = ", {mm}mm beyond the allowed range"
+text_zh_tw = "，超出允許範圍 {mm}mm"
+text_ja = "、許容範囲を {mm}mm 超えています"
+params = ["mm"]
 
 # ---------------------------------------------------------------- 钩子层（切片器 + 界面）
 

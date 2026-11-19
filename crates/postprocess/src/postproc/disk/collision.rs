@@ -764,6 +764,135 @@ fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
     }
 }
 
+/// 越界那一趟的**一块模型**（2026-11-19）。
+///
+/// 与 [`ModelFootprint`] 的差别是"要画的就是越界那块"决定的：
+/// - 点**不按板裁**（`model_footprint_in` 会把板外的挤出点丢掉，等于把要画的东西裁没了）；
+/// - 每块带一个 `shift`：把这一块挪进允许范围的最小平移。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundaryPiece {
+    /// 凸包（≤24 边，**喷嘴坐标**，与切片器所见同一个位置）
+    pub polygon: Vec<[f64; 2]>,
+    /// 这一块的框（mm，**喷嘴坐标**）
+    pub bbox: Box4,
+    /// 建议位移（mm，含符号）：`[0, 0]` = 这块本来就在笔尖允许范围里
+    pub shift: [f64; 2],
+}
+
+/// 把一块挪进 `limit` 的最小平移；按 0.1mm **向外**取整（与消息里那个数是同一份）。
+fn shift_into(b: &Box4, limit: &Box4) -> [f64; 2] {
+    let out = |v: f64| -> f64 {
+        if v > 0.0 {
+            crate::postproc::geom::ceil_to_01(v)
+        } else if v < 0.0 {
+            -crate::postproc::geom::ceil_to_01(-v)
+        } else {
+            0.0
+        }
+    };
+    let dx = if b.x_min < limit.x_min {
+        limit.x_min - b.x_min
+    } else if b.x_max > limit.x_max {
+        limit.x_max - b.x_max
+    } else {
+        0.0
+    };
+    let dy = if b.y_min < limit.y_min {
+        limit.y_min - b.y_min
+    } else if b.y_max > limit.y_max {
+        limit.y_max - b.y_max
+    } else {
+        0.0
+    };
+    [out(dx), out(dy)]
+}
+
+/// **越界那一趟每块模型的俯视几何**（2026-11-19）。
+///
+/// 与 [`model_map_facts`] 的分工：那个按板裁点、画"模型在板上占哪块"；这里**不裁**，
+/// 板外那截正是报告页要标红的东西。同一批样本、同一套连通块/凸包（[`Occupancy`]），
+/// 只换格网范围：**实测范围 ∪ 允许范围**（`mark` 会丢格网外的点，格网小了越界点就没了）。
+///
+/// 点是 G-code 原坐标，出来之前统一加笔偏移 —— 与越界判据（`offset.rs`）同一个坐标系，
+/// 于是图上凸出去的那块与消息里那句"超出 X mm"是同一件事。
+pub fn model_pieces_beyond(content: &[String], ir: &Ir, limit: &Box4) -> Vec<BoundaryPiece> {
+    /* 一、收点：与碰撞检测同一批样本（带 E 的模型移动；切片器自己的擦料塔不算） */
+    let mut points: Vec<[f64; 2]> = Vec::new();
+    let mut in_prime_tower = false;
+    for line in content {
+        let trimmed = line.trim();
+        if crate::gcode::has_slicer_comment_prefix(trimmed, "FEATURE") {
+            in_prime_tower =
+                crate::gcode::has_slicer_comment_prefix(trimmed, "FEATURE: Prime tower");
+            continue;
+        }
+        let Some((x, y)) = is_extrusion_move(line) else {
+            continue;
+        };
+        if in_prime_tower {
+            continue;
+        }
+        points.push([x, y]);
+    }
+    if points.is_empty() {
+        return Vec::new();
+    }
+
+    /* 二、格网：实测范围 ∪ 允许范围 ∪ 机型范围，四周各留一格（越界点必须进得来） */
+    const CELL: f64 = 2.0;
+    let (mut x0, mut x1) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut y0, mut y1) = (f64::INFINITY, f64::NEG_INFINITY);
+    for [x, y] in &points {
+        x0 = x0.min(*x);
+        x1 = x1.max(*x);
+        y0 = y0.min(*y);
+        y1 = y1.max(*y);
+    }
+    let grid = Box4 {
+        x_min: x0.min(limit.x_min).min(ir.machine.min_x) - CELL,
+        x_max: x1.max(limit.x_max).max(ir.machine.max_x) + CELL,
+        y_min: y0.min(limit.y_min).min(ir.machine.min_y) - CELL,
+        y_max: y1.max(limit.y_max).max(ir.machine.max_y) + CELL,
+    };
+    let mut occ = Occupancy::new(&grid, CELL);
+    for [x, y] in &points {
+        occ.mark(*x, *y);
+    }
+
+    /* 三、逐块搬出来（boxes 与 polygons 都由同一批连通块生成，顺序一一对应）。
+     *
+     * ★ 几何是**喷嘴坐标**（原样，不加笔偏移）：切片器里看到的是什么位置，图上就是什么
+     *   位置 —— 加了笔偏移会整盘推向 +Y（A1 mini 的 Y 偏移 23mm），底部留白凭空变大。
+     *   笔尖那一层由界面用 `BoundaryRecord.pen` 平移出来。
+     *   `shift` 仍按**笔尖坐标**算（bbox + 笔偏移 对 limit）：那是判据的坐标系，
+     *   位移向量与坐标系无关，数值与消息里那句同一个。 */
+    let (dx, dy) = (ir.toolhead.x_offset, ir.toolhead.y_offset);
+    occ.boxes()
+        .iter()
+        .zip(occ.polygons())
+        .map(|(b, poly)| {
+            let bbox = Box4 {
+                x_min: b.x_min,
+                x_max: b.x_max,
+                y_min: b.y_min,
+                y_max: b.y_max,
+            };
+            let pen_bbox = Box4 {
+                x_min: b.x_min + dx,
+                x_max: b.x_max + dx,
+                y_min: b.y_min + dy,
+                y_max: b.y_max + dy,
+            };
+            BoundaryPiece {
+                polygon: poly.clone(),
+                bbox,
+                shift: shift_into(&pen_bbox, limit),
+            }
+        })
+        .collect()
+}
+
 /// `DetectTowerCollision`：检测擦料塔包围盒与模型/原塔挤出点的冲突。
 /// `UseTowers=false` 时直接返回空结果（无 MKP 擦料塔，跳过检测）。
 pub fn detect_tower_collision(content: &[String], ir_data: &Ir) -> CollisionResult {
@@ -1809,6 +1938,48 @@ mod tests {
         v.iter().map(|s| s.to_string()).collect()
     }
 
+    /// **越界那一趟的几何画在喷嘴坐标里**（2026-11-19）：切片器看到模型在哪，图上就在哪。
+    ///
+    /// 笔偏移只进 `shift` 的判定（判据是笔尖）：这块模型自己没出板，是**笔尖**出去了。
+    #[test]
+    fn boundary_pieces_stay_in_nozzle_space_while_the_shift_judges_the_pen() {
+        let mut ir = Ir::default();
+        ir.machine.min_x = 0.0;
+        ir.machine.max_x = 256.0;
+        ir.machine.min_y = 0.0;
+        ir.machine.max_y = 180.0;
+        /* 笔尖比喷嘴偏 +23mm（A1 mini 那台真机就是这组数） */
+        ir.toolhead.y_offset = 23.0;
+
+        /* 模型自己的上沿 170（离板边还有 10mm），笔尖上沿 193 —— 越界 13 */
+        let content = lines(&["G1 X100 Y170 E0.5", "G1 X101 Y170 E0.5"]);
+        let limit = Box4 {
+            x_min: 0.0,
+            x_max: 256.0,
+            y_min: 0.0,
+            y_max: 180.0,
+        };
+        let pieces = model_pieces_beyond(&content, &ir, &limit);
+        assert_eq!(pieces.len(), 1, "两块相邻的点是一块模型");
+
+        let p = &pieces[0];
+        assert!(
+            p.bbox.y_max <= 180.0,
+            "几何必须是喷嘴坐标（模型自己没出板）：{:?}",
+            p.bbox
+        );
+        assert!(
+            p.polygon.iter().all(|[_, y]| *y <= 180.0),
+            "轮廓也不许带笔偏移：{:?}",
+            p.polygon
+        );
+        assert!(
+            p.shift[1] < 0.0,
+            "判据是笔尖：这一块要往回挪，shift={:?}",
+            p.shift
+        );
+    }
+
     /// 9.6 命中侧：挤出点落进塔包围盒 → has_collision + Model 类型 + 建议位移。
     #[test]
     fn collision_detected_when_model_extrudes_into_tower() {
@@ -1823,6 +1994,45 @@ mod tests {
         assert_eq!(r.collision_type, CollisionType::Model);
         assert!(r.conflict_count >= 1);
         assert!(!r.conflict_points.is_empty());
+    }
+
+    /// **越界几何**（2026-11-19）：板外的点也要算（要画的就是那一截）、逐块分开、
+    /// 轮廓是**喷嘴坐标**（切片器所见），每块给出"把笔尖挪进允许范围"的位移。
+    #[test]
+    fn boundary_pieces_keep_the_overflow_and_carry_per_model_shifts() {
+        let mut ir = tower_ir();
+        ir.machine.max_y = 180.0;
+        ir.toolhead.y_offset = 2.0;
+        let content = lines(&[
+            "G1 X10 Y10 E0.4",
+            "G1 X12 Y10 E0.4",
+            /* 第二块：整块都在板外 —— 按板裁点那一套会把它整个丢掉 */
+            "G1 X150 Y196 E0.4",
+            "G1 X152 Y196 E0.4",
+        ]);
+        let limit = Box4 {
+            x_min: -10.0,
+            x_max: 180.0,
+            y_min: 0.0,
+            y_max: 180.0,
+        };
+        let pieces = model_pieces_beyond(&content, &ir, &limit);
+
+        assert_eq!(pieces.len(), 2, "两块模型要分开，越界那块不许被丢掉");
+        let inside = pieces
+            .iter()
+            .find(|p| p.bbox.y_max < 100.0)
+            .expect("板内那块");
+        assert_eq!(inside.shift, [0.0, 0.0], "没越界不给位移");
+
+        let outside = pieces
+            .iter()
+            .find(|p| p.bbox.y_min > 180.0)
+            .expect("越界那块");
+        assert!(outside.polygon.len() >= 3, "一块模型一条轮廓");
+        assert_eq!(outside.bbox.y_min, 196.0, "轮廓是喷嘴坐标（不加笔偏移）");
+        assert_eq!(outside.shift[1], -20.0, "笔尖比喷嘴高 2：198+2 要挪回 180");
+        assert_eq!(outside.shift[0], 0.0, "X 没越界");
     }
 
     /// 9.6 不命中侧：模型全部远离塔 → 无冲突；且 UseTowers=false 时整体跳过。

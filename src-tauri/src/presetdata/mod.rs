@@ -515,6 +515,11 @@ impl Presets {
         if let Some(asset_root) = self.assets.asset_root() {
             p.set_asset_root(asset_root);
         }
+        /* 草稿载荷根同样跟着走：改名还没保存时文件只活在影子里，
+        撤销 / 重做后重读这一份还得找得到它（见 `Assets::locate`） */
+        if let Some(draft_root) = self.assets.draft_root() {
+            p.set_draft_asset_root(draft_root);
+        }
         Ok(p)
     }
 
@@ -527,6 +532,11 @@ impl Presets {
     /// 而不是一个查不出来的状态。
     pub fn set_asset_root(&mut self, root: &Path) {
         self.assets.set_asset_root(root);
+    }
+
+    /// 资产的**草稿载荷根**（工作台影子树里那一份）。客户端不调 —— 它没有草稿
+    pub fn set_draft_asset_root(&mut self, root: &Path) {
+        self.assets.set_draft_root(root);
     }
 
     /// 写一个机型 / 版本的值，**写完落盘**（原子写）。
@@ -1291,6 +1301,25 @@ impl Presets {
         self.assets.set_delivery(id, d)?;
         self.assets.write()?;
         Ok(())
+    }
+
+    /// **给一批资产改名**（作者 2026-11-19）：一条命令 = 一条撤销 = 一次保存才落盘。
+    ///
+    /// 这里只改台账（`path` / `name` 那一格）—— 资产文件本体的搬动在命令层
+    /// （`workbench::app::assets::wb_rename_assets`），这一层看不见影子树。
+    /// 名字 → 路径的换算复用 [`crate::presetdata::assets::renamed_path`]，
+    /// 不在这里再写一遍。
+    pub fn rename_assets(&mut self, items: &[(String, String)]) -> Result<(), AppError> {
+        if items.is_empty() {
+            return Ok(());
+        }
+        for (id, name) in items {
+            self.assets.rename(id, name)?;
+        }
+        /* 改名可能让"未分组资产的干名"与某个组 id 撞车（check_groups 第 6 条）——
+        写盘前先过一遍，坏值整次拒绝（内存那一半由命令层回滚） */
+        self.assets.check_after_edit()?;
+        self.assets.write()
     }
 
     /// **新建或改写一个分组**（作者 2026-10-16），落盘。

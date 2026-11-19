@@ -3,7 +3,7 @@
  *
  * # 它恢复的是哪两份
  *
- * ① 后处理那 15 个偏好（`[Prefs]` 的 11 项 + 通知 / 显示方式 / 置顶 / 强制校准）全部置回
+ * ① 后处理那 16 个偏好（`[Prefs]` 的 12 项 + 通知 / 显示方式 / 置顶 / 强制校准）全部置回
  *    `null`（= 没设过），由后端 `resolved()` 去读 `presets/client-defaults.toml`；
  * ② 客户端壳那几格（主题 / 语言 / 自动清理 / 自动检查更新 / 预设页三项 / 数据源覆盖）
  *    由 `resetClientPrefs` 清回 `None` —— 同一个口径：清"没设过"，不是写死出厂值。
@@ -39,7 +39,7 @@ import s from './PageSettings.module.css'
 /**
  * 「恢复默认」的那一份补丁：全给 `null`，由后端按出厂重算。
  *
- * 键 = 「有出厂值的那 15 项」（`[Prefs]` 的 11 项 + 通知 / 显示方式 / 置顶 / 强制校准）；
+ * 键 = 「有出厂值的那 16 项」（`[Prefs]` 的 12 项 + 通知 / 显示方式 / 置顶 / 强制校准）；
  * 漏一个就是「那一项恢复不了」。
  */
 const RESET_PATCH = {
@@ -53,6 +53,7 @@ const RESET_PATCH = {
   skipVibrationCalibration: null,
   beginStageRetractEnabled: null,
   beginStageRetractZLiftMm: null,
+  calibrationSafeLiftMm: null,
   zCalibrationDwellSec: null,
   xyCalibrationDwellSec: null,
   bedGlueEnabled: null,
@@ -60,7 +61,7 @@ const RESET_PATCH = {
   autoTowerPosition: null,
 } as const
 
-/** 对比表里的 15 行（顺序与设置页出现顺序一致；标签走文案表，与设置页同一句） */
+/** 对比表里的 16 行（顺序与设置页出现顺序一致；标签走文案表，与设置页同一句） */
 const ITEMS: { key: keyof PostprocPrefsView['factory']; label: StringKey }[] = [
   { key: 'notifyOnFinish', label: 'settings.postproc.notify' },
   { key: 'uiMode', label: 'settings.postproc.mode' },
@@ -69,6 +70,7 @@ const ITEMS: { key: keyof PostprocPrefsView['factory']; label: StringKey }[] = [
   { key: 'skipVibrationCalibration', label: 'settings.calib.skipVibration' },
   { key: 'beginStageRetractEnabled', label: 'settings.calib.beginRetract' },
   { key: 'beginStageRetractZLiftMm', label: 'settings.calib.lift' },
+  { key: 'calibrationSafeLiftMm', label: 'settings.calib.calibLift' },
   { key: 'zCalibrationDwellSec', label: 'settings.calib.zDwell' },
   { key: 'xyCalibrationDwellSec', label: 'settings.calib.xyDwell' },
   { key: 'underSupportEnabled', label: 'settings.under.enable' },
@@ -159,7 +161,7 @@ export default function ResetPostprocDefaults({ host }: { host: HTMLElement | nu
 
   /*
    * 打开时读一次客户端壳那几项（上一轮恢复之后再看是对的）。
-   * 读不到就如实报错、列表只摆后处理那 15 行 —— 不编一份"出厂"出来。
+   * 读不到就如实报错、列表只摆后处理那 16 行 —— 不编一份"出厂"出来。
    */
   useEffect(() => {
     if (!open) return

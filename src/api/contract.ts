@@ -171,6 +171,42 @@ export interface ReportModelMap {
 }
 
 /**
+ * **越界那一趟的一块模型**（2026-11-19，`_meta.json` 顶层 `boundary.pieces[]`）。
+ *
+ * 一块模型一条：轮廓是凸包（≤24 边），框是它的外接框，两个都**已加笔偏移** ——
+ * 与判据同一坐标系，所以图上凸出去的那块与消息里那个数是同一件事。
+ */
+export interface ReportBoundaryPiece {
+  /** 轮廓（凸包，**喷嘴坐标**，与切片器所见同一个位置）—— 图上画的就是它 */
+  polygon?: [number, number][]
+  /** 这一块的框（mm，**喷嘴坐标**） */
+  bbox?: ReportBox4
+  /** 建议位移（mm，含符号）：把这块挪进允许范围的最小平移；`[0, 0]` = 没越界 */
+  shift?: [number, number]
+}
+
+/**
+ * **越界那一趟的几何**（2026-11-19，`_meta.json` 顶层 `boundary`）。
+ *
+ * `limit` 是判据用的允许范围（`_001` 机型打印范围 / `_002` 涂胶范围），
+ * `pieces` 是一块模型一条（轮廓 + 建议位移）。图上凸出 `limit` 的那部分标红，
+ * 越界的块各一支箭头 —— 用户要的就是"超出范围的地方在哪儿、往哪挪"。
+ */
+export interface ReportBoundary {
+  /** 判据用的允许范围（mm，**笔尖坐标**；涂胶那一档是涂胶范围） */
+  limit?: ReportBox4
+  /**
+   * 笔尖相对喷嘴的偏移（mm）：`[x_offset, y_offset]`。
+   *
+   * 界面用它把两块事实接起来：模型 `+ pen` = 笔尖轮廓（另画一层虚线）；
+   * 判据范围 `− pen` = 喷嘴坐标下"笔尖会越界"的那条线（红区按它裁）。
+   */
+  pen?: [number, number]
+  /** 每块模型一条（**喷嘴坐标**）；空 / 旧记录 ⇒ 不摆图 */
+  pieces?: ReportBoundaryPiece[]
+}
+
+/**
  * **碰撞那一趟的事实**（2026-10-18）。
  *
  * 内核算完检测就把这些一起带出来（旧版有"移动建议"，这一稿把它落进执行记录）：
@@ -521,6 +557,16 @@ export interface ReportDetail {
    * 的恰恰是成功那趟。旧记录 / 那趟扫不出模型点 ⇒ `null` ⇒ 图只画塔。
    */
   modelMap?: ReportModelMap | null
+  /**
+   * **越界那一趟的俯视几何**（2026-11-19，`_meta.json` 顶层 `boundary`）。
+   * 每块模型一条轮廓 + 建议位移，报告页据此把越界那块标红并画箭头。
+   *
+   * 只有 `E_GCODE_BOUNDARY_00x` 会写：`limit` 是判据用的允许范围（与消息里那句
+   * 「允许范围」同一份），`model` 是模型（**含笔偏移**）的包围盒。报告页据此把
+   * 凸出 `limit` 的那一块标红 —— 与 `modelMap` 的区别是它**不裁掉**越界点。
+   * 旧记录 / 别的失败一律 `null` ⇒ 不摆那张图。
+   */
+  boundary?: ReportBoundary | null
   /**
    * **挪塔记录**（2026-10-18，`_meta.json` 顶层 `relocation`）。
    *
@@ -2413,6 +2459,11 @@ export interface ResolvedPostprocPrefs {
   skipVibrationCalibration: boolean
   beginStageRetractEnabled: boolean
   beginStageRetractZLiftMm: number
+  /**
+   * **校准「切笔」的安全抬升量**（mm，量程见 `limits.calibLift`）：
+   * 校准块的挂笔前 / 收笔前 / 进块前都抬到 `首层 + 笔偏移 + 这一格`。
+   */
+  calibrationSafeLiftMm: number
   /** 调试模式：切片只产出「只跑落笔/收笔」的骨架 */
   debugModeEnabled: boolean
   debugWaitX: number
@@ -2479,6 +2530,8 @@ export interface PostprocPrefsWire {
   skipVibrationCalibration?: boolean | null
   beginStageRetractEnabled?: boolean | null
   beginStageRetractZLiftMm?: number | null
+  /** 校准抬升高度（mm）：`null` = 回到出厂档（10） */
+  calibrationSafeLiftMm?: number | null
   debugModeEnabled?: boolean | null
   debugWaitX?: number | null
   debugMountWaitX?: number | null
@@ -2562,7 +2615,7 @@ export interface PostprocPrefsView {
   raw: PostprocPrefsWire
   resolved: ResolvedPostprocPrefs
   /**
-   * **出厂档**（全 `null` 解析出来的那一份）：`[Prefs]` 那 11 项 + 通知 / 显示方式 /
+   * **出厂档**（全 `null` 解析出来的那一份）：`[Prefs]` 那 12 项 + 通知 / 显示方式 /
    * 置顶 / 强制校准这 4 项（后者来自同一份文件的 `[Client]` 段）。
    *
    * 设置页「恢复默认」的对比要用它 —— 只写「出厂」两个字，用户看不出点完变成
@@ -2576,6 +2629,7 @@ export interface PostprocPrefsView {
     skipVibrationCalibration: boolean
     beginStageRetractEnabled: boolean
     beginStageRetractZLiftMm: number
+    calibrationSafeLiftMm: number
     zCalibrationDwellSec: number
     xyCalibrationDwellSec: number
     underSupportEnabled: boolean
@@ -2590,6 +2644,7 @@ export interface PostprocPrefsView {
     zDwell: { min: number; max: number }
     xyDwell: { min: number; max: number }
     zLift: { min: number; max: number }
+    calibLift: { min: number; max: number }
     underSupport: { min: number; max: number }
   }
 }
@@ -2956,6 +3011,14 @@ export interface PostProcessFinished {
    *   于是"塔被挪到哪"只有这条消息带得来（作者：开了自动也得把塔的移动显示出来）。
    */
   relocation?: RelocationRecord | null
+  /**
+   * **越界那一趟的俯视几何**（2026-11-19）：与归档 `_meta.json` 的 `boundary`
+   * **同一份**（Rust `archive::BoundaryRecord`）。
+   *
+   * 有它 ⇒ 结果屏多一页「说明」，摆"超出范围那块标红 + 每块一支箭头"那张图；
+   * 别的失败 / 成功 ⇒ `null`，那一页不摆（与从前一字不差）。
+   */
+  boundary?: ReportBoundary | null
   /**
    * **结果读数**（那一屏「结果」几扇要摆的读数：指标条 + 擦料与胶水消耗那几格）。
    *

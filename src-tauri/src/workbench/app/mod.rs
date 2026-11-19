@@ -588,6 +588,9 @@ impl Ctx {
             // 载荷根仍指真仓库：资产是只读读出来的，编辑走「暂存 + 保存时搬」
             presets.set_asset_root(&asset_root);
         }
+        /* 改名是先在影子里搬文件、保存才进真仓库（`wb_rename_assets`）——
+        草稿那一份也要认得出来，否则改完名那一行当场变成「文件未到」 */
+        presets.set_draft_asset_root(&shadow_root.join("assets"));
         /* `base_root` 在上面已经算过 —— `store` 马上要被 move 进会话 */
         let mut ctx = Self::with(presets, store)?;
         ctx.real_root = real_root;
@@ -933,6 +936,7 @@ const COMMAND_LABELS: &[(&str, &str)] = &[
     ("wb_remove_bundle", "删除套餐"),
     ("wb_assign_bundle_versions", "指派版本到套餐"),
     ("wb_remove_asset", "删除资产"),
+    ("wb_rename_assets", "资产改名"),
     ("wb_set_asset_delivery", "改资产交付档"),
     ("wb_set_calibration_identity", "改校准身份"),
     ("wb_set_group", "改资产分组"),
@@ -7105,7 +7109,9 @@ mod tests {
             if EXEMPT.contains(cmd) {
                 continue;
             }
-            let Some(start) = all.find(&format!("pub fn {cmd}")) else {
+            /* 针里必须带 `(`：只按名字前缀找的话，`wb_rename_assets` 会先撞上
+            `wb_rename_assets_preview`（两条命令共一个前缀），拿预览那一段去判它 */
+            let Some(start) = all.find(&format!("pub fn {cmd}(")) else {
                 panic!("{cmd}（{label}）登记在 COMMAND_LABELS 里，源码里却找不到这个函数");
             };
             /* 一条命令的正文到下一个命令注解为止；文件末尾那一条会吞掉测试模块，
@@ -7162,6 +7168,8 @@ mod tests {
             "wb_assets",
             "wb_asset_usage",
             "wb_asset_inspect",
+            // 改名预览：只算不写（与 `wb_rename_assets` 同一个 plan_renames）
+            "wb_rename_assets_preview",
             // 「在访达中显示」不写任何应用状态（只开系统文件管理器）—— 也归读这一档
             "wb_reveal_asset",
             "wb_bundles",

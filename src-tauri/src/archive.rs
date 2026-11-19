@@ -699,7 +699,39 @@ pub struct Meta {
     /// 为什么单独一格：成功那趟 `collision` 恒为 `null`，而作者要看的正是成功那趟。
     /// 也是**新增键**：旧记录读到 `null` ⇒ 那幅图退回"从头算一遍"（见 `ipc::report`）。
     pub model_map: Option<postprocess::postproc::disk::collision::ModelMapFacts>,
+    /**
+     * **越界那一趟的俯视几何**（2026-11-19）：只有 `E_GCODE_BOUNDARY_00x` 会写。
+     *
+     * 报告页拿它画"超出范围的那一块"：`pieces` 是每块模型的轮廓（**喷嘴坐标**，
+     * 与切片器所见一致），`pen` 是笔尖偏移（另画一层），`limit` 是判据用的允许范围
+     * （与消息里那句「允许范围」同一份，**笔尖坐标**）—— 凸出 `limit − pen` 的那部分
+     * 在图上标红。
+     *
+     * 为什么不复用 `modelMap`：那一格按板**裁掉了越界点**（它画的是"模型在板上占哪块"），
+     * 而要画的恰恰是被裁掉的那一部分。别的失败 / 成功记录一律 `null`。
+     */
+    pub boundary: Option<BoundaryRecord>,
     pub detail: Detail,
+}
+
+/// 越界那一趟的几何（见 [`Meta::boundary`]）。
+///
+/// **两套坐标系，别混**：
+/// - `pieces[].polygon / bbox` 是**喷嘴坐标**（切片器里看到的位置）；
+/// - `limit` 是**笔尖坐标**下的允许范围（判据用的那一份）；
+/// - `pen` 是笔尖相对喷嘴的偏移 —— 界面用 `piece + pen` 画笔尖那一层，
+///   用 `limit − pen` 把"笔尖会越界的那部分模型"染红。三处用的是同一份事实。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundaryRecord {
+    /// 判据用的允许范围（mm，**笔尖坐标**）：`_001` 是机型打印范围，`_002` 是涂胶范围。
+    pub limit: postprocess::postproc::disk::collision::Box4,
+    /// 笔尖相对喷嘴的偏移（mm）：`[x_offset, y_offset]`。
+    pub pen: [f64; 2],
+    /// **每块模型**一条：轮廓（凸包，**喷嘴坐标**）+ 框 + 把这块挪进范围的位移。
+    ///
+    /// 分块的理由（2026-11-19 作者）：多个模型要各自一个箭头，不是整盘一个框。
+    pub pieces: Vec<postprocess::postproc::disk::collision::BoundaryPiece>,
 }
 
 impl Meta {
@@ -1962,6 +1994,8 @@ mod tests {
                 forbidden_zones: Vec::new(),
             }),
             relocation: None,
+            /* 成功记录没有越界几何 */
+            boundary: None,
             detail: Detail {
                 debug: None,
                 input_file: FileFact {
@@ -2103,6 +2137,8 @@ mod tests {
             collision: None,
             /* 越界失败这一份不画图（这一格同样是 `null`：不编几何） */
             model_map: None,
+            /* 这一段钉的是"旧记录"那一档：越界几何那一格是后来才有的 ⇒ `null` */
+            boundary: None,
             relocation: None,
             detail: Detail {
                 debug: None,

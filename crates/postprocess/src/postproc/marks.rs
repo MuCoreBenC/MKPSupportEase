@@ -259,28 +259,51 @@ fn reconcile_layer_declarations(lines: &mut Vec<String>) -> Result<Declared, Pos
     })
 }
 
-/// 塔块必须打在**本层自己的 Z** 上。
+/// 塔片的 Z 必须**从下往上、且不越过本层层顶**；每层最后一片必须落在层顶。
 ///
-/// 为什么这条非拦不可：Bambu Studio 的层表只认「挤出移动的 Z」——
+/// 为什么非要管：Bambu Studio 的层表只认「挤出移动的 Z」——
 /// 无斜接缝按 Z 平台段数层（`AdvancedRenderer.cpp:947-960`，容差 `1e-4`），
 /// 有斜接缝取每层挤出 Z 的最大值（`GCodeProcessor.cpp:4409-4421`）。
-/// 塔原来按自己的记账高度推进（比模型层低 0.04~0.47mm），于是在**没有**斜接缝时
-/// 每层多出一个假层（627 层被显示成 1215 层），有斜接缝时又把层表搅乱。
+/// 塔原来按自己的记账高度推进（比模型层低 0.04~0.47mm、且不落在层顶），于是
+/// 每层多出一个假层（627 层被显示成 1215 层）。
+///
+/// 允许层内补片（一片比喷嘴的层高上限还厚的模型层要拆开打），所以不再要求
+/// "每一片都等于层顶"；但补片只能在层内，且那层收尾必须落回层顶 ——
+/// 否则上一层的高度就没人报，行序与层表会错位。
 ///
 /// 认的是塔自己写的两条注释：`G1 Z<x>;Tower Z` 与 `G1 Z<x> ;Print Z`。
-/// 容差见 [`TOWER_LAYER_Z_TOLERANCE`] —— 只容忍注释精度，不容忍"各打各的"。
+/// 容差见 [`TOWER_LAYER_Z_TOLERANCE`] —— 只容忍注释精度。
 fn check_tower_prints_at_layer_z(lines: &[String]) -> Result<(), PostprocError> {
     let mut layer_z: Option<f64> = None;
     let mut layer_no: usize = 0;
+    let mut prev_tower: Option<f64> = None;
+    let mut last_in_layer: Option<f64> = None;
+
+    let close = |no: usize, top: Option<f64>, last: Option<f64>| -> Result<(), PostprocError> {
+        let (Some(top), Some(last)) = (top, last) else {
+            return Ok(());
+        };
+        if (last - top).abs() > TOWER_LAYER_Z_TOLERANCE {
+            return Err(PostprocError::Processing {
+                message: format!(
+                    "第 {no} 层的塔最后一片打在 Z={last}，而本层是 {top}                     （允许差 {TOWER_LAYER_Z_TOLERANCE}）—— 每层收尾必须落在模型层顶，\
+                     否则预览的层表会与内容错位。"
+                ),
+            });
+        }
+        Ok(())
+    };
 
     for line in lines {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix(Z_HEIGHT_PREFIX) {
+            close(layer_no, layer_z, last_in_layer)?;
             layer_z = rest.trim().parse::<f64>().ok();
             layer_no += 1;
+            last_in_layer = None;
             continue;
         }
-        let Some(layer_z) = layer_z else {
+        let Some(top) = layer_z else {
             continue;
         };
         let is_tower_z = trimmed.contains(";Tower Z") || trimmed.contains(";Print Z");
@@ -296,15 +319,26 @@ fn check_tower_prints_at_layer_z(lines: &[String]) -> Result<(), PostprocError> 
         else {
             continue;
         };
-        if (z - layer_z).abs() > TOWER_LAYER_Z_TOLERANCE {
+        if z > top + TOWER_LAYER_Z_TOLERANCE {
             return Err(PostprocError::Processing {
                 message: format!(
-                    "第 {layer_no} 层的塔打在 Z={z}，而本层是 {layer_z}                     （允许差 {TOWER_LAYER_Z_TOLERANCE}）—— 塔必须在模型层顶落笔，\
-                     否则预览的层表会与内容错位。"
+                    "第 {layer_no} 层的塔打到了 Z={z}，比本层层顶 {top} 还高                     （允许差 {TOWER_LAYER_Z_TOLERANCE}）—— 塔片不能越过模型层。"
                 ),
             });
         }
+        // 同一片会写两条带标记的 Z（塔身的 `;Tower Z` 与斜肋的 `;Print Z`），
+        // 所以只拦"往回走"，不拦相等。
+        if let Some(prev) = prev_tower.filter(|&prev| z + 1e-9 < prev) {
+            return Err(PostprocError::Processing {
+                message: format!(
+                    "塔片 Z 往回走了：{prev} 之后又打了 Z={z}                     —— 塔只能一层层往上长。"
+                ),
+            });
+        }
+        prev_tower = Some(z);
+        last_in_layer = Some(z);
     }
+    close(layer_no, layer_z, last_in_layer)?;
     Ok(())
 }
 

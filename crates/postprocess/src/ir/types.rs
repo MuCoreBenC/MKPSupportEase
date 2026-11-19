@@ -555,6 +555,12 @@ pub struct PrefsIr {
     pub begin_stage_retract_enabled: bool,
     /// 收笔时在原版抬 Z 之上再补抬的相对高度（mm）。
     pub begin_stage_retract_z_lift_mm: i64,
+    /// **校准「切笔」的安全抬升量**（mm，量程 6–20、出厂 10）。
+    ///
+    /// 校准块的挂笔前 / 收笔前 / 进块前都抬到
+    /// `first_layer_height + toolhead.z_offset + 这一格`，笔尖离板面恒等于它。
+    /// 校准这条线**不接** `glue_z_lift_height` —— 那是涂胶那趟的账。
+    pub calibration_safe_lift_mm: f64,
     /// Z 轴校准停留秒数。
     pub z_calibration_dwell_sec: i64,
     /// XY 轴校准停留秒数。

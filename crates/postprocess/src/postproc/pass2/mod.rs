@@ -42,6 +42,28 @@ pub const TOWER_COLLISION_MAX_KEEP_LAYERS: i64 = 20;
 pub(crate) const TOWER_COLLISION_TARGET_Z_RANGE: f64 = 0.8;
 pub(crate) const TOWER_HEIGHT_COMP_OFFSET: f64 = 2.0;
 
+/// 塔片层高上限：0.7 × 喷嘴（0.4 → 0.28、0.2 → 0.14）。
+///
+/// 这也是切片器自己的层高上限 —— 一片再厚就不该一次打出来。
+pub(crate) fn tower_max_layer_height(nozzle_diameter: f64) -> f64 {
+    (TOWER_SUGGESTED_LAYER_COEFF * nozzle_diameter * 1000.0).round() / 1000.0
+}
+
+/// 塔片层高下限：0.2 × 喷嘴（0.4 → 0.08、0.2 → 0.04）。
+///
+/// 比它还薄的一段并到下一层去 —— 可变层高里的细层不该把塔打成一片片薄纸。
+pub(crate) fn tower_min_layer_height(nozzle_diameter: f64) -> f64 {
+    (TOWER_MIN_LAYER_COEFF * nozzle_diameter * 1000.0).round() / 1000.0
+}
+
+/// 这一趟的塔片上下限（两个口径都在这一处算，别处不要再乘一遍系数）。
+pub(crate) fn tower_slice_bounds(nozzle_diameter: f64) -> tower::Bounds {
+    tower::Bounds {
+        min: tower_min_layer_height(nozzle_diameter),
+        max: tower_max_layer_height(nozzle_diameter),
+    }
+}
+
 /// `towerCollisionKeepLayers`（pass2.go:39）：按层高自适应碰撞窗口容量。
 pub(crate) fn tower_collision_keep_layers(typical_layer_height: f64) -> usize {
     if typical_layer_height <= 0.0 {
@@ -54,45 +76,6 @@ pub(crate) fn tower_collision_keep_layers(typical_layer_height: f64) -> usize {
         TOWER_COLLISION_MAX_KEEP_LAYERS as usize
     } else {
         n as usize
-    }
-}
-
-/// `CalcSuggestedLH`（extrusion.go）：塔层高建议值（fast/custom/follow 三模式）。
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn calc_suggested_lh(
-    current_z: f64,
-    last_z: f64,
-    nozzle_diameter: f64,
-    has_next_tj: bool,
-    fast_tower_mode: &str,
-    custom_layer_height: &str,
-    next_glue_layer_distance: i64,
-) -> f64 {
-    let max_lh = (TOWER_SUGGESTED_LAYER_COEFF * nozzle_diameter * 1000.0).round() / 1000.0;
-    let min_lh = (TOWER_MIN_LAYER_COEFF * nozzle_diameter * 1000.0).round() / 1000.0;
-    let clamp_lh = |lh: f64| lh.clamp(min_lh, max_lh);
-
-    match fast_tower_mode {
-        "fast" => {
-            if has_next_tj || next_glue_layer_distance <= 1 {
-                clamp_lh(((current_z - last_z) * 1000.0).round() / 1000.0)
-            } else {
-                max_lh
-            }
-        }
-        "custom" => match custom_layer_height {
-            "min" => min_lh,
-            "max" => max_lh,
-            "auto" => {
-                if has_next_tj {
-                    clamp_lh(((current_z - last_z) * 1000.0).round() / 1000.0)
-                } else {
-                    max_lh
-                }
-            }
-            _ => max_lh,
-        },
-        _ => clamp_lh(((current_z - last_z) * 1000.0).round() / 1000.0),
     }
 }
 
@@ -325,31 +308,27 @@ struct Ctx<'a> {
 
     current_layer_height: f64,
     last_layer_height: f64,
-    /// 塔的**记账高度**：按 `suggested_lh` 累加，只用来决定「这一层要不要出塔块」
-    /// （`tower_flag`）。它**不是**打印高度 —— 成品里任何 `G1 Z` 都不读它。
+    /// **塔顶 Z**：最后一片塔实际打到的 Z（换笔 / 遮嘴那几句从这里下探擦嘴）。
     ///
-    /// 塔一律打在 [`Self::current_layer_height`]（本层模型层顶）。为什么不能各打各的：
+    /// 它跟 [`Self::last_tower_z`] 同步推进。塔一律打在
+    /// [`Self::current_layer_height`]（本层模型层顶）。为什么不能各打各的：
     /// Bambu Studio 的预览按「挤出移动的 Z」数层（`AdvancedRenderer.cpp:947-960`），
     /// 开斜接缝时取每层挤出 Z 的最大值（`GCodeProcessor.cpp:4409-4421`）。
     /// 塔比模型层低一截会把本层 Z 拉低，高出去会把本层顶高 —— 两种都会让
     /// 预览的层表与内容对不上。
     nominal_tower_height: f64,
-    last_nominal_tower_height: f64,
-    /// 上一次真正打印塔块时的模型层顶（算塔层厚用）。
+    /// 上一片塔打到的模型层顶（算这一层要长多少、每片多厚用）。
     last_tower_z: f64,
     /// 每层**切片器自己写过的**那个 Z 字面量（见 [`collect_layer_z_literals`]）。
     layer_z_literals: Vec<Option<String>>,
     /// 现在走到第几层（`; Z_HEIGHT:` 的序号，从 0 起）。
     layer_seq: usize,
-    tower_flag: bool,
     first_layer_tower_flag: bool,
     first_layer_flag: bool,
-    next_tj: bool,
     remove_g3_flag: bool,
     allow_print_flag: bool,
     remove_wrap_detect_flag: bool,
     remove_timelapse_flag: bool,
-    suggested_lh: f64,
     local_thickness: f64,
     adjust_support_flag: bool,
     switch_tower_type: i64,
@@ -779,18 +758,14 @@ pub fn second_pass(
         tower_bbox,
         current_layer_height: 0.0,
         last_layer_height: 0.0,
-        nominal_tower_height: 0.0, // 占位，下方按 Go 初值设置
-        last_nominal_tower_height: 0.0,
+        nominal_tower_height: 0.0, // 占位，下方按首层高度设置
         last_tower_z: 0.0,
-        tower_flag: false,
         first_layer_tower_flag: true,
         first_layer_flag: true,
-        next_tj: false,
         remove_g3_flag: false,
         allow_print_flag: true,
         remove_wrap_detect_flag: false,
         remove_timelapse_flag: false,
-        suggested_lh: 0.0,
         local_thickness: 0.0,
         layer_z_literals,
         layer_seq: 0,
@@ -819,8 +794,9 @@ pub fn second_pass(
         slicer_feature: None,
         future_collision_layers,
     };
+    // 首层底盘（`first_layer_tower_flag` 那一块）打到的 Z 就是塔的起点。
     ctx.nominal_tower_height = ctx.ir_data.machine.first_layer_height;
-    ctx.suggested_lh = TOWER_SUGGESTED_LAYER_COEFF * ctx.ir_data.machine.nozzle_diameter;
+    ctx.last_tower_z = ctx.ir_data.machine.first_layer_height;
 
     // 读队列（Go 的 scanner + peekBuffer 合并成一条队列）：
     // `read_next` = 队头弹出（**移动**，不再每行 `clone`）；`peek_lines` = 看队头 n 行。
@@ -1035,53 +1011,17 @@ pub fn second_pass(
                 ctx.first_layer_flag = false;
             }
 
+            // 这一层是不是换料层：只看紧跟的几行里有没有「抬喷嘴」那条。
             let peek = peek_lines(&remaining, 20);
             for pk in &peek {
                 if pk.contains(";Rising Nozzle a little") {
-                    ctx.next_tj = true;
                     ctx.switch_tower_type = 1;
                     ctx.pen_change_flag = true;
                     break;
                 }
             }
 
-            // 距下一涂胶层的层数（fast 模式层高预判）
-            let mut next_glue_layer_distance: i64 = 9999;
-            let peek_far = peek_lines(&remaining, 200);
-            let mut z_height_count: i64 = 0;
-            for pk in &peek_far {
-                if pk.contains(";Rising Nozzle a little") {
-                    next_glue_layer_distance = z_height_count;
-                    break;
-                }
-                if match_slicer_comment(pk, "Z_HEIGHT: ") {
-                    z_height_count += 1;
-                }
-            }
-
-            ctx.suggested_lh = calc_suggested_lh(
-                ctx.current_layer_height,
-                ctx.last_layer_height,
-                ctx.ir_data.machine.nozzle_diameter,
-                ctx.next_tj,
-                &ctx.ir_data.tower.fast_mode,
-                &ctx.ir_data.tower.custom_layer_height,
-                next_glue_layer_distance,
-            );
-
-            ctx.last_nominal_tower_height = ctx.nominal_tower_height;
-            if ctx.current_layer_height < ctx.last_key + TOWER_HEIGHT_THRESHOLD {
-                if ctx.nominal_tower_height + ctx.suggested_lh < ctx.current_layer_height
-                    || ctx.next_tj
-                {
-                    ctx.next_tj = false;
-                    ctx.nominal_tower_height =
-                        math_round(ctx.nominal_tower_height + ctx.suggested_lh, 3);
-                }
-                if ctx.last_nominal_tower_height < ctx.nominal_tower_height {
-                    ctx.tower_flag = true;
-                }
-            }
+            // 塔出不出片不在这里定：只要这一层比上一片高，就出片（见塔块处）。
 
             // 底面涂胶块插入（pass1 预生成于 State.BottomGlueEntries）。
             // 先按值取出命中条目再写（避免与 ctx 的可变借用冲突；Go 语义不变）。
@@ -1187,6 +1127,7 @@ pub fn second_pass(
             }
             ctx.ir_data.tower.layer_count += 1;
             ctx.last_tower_z = ctx.layer_z();
+            ctx.nominal_tower_height = ctx.layer_z();
         }
 
         // 第二个 CHANGE_LAYER：首层模型打完 → 润笔（校准模式禁用）
@@ -1211,333 +1152,369 @@ pub fn second_pass(
 
         if trimmed.contains("; update layer progress")
             && ctx.ir_data.tower.use_towers
-            && ctx.tower_flag
             && !ctx.first_layer_tower_flag
             && ctx.current_layer_height != ctx.ir_data.machine.first_layer_height
         {
-            ctx.tower_flag = false;
-            ctx.write_line(&format!(
-                "G1 F{}",
-                format_speed(ctx.ir_data.machine.travel_speed * MM_PER_MINUTE)
-            ));
-            ctx.ir_data.tower.extrude_ratio = math_round(ctx.suggested_lh / 0.2, 3);
-            let ratio = ctx.ir_data.tower.extrude_ratio;
-            let safe_z = ctx.layer_z() + ctx.ir_data.tower.safe_z_offset;
-            let processed = process_gcode_offset(
-                "G1 X20 Y20",
-                ctx.tower_x_off(),
-                ctx.tower_y_off(),
-                0.0,
-                crate::gcode::OffsetMode::Tower,
-                ctx.ir_data,
-            )?;
-            ctx.write_line(&format!("{} Z{}", processed, format_z(safe_z)));
-            ctx.write_line("; FEATURE: Inner wall");
-            ctx.write_line("; LINE_WIDTH: 0.42");
-            ctx.write_line(&format!(
-                ";Extruding Ratio: {}",
-                format_python_float(ctx.ir_data.tower.extrude_ratio)
-            ));
-            ctx.write_line(&format!(
-                "; LAYER_HEIGHT: {}",
-                format_python_float(ctx.suggested_lh)
-            ));
-            for cl in &ctx.cached_layer_lines.clone() {
-                if cl.is_g1_f9600 {
-                    let need_speed_limit = match ctx.ir_data.tower.fast_mode.as_str() {
-                        "fast" => ctx.switch_tower_type == 1,
-                        "follow" => ctx.switch_tower_type <= 3,
-                        "custom" => ctx.switch_tower_type == 1,
-                        _ => false,
-                    };
-                    if need_speed_limit {
-                        ctx.write_line(&format!(
-                            "G1 F{}",
-                            format_speed_int(
-                                ctx.ir_data
-                                    .wiping
-                                    .tower_print_speed
-                                    .min(ctx.ir_data.tower.glue_layer_speed)
-                                    * MM_PER_MINUTE,
-                            )
-                        ));
-                    } else {
-                        ctx.write_line(&format!(
-                            "G1 F{}",
-                            format_speed(ctx.ir_data.wiping.tower_print_speed * MM_PER_MINUTE)
-                        ));
-                    }
-                } else if cl.is_g1_f9600c {
-                    let mut corner_speed =
-                        ctx.ir_data.wiping.tower_print_speed * tower::TOWER_CORNER_SPEED_RATIO;
-                    let need_speed_limit = match ctx.ir_data.tower.fast_mode.as_str() {
-                        "fast" => ctx.switch_tower_type == 1,
-                        "follow" => ctx.switch_tower_type <= 3,
-                        "custom" => ctx.switch_tower_type == 1,
-                        _ => false,
-                    };
-                    if need_speed_limit {
-                        corner_speed = corner_speed.min(ctx.ir_data.tower.glue_layer_speed);
+            let layer_top_z = ctx.layer_z();
+            let bounds = tower_slice_bounds(ctx.ir_data.machine.nozzle_diameter);
+            // 最后一层差得再少也要打：塔必须跟到件顶。
+            let must_reach = ctx.layer_seq + 1 >= ctx.layer_z_literals.len();
+            // 塔自己决定这一层怎么长：细层并到下一层，超上限的层拆成几片
+            // （见 `tower::plan`）。模型只负责报层顶，不负责说这一片多厚。
+            let slices = tower::plan_layer(ctx.last_tower_z, layer_top_z, bounds, must_reach);
+            if !slices.is_empty() {
+                // 判据读「本层开始时的值」：`switch_tower_type` 每出一片自增一次，
+                // 自增之后它就不再是 1 了。
+                let switch_tower_type = ctx.switch_tower_type;
+                for slice in &slices {
+                    let slice_z = slice.z;
+                    let slice_h = slice.height;
+                    ctx.ir_data.tower.extrude_ratio =
+                        math_round(slice_h / TOWER_FIRST_LAYER_REF, 3);
+                    let ratio = ctx.ir_data.tower.extrude_ratio;
+                    let safe_z = slice_z + ctx.ir_data.tower.safe_z_offset;
+                    let processed = process_gcode_offset(
+                        "G1 X20 Y20",
+                        ctx.tower_x_off(),
+                        ctx.tower_y_off(),
+                        0.0,
+                        crate::gcode::OffsetMode::Tower,
+                        ctx.ir_data,
+                    )?;
+                    ctx.write_line(&format!(
+                        "G1 F{}",
+                        format_speed(ctx.ir_data.machine.travel_speed * MM_PER_MINUTE)
+                    ));
+                    ctx.write_line(&format!("{} Z{}", processed, format_z(safe_z)));
+                    ctx.write_line("; FEATURE: Inner wall");
+                    ctx.write_line("; LINE_WIDTH: 0.42");
+                    ctx.write_line(&format!(
+                        ";Extruding Ratio: {}",
+                        format_python_float(ctx.ir_data.tower.extrude_ratio)
+                    ));
+                    // 4 位小数：片高是两个 Z 相减来的，直接印会带出 `0.19999999999996`
+                    // 这种浮点尾巴。
+                    ctx.write_line(&format!(
+                        "; LAYER_HEIGHT: {}",
+                        format_python_float(math_round(slice_h, 4))
+                    ));
+                    for cl in &ctx.cached_layer_lines.clone() {
+                        if cl.is_g1_f9600 {
+                            let need_speed_limit = match ctx.ir_data.tower.fast_mode.as_str() {
+                                "fast" => switch_tower_type == 1,
+                                "follow" => switch_tower_type <= 3,
+                                "custom" => switch_tower_type == 1,
+                                _ => false,
+                            };
+                            if need_speed_limit {
+                                ctx.write_line(&format!(
+                                    "G1 F{}",
+                                    format_speed_int(
+                                        ctx.ir_data
+                                            .wiping
+                                            .tower_print_speed
+                                            .min(ctx.ir_data.tower.glue_layer_speed)
+                                            * MM_PER_MINUTE,
+                                    )
+                                ));
+                            } else {
+                                ctx.write_line(&format!(
+                                    "G1 F{}",
+                                    format_speed(
+                                        ctx.ir_data.wiping.tower_print_speed * MM_PER_MINUTE
+                                    )
+                                ));
+                            }
+                        } else if cl.is_g1_f9600c {
+                            let mut corner_speed = ctx.ir_data.wiping.tower_print_speed
+                                * tower::TOWER_CORNER_SPEED_RATIO;
+                            let need_speed_limit = match ctx.ir_data.tower.fast_mode.as_str() {
+                                "fast" => switch_tower_type == 1,
+                                "follow" => switch_tower_type <= 3,
+                                "custom" => switch_tower_type == 1,
+                                _ => false,
+                            };
+                            if need_speed_limit {
+                                corner_speed = corner_speed.min(ctx.ir_data.tower.glue_layer_speed);
+                            }
+                            ctx.write_line(&format!(
+                                "G1 F{}",
+                                format_speed_int(corner_speed * MM_PER_MINUTE)
+                            ));
+                            ctx.corner_extra_flow_active = true;
+                        } else if !cl.raw_line.is_empty() {
+                            ctx.write_line(&cl.raw_line);
+                        } else if cl.is_placeholder {
+                            match cl.placeholder_key {
+                                // 这一片落在哪就写哪：补片时它是层内那个中间 Z，
+                                // 不是本层层顶（层顶留给这一层的最后一片）。
+                                "NOZZLE_HEIGHT_ADJUST" => {
+                                    ctx.write_line(&format!("G1 Z{};Tower Z", format_z(slice_z)));
+                                }
+                                "EXTRUDER_REFILL" => {
+                                    ctx.write_line("G92 E0");
+                                    ctx.write_line(&format!(
+                                        "G1 E{}",
+                                        format_e(ctx.ir_data.machine.retract_length)
+                                    ));
+                                    ctx.write_line("G92 E0");
+                                }
+                                "EXTRUDER_RETRACT" => {
+                                    ctx.write_line("G92 E0");
+                                    ctx.write_line(&format!(
+                                        "G1 E-{}",
+                                        format_e(math_round(
+                                            (ctx.ir_data.machine.retract_length
+                                                - TOWER_RETRACT_DIFF)
+                                                .abs(),
+                                            3,
+                                        ))
+                                    ));
+                                    ctx.write_line("G92 E0");
+                                }
+                                _ => {}
+                            }
+                        } else if cl.is_g1_e_static {
+                            ctx.write_line(cl.static_e_line);
+                        } else if cl.is_g92_e0 {
+                            ctx.write_line("G92 E0");
+                        } else if cl.is_g1_with_e {
+                            if ctx.more_extrude_flag
+                                && ctx.current_layer_height >= TOWER_HEIGHT_THRESHOLD
+                            {
+                                if cl.template_line.starts_with("G1 X20 Y20 E") {
+                                    let processed = process_gcode_offset(
+                                        &format!(
+                                            "G1 X20 Y20 E.34 {}",
+                                            crate::gcode::MARKER_MORE_EXTRUSION
+                                        ),
+                                        ctx.tower_x_off(),
+                                        ctx.tower_y_off(),
+                                        0.0,
+                                        crate::gcode::OffsetMode::Tower,
+                                        ctx.ir_data,
+                                    )?;
+                                    ctx.write_line(&processed);
+                                    ctx.corner_extra_flow_active = false;
+                                } else if cl.template_line.starts_with("G1 X29.81 Y20 E") {
+                                    let processed = process_gcode_offset(
+                                        &format!(
+                                            "G1 X29.81 Y20 E.34 {}",
+                                            crate::gcode::MARKER_MORE_EXTRUSION
+                                        ),
+                                        ctx.tower_x_off(),
+                                        ctx.tower_y_off(),
+                                        0.0,
+                                        crate::gcode::OffsetMode::Tower,
+                                        ctx.ir_data,
+                                    )?;
+                                    ctx.write_line(&processed);
+                                    ctx.corner_extra_flow_active = false;
+                                } else if cl.template_line.starts_with("G1 X10.19 Y20 E") {
+                                    let processed = process_gcode_offset(
+                                        &format!(
+                                            "G1 X10.19 Y20 E.34 {}",
+                                            crate::gcode::MARKER_MORE_EXTRUSION
+                                        ),
+                                        ctx.tower_x_off(),
+                                        ctx.tower_y_off(),
+                                        0.0,
+                                        crate::gcode::OffsetMode::Tower,
+                                        ctx.ir_data,
+                                    )?;
+                                    ctx.write_line(&processed);
+                                    ctx.corner_extra_flow_active = false;
+                                } else if ctx.corner_extra_flow_active {
+                                    let scaled_e =
+                                        cl.template_e * (1.0 + tower::TOWER_CORNER_EXTRA_FLOW);
+                                    ctx.write_line(&scale_cached_e_value(
+                                        &cl.offset_applied,
+                                        scaled_e,
+                                        ratio,
+                                    ));
+                                    ctx.corner_extra_flow_active = false;
+                                } else {
+                                    ctx.write_line(&scale_cached_e_value(
+                                        &cl.offset_applied,
+                                        cl.template_e,
+                                        ratio,
+                                    ));
+                                }
+                            } else if ctx.corner_extra_flow_active {
+                                let scaled_e =
+                                    cl.template_e * (1.0 + tower::TOWER_CORNER_EXTRA_FLOW);
+                                ctx.write_line(&scale_cached_e_value(
+                                    &cl.offset_applied,
+                                    scaled_e,
+                                    ratio,
+                                ));
+                                ctx.corner_extra_flow_active = false;
+                            } else {
+                                ctx.write_line(&scale_cached_e_value(
+                                    &cl.offset_applied,
+                                    cl.template_e,
+                                    ratio,
+                                ));
+                            }
+                        } else if cl.is_g1_no_e {
+                            ctx.write_line(&cl.offset_applied_ne);
+                        } else if cl.is_travel_f30000 {
+                            let replaced = cl.offset_applied_t.replacen(
+                                "F30000",
+                                &format!(
+                                    "F{}",
+                                    (ctx.ir_data.tower.travel_speed * MM_PER_MINUTE) as i64
+                                ),
+                                1,
+                            );
+                            ctx.write_line(&replaced);
+                        }
                     }
                     ctx.write_line(&format!(
                         "G1 F{}",
-                        format_speed_int(corner_speed * MM_PER_MINUTE)
+                        format_speed(ctx.ir_data.machine.travel_speed * MM_PER_MINUTE)
                     ));
-                    ctx.corner_extra_flow_active = true;
-                } else if !cl.raw_line.is_empty() {
-                    ctx.write_line(&cl.raw_line);
-                } else if cl.is_placeholder {
-                    match cl.placeholder_key {
-                        "NOZZLE_HEIGHT_ADJUST" => {
-                            ctx.write_line(&format!("G1 Z{};Tower Z", format_z(ctx.layer_z())));
-                        }
-                        "EXTRUDER_REFILL" => {
-                            ctx.write_line("G92 E0");
-                            ctx.write_line(&format!(
-                                "G1 E{}",
-                                format_e(ctx.ir_data.machine.retract_length)
-                            ));
-                            ctx.write_line("G92 E0");
-                        }
-                        "EXTRUDER_RETRACT" => {
-                            ctx.write_line("G92 E0");
-                            ctx.write_line(&format!(
-                                "G1 E-{}",
-                                format_e(math_round(
-                                    (ctx.ir_data.machine.retract_length - TOWER_RETRACT_DIFF).abs(),
-                                    3,
-                                ))
-                            ));
-                            ctx.write_line("G92 E0");
-                        }
+                    let mut should_gen_sheath = true;
+                    let should_gen_rib = ctx.ir_data.wiping.outer_structure == "rib";
+                    match ctx.ir_data.tower.fast_mode.as_str() {
+                        "fast" => should_gen_sheath = switch_tower_type == 1,
+                        "follow" => should_gen_sheath = true,
+                        "custom" => match ctx.ir_data.tower.wipe_mode.as_str() {
+                            "on" => should_gen_sheath = true,
+                            "off" => should_gen_sheath = false,
+                            "auto" => should_gen_sheath = switch_tower_type == 1,
+                            _ => should_gen_sheath = switch_tower_type == 1,
+                        },
                         _ => {}
                     }
-                } else if cl.is_g1_e_static {
-                    ctx.write_line(cl.static_e_line);
-                } else if cl.is_g92_e0 {
-                    ctx.write_line("G92 E0");
-                } else if cl.is_g1_with_e {
-                    if ctx.more_extrude_flag && ctx.current_layer_height >= TOWER_HEIGHT_THRESHOLD {
-                        if cl.template_line.starts_with("G1 X20 Y20 E") {
-                            let processed = process_gcode_offset(
-                                &format!("G1 X20 Y20 E.34 {}", crate::gcode::MARKER_MORE_EXTRUSION),
-                                ctx.tower_x_off(),
-                                ctx.tower_y_off(),
-                                0.0,
-                                crate::gcode::OffsetMode::Tower,
-                                ctx.ir_data,
-                            )?;
-                            ctx.write_line(&processed);
-                            ctx.corner_extra_flow_active = false;
-                        } else if cl.template_line.starts_with("G1 X29.81 Y20 E") {
-                            let processed = process_gcode_offset(
-                                &format!(
-                                    "G1 X29.81 Y20 E.34 {}",
-                                    crate::gcode::MARKER_MORE_EXTRUSION
-                                ),
-                                ctx.tower_x_off(),
-                                ctx.tower_y_off(),
-                                0.0,
-                                crate::gcode::OffsetMode::Tower,
-                                ctx.ir_data,
-                            )?;
-                            ctx.write_line(&processed);
-                            ctx.corner_extra_flow_active = false;
-                        } else if cl.template_line.starts_with("G1 X10.19 Y20 E") {
-                            let processed = process_gcode_offset(
-                                &format!(
-                                    "G1 X10.19 Y20 E.34 {}",
-                                    crate::gcode::MARKER_MORE_EXTRUSION
-                                ),
-                                ctx.tower_x_off(),
-                                ctx.tower_y_off(),
-                                0.0,
-                                crate::gcode::OffsetMode::Tower,
-                                ctx.ir_data,
-                            )?;
-                            ctx.write_line(&processed);
-                            ctx.corner_extra_flow_active = false;
-                        } else if ctx.corner_extra_flow_active {
-                            let scaled_e = cl.template_e * (1.0 + tower::TOWER_CORNER_EXTRA_FLOW);
-                            ctx.write_line(&scale_cached_e_value(
-                                &cl.offset_applied,
-                                scaled_e,
-                                ratio,
-                            ));
-                            ctx.corner_extra_flow_active = false;
-                        } else {
-                            ctx.write_line(&scale_cached_e_value(
-                                &cl.offset_applied,
-                                cl.template_e,
-                                ratio,
-                            ));
+                    if should_gen_sheath {
+                        let sheath_lines = tower::generate_sheath_gcode(
+                            ctx.ir_data.tower.layer_count,
+                            slice_z,
+                            slice_h,
+                            ctx.ir_data.machine.first_layer_height,
+                            ctx.ir_data.wiping.wiper_x,
+                            ctx.ir_data.wiping.wiper_y,
+                            ctx.ir_data.machine.travel_speed * MM_PER_MINUTE,
+                            ctx.ir_data.tower.sheath_speed * MM_PER_MINUTE,
+                            ctx.ir_data.machine.retract_length,
+                            ctx.ir_data.machine.nozzle_diameter,
+                            ctx.ir_data.wiping.outer_structure.as_str(),
+                            ctx.ir_data.sheath.base_expand,
+                            ctx.ir_data.sheath.enable_height,
+                            ctx.ir_data.sheath.converge_layers,
+                            ctx.ir_data.sheath.wall_width,
+                            final_tower_height,
+                            1.0,
+                            ctx.current_layer_height,
+                            ctx.ir_data.tower.safe_z_offset,
+                            ctx.tower_bbox.min_x,
+                            ctx.tower_bbox.min_y,
+                        );
+                        if let Some(lines) = sheath_lines.filter(|l| !l.is_empty()) {
+                            ctx.write_lines(&lines);
                         }
-                    } else if ctx.corner_extra_flow_active {
-                        let scaled_e = cl.template_e * (1.0 + tower::TOWER_CORNER_EXTRA_FLOW);
-                        ctx.write_line(&scale_cached_e_value(&cl.offset_applied, scaled_e, ratio));
-                        ctx.corner_extra_flow_active = false;
-                    } else {
-                        ctx.write_line(&scale_cached_e_value(
-                            &cl.offset_applied,
-                            cl.template_e,
-                            ratio,
-                        ));
                     }
-                } else if cl.is_g1_no_e {
-                    ctx.write_line(&cl.offset_applied_ne);
-                } else if cl.is_travel_f30000 {
-                    let replaced = cl.offset_applied_t.replacen(
-                        "F30000",
-                        &format!(
-                            "F{}",
-                            (ctx.ir_data.tower.travel_speed * MM_PER_MINUTE) as i64
-                        ),
-                        1,
-                    );
-                    ctx.write_line(&replaced);
-                }
-            }
-            if ctx.switch_tower_type <= 3 {
-                ctx.switch_tower_type += 1;
-            }
-            if ctx.more_extrude_flag {
-                ctx.more_extrude_flag = false;
-            }
-            ctx.write_line(&format!(
-                "G1 F{}",
-                format_speed(ctx.ir_data.machine.travel_speed * MM_PER_MINUTE)
-            ));
-            if ctx.ir_data.tower.use_towers {
-                let mut should_gen_sheath = true;
-                let should_gen_rib = ctx.ir_data.wiping.outer_structure == "rib";
-                match ctx.ir_data.tower.fast_mode.as_str() {
-                    "fast" => should_gen_sheath = ctx.switch_tower_type == 1,
-                    "follow" => should_gen_sheath = true,
-                    "custom" => match ctx.ir_data.tower.wipe_mode.as_str() {
-                        "on" => should_gen_sheath = true,
-                        "off" => should_gen_sheath = false,
-                        "auto" => should_gen_sheath = ctx.switch_tower_type == 1,
-                        _ => should_gen_sheath = ctx.switch_tower_type == 1,
-                    },
-                    _ => {}
-                }
-                if should_gen_sheath {
-                    let sheath_lines = tower::generate_sheath_gcode(
-                        ctx.ir_data.tower.layer_count,
-                        ctx.layer_z(),
-                        ctx.suggested_lh,
-                        ctx.ir_data.machine.first_layer_height,
-                        ctx.ir_data.wiping.wiper_x,
-                        ctx.ir_data.wiping.wiper_y,
-                        ctx.ir_data.machine.travel_speed * MM_PER_MINUTE,
-                        ctx.ir_data.tower.sheath_speed * MM_PER_MINUTE,
-                        ctx.ir_data.machine.retract_length,
-                        ctx.ir_data.machine.nozzle_diameter,
-                        ctx.ir_data.wiping.outer_structure.as_str(),
-                        ctx.ir_data.sheath.base_expand,
-                        ctx.ir_data.sheath.enable_height,
-                        ctx.ir_data.sheath.converge_layers,
-                        ctx.ir_data.sheath.wall_width,
-                        final_tower_height,
-                        1.0,
-                        ctx.current_layer_height,
-                        ctx.ir_data.tower.safe_z_offset,
-                        ctx.tower_bbox.min_x,
-                        ctx.tower_bbox.min_y,
-                    );
-                    if let Some(lines) = sheath_lines.filter(|l| !l.is_empty()) {
-                        ctx.write_lines(&lines);
+                    if should_gen_rib {
+                        let rib_speed = if ctx.ir_data.tower.rib_speed_mode == "custom" {
+                            ctx.ir_data.tower.rib_speed_value * MM_PER_MINUTE
+                        } else {
+                            ctx.ir_data.wiping.tower_print_speed * MM_PER_MINUTE
+                        };
+                        let rib_lines = tower::generate_rib_gcode(
+                            ctx.ir_data.tower.layer_count,
+                            slice_z,
+                            slice_h,
+                            ctx.ir_data.machine.first_layer_height,
+                            final_tower_height,
+                            ctx.ir_data.wiping.wiper_x,
+                            ctx.ir_data.wiping.wiper_y,
+                            ctx.ir_data.tower.travel_speed * MM_PER_MINUTE,
+                            rib_speed,
+                            ctx.ir_data.machine.retract_length,
+                            ctx.ir_data.machine.nozzle_diameter,
+                            ctx.ir_data.rib.extra_length,
+                            ctx.ir_data.rib.width,
+                            ctx.ir_data.rib.fillet_wall,
+                            1.0,
+                            ctx.ir_data.rib.bottom_fill_style.as_str(),
+                            (ctx.ir_data.machine.min_x + ctx.ir_data.machine.max_x) / 2.0,
+                            (ctx.ir_data.machine.min_y + ctx.ir_data.machine.max_y) / 2.0,
+                            ctx.current_layer_height,
+                            ctx.ir_data.tower.safe_z_offset,
+                            ctx.tower_bbox.min_x,
+                            ctx.tower_bbox.min_y,
+                        );
+                        if let Some(lines) = rib_lines.filter(|l| !l.is_empty()) {
+                            ctx.write_lines(&lines);
+                        }
                     }
+                    ctx.ir_data.tower.layer_count += 1;
+                    ctx.last_tower_z = slice_z;
+                    ctx.nominal_tower_height = slice_z;
                 }
-                if should_gen_rib {
-                    let rib_speed = if ctx.ir_data.tower.rib_speed_mode == "custom" {
-                        ctx.ir_data.tower.rib_speed_value * MM_PER_MINUTE
-                    } else {
-                        ctx.ir_data.wiping.tower_print_speed * MM_PER_MINUTE
-                    };
-                    let rib_lines = tower::generate_rib_gcode(
-                        ctx.ir_data.tower.layer_count,
-                        ctx.layer_z(),
-                        ctx.suggested_lh,
-                        ctx.ir_data.machine.first_layer_height,
-                        final_tower_height,
-                        ctx.ir_data.wiping.wiper_x,
-                        ctx.ir_data.wiping.wiper_y,
-                        ctx.ir_data.tower.travel_speed * MM_PER_MINUTE,
-                        rib_speed,
-                        ctx.ir_data.machine.retract_length,
-                        ctx.ir_data.machine.nozzle_diameter,
-                        ctx.ir_data.rib.extra_length,
-                        ctx.ir_data.rib.width,
-                        ctx.ir_data.rib.fillet_wall,
-                        1.0,
-                        ctx.ir_data.rib.bottom_fill_style.as_str(),
-                        (ctx.ir_data.machine.min_x + ctx.ir_data.machine.max_x) / 2.0,
-                        (ctx.ir_data.machine.min_y + ctx.ir_data.machine.max_y) / 2.0,
-                        ctx.current_layer_height,
-                        ctx.ir_data.tower.safe_z_offset,
-                        ctx.tower_bbox.min_x,
-                        ctx.tower_bbox.min_y,
-                    );
-                    if let Some(lines) = rib_lines.filter(|l| !l.is_empty()) {
-                        ctx.write_lines(&lines);
-                    }
+                // 一整层出完（可能拆了几片）才更新记账高度：层内补片不算新的一层。
+                ctx.last_tower_z = layer_top_z;
+                ctx.nominal_tower_height = layer_top_z;
+                // 「换料后第几层」：一层推一次。
+                if ctx.switch_tower_type <= 3 {
+                    ctx.switch_tower_type += 1;
                 }
-                ctx.ir_data.tower.layer_count += 1;
-            }
-            let safe_z = ctx.layer_z() + ctx.ir_data.tower.safe_z_offset;
-            let leaving = process_gcode_offset(
-                &format!(
-                    "G1 X{} Y{}",
-                    crate::gcode::format_float(tower::LEAVE_TOWER_X),
-                    crate::gcode::format_float(tower::LEAVE_TOWER_Y)
-                ),
-                ctx.tower_x_off(),
-                ctx.tower_y_off(),
-                safe_z,
-                crate::gcode::OffsetMode::Tower,
-                ctx.ir_data,
-            )?;
-            ctx.write_line(&format!(
-                "{} Z{} ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔",
-                leaving,
-                format_z(safe_z)
-            ));
-            ctx.write_line(&format!(
-                "; LAYER_HEIGHT: {}",
-                format_python_float(ctx.local_thickness)
-            ));
-            ctx.remove_g3_flag = true;
+                if ctx.more_extrude_flag {
+                    ctx.more_extrude_flag = false;
+                }
+                let safe_z = layer_top_z + ctx.ir_data.tower.safe_z_offset;
+                let leaving = process_gcode_offset(
+                    &format!(
+                        "G1 X{} Y{}",
+                        crate::gcode::format_float(tower::LEAVE_TOWER_X),
+                        crate::gcode::format_float(tower::LEAVE_TOWER_Y)
+                    ),
+                    ctx.tower_x_off(),
+                    ctx.tower_y_off(),
+                    safe_z,
+                    crate::gcode::OffsetMode::Tower,
+                    ctx.ir_data,
+                )?;
+                ctx.write_line(&format!(
+                    "{} Z{} ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔",
+                    leaving,
+                    format_z(safe_z)
+                ));
+                ctx.write_line(&format!(
+                    "; LAYER_HEIGHT: {}",
+                    format_python_float(ctx.local_thickness)
+                ));
+                ctx.remove_g3_flag = true;
 
-            // 把 feature 上下文还给切片器。
-            //
-            // 这一层最前面写的是塔块的 `; FEATURE: Inner wall`（要那个黄，不能改）；
-            // 而原文回到模型段时**不会**重发 FEATURE —— Bambu 只在 feature 变化时才写。
-            // 于是从塔块到本层结束的所有模型走线都会挂在「内墙」名下：
-            // 预览里模型支撑被染成内墙黄，`切片结果` 面板的内墙占比也跟着虚高。
-            // 这里补一条，位置就是 Bambu 自己会写的那一处（塔块之后、原文第一段之前）。
-            if let Some(feat) = ctx.slicer_feature.clone() {
-                if feat != "Inner wall" {
-                    ctx.write_line(&format!("; FEATURE: {feat}"));
+                // 把 feature 上下文还给切片器。
+                //
+                // 这一层最前面写的是塔块的 `; FEATURE: Inner wall`（要那个黄，不能改）；
+                // 而原文回到模型段时**不会**重发 FEATURE —— Bambu 只在 feature 变化时才写。
+                // 于是从塔块到本层结束的所有模型走线都会挂在「内墙」名下：
+                // 预览里模型支撑被染成内墙黄，`切片结果` 面板的内墙占比也跟着虚高。
+                // 这里补一条，位置就是 Bambu 自己会写的那一处（塔块之后、原文第一段之前）。
+                if let Some(feat) = ctx.slicer_feature.clone() {
+                    if feat != "Inner wall" {
+                        ctx.write_line(&format!("; FEATURE: {feat}"));
+                    }
+                }
+
+                // 规划器把层内差值切到不超过上限了；只有「切到 32 片仍超上限」
+                // （一层厚过 32 × max ≈ 9mm）才会走到这里 —— 记下来给报告页看。
+                if let Some(first) = slices
+                    .iter()
+                    .find(|s| s.height > bounds.max + tower::plan::SLICE_EPS)
+                {
+                    pass2_stats.tower_layer_height_warnings.push(
+                        crate::postproc::pass1::TowerLayerHeightWarning {
+                            z: layer_top_z,
+                            layer_height: first.height,
+                            max_lh: bounds.max,
+                        },
+                    );
                 }
             }
-
-            let layer_height = ctx.layer_z() - ctx.last_tower_z;
-            let max_lh =
-                (TOWER_SUGGESTED_LAYER_COEFF * ctx.ir_data.machine.nozzle_diameter * 1000.0)
-                    .round()
-                    / 1000.0;
-            // epsilon 容差避免浮点减法伪影
-            if layer_height > max_lh + 1e-9 {
-                pass2_stats.tower_layer_height_warnings.push(
-                    crate::postproc::pass1::TowerLayerHeightWarning {
-                        z: ctx.layer_z(),
-                        layer_height,
-                        max_lh,
-                    },
-                );
-            }
-            ctx.last_tower_z = ctx.layer_z();
         }
 
         if trimmed.starts_with("; layer num/total_layer_count") {

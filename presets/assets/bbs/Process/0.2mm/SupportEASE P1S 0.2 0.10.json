@@ -20,7 +20,7 @@
         "250"
     ],
     "layer_height": "0.1",
-    "name": "MKPProcess X1 0.2",
+    "name": "SupportEASE P1S 0.2 0.10",
     "only_one_wall_first_layer": "1",
     "outer_wall_acceleration": [
         "10000"
@@ -43,7 +43,7 @@
     "print_extruder_variant": [
         "Direct Drive Standard"
     ],
-    "print_settings_id": "MKPProcess X1",
+    "print_settings_id": "SupportEASE P1S 0.2 0.10",
     "raft_first_layer_density": "100%",
     "small_perimeter_speed": [
         "100%"

@@ -46,7 +46,10 @@ import type {
   PostProcessFinished,
   PostProcessResult,
   RelocationRecord,
+  ReportBoundary,
 } from '../../api/contract'
+import BoundaryPlate from '../report/BoundaryPlate'
+import { boundaryNumbering, moveDistanceMm } from '../report/boundaryNumbering'
 import { detectPlatform } from '../../hooks/usePlatform'
 import { Btn } from '../ui/Controls'
 import { HeadNote, Modal, NoticeHero, PageToggle } from '../../components/modal'
@@ -216,6 +219,23 @@ function usePressFlash<T extends HTMLElement>(onDoubleTap?: () => void) {
 /** 文件大小：MB 两位小数（与报告页那份口径一致） */
 function sizeText(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+}
+
+/**
+ * 把结论行尾部那个 `［码］` / `[码]` 去掉（见 `failLines` 那段）。
+ *
+ * **只认同一个码**：不是"最后一个方括号"那种猜法 —— 句子里的方括号还有别的用法。
+ */
+function stripTrailingCode(message: string, code: string): string {
+  const trimmed = message.trimEnd()
+  for (const [open, close] of [
+    ['［', '］'],
+    ['[', ']'],
+  ]) {
+    const tail = `${open}${code}${close}`
+    if (trimmed.endsWith(tail)) return trimmed.slice(0, -tail.length).trimEnd()
+  }
+  return message
 }
 
 /** 毫米这两位：内核里 0 = 预设没写这一格 ⇒ 摆 `—`，不摆 `0.00` */
@@ -810,6 +830,56 @@ function CollisionNote({
           </button>
         )}
       </p>
+    </div>
+  )
+}
+
+/**
+ * **越界那一屏的「说明」页**（2026-11-19）。
+ *
+ * 上面那张俯视图与**报告页同源**（共用 `BoundaryPlate` → `CollisionMap`）：
+ * 每块模型一条轮廓，凸出允许范围的那块标红，越界的块各一支箭头（中心 → 挪到位）。
+ * 下面只留一句"怎么办" —— 方向已经由箭头表达，不再写 `Y-` 那种字。
+ *
+ * 判据（`isBoundaryFail`）已经保证 `pieces` 非空，所以这里不摆"没有几何"的空态。
+ */
+function BoundaryNote({
+  boundary,
+  machineType,
+}: {
+  boundary: ReportBoundary
+  machineType: string | null
+}) {
+  const tr = useT()
+  /* 与图上徽标**同一份排序**（`boundaryNumbering`）：1 号对 1 号，不会错位 */
+  const items = boundaryNumbering(boundary.pieces ?? [])
+  return (
+    <div className={s.boundaryNote}>
+      <BoundaryPlate
+        boundary={boundary}
+        machineType={machineType}
+        height={156}
+        /* 图在左，说明与图例在右（作者 2026-11-19：「可以放在右侧，左右分布」） */
+        layout="row"
+        numbered
+        caption={
+          <>
+            <p className={s.collisionNoteBody}>{tr('postproc.boundary.body')}</p>
+            {items.length > 0 && (
+              <ul className={s.boundaryList}>
+                {items.map(({ n, piece }) => (
+                  <li key={n}>
+                    {tr('postproc.boundary.item', {
+                      n: String(n),
+                      mm: moveDistanceMm(piece).toFixed(1),
+                    })}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        }
+      />
     </div>
   )
 }
@@ -1486,6 +1556,20 @@ export default function PostProcessModal({
     finished.code === 'E_GCODE_COLLISION_001'
 
   /**
+   * **越界失败**这一屏（2026-11-19）：`E_GCODE_BOUNDARY_001/002` 且几何带出来了。
+   *
+   * 多一页「说明」：一张俯视图（每块模型一条轮廓，凸出允许范围那块标红，越界的块
+   * 各一支箭头）。**判据用几何而不是光看码** —— 旧钩子只给码没几何，那一页摆不出来，
+   * 不如不摆（不画编出来的图）。
+   */
+  const isBoundaryFail =
+    finished !== null &&
+    !finished.ok &&
+    !finished.cancelled &&
+    finished.boundary != null &&
+    (finished.boundary.pieces?.length ?? 0) > 0
+
+  /**
    * 这一趟失败得**去设置里改一项**吗 —— 按码查表（`FAIL_FIX_TARGETS`）。
    *
    * 有落点 ⇒ 页脚多一颗「去设置」：收掉这一屏、跳到设置页那一行并亮它。
@@ -1526,9 +1610,16 @@ export default function PostProcessModal({
    * ★ 默认页永远是 `pages[0]`：`warn` 只在**成功但有话要说**那一屏排到最前（上面那条
    *   effect 把它翻上来）；失败 / 挪塔那几屏它排最后，红卡与图仍是第一眼看到的东西。
    */
-  const pages: PageTab[] = isCollisionFail
-    ? hasNotice ? ['fail', 'note', 'warn'] : ['fail', 'note']
-    : isDebugResult
+  /*
+   * ★ **越界那一屏把图排在最前**（2026-11-19 作者：「优先去显示这一个板子，不要显示信息」）：
+   *   红卡仍钉在上面那张 hero，默认落到说明页 = 板子 + 箭头；信息退到第二页由钮翻。
+   *   碰撞失败那一屏的顺序不动（作者 2026-11-04 定过：默认就是信息）。
+   */
+  const pages: PageTab[] = isBoundaryFail
+    ? hasNotice ? ['note', 'fail', 'warn'] : ['note', 'fail']
+    : isCollisionFail
+      ? hasNotice ? ['fail', 'note', 'warn'] : ['fail', 'note']
+      : isDebugResult
       ? hasNotice ? ['note', 'facts', 'warn'] : ['note', 'facts']
       : showsRelocateMaps
       ? hasNotice ? ['facts', 'note', 'warn'] : ['facts', 'note']
@@ -1582,14 +1673,18 @@ export default function PostProcessModal({
    */
   const failLines: string[] = []
   if (finished !== null && !finished.ok) {
-    failLines.push(
-      /* 「已停止 —— 」那半句前缀不用再摆：标题那行就是「已停止」。
-         ★ 后端句子随语言走（2026-10-26）⇒ 两种语言的前缀都要剥 */
-      finished.message.replace(/^(已停止 —— |Stopped — )/, ''),
-    )
+    const message = finished.message.replace(/^(已停止 —— |Stopped — )/, '')
     const codes: string[] = []
     if (finished.code !== null) codes.push(tr('postproc.err.code', { code: finished.code }))
     if (finished.exitCode !== 0) codes.push(tr('postproc.err.exit', { code: finished.exitCode }))
+    /* 结论行本身就把码写在方括号里（`…［E_GCODE_BOUNDARY_001］`）—— 下面那一行又写一遍
+       等于同一个码说两次（2026-11-19 作者）。有码那一行在时，只把结论行尾部那一截剥掉；
+       剥的是**同一个码**（不是模糊匹配），语言不同也只是全角/半角括号之差。 */
+    failLines.push(
+      finished.code === null || codes.length === 0
+        ? message
+        : stripTrailingCode(message, finished.code),
+    )
     if (codes.length > 0) failLines.push(codes.join(' · '))
   }
 
@@ -2068,7 +2163,10 @@ export default function PostProcessModal({
            * ★ 警告页与信息页**共用这两栏事实**：翻到警告只是上面那张 hero 换了
            *   （2026-11-08 作者：「下面的那些内容不用变」），所以没有第三块内容。
            */
-          <div className={s.relocateSlot}>
+          /* ★ 说明页排第一时（越界那一屏，2026-11-19），**槽高要按它撑** ——
+             否则板子被信息页那两栏的高度切掉半块。哪一页在流里由 `data-note-first` 说，
+             见 `.relocateSlot[data-note-first]` 那三条规则。 */
+          <div className={s.relocateSlot} data-note-first={pages[0] === 'note' || undefined}>
             <div
               className={`${s.relocatePage} ${activeTab !== 'note' ? '' : s.relocatePageOff}`}
               aria-hidden={activeTab === 'note'}
@@ -2085,6 +2183,12 @@ export default function PostProcessModal({
                   <RelocateNote
                     question={run.question}
                     countdown={countdownText(run.question.deadlineUnixMs)}
+                  />
+                ) : isBoundaryFail && finished != null && finished.boundary != null ? (
+                  /* 越界那一屏：同一张俯视图（报告页那份），越界那块标红 + 每块一支箭头 */
+                  <BoundaryNote
+                    boundary={finished.boundary}
+                    machineType={facts?.presetMachine ?? null}
                   />
                 ) : isCollisionFail ? (
                   /* **只有失败那屏**才说"撞了、下次怎么办" —— 2026-11-04 作者截图：

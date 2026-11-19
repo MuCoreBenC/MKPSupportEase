@@ -161,12 +161,12 @@ pub fn load_presets() -> Result<crate::presetdata::Presets, AppError> {
 pub fn load_session_presets() -> Result<crate::presetdata::Presets, AppError> {
     let store = crate::workbench::store::Store::open()?;
     let shadow = crate::workbench::domain::txn::shadow_root(&store.root);
-    let root = if shadow
+    let shadow_present = shadow
         .join("registry")
         .join("param_registry.toml")
-        .is_file()
-    {
-        shadow
+        .is_file();
+    let root = if shadow_present {
+        shadow.clone()
     } else {
         crate::workbench::paths::presets_root().ok_or_else(|| {
             AppError::not_found("找不到工作台的预设数据根 presets/")
@@ -176,6 +176,11 @@ pub fn load_session_presets() -> Result<crate::presetdata::Presets, AppError> {
     let mut p = crate::presetdata::Presets::load_from(&root)?;
     if let Ok(asset_root) = crate::workbench::paths::assets_root() {
         p.set_asset_root(&asset_root);
+    }
+    /* 草稿载荷根（同 `Ctx::open_at`）：改名还没保存时文件只活在影子里，
+    检查面板 / 「在访达中显示」都得找得到它 */
+    if shadow_present {
+        p.set_draft_asset_root(&shadow.join("assets"));
     }
     Ok(p)
 }

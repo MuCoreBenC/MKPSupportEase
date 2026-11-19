@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "aa410ef3dd82e09a",
+  "revision": "6fa1d32a9278c1a9",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -681,7 +681,7 @@
       "type": "slicerProfile",
       "machineId": "A1",
       "name": "A1：0.2 喷头 0.10 层高",
-      "path": "bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json",
+      "path": "bbs/Process/0.2mm/SupportEASE A1 0.2 0.10.json",
       "slicer": "bbs",
       "profile": "process",
       "delivery": "download"
@@ -691,7 +691,7 @@
       "type": "slicerProfile",
       "machineId": "A1",
       "name": "A1：0.4 喷头 0.20 层高",
-      "path": "bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
+      "path": "bbs/Process/0.4mm/SupportEASE A1 0.4 0.20.json",
       "slicer": "bbs",
       "profile": "process",
       "delivery": "download"
@@ -701,7 +701,7 @@
       "type": "slicerProfile",
       "machineId": "A1_MINI",
       "name": "A1 mini：0.2 喷头 0.10 层高",
-      "path": "bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json",
+      "path": "bbs/Process/0.2mm/SupportEASE A1 mini 0.2 0.10.json",
       "slicer": "bbs",
       "profile": "process",
       "delivery": "download"
@@ -711,7 +711,7 @@
       "type": "slicerProfile",
       "machineId": "A1_MINI",
       "name": "A1 mini：0.4 喷头 0.20 层高",
-      "path": "bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
+      "path": "bbs/Process/0.4mm/SupportEASE A1 mini 0.4 0.20.json",
       "slicer": "bbs",
       "profile": "process",
       "delivery": "download"
@@ -721,7 +721,7 @@
       "type": "slicerProfile",
       "machineId": "P1S",
       "name": "P1S：0.2 喷头 0.10 层高",
-      "path": "bbs/Process/0.2mm/MKPProcess P1S 0.2 0.10.json",
+      "path": "bbs/Process/0.2mm/SupportEASE P1S 0.2 0.10.json",
       "slicer": "bbs",
       "profile": "process",
       "delivery": "download"
@@ -731,7 +731,7 @@
       "type": "slicerProfile",
       "machineId": "P1S",
       "name": "P1S：0.4 喷头 0.24 层高",
-      "path": "bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
+      "path": "bbs/Process/0.4mm/SupportEASE P1S 0.4 0.24.json",
       "slicer": "bbs",
       "profile": "process",
       "delivery": "download"
@@ -741,7 +741,7 @@
       "type": "slicerProfile",
       "machineId": "X1C",
       "name": "X1C：0.2 喷头 0.10 层高",
-      "path": "bbs/Process/0.2mm/MKPProcess X1 0.2 0.10.json",
+      "path": "bbs/Process/0.2mm/SupportEASE X1 0.2 0.10.json",
       "slicer": "bbs",
       "profile": "process",
       "delivery": "download"
@@ -751,7 +751,7 @@
       "type": "slicerProfile",
       "machineId": "X1C",
       "name": "X1C：0.4 喷头 0.24 层高",
-      "path": "bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
+      "path": "bbs/Process/0.4mm/SupportEASE X1 0.4 0.24.json",
       "slicer": "bbs",
       "profile": "process",
       "delivery": "download"
@@ -1901,7 +1901,7 @@
         "deprecated": false,
         "machineVariants": {
           "A1:FAST260326": -0.7,
-          "A1:FAST261111": -0.7,
+          "A1:FAST261111": -0.8,
           "A1:STANDARD": -1.0,
           "A1_MINI:FAST260326": -0.5,
           "A1_MINI:FAST261111": -0.9,
@@ -2044,11 +2044,11 @@
         "machineVariants": {
           "A1": 4.0,
           "A1:FAST260326": 4.0,
-          "A1:FAST261111": 4.0,
+          "A1:FAST261111": 4.1,
           "A1:STANDARD": 4.0,
           "A1_MINI": 4.0,
           "A1_MINI:FAST260326": 4.0,
-          "A1_MINI:FAST261111": 4.0,
+          "A1_MINI:FAST261111": 4.1,
           "A1_MINI:STANDARD": 4.0,
           "P1S": 1.1,
           "P1S:LITE": 1.1,
@@ -7024,57 +7024,57 @@
     },
     {
       "kind": "bbs_config",
-      "fileName": "MKPProcess A1 0.2 0.10.json",
-      "path": "assets/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json",
+      "fileName": "SupportEASE A1 0.2 0.10.json",
+      "path": "assets/bbs/Process/0.2mm/SupportEASE A1 0.2 0.10.json",
       "machineId": "A1",
       "versionId": ""
     },
     {
       "kind": "bbs_config",
-      "fileName": "MKPProcess A1 0.4 0.20.json",
-      "path": "assets/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
+      "fileName": "SupportEASE A1 0.4 0.20.json",
+      "path": "assets/bbs/Process/0.4mm/SupportEASE A1 0.4 0.20.json",
       "machineId": "A1",
       "versionId": ""
     },
     {
       "kind": "bbs_config",
-      "fileName": "MKPProcess A1 mini 0.2 0.10.json",
-      "path": "assets/bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json",
+      "fileName": "SupportEASE A1 mini 0.2 0.10.json",
+      "path": "assets/bbs/Process/0.2mm/SupportEASE A1 mini 0.2 0.10.json",
       "machineId": "A1_MINI",
       "versionId": ""
     },
     {
       "kind": "bbs_config",
-      "fileName": "MKPProcess A1 mini 0.4 0.20.json",
-      "path": "assets/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
+      "fileName": "SupportEASE A1 mini 0.4 0.20.json",
+      "path": "assets/bbs/Process/0.4mm/SupportEASE A1 mini 0.4 0.20.json",
       "machineId": "A1_MINI",
       "versionId": ""
     },
     {
       "kind": "bbs_config",
-      "fileName": "MKPProcess P1S 0.2 0.10.json",
-      "path": "assets/bbs/Process/0.2mm/MKPProcess P1S 0.2 0.10.json",
+      "fileName": "SupportEASE P1S 0.2 0.10.json",
+      "path": "assets/bbs/Process/0.2mm/SupportEASE P1S 0.2 0.10.json",
       "machineId": "P1S",
       "versionId": ""
     },
     {
       "kind": "bbs_config",
-      "fileName": "MKPProcess P1S 0.4 0.24.json",
-      "path": "assets/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
+      "fileName": "SupportEASE P1S 0.4 0.24.json",
+      "path": "assets/bbs/Process/0.4mm/SupportEASE P1S 0.4 0.24.json",
       "machineId": "P1S",
       "versionId": ""
     },
     {
       "kind": "bbs_config",
-      "fileName": "MKPProcess X1 0.2 0.10.json",
-      "path": "assets/bbs/Process/0.2mm/MKPProcess X1 0.2 0.10.json",
+      "fileName": "SupportEASE X1 0.2 0.10.json",
+      "path": "assets/bbs/Process/0.2mm/SupportEASE X1 0.2 0.10.json",
       "machineId": "X1C",
       "versionId": ""
     },
     {
       "kind": "bbs_config",
-      "fileName": "MKPProcess X1 0.4 0.24.json",
-      "path": "assets/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
+      "fileName": "SupportEASE X1 0.4 0.24.json",
+      "path": "assets/bbs/Process/0.4mm/SupportEASE X1 0.4 0.24.json",
       "machineId": "X1C",
       "versionId": ""
     }

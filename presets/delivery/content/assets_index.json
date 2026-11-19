@@ -32,7 +32,7 @@
       "type": "slicerProfile",
       "machineId": "A1",
       "name": "A1：0.4 喷头 0.20 层高",
-      "path": "assets/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
+      "path": "assets/bbs/Process/0.4mm/SupportEASE A1 0.4 0.20.json",
       "slicer": "bbs",
       "profile": "process"
     },
@@ -41,7 +41,7 @@
       "type": "slicerProfile",
       "machineId": "A1_MINI",
       "name": "A1 mini：0.4 喷头 0.20 层高",
-      "path": "assets/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
+      "path": "assets/bbs/Process/0.4mm/SupportEASE A1 mini 0.4 0.20.json",
       "slicer": "bbs",
       "profile": "process"
     },
@@ -50,7 +50,7 @@
       "type": "slicerProfile",
       "machineId": "P1S",
       "name": "P1S：0.4 喷头 0.24 层高",
-      "path": "assets/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
+      "path": "assets/bbs/Process/0.4mm/SupportEASE P1S 0.4 0.24.json",
       "slicer": "bbs",
       "profile": "process"
     },
@@ -59,7 +59,7 @@
       "type": "slicerProfile",
       "machineId": "X1C",
       "name": "X1C：0.4 喷头 0.24 层高",
-      "path": "assets/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
+      "path": "assets/bbs/Process/0.4mm/SupportEASE X1 0.4 0.24.json",
       "slicer": "bbs",
       "profile": "process"
     }

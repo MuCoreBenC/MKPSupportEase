@@ -54,6 +54,8 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
     ir.prefs.skip_vibration_calibration = prefs.skip_vibration_calibration;
     ir.prefs.begin_stage_retract_enabled = prefs.begin_stage_retract_enabled;
     ir.prefs.begin_stage_retract_z_lift_mm = prefs.begin_stage_retract_z_lift_mm;
+    /* 校准「切笔」的安全抬升量（mm）：内核那侧是 f64，这里一格整数偏好 */
+    ir.prefs.calibration_safe_lift_mm = prefs.calibration_safe_lift_mm as f64;
     ir.prefs.z_calibration_dwell_sec = prefs.z_calibration_dwell_sec;
     ir.prefs.xy_calibration_dwell_sec = prefs.xy_calibration_dwell_sec;
     ir.prefs.bed_glue_enabled = prefs.bed_glue_enabled;
@@ -101,8 +103,9 @@ mod tests {
     use super::*;
     use crate::runtime::app_state::{
         PostprocPrefs, BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT, BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
-        BEGIN_STAGE_RETRACT_Z_LIFT_MIN, UNDER_SUPPORT_MM_DEFAULT, XY_DWELL_DEFAULT,
-        Z_DWELL_DEFAULT,
+        BEGIN_STAGE_RETRACT_Z_LIFT_MIN, CALIBRATION_SAFE_LIFT_MM_DEFAULT,
+        CALIBRATION_SAFE_LIFT_MM_MAX, CALIBRATION_SAFE_LIFT_MM_MIN, UNDER_SUPPORT_MM_DEFAULT,
+        XY_DWELL_DEFAULT, Z_DWELL_DEFAULT,
     };
 
     /// ★★★ **两份出厂档必须一致**：两边现在都读 `presets/client-defaults.toml`，
@@ -132,6 +135,10 @@ mod tests {
         assert_eq!(
             kernel.begin_stage_retract_z_lift_mm,
             client.begin_stage_retract_z_lift_mm
+        );
+        assert_eq!(
+            kernel.calibration_safe_lift_mm, client.calibration_safe_lift_mm as f64,
+            "校准抬升出厂值两端不一致"
         );
         assert_eq!(
             kernel.z_calibration_dwell_sec,
@@ -164,6 +171,32 @@ mod tests {
         assert_eq!(
             kernel.begin_stage_retract_z_lift_mm, BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT,
             "收笔抬升出厂值两端不一致"
+        );
+        assert_eq!(
+            kernel.calibration_safe_lift_mm, CALIBRATION_SAFE_LIFT_MM_DEFAULT as f64,
+            "校准抬升出厂值两端不一致"
+        );
+    }
+
+    /// 校准抬升的量程也必须两端一致：界面画的是客户端这一份，内核夹的是它自己那份。
+    #[test]
+    fn the_calibration_lift_range_agrees_with_the_kernel() {
+        use postprocess::postproc::disk::{
+            CALIBRATION_SAFE_LIFT_MAX_MM, CALIBRATION_SAFE_LIFT_MIN_MM,
+        };
+
+        assert_eq!(
+            CALIBRATION_SAFE_LIFT_MIN_MM, CALIBRATION_SAFE_LIFT_MM_MIN as f64,
+            "校准抬升下限两端不一致"
+        );
+        assert_eq!(
+            CALIBRATION_SAFE_LIFT_MAX_MM, CALIBRATION_SAFE_LIFT_MM_MAX as f64,
+            "校准抬升上限两端不一致"
+        );
+        assert!(
+            (CALIBRATION_SAFE_LIFT_MIN_MM..=CALIBRATION_SAFE_LIFT_MAX_MM)
+                .contains(&(CALIBRATION_SAFE_LIFT_MM_DEFAULT as f64)),
+            "出厂值必须落在量程里"
         );
     }
 
@@ -205,6 +238,7 @@ mod tests {
             skip_vibration_calibration: true,
             begin_stage_retract_enabled: false,
             begin_stage_retract_z_lift_mm: 42,
+            calibration_safe_lift_mm: 14,
             debug_mode_enabled: false,
             debug_wait_x: 20.0,
             debug_mount_wait_x: Some(256.0),
@@ -246,6 +280,10 @@ mod tests {
         assert!(ir.prefs.skip_vibration_calibration);
         assert!(!ir.prefs.begin_stage_retract_enabled);
         assert_eq!(ir.prefs.begin_stage_retract_z_lift_mm, 42);
+        assert_eq!(
+            ir.prefs.calibration_safe_lift_mm, 14.0,
+            "校准抬升必须真的落到 IR —— 校准生成器读的就是它"
+        );
         assert_eq!(ir.prefs.z_calibration_dwell_sec, 7);
         assert_eq!(ir.prefs.xy_calibration_dwell_sec, 9);
         assert!(ir.prefs.bed_glue_enabled);
@@ -327,6 +365,7 @@ mod tests {
             z_calibration_dwell_sec: Some(999),
             xy_calibration_dwell_sec: Some(-5),
             begin_stage_retract_z_lift_mm: Some(-1),
+            calibration_safe_lift_mm: Some(1),
             ..PostprocPrefs::default()
         }
         .resolved();
@@ -336,9 +375,11 @@ mod tests {
             p.begin_stage_retract_z_lift_mm,
             BEGIN_STAGE_RETRACT_Z_LIFT_MIN
         );
+        assert_eq!(p.calibration_safe_lift_mm, CALIBRATION_SAFE_LIFT_MM_MIN);
 
         let high = PostprocPrefs {
             begin_stage_retract_z_lift_mm: Some(999),
+            calibration_safe_lift_mm: Some(999),
             ..PostprocPrefs::default()
         }
         .resolved();
@@ -346,5 +387,6 @@ mod tests {
             high.begin_stage_retract_z_lift_mm,
             BEGIN_STAGE_RETRACT_Z_LIFT_MAX
         );
+        assert_eq!(high.calibration_safe_lift_mm, CALIBRATION_SAFE_LIFT_MM_MAX);
     }
 }

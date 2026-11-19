@@ -11,7 +11,7 @@
   "toolhead.glue_z_offset": -0.05,
   "toolhead.offset.x": -0.9,
   "toolhead.offset.y": 23.0,
-  "toolhead.offset.z": 4.0,
+  "toolhead.offset.z": 4.1,
   "toolhead.pen_mount_speed": 10000.0,
   "toolhead.pen_mount_wait_x": 168.0,
   "toolhead.pen_mount_wait_y": 0.0,

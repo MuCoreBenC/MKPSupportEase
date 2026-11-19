@@ -20,6 +20,7 @@ UnderSupportMm = 0.5
 SkipVibrationCalibration = true
 BeginStageRetractEnabled = true
 BeginStageRetractZLiftMm = 5
+CalibrationSafeLiftMm = 10
 ZCalibrationDwellSec = 2
 XyCalibrationDwellSec = 3
 BedGlueEnabled = false
@@ -28,7 +29,7 @@ AutoTowerPosition = "ask"
 
 # 客户端壳自己的偏好 —— **不进 G-code**，读者是客户端（`runtime::client_defaults`）。
 #
-# 与上面那 11 项同一条纪律：这里写什么，新装就是什么；缺一个键就是读不出来（不兜底）。
+# 与上面那 12 项同一条纪律：这里写什么，新装就是什么；缺一个键就是读不出来（不兜底）。
 # 量程与取值也就是客户端盘上那几个字符串，多一个都算错。
 [Client]
 Theme = "system"
