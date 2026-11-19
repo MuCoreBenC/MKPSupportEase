@@ -67,13 +67,13 @@
 
 | 模式 | 行数 | 文件 |
 |---|---|---|
-| ZOffset | 900 | `ZOffset.{input.json,expected.gcode}` |
-| Precise | 238 | `Precise.…` |
-| Rough | 238 | `Rough.…` |
-| Repetition | 116 | `Repetition.…` |
-| ZOffset.new | 900 | `ZOffset.new.…` |
-| Precise.new | 260 | `Precise.new.…` |
-| Rough.new | 260 | `Rough.new.…` |
+| ZOffset | 901 | `ZOffset.{input.json,expected.gcode}` |
+| Precise | 239 | `Precise.…` |
+| Rough | 239 | `Rough.…` |
+| Repetition | 117 | `Repetition.…` |
+| ZOffset.new | 901 | `ZOffset.new.…` |
+| Precise.new | 261 | `Precise.new.…` |
+| Rough.new | 261 | `Rough.new.…` |
 
 **没有再生开关**：改期望值就是人工生成一份新输出、逐行看过、替换文件。
 测试不会自己覆写判据。
@@ -82,11 +82,17 @@
 
 ```
 1  ; ZOffset Calibration
-2  G1 Z10 F1200
+2  G1 Z10.2 F1200
 3  ; FEATURE: Outer wall
-4  G1 X100 Y100 Z10 E0.001 F3000 ; MKPSE: virtual extrusion …
+4  G1 X100 Y100 Z10.2 E0.001 F3000 ; MKPSE: virtual extrusion …
 5  ; FEATURE: Custom
 ```
+
+这两个 `10.2` 不是常量：校准块的安全高度统一是
+`first_layer_height + toolhead.z_offset + prefs.calibration_safe_lift_mm`，
+抬升量的出厂值是 10（`presets/client-defaults.toml` 的 `CalibrationSafeLiftMm`）。
+参考夹具的 IR 没有 `Prefs` 段 ⇒ 走 `PrefsIr::default()`，首层 0.2、`z_offset` 0、抬升 10，
+所以落在 10.2。挂笔前、收笔前用的是同一个高度，三种校准不再分化。
 
 第 3、5 行的作用是**换角色**：切片器建路径包围盒时排除 `erCustom`，而校准块整段活在
 start gcode 的 `; FEATURE: Custom` 之下 —— 不换角色，第 4 行那条虚拟挤出等于没写，

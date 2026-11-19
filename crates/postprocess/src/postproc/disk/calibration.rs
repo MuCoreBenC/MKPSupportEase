@@ -16,33 +16,61 @@ use crate::postproc::calibration::CalibrationReceipt;
 use crate::postproc::machine_dims::{self, get_machine_dimensions};
 use crate::postproc::offset::{MM_PER_MINUTE, process_gcode_offset};
 
+/// 校准「切笔」安全抬升量的量程（mm）。
+///
+/// 值本身是用户偏好（`ir.prefs.calibration_safe_lift_mm`，出厂值在
+/// `presets/client-defaults.toml`）；量程在这一侧也要有一份：手写 IR / 老档案里的
+/// 越界值不许把工具头顶到行程外。与客户端 `runtime::app_state::CALIBRATION_SAFE_LIFT_MM_*`
+/// 一一对应（判据 `the_calibration_lift_range_agrees_with_the_kernel` 咬着）。
+pub const CALIBRATION_SAFE_LIFT_MIN_MM: f64 = 6.0;
+pub const CALIBRATION_SAFE_LIFT_MAX_MM: f64 = 20.0;
+
+/// 校准块的统一安全高度（喷嘴坐标）：**挂笔前、收笔前、进块前**那三次抬升都用它。
+///
+/// 公式是 `first_layer_height + toolhead.z_offset + 抬升量`。减掉 `z_offset`
+/// 之后，笔尖离板面恒等于抬升量，与笔伸多长无关 —— 与正常涂胶的
+/// `extended_travel_z` 同一个基准，差别只在**校准这条线读的是自己的偏好**
+/// （`glue_z_lift_height` 是涂胶那趟的账，不许拿来管校准）。
+///
+/// XY / ZOffset / Repetition 三种校准共用这一个值，不许再按模式分化。
+fn calibration_safe_z(ir_data: &Ir) -> f64 {
+    let lift = ir_data
+        .prefs
+        .calibration_safe_lift_mm
+        .clamp(CALIBRATION_SAFE_LIFT_MIN_MM, CALIBRATION_SAFE_LIFT_MAX_MM);
+    round3(ir_data.machine.first_layer_height + ir_data.toolhead.z_offset + lift)
+}
+
+/// 抬到安全高度：挂笔前、收笔前各一次。
+fn push_safe_z(output: &mut Vec<String>, ir_data: &Ir) {
+    output.push(format!("G1 Z{}", format_z(calibration_safe_z(ir_data))));
+}
+
 /// 校准块的 home 行：含一条虚拟挤出（E0.001），BBS 才认得出这盘有路径。
 ///
 /// 拼法在 [`crate::gcode::virtual_extrude`] —— E 值与标记文本只有那一处，
 /// 别在这里再手拼一遍。
-fn calibration_home_line() -> String {
-    crate::gcode::virtual_extrude::line("X100 Y100 Z10", "3000")
+fn calibration_home_line(z: f64) -> String {
+    crate::gcode::virtual_extrude::line(&format!("X100 Y100 Z{}", format_z(z)), "3000")
 }
 
-/// 进校准块之前**单独抬 Z**的那一行。
+/// 校准块的入口两步：抬 Z → 平移到位。**顺序不可合并、不可颠倒**。
 ///
-/// 为什么必须有它：`calibration_home_line` 把 XY 和 Z 写在同一句里，打印机按线性插值
-/// 执行 —— 于是「从当前 Z 平移 200mm 到 (100,100)」这一路是**贴着板面拖过去的**。
+/// 为什么必须有这一步：`calibration_home_line` 把 XY 和 Z 写在同一句里，打印机按
+/// 线性插值执行 —— 于是「从当前 Z 平移 200mm 到 (100,100)」这一路是**贴着板面拖过去的**。
 /// 直接校准（不打印模型）时尤其明显：模型路径被删光之后喷嘴停在 Z0.2～0.3，
-/// 真机上就是喷嘴在板上刮一道（用户 2026-10-20 的录像逐帧确认）。
-/// 先抬到同一个目标 Z，再平移，坐标与原来完全一致，只是分成两步。
-const CALIBRATION_PRELIFT: &str = "G1 Z10 F1200";
-
-/// 校准块的入口两步：抬 Z → 平移到位。**顺序不可合并、不可颠倒**（见 [`CALIBRATION_PRELIFT`]）。
+/// 真机上就是喷嘴在板上刮一道。先抬到同一个目标 Z 再平移，坐标与原来完全一致，
+/// 只是分成两步。入口高度与切笔同档，走 [`calibration_safe_z`]，不写死绝对 Z。
 ///
 /// 挤出那一行外面包了一层 `; FEATURE:`：切片器建路径包围盒时排除 `erCustom`，
 /// 而校准块整段都活在 start gcode 的 `; FEATURE: Custom` 之下 —— 不换角色，
 /// 这条虚拟挤出等于没写，`direct_calibrate`（模型路径被删光）那一支在第二盘起
 /// 会被判「路径在床外」。探针之后立刻换回来，校准图案的角色保持原样。
-fn push_calibration_home(output: &mut Vec<String>) {
-    output.push(CALIBRATION_PRELIFT.to_string());
+fn push_calibration_home(output: &mut Vec<String>, ir_data: &Ir) {
+    let safe_z = calibration_safe_z(ir_data);
+    output.push(format!("G1 Z{} F1200", format_z(safe_z)));
     output.push("; FEATURE: Outer wall".to_string());
-    output.push(calibration_home_line());
+    output.push(calibration_home_line(safe_z));
     output.push("; FEATURE: Custom".to_string());
 }
 
@@ -345,14 +373,9 @@ fn generate_xy_calibration(
     }
 
     output.push("; XY Offset Calibration".to_string());
-    push_calibration_home(&mut output);
+    push_calibration_home(&mut output, ir_data);
     output.push(";Rising nozzle to avoid collision".to_string());
-    output.push(format!(
-        "G1 Z{}",
-        format_z(round3(
-            ir_data.machine.first_layer_height + ir_data.toolhead.z_offset + 6.0
-        ))
-    ));
+    push_safe_z(&mut output, ir_data);
     output.push(";Mounting Toolhead".to_string());
     let (mount, unmount) = mount_unmount_lines(ir_data);
     output.extend(mount);
@@ -499,6 +522,7 @@ fn generate_xy_calibration(
         ));
     }
 
+    push_safe_z(&mut output, ir_data);
     output.push(";Unmounting Toolhead".to_string());
     output.extend(unmount);
     output.push(";Toolhead Unmounted".to_string());
@@ -525,14 +549,9 @@ fn generate_z_offset_calibration(
     let fr_calibe_y_start = dims.calibration.z_start_y;
 
     output.push("; ZOffset Calibration".to_string());
-    push_calibration_home(&mut output);
+    push_calibration_home(&mut output, ir_data);
     output.push(";Rising nozzle to avoid collision".to_string());
-    output.push(format!(
-        "G1 Z{}",
-        format_z(round3(
-            ir_data.machine.first_layer_height + ir_data.toolhead.z_offset + 6.0
-        ))
-    ));
+    push_safe_z(&mut output, ir_data);
     output.push(";Mounting Toolhead".to_string());
     let (mount, unmount) = mount_unmount_lines(ir_data);
     output.extend(mount);
@@ -611,6 +630,7 @@ fn generate_z_offset_calibration(
         output.push(format!("G4 P{z_dwell_ms}"));
     }
 
+    push_safe_z(&mut output, ir_data);
     output.push(";Unmounting Toolhead".to_string());
     output.extend(unmount);
     output.push(";Toolhead Unmounted".to_string());
@@ -675,14 +695,9 @@ fn generate_repetition_calibration(
     let mut output: Vec<String> = Vec::new();
 
     output.push("; LShape Repetition Calibration".to_string());
-    push_calibration_home(&mut output);
+    push_calibration_home(&mut output, ir_data);
     output.push(";Rising nozzle to avoid collision".to_string());
-    output.push(format!(
-        "G1 Z{}",
-        format_z(round3(
-            ir_data.machine.first_layer_height + ir_data.toolhead.z_offset + 6.0
-        ))
-    ));
+    push_safe_z(&mut output, ir_data);
     output.push(";Mounting Toolhead".to_string());
     let (mount, unmount) = mount_unmount_lines(ir_data);
     output.extend(mount);
@@ -739,6 +754,7 @@ fn generate_repetition_calibration(
         }
     }
 
+    push_safe_z(&mut output, ir_data);
     output.push(";Unmounting Toolhead".to_string());
     output.extend(unmount);
     output.push(";Toolhead Unmounted".to_string());
@@ -911,14 +927,9 @@ fn generate_xy_calibration_new(
 
     let mut output: Vec<String> = Vec::new();
     output.push("; XY Offset Calibration".to_string());
-    push_calibration_home(&mut output);
+    push_calibration_home(&mut output, ir_data);
     output.push(";Rising nozzle to avoid collision".to_string());
-    output.push(format!(
-        "G1 Z{}",
-        format_z(round3(
-            ir_data.machine.first_layer_height + ir_data.toolhead.z_offset + 6.0
-        ))
-    ));
+    push_safe_z(&mut output, ir_data);
     output.push(";Mounting Toolhead".to_string());
     let (mount, unmount) = filtered_mount_unmount_lines(ir_data);
     output.extend(mount);
@@ -1066,6 +1077,7 @@ fn generate_xy_calibration_new(
         ));
     }
 
+    push_safe_z(&mut output, ir_data);
     output.push(";Unmounting Toolhead".to_string());
     output.extend(unmount);
     output.push(";Toolhead Unmounted".to_string());
@@ -1121,14 +1133,9 @@ fn generate_z_offset_calibration_new(
 
     let mut output: Vec<String> = Vec::new();
     output.push("; ZOffset Calibration".to_string());
-    push_calibration_home(&mut output);
+    push_calibration_home(&mut output, ir_data);
     output.push(";Rising nozzle to avoid collision".to_string());
-    output.push(format!(
-        "G1 Z{}",
-        format_z(round3(
-            ir_data.machine.first_layer_height + ir_data.toolhead.z_offset + 6.0
-        ))
-    ));
+    push_safe_z(&mut output, ir_data);
     output.push(";Mounting Toolhead".to_string());
     let (mount, unmount) = filtered_mount_unmount_lines(ir_data);
     output.extend(mount);
@@ -1204,6 +1211,7 @@ fn generate_z_offset_calibration_new(
         output.push(format!("G4 P{z_dwell_ms}"));
     }
 
+    push_safe_z(&mut output, ir_data);
     output.push(";Unmounting Toolhead".to_string());
     output.extend(unmount);
     output.push(";Toolhead Unmounted".to_string());
@@ -1378,7 +1386,7 @@ mod tests {
             .expect("New 变体不该返回空")
     }
 
-    /// 结构与坐标：22 轮（11 横 + 11 竖），每轮 7 行，头 6 尾 3。
+    /// 结构与坐标：22 轮（11 横 + 11 竖），每轮 7 行，头 6 尾 4。
     /// 坐标全部相对 `bbox` 左下角，不碰机型固定坐标。
     #[test]
     fn xy_new_structure_and_coordinates() {
@@ -1387,18 +1395,21 @@ mod tests {
         // P1S 没有 CALIBE_SING，行数干净好数
         let out = xy_new("Precise", "P1S", &ir, &b);
 
-        assert_eq!(out.len(), 9 + 22 * 7 + 3, "行数不对: {}", out.len());
+        assert_eq!(out.len(), 9 + 22 * 7 + 4, "行数不对: {}", out.len());
         assert_eq!(out[0], "; XY Offset Calibration");
-        // 先单独抬 Z，再平移 —— 同一句里带 Z 会贴着板面拖过去（见 CALIBRATION_PRELIFT）
-        assert_eq!(out[1], CALIBRATION_PRELIFT);
+        // 先单独抬 Z，再平移 —— 同一句里带 Z 会贴着板面拖过去（见 calibration_safe_z）
+        assert_eq!(out[1], "G1 Z10.2 F1200");
         assert_eq!(
             out[2], "; FEATURE: Outer wall",
             "虚拟挤出必须挂在非 Custom 的角色下"
         );
-        assert_eq!(out[3], calibration_home_line());
+        assert_eq!(
+            out[3],
+            "G1 X100 Y100 Z10.2 E0.001 F3000 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility"
+        );
         assert_eq!(out[4], "; FEATURE: Custom", "探针之后角色换回来");
         assert_eq!(out[5], ";Rising nozzle to avoid collision");
-        assert_eq!(out[6], "G1 Z6.2"); // 0.2 + 0 + 6
+        assert_eq!(out[6], "G1 Z10.2"); // 0.2 + 0 + 10
         assert_eq!(out[7], ";Mounting Toolhead");
         assert_eq!(out[8], ";Toolhead Mounted");
 
@@ -1421,6 +1432,8 @@ mod tests {
         // 每轮都有停留 —— 这是 New 与经典分支最容易漏的差异（经典分支根本没有 G4）
         assert_eq!(out.iter().filter(|l| l.as_str() == "G4 P3000").count(), 22);
 
+        // 收笔前必须再抬一次到安全高度（三种校准同一档，见 calibration_safe_z）
+        assert_eq!(out[out.len() - 4], "G1 Z10.2");
         assert_eq!(out[out.len() - 3], ";Unmounting Toolhead");
         assert_eq!(out[out.len() - 2], ";Toolhead Unmounted");
         assert_eq!(out[out.len() - 1], "G1 X100 Y100 Z100");
@@ -1735,13 +1748,13 @@ mod tests {
         let per_round = Z_OFFSET_SING_LINES.len() + 6;
         assert_eq!(
             out.len(),
-            9 + z_profile().square_count * per_round + 3,
+            9 + z_profile().square_count * per_round + 4,
             "行数不对: {}",
             out.len()
         );
         assert_eq!(out[0], "; ZOffset Calibration");
-        assert_eq!(out[1], CALIBRATION_PRELIFT, "进块之前必须先单独抬 Z");
-        assert_eq!(out[6], "G1 Z6.2");
+        assert_eq!(out[1], "G1 Z10.2 F1200", "进块之前必须先单独抬 Z");
+        assert_eq!(out[6], "G1 Z10.2");
         assert_eq!(out[8], ";Toolhead Mounted");
         assert!(
             !out.iter().any(|l| l == ";Floating Z Calibration"),
@@ -1761,6 +1774,78 @@ mod tests {
         assert_eq!(out[9 + per_round - 2], "G1 Z6.0");
 
         assert_eq!(out[out.len() - 1], "G1 X100 Y100 Z100");
+    }
+
+    /// **切笔只有一个安全高度**：挂笔前、收笔前都抬到
+    /// `首层 + z_offset + prefs.calibration_safe_lift_mm`，XY / ZOffset / Repetition 不许分化。
+    ///
+    /// 三种校准各走一遍经典分支（New 变体由 `*_new_structure_and_*` 那两条钉住，
+    /// 参考夹具另外逐字节兜底）；A1_MINI 才有 `lShapeBase`，所以机型固定用它。
+    #[test]
+    fn every_calibration_lifts_to_the_same_safe_z_around_the_pen_swap() {
+        let mut ir = test_ir();
+        // 关掉 new ⇒ 走经典生成器（XY / ZOffset），Repetition 本来就只有一条路
+        ir.safety.xy_calibration = String::new();
+        ir.safety.z_calibration = String::new();
+
+        let safe = format!("G1 Z{}", format_z(calibration_safe_z(&ir)));
+        assert_eq!(safe, "G1 Z10.2", "首层 0.2 + 笔偏移 0 + 10");
+
+        for mode in ["Precise", "ZOffset", "Repetition"] {
+            let bbox = xy_sample_bbox();
+            let out = generate_calibration_gcode_with_centroid(
+                mode,
+                "A1_MINI",
+                &ir,
+                Some(&bbox),
+                CentroidResult::default(),
+                2,
+                3,
+            )
+            .expect("生成失败")
+            .expect("参考机型不该返回空");
+
+            let mount = out
+                .iter()
+                .position(|l| l == ";Mounting Toolhead")
+                .unwrap_or_else(|| panic!("{mode}: 缺挂笔段"));
+            assert_eq!(out[mount - 1], safe, "{mode}: 挂笔前没抬到安全高度");
+
+            let unmount = out
+                .iter()
+                .position(|l| l == ";Unmounting Toolhead")
+                .unwrap_or_else(|| panic!("{mode}: 缺收笔段"));
+            assert_eq!(out[unmount - 1], safe, "{mode}: 收笔前没抬到安全高度");
+        }
+    }
+
+    /// 这一格是**用户偏好**：填 20 就抬 20；越界值由内核夹回量程 ——
+    /// 手写 IR / 老档案里的 0 或 99 不许把工具头顶到行程外。
+    #[test]
+    fn the_lift_comes_from_prefs_and_is_clamped() {
+        let mut ir = test_ir();
+        ir.safety.z_calibration = String::new();
+
+        let mut mount_z = |lift: f64| -> String {
+            ir.prefs.calibration_safe_lift_mm = lift;
+            let out = generate_calibration_gcode_with_centroid(
+                "ZOffset",
+                "A1_MINI",
+                &ir,
+                None,
+                CentroidResult::default(),
+                2,
+                3,
+            )
+            .expect("生成失败")
+            .expect("A1_MINI 有 Z 校准位");
+            out[6].clone()
+        };
+
+        assert_eq!(mount_z(10.0), "G1 Z10.2", "出厂档：0.2 + 0 + 10");
+        assert_eq!(mount_z(20.0), "G1 Z20.2", "用户填多少就是多少");
+        assert_eq!(mount_z(0.0), "G1 Z6.2", "低于下限按 6 算");
+        assert_eq!(mount_z(99.0), "G1 Z20.2", "高于上限按 20 算");
     }
 
     /// 把一行里的 X / Y 数值各整体平移 `dx` / `dy`（其余字符原样）——

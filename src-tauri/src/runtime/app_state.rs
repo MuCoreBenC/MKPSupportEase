@@ -315,6 +315,12 @@ pub struct PostprocPrefs {
     /// 收笔块自己抬 Z 的高度（mm）。`None` = 出厂 30。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub begin_stage_retract_z_lift_mm: Option<i64>,
+    /// **校准「切笔」的安全抬升量**（mm，6–20）。`None` = 出厂 10。
+    ///
+    /// 校准块的挂笔前 / 收笔前 / 进块前都抬到
+    /// `首层 + 笔偏移 + 这一格`，三种校准共用一个值。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibration_safe_lift_mm: Option<i64>,
     /// **调试模式**：切片只产出「只跑落笔/收笔」的骨架，不打印模型。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_mode_enabled: Option<bool>,
@@ -541,6 +547,10 @@ impl PostprocPrefs {
                     BEGIN_STAGE_RETRACT_Z_LIFT_MIN,
                     BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
                 ),
+            calibration_safe_lift_mm: self
+                .calibration_safe_lift_mm
+                .unwrap_or(d.calibration_safe_lift_mm as i64)
+                .clamp(CALIBRATION_SAFE_LIFT_MM_MIN, CALIBRATION_SAFE_LIFT_MM_MAX),
             debug_mode_enabled: self.debug_mode_enabled.unwrap_or(false),
             debug_wait_x: self.debug_wait_x.unwrap_or(DEBUG_WAIT_X_DEFAULT),
             debug_mount_wait_x: self.debug_mount_wait_x,
@@ -658,6 +668,15 @@ pub const BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT: i64 = 5;
 pub const BEGIN_STAGE_RETRACT_Z_LIFT_MIN: i64 = 5;
 pub const BEGIN_STAGE_RETRACT_Z_LIFT_MAX: i64 = 30;
 
+/// 校准「切笔」安全抬升量的**出厂值镜像**与量程（mm）。
+///
+/// 出厂值的真值在 `presets/client-defaults.toml`；量程的真值在内核
+/// （`postprocess::postproc::disk::{CALIBRATION_SAFE_LIFT_MIN_MM, ...}`），
+/// 两处一致由 `postproc_prefs` 的测试咬住。
+pub const CALIBRATION_SAFE_LIFT_MM_DEFAULT: i64 = 10;
+pub const CALIBRATION_SAFE_LIFT_MM_MIN: i64 = 6;
+pub const CALIBRATION_SAFE_LIFT_MM_MAX: i64 = 20;
+
 /// 调试动作的出厂值 —— A1 系列那一组（驻点 `X20`、落笔 `X267`、收笔 `X276`、`F10000`）。
 ///
 /// 与 `hooks.rs` 里那三组硬编码收笔位是**两件事**：那里是「开始阶段收笔」用的固定序列，
@@ -697,6 +716,8 @@ pub struct ResolvedPostprocPrefs {
     pub skip_vibration_calibration: bool,
     pub begin_stage_retract_enabled: bool,
     pub begin_stage_retract_z_lift_mm: i64,
+    /// 校准「切笔」的安全抬升量（mm），量程 `CALIBRATION_SAFE_LIFT_MM_*`
+    pub calibration_safe_lift_mm: i64,
     pub debug_mode_enabled: bool,
     pub debug_wait_x: f64,
     /// `None` = 跟随驻点位

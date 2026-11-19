@@ -8,7 +8,7 @@
  *   2. 强制校准模式     —— 这一趟认不认得出校准件
  *   3. 跳过震动校准检测 —— 要不要省掉开场那次震动检测
  *   4. 开始阶段收笔（+ 收笔抬升高度，跟着它缩进）
- *   5. Z 轴停留时间 / 6. XY 轴停留时间 —— 数值框排最后
+ *   5. 校准抬升高度 / 6. Z 轴停留时间 / 7. XY 轴停留时间 —— 数值框排最后
  *
  * 一句话：**模式 → 行为开关 → 数值**。前两行都是"这一趟怎么跑"，所以排在一起放上面；
  * 收落笔点位测试压过别的开关（它一开，本区其它项全不生效），因此排第一。
@@ -34,6 +34,8 @@ import { Switch } from '../../components/switch'
 import { Tip } from '../../components/tooltip'
 import DebugPrefsModal from './DebugPrefsModal'
 import { SectionHead } from './SectionHead'
+import { formulaOf } from './calibLift'
+import { useCalibLiftBase } from './useCalibLiftBase'
 import { Btn } from '../ui/Controls'
 import { SETTINGS_TARGET_FORCE_CALIB } from './targets'
 import s from './PageSettings.module.css'
@@ -48,6 +50,9 @@ export default function CalibSection({ nested = false }: { nested?: boolean }) {
   const [err, setErr] = useState<string | null>(null)
   /** 收落笔点位测试那扇窗开着没 */
   const [debugOpen, setDebugOpen] = useState(false)
+
+  /** 算式里那两个底数（首层 / 笔偏移）；读不到 = `null`，那一行就只摆数字框 */
+  const base = useCalibLiftBase()
 
   const on = (why: string) => setErr(why)
 
@@ -70,7 +75,7 @@ export default function CalibSection({ nested = false }: { nested?: boolean }) {
   }
 
   const r = prefs.resolved
-  const { zDwell, xyDwell, zLift } = prefs.limits
+  const { zDwell, xyDwell, zLift, calibLift } = prefs.limits
 
   return (
     <section className={s.section} aria-label={tr('settings.calib.title')}>
@@ -165,6 +170,34 @@ export default function CalibSection({ nested = false }: { nested?: boolean }) {
           </span>
         </div>
       )}
+
+      {/* 校准块的挂笔 / 收笔 / 进场都先抬到这里（三种校准共用一个值）。
+          下面那串算式就是内核算 G-code 用的那个加法，只是把首层与笔偏移代进去 ——
+          改数字框，等号右边立刻跟着变。 */}
+      <div className={`${s.field} ${s.fieldRow}`}>
+        <div className={s.fieldText}>
+          <div className={s.fieldTitle}>
+            {tr('settings.calib.calibLift')}
+            <Tip
+              text={tr('settings.calib.calibLiftNote', { min: calibLift.min, max: calibLift.max })}
+            />
+          </div>
+          {base !== null && (
+            <p className={s.fieldNote}>{formulaOf(base, r.calibrationSafeLiftMm)}</p>
+          )}
+        </div>
+        <span className={s.numBox}>
+          <NumberField
+            label={tr('settings.calib.calibLift')}
+            unit="mm"
+            value={r.calibrationSafeLiftMm}
+            min={calibLift.min}
+            max={calibLift.max}
+            step={1}
+            onChange={(next) => void set({ calibrationSafeLiftMm: next }, on)}
+          />
+        </span>
+      </div>
 
       {/* 停留时间是并列的参数（不是哪一行的派生值）⇒ 不缩进 */}
       <div className={`${s.field} ${s.fieldRow}`}>

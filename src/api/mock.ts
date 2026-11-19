@@ -3448,6 +3448,7 @@ export const mockApi: MkpApi = {
       skipVibrationCalibration: mockPostproc.skipVibrationCalibration ?? false,
       beginStageRetractEnabled: mockPostproc.beginStageRetractEnabled ?? true,
       beginStageRetractZLiftMm: mockPostproc.beginStageRetractZLiftMm ?? 5,
+      calibrationSafeLiftMm: mockPostproc.calibrationSafeLiftMm ?? 10,
       debugModeEnabled: mockPostproc.debugModeEnabled ?? false,
       debugWaitX: mockPostproc.debugWaitX ?? 20,
       debugMountWaitX: mockPostproc.debugMountWaitX ?? null,
@@ -3490,6 +3491,7 @@ export const mockApi: MkpApi = {
         skipVibrationCalibration: true,
         beginStageRetractEnabled: true,
         beginStageRetractZLiftMm: 5,
+        calibrationSafeLiftMm: 10,
         zCalibrationDwellSec: 2,
         xyCalibrationDwellSec: 3,
         underSupportEnabled: true,
@@ -3503,6 +3505,7 @@ export const mockApi: MkpApi = {
         zDwell: { min: 1, max: 20 },
         xyDwell: { min: 1, max: 10 },
         zLift: { min: 5, max: 30 },
+        calibLift: { min: 6, max: 20 },
         underSupport: { min: 0, max: 2 },
       },
     }

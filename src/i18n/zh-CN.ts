@@ -213,6 +213,8 @@ export const zhCN = {
   'settings.calib.debugTravelSpeed': '驻点速度',
   'settings.calib.debugSpeed': '调试移动速度',
   'settings.calib.liftNote': '抬 Z 后再补抬的高度（{min}-{max} mm），到顶会自动停。只影响正常后处理；收落笔点位测试那一段收笔不跑，这个高度也就不生效。',
+  'settings.calib.calibLift': '校准抬升高度',
+  'settings.calib.calibLiftNote': '校准件挂笔与收笔都先抬到这里（{min}-{max} mm）。算式按首层 0.2 与这份预设的笔偏移。',
   'settings.calib.zDwell': 'Z 轴校准停留时间',
   'settings.calib.zDwellNote': '每层测量后暂停（{min}-{max} 秒）。',
   'settings.calib.xyDwell': 'XY 轴校准停留时间',

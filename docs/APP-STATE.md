@@ -111,7 +111,7 @@ AppState 放的是「**应用现在是什么状态**」，不是「应用所有�
 `postproc`，形状是 [`runtime::app_state::PostprocPrefs`](../src-tauri/src/runtime/app_state.rs)
 （每一项 `Option`，缺省 = **从没动过** ⇒ 用出厂档）。
 
-出厂档在 `presets/client-defaults.toml`：改写 G-code 的那 11 项在 `[Prefs]`，通知 / 显示方式 /
+出厂档在 `presets/client-defaults.toml`：改写 G-code 的那 12 项在 `[Prefs]`，通知 / 显示方式 /
 置顶 / 强制校准在 `[Client]`。**工作台「默认配置」页能改的全部就是这两段**，
 见 [`CLIENT-DEFAULTS.md`](CLIENT-DEFAULTS.md)。
 

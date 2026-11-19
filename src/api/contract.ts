@@ -2413,6 +2413,11 @@ export interface ResolvedPostprocPrefs {
   skipVibrationCalibration: boolean
   beginStageRetractEnabled: boolean
   beginStageRetractZLiftMm: number
+  /**
+   * **校准「切笔」的安全抬升量**（mm，量程见 `limits.calibLift`）：
+   * 校准块的挂笔前 / 收笔前 / 进块前都抬到 `首层 + 笔偏移 + 这一格`。
+   */
+  calibrationSafeLiftMm: number
   /** 调试模式：切片只产出「只跑落笔/收笔」的骨架 */
   debugModeEnabled: boolean
   debugWaitX: number
@@ -2479,6 +2484,8 @@ export interface PostprocPrefsWire {
   skipVibrationCalibration?: boolean | null
   beginStageRetractEnabled?: boolean | null
   beginStageRetractZLiftMm?: number | null
+  /** 校准抬升高度（mm）：`null` = 回到出厂档（10） */
+  calibrationSafeLiftMm?: number | null
   debugModeEnabled?: boolean | null
   debugWaitX?: number | null
   debugMountWaitX?: number | null
@@ -2562,7 +2569,7 @@ export interface PostprocPrefsView {
   raw: PostprocPrefsWire
   resolved: ResolvedPostprocPrefs
   /**
-   * **出厂档**（全 `null` 解析出来的那一份）：`[Prefs]` 那 11 项 + 通知 / 显示方式 /
+   * **出厂档**（全 `null` 解析出来的那一份）：`[Prefs]` 那 12 项 + 通知 / 显示方式 /
    * 置顶 / 强制校准这 4 项（后者来自同一份文件的 `[Client]` 段）。
    *
    * 设置页「恢复默认」的对比要用它 —— 只写「出厂」两个字，用户看不出点完变成
@@ -2576,6 +2583,7 @@ export interface PostprocPrefsView {
     skipVibrationCalibration: boolean
     beginStageRetractEnabled: boolean
     beginStageRetractZLiftMm: number
+    calibrationSafeLiftMm: number
     zCalibrationDwellSec: number
     xyCalibrationDwellSec: number
     underSupportEnabled: boolean
@@ -2590,6 +2598,7 @@ export interface PostprocPrefsView {
     zDwell: { min: number; max: number }
     xyDwell: { min: number; max: number }
     zLift: { min: number; max: number }
+    calibLift: { min: number; max: number }
     underSupport: { min: number; max: number }
   }
 }

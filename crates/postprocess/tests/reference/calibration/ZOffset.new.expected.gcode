@@ -1,10 +1,10 @@
 ; ZOffset Calibration
-G1 Z10 F1200
+G1 Z10.2 F1200
 ; FEATURE: Outer wall
-G1 X100 Y100 Z10 E0.001 F3000 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility
+G1 X100 Y100 Z10.2 E0.001 F3000 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility
 ; FEATURE: Custom
 ;Rising nozzle to avoid collision
-G1 Z6.2
+G1 Z10.2
 ;Mounting Toolhead
 ;Toolhead Mounted
 ;Calibration Start Music
@@ -848,6 +848,7 @@ G1 X145.718 Y96.291
 G1 X145.277 Y96.731 
 G1 Z6.0
 G4 P2000
+G1 Z10.2
 ;Unmounting Toolhead
 ;Toolhead Unmounted
 ;Calibration Start Music

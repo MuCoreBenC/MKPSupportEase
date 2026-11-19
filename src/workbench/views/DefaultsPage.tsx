@@ -83,6 +83,7 @@ const GROUPS: EditGroup[] = [
           'SkipVibrationCalibration',
           'BeginStageRetractEnabled',
           'BeginStageRetractZLiftMm',
+          'CalibrationSafeLiftMm',
           'ZCalibrationDwellSec',
           'XyCalibrationDwellSec',
         ],
@@ -130,6 +131,7 @@ const GROUPS: EditGroup[] = [
 const NUM_META: Record<string, { unit: string; step: number; min: number; max: number }> = {
   UnderSupportMm: { unit: 'mm', step: 0.05, min: 0, max: 2 },
   BeginStageRetractZLiftMm: { unit: 'mm', step: 1, min: 5, max: 30 },
+  CalibrationSafeLiftMm: { unit: 'mm', step: 1, min: 6, max: 20 },
   ZCalibrationDwellSec: { unit: '秒', step: 1, min: 1, max: 20 },
   XyCalibrationDwellSec: { unit: '秒', step: 1, min: 1, max: 3 },
 }

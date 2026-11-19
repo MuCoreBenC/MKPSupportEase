@@ -111,6 +111,7 @@ BedGlueAllModels = false
 BedGlueEnabled = false
 BeginStageRetractEnabled = true
 BeginStageRetractZLiftMm = 5
+CalibrationSafeLiftMm = 10.0
 GlueBottomEnabled = false
 SkipVibrationCalibration = true
 UnderSupportEnabled = true

@@ -209,6 +209,8 @@ export const zhTW: Record<StringKey, string> = {
   'settings.calib.debugTravelSpeed': '駐點速度',
   'settings.calib.debugSpeed': '調試移動速度',
   'settings.calib.liftNote': '抬 Z 後再補抬的高度（{min}-{max} mm），到頂會自動停。只影響正常後處理；收落筆點位測試那一段收筆不跑，這個高度也就不生效。',
+  'settings.calib.calibLift': '校準抬升高度',
+  'settings.calib.calibLiftNote': '校準件掛筆與收筆都先抬到這裡（{min}-{max} mm）。算式按首層 0.2 與這份預設的筆偏移。',
   'settings.calib.zDwell': 'Z 軸校準停留時間',
   'settings.calib.zDwellNote': '每層測量後暫停（{min}-{max} 秒）。',
   'settings.calib.xyDwell': 'XY 軸校準停留時間',

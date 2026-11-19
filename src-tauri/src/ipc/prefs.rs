@@ -652,6 +652,8 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "skipVibrationCalibration": r.skip_vibration_calibration,
                 "beginStageRetractEnabled": r.begin_stage_retract_enabled,
                 "beginStageRetractZLiftMm": r.begin_stage_retract_z_lift_mm,
+                /* 校准「切笔」的安全抬升量（2026-11-19）：三种校准共用一个值 */
+                "calibrationSafeLiftMm": r.calibration_safe_lift_mm,
                 "zCalibrationDwellSec": r.z_calibration_dwell_sec,
                 "xyCalibrationDwellSec": r.xy_calibration_dwell_sec,
                 "bedGlueEnabled": r.bed_glue_enabled,
@@ -685,7 +687,7 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
              * 出厂档 = 全 `null` 解析出来的那一份。
              *
              * 恢复默认的对比要用它：只写「出厂」两个字，用户看不出点完会变成开还是关、
-             * 数字是多少。这里给「有出厂值的那几项」：`[Prefs]` 段的 11 项 + 通知 /
+             * 数字是多少。这里给「有出厂值的那几项」：`[Prefs]` 段的 12 项 + 通知 /
              * 显示方式 / 置顶 / 强制校准这 4 项（它们的出厂档在同一份文件的 `[Client]` 段），
              * 与 `resetDefaults` 的补丁一一对应；调试动作那组有自己那颗恢复，不在这里。
              */
@@ -697,6 +699,7 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "skipVibrationCalibration": f.skip_vibration_calibration,
                 "beginStageRetractEnabled": f.begin_stage_retract_enabled,
                 "beginStageRetractZLiftMm": f.begin_stage_retract_z_lift_mm,
+                "calibrationSafeLiftMm": f.calibration_safe_lift_mm,
                 "zCalibrationDwellSec": f.z_calibration_dwell_sec,
                 "xyCalibrationDwellSec": f.xy_calibration_dwell_sec,
                 "underSupportEnabled": f.under_support_enabled,
@@ -713,6 +716,10 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "zLift": {
                     "min": runtime::app_state::BEGIN_STAGE_RETRACT_Z_LIFT_MIN,
                     "max": runtime::app_state::BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
+                },
+                "calibLift": {
+                    "min": runtime::app_state::CALIBRATION_SAFE_LIFT_MM_MIN,
+                    "max": runtime::app_state::CALIBRATION_SAFE_LIFT_MM_MAX,
                 },
                 "underSupport": {
                     "min": runtime::app_state::UNDER_SUPPORT_MM_MIN,

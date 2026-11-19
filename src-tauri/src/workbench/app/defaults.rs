@@ -2,7 +2,7 @@
 //!
 //! 出厂值的真值只有这一份 —— 三个消费者都 `include_str!` 它：
 //! 内核 `postprocess::ir::PrefsIr::default()`、客户端 `runtime::app_state::PostprocPrefs::resolved()`
-//! 的那 11 项（`[Prefs]` 段），以及客户端 `runtime::client_defaults` 那一批界面偏好（`[Client]` 段）。
+//! 的那 12 项（`[Prefs]` 段），以及客户端 `runtime::client_defaults` 那一批界面偏好（`[Client]` 段）。
 //! 这一页改的是**新装**的默认值：已经装好的客户端不受影响，要重新构建才进包。
 //!
 //! 写入走 [`with_struct_ctx`]：一个文件、一条撤销点、失败回滚 ——
@@ -151,6 +151,12 @@ const EDITABLE: &[Spec] = &[
     },
     Spec {
         section: Section::Prefs,
+        key: "CalibrationSafeLiftMm",
+        label: "校准抬升高度",
+        kind: Kind::Number,
+    },
+    Spec {
+        section: Section::Prefs,
         key: "ZCalibrationDwellSec",
         label: "Z 轴校准停留时间",
         kind: Kind::Number,
@@ -289,6 +295,7 @@ fn value_of_prefs(prefs: &postprocess::ir::PrefsIr, key: &str) -> Option<Value> 
         "SkipVibrationCalibration" => Value::Bool(prefs.skip_vibration_calibration),
         "BeginStageRetractEnabled" => Value::Bool(prefs.begin_stage_retract_enabled),
         "BeginStageRetractZLiftMm" => Value::from(prefs.begin_stage_retract_z_lift_mm),
+        "CalibrationSafeLiftMm" => Value::from(prefs.calibration_safe_lift_mm),
         "ZCalibrationDwellSec" => Value::from(prefs.z_calibration_dwell_sec),
         "XyCalibrationDwellSec" => Value::from(prefs.xy_calibration_dwell_sec),
         "BedGlueEnabled" => Value::Bool(prefs.bed_glue_enabled),

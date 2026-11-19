@@ -12,8 +12,8 @@ pub mod collision;
 pub mod wipe;
 
 pub use calibration::{
-    BBox, CentroidResult, generate_calibration_gcode_with_centroid,
-    generate_calibration_gcode_with_centroid_rec,
+    BBox, CALIBRATION_SAFE_LIFT_MAX_MM, CALIBRATION_SAFE_LIFT_MIN_MM, CentroidResult,
+    generate_calibration_gcode_with_centroid, generate_calibration_gcode_with_centroid_rec,
 };
 pub use collision::{
     AdjustmentTarget, CollisionFacts, CollisionResult, CollisionType, ModelFootprint,

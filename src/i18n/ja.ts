@@ -204,6 +204,8 @@ export const ja: Record<StringKey, string> = {
   'settings.calib.debugTravelSpeed': '待機移動の速度',
   'settings.calib.debugSpeed': 'デバッグ移動速度',
   'settings.calib.liftNote': 'Z 上昇後に追加で上げる高さ（{min}-{max} mm）。上端で自動停止します。通常の後処理のみ有効で、離座・着座ポイントテストではペン戻しブロックを実行しないため、この高さも効きません。',
+  'settings.calib.calibLift': 'キャリブレーション持ち上げ',
+  'settings.calib.calibLiftNote': 'キャリブレーション造形はペンの着座前と離座後にここまで上げます（{min}-{max} mm）。式はファーストレイヤー 0.2 とこのプリセットのペンオフセットで計算します。',
   'settings.calib.zDwell': 'Z 軸キャリブレーションの停止時間',
   'settings.calib.zDwellNote': '各層の測定後の待ち時間（{min}-{max} 秒）。',
   'settings.calib.xyDwell': 'XY 軸キャリブレーションの停止時間',

@@ -202,6 +202,8 @@ export const en: Record<StringKey, string> = {
   'settings.calib.debugTravelSpeed': 'Park speed',
   'settings.calib.debugSpeed': 'Debug move speed',
   'settings.calib.liftNote': 'Extra lift after Z homing ({min}–{max} mm); stops at the top. Normal post-processing only — pen up/down point test skips the retract block, so this height does not apply there.',
+  'settings.calib.calibLift': 'Calibration pen lift',
+  'settings.calib.calibLiftNote': 'Calibration parts lift to here before mounting and after releasing the pen ({min}–{max} mm). The sum assumes a 0.2 first layer and this preset’s pen offset.',
   'settings.calib.zDwell': 'Z calibration dwell time',
   'settings.calib.zDwellNote': 'Pause after each layer ({min}–{max} s).',
   'settings.calib.xyDwell': 'XY calibration dwell time',

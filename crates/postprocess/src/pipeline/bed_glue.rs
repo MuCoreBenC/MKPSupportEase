@@ -1084,7 +1084,7 @@ mod tests {
     }
 
     /// 平移之前必须先抬 Z：虚拟挤出那行只有 XY，写在低 Z 上就是喷嘴贴板拖过去
-    /// （校准块同一个坑，见 `calibration::CALIBRATION_PRELIFT`）。
+    /// （校准块同一个坑，见 `calibration::CALIBRATION_SAFE_LIFT`）。
     #[test]
     fn lifts_z_before_the_virtual_travel() {
         let src = lines(&[
