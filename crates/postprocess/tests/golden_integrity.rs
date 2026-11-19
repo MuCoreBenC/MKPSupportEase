@@ -73,9 +73,14 @@ const VENDORED: &[(&str, &str, u64)] = &[
         // 那份里 `SkipVibrationCalibration` / `UnderSupportEnabled` 是开的 ——
         // 产物少掉 M970/M974 那四行震动校准指令（672282 → 672201 字节）。
         // 差异逐行审过：只删那四行，其余字节不动。
+        // 2026-11-19 再生：塔片改「每层必出片、片高 = 本层 Z 增量」（此前按名义层高
+        // 记账，约每 1.4 层才出一片，两片之间留 0.1~0.26mm 空气）。这份 43 层的样本
+        // 塔片从 11 片变成 42 片，`;MKP_STATS towers=` 同步 11 → 42。
+        // 人工核过 diff：新增/改写全在塔块内（`;Tower_Layer_Gcode` ~ `Finished` 与
+        // 斜肋段），模型段一行未动；`; LAYER_HEIGHT:` 由名义 0.28/0.2 变成实际片高。
         "42274.2.e2e-A1.config.gcode",
-        "d75458936d137d41fbf770b6ce22417a2acf1c3e8a1bbdd4ad183efa7e7916fc",
-        672_201,
+        "d7e6d29744f5b5c8b8254004829a4f922592153bc465aa762d865d36ce117b59",
+        851_111,
     ),
 ];
 

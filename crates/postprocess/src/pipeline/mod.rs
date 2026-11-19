@@ -767,6 +767,26 @@ fn run(
     let tower_height = p2.tower_height;
     let mut out_lines = p2.lines;
 
+    /* 塔片比喷嘴允许的层高还厚：塔片按本层 Z 增量打，正常切片不会出现
+    （模型层本身就比上限厚才会），所以这条是**兜底闸**，报的是一件事：
+    那几层之间会留缝。只在真有这回事时才出门。 */
+    if !pass2_stats.tower_layer_height_warnings.is_empty() {
+        let count = pass2_stats.tower_layer_height_warnings.len().to_string();
+        let worst = pass2_stats
+            .tower_layer_height_warnings
+            .iter()
+            .fold(0.0_f64, |acc, w| acc.max(w.layer_height));
+        let max_lh = pass2_stats.tower_layer_height_warnings[0].max_lh;
+        ir.warnings.push(MessageRef::new(
+            "postproc.tower_layer_height",
+            &[
+                ("count", &count),
+                ("max", &format!("{max_lh:.2}")),
+                ("worst", &format!("{worst:.2}")),
+            ],
+        ));
+    }
+
     // ---- step 10: calibration —— 校准插入（内存行序列）----
     checkpoint(cancel)?;
     if crate::postproc::calibration::is_any(calib_mode) {

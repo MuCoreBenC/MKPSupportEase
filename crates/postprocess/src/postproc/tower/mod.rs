@@ -4,12 +4,14 @@
 //! - `geometry`：多边形/肋截面/圆角/限深插值（逐行，浮点顺序与 Go 一字不差）
 //! - `sheath` / `rib` / `spiral`：三个生成入口（G3 golden 的被测对象）
 //! - `bbox`：碰撞用包围盒
+//! - `plan`：塔自己的 Z 构建计划（片高的上下限、细层合并、超限补片）
 //! - 刻意**不移植** `arcfit.go`：实测全仓零消费（死代码），登记于提交信息。
 
 pub mod bbox;
 pub mod constants;
 pub use constants::*;
 pub mod geometry;
+pub mod plan;
 pub mod rib;
 pub mod sheath;
 pub mod spiral;
@@ -17,6 +19,7 @@ pub mod spiral;
 mod template;
 
 pub use bbox::{TowerBBox, calculate_tower_bbox};
+pub use plan::{Bounds, TowerSlice, plan_layer, plan_sequence};
 pub use rib::generate_rib_gcode;
 pub use sheath::{calculate_sheath_expansion, generate_sheath_gcode};
 pub use spiral::generate_mini_spiral_gcode;
