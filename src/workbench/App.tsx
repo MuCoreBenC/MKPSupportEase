@@ -1432,7 +1432,7 @@ export function WorkbenchApp() {
                         <>
                           <span
                             className={`${s.tag} ${s.tagGhost}`}
-                            data-tip={pageSlot.dirtyTitle ?? pageSlot.dirtyLabel}
+                            data-tip={pageSlot.dirty ? pageSlot.dirtyTitle : undefined}
                           >
                             {pageSlot.dirty ? pageSlot.dirtyLabel : pageSlot.savedLabel}
                           </span>
@@ -1440,7 +1440,7 @@ export function WorkbenchApp() {
                             type="button"
                             className={`${s.btn} ${s.btnSm}`}
                             disabled={!pageSlot.canDiscard || pageSlot.busy === true}
-                            data-tip={pageSlot.discardTitle ?? '放弃这一次的改动'}
+                            data-tip={pageSlot.discardTitle}
                             onClick={() => pageActions.run('discard')}
                           >
                             放弃
@@ -1458,7 +1458,7 @@ export function WorkbenchApp() {
                             type="button"
                             className={`${s.btn} ${s.btnSm} ${saveOn ? s.btnPrimary : ''}`}
                             disabled={!saveOn}
-                            data-tip={saveOn ? (pageSlot.saveTitle ?? '把这一份落盘') : saveWhy}
+                            data-tip={saveOn ? pageSlot.saveTitle : saveWhy}
                             onClick={() => pageActions.run('save')}
                           >
                             {pageSlot.busy === true

@@ -37,6 +37,7 @@
 | [`docs/APP-STATE.md`](APP-STATE.md) | 持久化状态地基：一个应用一个 AppState | 现行（10-08 盘点定案已并回本文 §5 / §10） |
 | [`docs/DESIGN-SPACING.md`](DESIGN-SPACING.md) | 间距与动画原则（试验场搬来） | 现行 |
 | [`docs/COPY-STYLE.md`](COPY-STYLE.md) | **界面文字规范**：判据、字数硬指标、禁用写法、术语白话表、状态句与确认框模板。**只管文字，不管间距与组件** | 现行 |
+| [`docs/TOOLTIP-RULES.md`](TOOLTIP-RULES.md) | **悬停提示**：只允许哪五类、五类之外怎么处置、代码强制的「说了的不弹」、盘点命令与清理顺序（写法仍归 COPY-STYLE） | 现行（2026-11-19 新建） |
 | [`docs/3D-ASSET-CONTRACT.md`](3D-ASSET-CONTRACT.md) | 上游 3D 资产契约 v3（对外） | 现行（自标：contract v3 取代 v2） |
 | [`HANDOFF.md`](../HANDOFF.md) | **进度台账**：现在在哪、接下来去哪 | 现行·持续追加（最新到"增量之五十"，**未结账那张表在 §2.4**；增量之三十六~四十四已归档，头部 ⚠️ 注记：两条旧口径 + 2026-10-11 清理） |
 | [`docs/RESOURCE-ADDRESSING-ROADMAP.md`](RESOURCE-ADDRESSING-ROADMAP.md) | 寻址改造总纲（长期大纲） | 半现行：自标"大纲已批准 2026-10-05，施工进度以 §8 台账为准" |
