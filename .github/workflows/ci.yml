@@ -1,7 +1,9 @@
 # CI —— 第一个 PR 之前就要存在的那层。
 #
-# 两个 job 的名字是 `web` 与 `rust`，必须和 scripts/setup-ruleset.mjs 里的
-# REQUIRED_CHECKS 逐字对上（Task 16 把它们挂成必需检查）。改名等于把闸门拆了。
+# 三个 job：`web` / `rust`(macOS) / `rust-windows`。必需检查是 `web` 与 `rust-windows`，
+# 名字必须与 scripts/setup-ruleset.mjs 的 REQUIRED_CHECKS 逐字对上。
+# macOS 那份仍跑（平台覆盖），但不设必需：它与 rust-windows 跑的是同一串命令，
+# 公共 macOS runner 排队常常十几分钟甚至被 CANCELLED，发版等它等于白等几个小时。
 #
 # 早先这里有一段"探测 + 跳过"的逻辑，用来在前端 / Rust 侧还没搬进来的阶段放行。
 # 现在两边都在了，那段整个删掉 —— "允许跳过"与试验场那七道空转的闸是同一个失效模式，

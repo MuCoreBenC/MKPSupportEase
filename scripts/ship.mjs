@@ -325,6 +325,10 @@ async function main() {
   }
 
   /* preview / stable */
+  /* 深度预检：把凭据失效、tag 闸标记缺失、空 PR 这些以前要等 CI 全绿之后
+     才暴露的问题挡在开 PR 之前（静态部分也已挂在 lint 上，跟着每个 PR 跑）。 */
+  info('发版深度预检（版本 / tag 闸 / 分支 / 凭据 / 空 PR）')
+  sh('node', ['scripts/check-release-readiness.mjs', `--channel=${choice.key}`])
   const summary = (note ?? '').trim() || `发 ${choice.label} ${version}`
   info(`调用：npm run release -- ${version} "${summary}" --channel ${choice.key} --confirm`)
   /*
