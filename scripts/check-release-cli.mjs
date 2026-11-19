@@ -16,10 +16,18 @@
  */
 
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
 const HERE = fileURLToPath(new URL('.', import.meta.url))
 const SCRIPT = `${HERE}release.mjs`
+
+/** release.mjs 的「建议值」取的是**工作区当前预览号**的下一号，不是命令行传进来的那个号。
+ *  工作区被冻结成稳定号（发版窗口）时，`-preview.N` 的序号不存在，建议值从 `.1` 起 ——
+ *  这一条断言在那种状态下没有意义，跳过；其余自检照跑。 */
+const workspaceVersion = /version\s*=\s*"([^"]+)"/.exec(
+  readFileSync(`${HERE}../version.toml`, 'utf8'),
+)?.[1] ?? ''
 
 /** 跑一次 `release.mjs --args-only`，回 `{ code, out, err }`（不抛）。 */
 function run(args) {
@@ -119,13 +127,17 @@ check('Preview 大写归一成小写', () => {
 })
 
 /* ⑧ 建议值要跟着**当前工作区的预览号**走，不是永远给 `.1` */
-check('预览建议值 = 当前预览号 + 1', () => {
-  const r = run(['0.0.12-preview.9', 'x', '--channel=preview'])
-  const j = JSON.parse(r.out)
-  if (!/-preview\.(\d+)$/.test(j.suggested)) throw new Error(`建议值形状不对：${j.suggested}`)
-  const n = Number(/-preview\.(\d+)$/.exec(j.suggested)[1])
-  if (n <= 1) throw new Error(`建议值该往后再给一个号：${j.suggested}`)
-})
+if (/-preview\.\d+$/i.test(workspaceVersion)) {
+  check('预览建议值 = 当前预览号 + 1', () => {
+    const r = run(['0.0.12-preview.9', 'x', '--channel=preview'])
+    const j = JSON.parse(r.out)
+    if (!/-preview\.(\d+)$/.test(j.suggested)) throw new Error(`建议值形状不对：${j.suggested}`)
+    const n = Number(/-preview\.(\d+)$/.exec(j.suggested)[1])
+    if (n <= 1) throw new Error(`建议值该往后再给一个号：${j.suggested}`)
+  })
+} else {
+  console.log(`  – 预览建议值 = 当前预览号 + 1（工作区已冻结为 ${workspaceVersion}，跳过）`)
+}
 
 if (failed > 0) {
   console.error(`\n发版脚本自检：${failed} 条没过`)
