@@ -243,6 +243,73 @@ pub fn pair_stem(stem: &str) -> &str {
     stem
 }
 
+/// **「新名字 → 新路径」的唯一实现**（改名预览与落盘共用这一条）。
+///
+/// 只换末段**干名**：目录与扩展名照旧（改名不换类型、不搬文件夹）。
+///
+/// 能修的就修：路径分隔符与控制字符直接剔掉（留着它们会把文件搬出这个目录）；
+/// 结尾的点与空白也去掉（Windows 上那样的名字建不出来）。
+/// 修不了的才拒：空、`.` / `..`、Windows 保留字符、超过单个文件名的字节上限。
+///
+/// 显示名与层高都从文件名派生（见 `workbench::app::assets::slicer_axes`），
+/// 所以"新名字得把层高那一段留着"这条判断在调用方 —— 这一层只管路径形状。
+pub fn renamed_path(old_path: &str, raw_name: &str) -> Result<String, AppError> {
+    let cleaned: String = raw_name
+        .trim()
+        .chars()
+        .filter(|c| !(c.is_control() || *c == '/' || *c == '\\'))
+        .collect();
+    let mut stem = cleaned.trim().to_owned();
+    if stem.is_empty() {
+        return Err(AppError::invalid_argument("名字不能空".to_owned()));
+    }
+    if stem == "." || stem == ".." {
+        return Err(AppError::invalid_argument(format!(
+            "「{stem}」不能当文件名"
+        )));
+    }
+    if let Some(bad) = stem
+        .chars()
+        .find(|c| matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+    {
+        return Err(AppError::invalid_argument(format!(
+            "文件名里不能有「{bad}」"
+        )));
+    }
+    stem = stem.trim_end_matches(['.', ' ']).to_owned();
+    if stem.is_empty() {
+        return Err(AppError::invalid_argument(
+            "名字不能只有点或空格".to_owned(),
+        ));
+    }
+
+    let p = Path::new(old_path.trim());
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+    let file = if ext.is_empty() {
+        stem
+    } else {
+        format!("{stem}.{ext}")
+    };
+    /* 单个文件名的字节上限（APFS / NTFS 都是 255；UTF-8 一个汉字 3 字节）。
+    超了不替他截 —— 截掉的很可能是层高那一段，而那一截是有意义的 */
+    if file.len() > 255 {
+        return Err(AppError::invalid_argument(format!(
+            "文件名太长（{} 字节，上限 255）",
+            file.len()
+        )));
+    }
+    let rel = match p.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => {
+            format!("{}/{}", dir.to_string_lossy().replace('\\', "/"), file)
+        }
+        _ => file,
+    };
+    check_relative(&rel).map_err(|e| {
+        AppError::invalid_argument(format!("「{rel}」不能当资产路径")).with_detail(e.to_string())
+    })?;
+    Ok(rel)
+}
+
 /// 文件形状。`[[assets]]` 数组表，与 `brands.toml` 那份"一份集中定义"同一写法。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -267,6 +334,13 @@ pub struct Assets {
     file: PathBuf,
     /// 载荷根。**由调用方给**，没有就是"这一侧没有资产文件本体"（见模块头）
     asset_root: Option<PathBuf>,
+    /// **草稿里的载荷根**（工作台的影子树 `…/presets/assets/`）。
+    ///
+    /// 只在"真仓库里那份还不在"时兜底：改名是先把文件搬进影子树，保存才进真仓库
+    /// （见 `workbench::app::assets::wb_rename_assets`）。`present` / 检查面板读它
+    /// 才能说出"文件在（还没保存）"，否则改完名那一行会当场变成"文件未到"。
+    /// 客户端没有草稿这一层 ⇒ 永远是 `None`。
+    draft_root: Option<PathBuf>,
 }
 
 impl Assets {
@@ -290,6 +364,7 @@ impl Assets {
             doc,
             file,
             asset_root: None,
+            draft_root: None,
         };
         out.check()?;
         Ok(out)
@@ -302,6 +377,15 @@ impl Assets {
 
     pub fn asset_root(&self) -> Option<&Path> {
         self.asset_root.as_deref()
+    }
+
+    /// 草稿载荷根（工作台影子树里那一份）。见字段注释
+    pub fn set_draft_root(&mut self, root: &Path) {
+        self.draft_root = Some(root.to_path_buf());
+    }
+
+    pub fn draft_root(&self) -> Option<&Path> {
+        self.draft_root.as_deref()
     }
 
     pub fn items(&self) -> &[Asset] {
@@ -388,13 +472,35 @@ impl Assets {
         })
     }
 
+    /// 这条资产**可读的那一份**：真仓库里优先；真仓库里还没有才看草稿。
+    ///
+    /// 顺序不能反过来：影子树是整份复制，草稿里那份可能比真仓库旧（外面改过文件、
+    /// 工作台还没重开）—— 一律读草稿等于"工作台看不见别人改的东西"。
+    /// 反过来只在一种情况下有区别：**改名还没保存**，新路径只有草稿里才有。
+    ///
+    /// 路径闸与 [`Self::resolve`] 同一条（`resolve_in`），不在这里再拼一套。
+    pub fn locate(&self, asset: &Asset) -> Result<PathBuf, AppError> {
+        let real = self.resolve(asset)?;
+        if real.is_file() {
+            return Ok(real);
+        }
+        if let Some(draft) = &self.draft_root {
+            if let Ok(p) = resolve_in(draft, asset.path.trim()) {
+                if p.is_file() {
+                    return Ok(p);
+                }
+            }
+        }
+        Ok(real)
+    }
+
     /// 这条资产的文件在不在。
     ///
     /// **Task 9 之前它会普遍是 `false`** —— 条目与文件一起在那边落地。这里不做成
     /// 加载期错误：定义与搬运是两步，而"还没搬"要能被说出来（界面显示、Task 11 的
     /// 校验层按 warning 报），不该让工作台起不来。
     pub fn present(&self, asset: &Asset) -> bool {
-        self.resolve(asset).is_ok_and(|p| p.is_file())
+        self.locate(asset).is_ok_and(|p| p.is_file())
     }
 
     /// 写回用的文本。**没改过就逐字节等于读进来那份**
@@ -514,6 +620,68 @@ impl Assets {
             })?;
         arr.remove(idx);
         Ok(removed)
+    }
+
+    /// 改一条资产的**显示名**（2026-11-19）。
+    ///
+    /// 显示名住在哪儿由类型决定（判据只在 `workbench::app::assets::display_name` 一处）：
+    ///
+    /// - `slicerProfile` → **文件名去扩展名**：换 `path` 的末段干名（目录与扩展名不动），
+    ///   文件本体的搬动在命令层 —— 这里看不见影子树，也不该看见；
+    /// - `image` / `icon` / `model` / `guide` → 台账 `name` 那一格；
+    /// - `mkPreset` → 显示名来自**版本名**，这里拒收（那要改机型文件，不是台账）。
+    ///
+    /// 撞名 / 目录里已有同名文件这些判断在命令层（它看得见影子树与同批的其他条）。
+    pub fn rename(&mut self, id: &str, new_name: &str) -> Result<Asset, AppError> {
+        let want = id.trim().to_lowercase();
+        let file = self.file.display().to_string();
+        let pos = self
+            .items
+            .iter()
+            .position(|a| a.id.to_lowercase() == want)
+            .ok_or_else(|| {
+                AppError::not_found(messages::text("ui.presetdata.assets.173", &[("id", id)]))
+            })?;
+        let asset_id = self.items[pos].id.clone();
+        if self.items[pos].kind == AssetKind::MkPreset {
+            return Err(AppError::invalid_argument(format!(
+                "「{asset_id}」的名字来自版本名，去「机型与版本」页改"
+            )));
+        }
+
+        let arr = self
+            .doc
+            .get_mut("assets")
+            .and_then(|i| i.as_array_of_tables_mut())
+            .ok_or_else(|| {
+                AppError::corrupted(messages::text("ui.presetdata.assets.174", &[("v1", &file)]))
+            })?;
+        let table = arr
+            .iter_mut()
+            .find(|t| {
+                t.get("id")
+                    .and_then(|i| i.as_str())
+                    .is_some_and(|s| s.to_lowercase() == want)
+            })
+            .ok_or_else(|| {
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.assets.175",
+                    &[("v1", &asset_id)],
+                ))
+            })?;
+
+        if self.items[pos].kind == AssetKind::SlicerProfile {
+            let new_path = renamed_path(&self.items[pos].path, new_name).map_err(|why| {
+                AppError::invalid_argument(format!("「{asset_id}」改不了名：{why}"))
+            })?;
+            self.items[pos].path = new_path.clone();
+            table["path"] = super::literal_str(&new_path);
+        } else {
+            let name = new_name.trim();
+            self.items[pos].name = name.to_owned();
+            table["name"] = super::literal_str(name);
+        }
+        Ok(self.items[pos].clone())
     }
 
     /// 改一条资产的**交付档位**（`download` ↔ `bundled`）。
@@ -742,6 +910,12 @@ impl Assets {
     /// 原子写回。**唯一的写盘点**（与 [`super::Catalog::write_machine`] 同一条出口）
     pub fn write(&self) -> Result<(), AppError> {
         crate::fsx::atomic::atomic_write(&self.file, self.to_toml().as_bytes())
+    }
+
+    /// 编辑之后再过一遍加载期那几条（改名动的是 `path`，分组第 6 条判据跟着变）。
+    /// **不留第二套校验** —— 与加载走的是同一个 [`Self::check`]。
+    pub fn check_after_edit(&self) -> Result<(), AppError> {
+        self.check()
     }
 
     /// 加载期那两条（Task 8.8）+ 类型与专有字段的搭配

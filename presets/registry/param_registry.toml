@@ -1115,7 +1115,7 @@ serialization = { "subfieldsOrder" = ["x", "y", "z"] }
 "A1_MINI:FAST260326" = -0.5
 "A1_MINI:FAST261111" = -0.9
 "A1:FAST260326" = -0.7
-"A1:FAST261111" = -0.7
+"A1:FAST261111" = -0.8
 
 [params.follows]
 "A1:STANDARD" = false
@@ -1231,14 +1231,16 @@ pinned = true
 "X1C:LITE" = 1.1
 "A1:STANDARD" = 4.0
 "A1_MINI:FAST260326" = 4.0
-"A1_MINI:FAST261111" = 4.0
+"A1_MINI:FAST261111" = 4.1
 "A1:FAST260326" = 4.0
-"A1:FAST261111" = 4.0
+"A1:FAST261111" = 4.1
 
 [params.follows]
 "P1S:LITE" = false
 "P2S:STANDARD" = false
 "X1C:LITE" = false
+"A1:FAST261111" = false
+"A1_MINI:FAST261111" = false
 
 [[params]]
 key = "toolhead.prime_length"

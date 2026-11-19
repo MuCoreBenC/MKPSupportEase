@@ -342,17 +342,26 @@ pub(super) fn display_name(presets: &Presets, a: &crate::workbench::presets::Ass
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| a.name.clone())
         }
-        AssetKind::SlicerProfile => a
-            .path
-            .rsplit('/')
-            .next()
-            .unwrap_or(&a.path)
-            .rsplit_once('.')
-            .map(|(stem, _)| stem)
-            .filter(|s| !s.is_empty())
-            .unwrap_or(&a.name)
-            .to_owned(),
+        AssetKind::SlicerProfile => {
+            let stem = slicer_stem(&a.path);
+            if stem.is_empty() {
+                a.name.clone()
+            } else {
+                stem
+            }
+        }
         _ => a.name.clone(),
+    }
+}
+
+/// 切片器的显示名 = **文件名去扩展名**（`bbs/…/MKPProcess A1 0.2 0.10.json` →
+/// `MKPProcess A1 0.2 0.10`）。[`display_name`] 与改名预览共用这一条 ——
+/// 两处各写一遍的话，"预览里的新名字"与"改完显示的名字"会慢慢分叉。
+fn slicer_stem(path: &str) -> String {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    match file.rsplit_once('.') {
+        Some((stem, _)) if !stem.is_empty() => stem.to_owned(),
+        _ => file.to_owned(),
     }
 }
 
@@ -855,6 +864,398 @@ pub fn wb_asset_usage(asset_id: String) -> Result<AssetUsageView, AppError> {
     })
 }
 
+/* ---------- 改名（2026-11-19） ---------- */
+
+/// 一次改名的输入：一条资产 + 它**新的显示名**（界面上看到的那一串）
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetRenameInput {
+    pub id: String,
+    pub display: String,
+}
+
+/// 改名计划里的一行。**预览与落盘是同一份计划**（同一个 `plan_renames` 算出来）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameRowView {
+    pub id: String,
+    /// 查不到这条资产时是 `null`（那一行只有 `problem` 有话说）
+    pub kind: Option<AssetKind>,
+    pub old: String,
+    pub new: String,
+    /// 切片器才有：旧 / 新台账路径。其余类改的是台账 `name`，不碰文件
+    pub old_path: Option<String>,
+    pub new_path: Option<String>,
+    /// 这一行**真的会变**（新名字与旧的逐字相同 ⇒ 不用动）
+    pub changed: bool,
+    pub problem: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenamePlanView {
+    pub rows: Vec<RenameRowView>,
+    /// 每一行都能改，且至少有一条真会变
+    pub ok: bool,
+}
+
+/// 新名字会不会撞上**同一目录里某个分组 id**（`Assets::check_groups` 第 6 条）。
+///
+/// 未分组资产的干名就是它那份标注源稿的文件名；组 id 也是 ⇒ 撞上就是两份源稿抢
+/// 同一个文件。加载期与写盘前都拦，预览也得拦 —— 不然预览说"能改"、落盘才报。
+fn rename_hits_group_id(presets: &Presets, id: &str, new_path: &str) -> bool {
+    let assets = &presets.assets;
+    /* 进了组的资产按组 id 落源稿，不吃自己的干名 */
+    if assets.group_of(id).is_some() {
+        return false;
+    }
+    let dir_of = |p: &str| {
+        p.rsplit_once('/')
+            .map(|(d, _)| d.to_owned())
+            .unwrap_or_default()
+    };
+    let stem = slicer_stem(new_path);
+    let derived = crate::presetdata::assets::pair_stem(&stem);
+    if derived.trim().is_empty() {
+        return false;
+    }
+    let want_dir = dir_of(new_path);
+    assets.groups().iter().any(|g| {
+        g.id.eq_ignore_ascii_case(derived)
+            && g.members.iter().any(|m| {
+                assets
+                    .get(&m.asset)
+                    .is_some_and(|a| dir_of(&a.path) == want_dir)
+            })
+    })
+}
+
+/// 这一条的文件在不在（真仓库 / 影子树各看一次）—— 改名前要有一份可读的字节。
+fn rename_source_present(presets: &Presets, shadow: &std::path::Path, rel: &str) -> bool {
+    if presets
+        .assets
+        .asset_root()
+        .is_some_and(|root| root.join(rel).is_file())
+    {
+        return true;
+    }
+    shadow.join("assets").join(rel).is_file()
+}
+
+/// 目标文件已经有了吗（真仓库 / 影子树各看一次）。
+///
+/// 只看"这一条的新落点"：同一批里两条撞同一个名字由 [`plan_renames`] 末尾那一趟管。
+fn rename_target_taken(presets: &Presets, shadow: &std::path::Path, rel: &str) -> bool {
+    if presets
+        .assets
+        .asset_root()
+        .is_some_and(|root| root.join(rel).exists())
+    {
+        return true;
+    }
+    shadow.join("assets").join(rel).exists()
+}
+
+/// **改名计划**（唯一实现）：把一批「id + 新显示名」算成"每一行变成什么、哪一行拦得住"。
+///
+/// 显示名住在哪儿与 [`display_name`] 同一张表：
+///
+/// - `slicerProfile` → 文件名 ⇒ 换 `path` 末段干名（文件本体由命令层在影子里搬）；
+/// - `image` / `icon` / `model` / `guide` → 台账 `name`；
+/// - `mkPreset` → 版本名，这里拒收并指路。
+///
+/// 切片器那几条多两道判据：
+/// 1. **层高不能变** —— 它从文件名尾部派生（[`slicer_axes`]），改掉就等于换了一份预设；
+/// 2. **不许只差大小写** —— 搬文件走的是"读旧的、写新的、删旧的"三步，而
+///    Windows / macOS 默认大小写不敏感：那三步在同一个文件上做，最后一步会把它删掉。
+fn plan_renames(
+    presets: &Presets,
+    shadow: &std::path::Path,
+    items: &[AssetRenameInput],
+) -> Vec<RenameRowView> {
+    let mut rows: Vec<RenameRowView> = Vec::new();
+    for it in items {
+        let Some(a) = presets.assets.get(it.id.trim()) else {
+            rows.push(RenameRowView {
+                id: it.id.trim().to_owned(),
+                kind: None,
+                old: String::new(),
+                new: it.display.trim().to_owned(),
+                old_path: None,
+                new_path: None,
+                changed: false,
+                problem: Some("没有这条资产。".to_owned()),
+            });
+            continue;
+        };
+        let old = display_name(presets, a);
+        let mut row = RenameRowView {
+            id: a.id.clone(),
+            kind: Some(a.kind),
+            old: old.clone(),
+            new: it.display.trim().to_owned(),
+            old_path: None,
+            new_path: None,
+            changed: false,
+            problem: None,
+        };
+        if row.new != old {
+            match a.kind {
+                AssetKind::MkPreset => {
+                    row.problem = Some("名字来自版本名，去「机型与版本」页改。".to_owned());
+                }
+                AssetKind::SlicerProfile => {
+                    row.old_path = Some(a.path.clone());
+                    match crate::presetdata::assets::renamed_path(&a.path, &row.new) {
+                        Err(e) => row.problem = Some(e.message),
+                        Ok(new_path) => {
+                            row.new = slicer_stem(&new_path);
+                            row.new_path = Some(new_path.clone());
+                            let old_layer = slicer_axes(a.kind, &a.path).1;
+                            let new_layer = slicer_axes(a.kind, &new_path).1;
+                            if new_path == a.path {
+                                /* 清洗之后原样（只有分隔符之类）—— 不是一次改名，但要说清 */
+                                row.new_path = None;
+                                row.problem = Some("这个名字清洗之后与原来一样。".to_owned());
+                            } else if !rename_source_present(presets, shadow, &a.path) {
+                                row.problem = Some("文件不在，没法改名。".to_owned());
+                            } else if old_layer != new_layer {
+                                row.problem = Some(match old_layer {
+                                    Some(l) => {
+                                        format!("层高从文件名尾部读出来：新名字要以 {l} 结尾。")
+                                    }
+                                    None => "这份没有层高后缀：新名字尾部别加数字。".to_owned(),
+                                });
+                            } else if new_path.eq_ignore_ascii_case(&a.path) {
+                                row.problem = Some("只差大小写，改不动。".to_owned());
+                            } else if presets.assets.items().iter().any(|o| {
+                                !o.id.eq_ignore_ascii_case(&a.id)
+                                    && o.path.eq_ignore_ascii_case(&new_path)
+                            }) {
+                                row.problem = Some(format!("台账里已经有一条登记在 {new_path}。"));
+                            } else if rename_target_taken(presets, shadow, &new_path) {
+                                row.problem = Some("资产目录里已经有这个文件名。".to_owned());
+                            } else if rename_hits_group_id(presets, &a.id, &new_path) {
+                                row.problem = Some(
+                                    "与同一目录的分组 id 撞了，两份标注会抢同一个文件。".to_owned(),
+                                );
+                            } else {
+                                row.changed = true;
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    if row.new.is_empty() {
+                        row.problem = Some("名字不能空。".to_owned());
+                    } else {
+                        row.changed = true;
+                    }
+                }
+            }
+        }
+        rows.push(row);
+    }
+
+    /* 同一批里两条切到同一个文件名 ⇒ **两条都拦**（不是"后一条赢"：谁赢都不是人能预期的） */
+    let mut by_path: std::collections::BTreeMap<String, Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (i, r) in rows.iter().enumerate() {
+        if let Some(p) = r.new_path.as_deref().filter(|_| r.changed) {
+            by_path.entry(p.to_lowercase()).or_default().push(i);
+        }
+    }
+    for idxs in by_path.values().filter(|v| v.len() > 1) {
+        for &i in idxs {
+            rows[i].changed = false;
+            rows[i].problem = Some("这一批里两条改成了同一个文件名。".to_owned());
+        }
+    }
+    rows
+}
+
+fn plan_of(
+    presets: &Presets,
+    shadow: &std::path::Path,
+    items: &[AssetRenameInput],
+) -> RenamePlanView {
+    let rows = plan_renames(presets, shadow, items);
+    let ok = !rows.is_empty()
+        && rows.iter().all(|r| r.problem.is_none())
+        && rows.iter().any(|r| r.changed);
+    RenamePlanView { rows, ok }
+}
+
+/// 这一笔会碰哪些文件（相对预设根）：台账 + 每个要搬的切片器的**旧路径与新路径**。
+///
+/// 两个路径都要在单子上：结构编辑的撤销记的是文件前后字节，`before` 是
+/// （旧: 有，新: 无）、`after` 是（旧: 无，新: 有）—— 撤销自然把旧的写回来、
+/// 把新的删掉。不用给 `StructCmd` 加"改名"这种新动作。
+fn files_of_rename(rows: &[RenameRowView]) -> Vec<String> {
+    let mut out = vec!["assets.toml".to_owned()];
+    for r in rows.iter().filter(|r| r.changed && r.problem.is_none()) {
+        if let (Some(old), Some(new)) = (&r.old_path, &r.new_path) {
+            out.push(format!("assets/{old}"));
+            out.push(format!("assets/{new}"));
+        }
+    }
+    out
+}
+
+/// 把切片器配置**文件内容里**的名字同步过去（`name` / `print_settings_id`）。
+///
+/// 为什么只对 `bbs`：BBS 的工艺预设把显示名抄在文件里（下拉里显示的是它，不是文件名），
+/// 不同步的话工作台改了名、切片器里还是旧的。文件里没有那两个键就不造 ——
+/// 只改"已经写着名字"的字段。改完重新序列化（4 空格缩进，与那份文件原来的一致）；
+/// 一个字节都不用改时原样返回。
+fn rewrite_preset_name(
+    display: &str,
+    slicer: Option<&str>,
+    bytes: &[u8],
+) -> Result<Vec<u8>, AppError> {
+    if slicer != Some("bbs") {
+        return Ok(bytes.to_vec());
+    }
+    let mut v: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| {
+        AppError::invalid_argument("这份切片器配置读不懂，没改名".to_owned())
+            .with_detail(e.to_string())
+    })?;
+    let Some(obj) = v.as_object_mut() else {
+        return Err(
+            AppError::invalid_argument("这份切片器配置不是 JSON 对象，没改名".to_owned())
+                .with_detail("期望一份 BBS 工艺预设（`{ … }`）".to_owned()),
+        );
+    };
+    let mut changed = false;
+    for key in ["name", "print_settings_id"] {
+        let cur = obj.get(key).and_then(|x| x.as_str()).map(str::to_owned);
+        if let Some(cur) = cur {
+            if cur != display {
+                obj.insert(
+                    key.to_owned(),
+                    serde_json::Value::String(display.to_owned()),
+                );
+                changed = true;
+            }
+        }
+    }
+    if !changed {
+        return Ok(bytes.to_vec());
+    }
+    let mut out = Vec::with_capacity(bytes.len());
+    let fmt = serde_json::ser::PrettyFormatter::with_indent(b"    ");
+    let mut ser = serde_json::Serializer::with_formatter(&mut out, fmt);
+    v.serialize(&mut ser).map_err(|e| {
+        AppError::internal("切片器配置写不出来".to_owned()).with_detail(e.to_string())
+    })?;
+    if bytes.ends_with(b"\n") {
+        out.push(b'\n');
+    }
+    Ok(out)
+}
+
+/// 把一条切片器的文件在**影子树**里搬到新名字上（保存才进真仓库）。
+///
+/// 影子里有就读影子，没有才读真仓库（外面刚放进去、影子还没对齐）——
+/// 同一份字节，不在这里判"谁更新"。
+fn move_asset_file(ctx: &super::Ctx, row: &RenameRowView) -> Result<(), AppError> {
+    let (Some(old_rel), Some(new_rel)) = (&row.old_path, &row.new_path) else {
+        return Ok(());
+    };
+    let old_abs = ctx.shadow_root.join("assets").join(old_rel);
+    let new_abs = ctx.shadow_root.join("assets").join(new_rel);
+    let bytes = std::fs::read(&old_abs)
+        .or_else(|_| std::fs::read(ctx.real_root.join("assets").join(old_rel)))
+        .map_err(|e| {
+            AppError::io(format!("读不动「{old_rel}」，没法改名")).with_detail(e.to_string())
+        })?;
+    let slicer = ctx
+        .presets
+        .assets
+        .get(&row.id)
+        .and_then(|a| a.slicer.clone());
+    let bytes = rewrite_preset_name(&row.new, slicer.as_deref(), &bytes)?;
+    crate::fsx::atomic::atomic_write(&new_abs, &bytes)?;
+    if old_abs != new_abs {
+        match std::fs::remove_file(&old_abs) {
+            Ok(()) => {}
+            /* 影子本来就没有这一份（只存在于真仓库）⇒ 保存时由 commit 按差集删 */
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(
+                    AppError::io(format!("旧文件「{old_rel}」删不掉")).with_detail(e.to_string())
+                )
+            }
+        }
+    }
+    Ok(())
+}
+
+/// **改名预览**（只读）：这一批改完长什么样、哪一行拦得住。
+///
+/// 与 [`wb_rename_assets`] 共用 `plan_renames` —— 预览说能改，落盘就不会被同一件事拒。
+#[tauri::command(async)]
+pub fn wb_rename_assets_preview(items: Vec<AssetRenameInput>) -> Result<RenamePlanView, AppError> {
+    traced("wb_rename_assets_preview", |_| {
+        with_ctx(|ctx| Ok(plan_of(&ctx.presets, &ctx.shadow_root, &items)))
+    })
+}
+
+/// **改名**（2026-11-19）：一条命令 = 一条撤销 = 保存才落盘。
+///
+/// # 改的是哪一格
+///
+/// 与 [`display_name`] 同一张表：切片器 = 文件名（`path` 末段）、其余 = 台账 `name`、
+/// MKP 预设拒收（名字来自版本名）。切片器的文件本体在影子树里搬 ——
+/// 撤销 / 放弃都退得回去，真仓库一个字节都不动。
+///
+/// # 引用为什么不用动
+///
+/// 机型图 / 图标 / 版本图 / 品牌 logo / 分组 / 套餐 `assetRefs` 全按 **id** 引用资产
+/// （id 不改），显示名从 `path`（切片器）或 `name`（其余）派生 ⇒ 改一处全部跟上。
+/// 唯一抄过名字的副本是 BBS 那份 JSON 的 `name` / `print_settings_id`，在
+/// [`rewrite_preset_name`] 里同步。
+#[tauri::command]
+pub fn wb_rename_assets(items: Vec<AssetRenameInput>) -> Result<AssetList, AppError> {
+    traced("wb_rename_assets", |_| {
+        with_struct_ctx(
+            /* 一次性动作：改名不与前后合并（与删除同一条） */
+            "",
+            |ctx| files_of_rename(&plan_renames(&ctx.presets, &ctx.shadow_root, &items)),
+            |ctx| {
+                apply_renames(ctx, &items)?;
+                list_now(ctx)
+            },
+        )
+    })
+}
+
+/// [`wb_rename_assets`] 的业务体（**抽出来是为了可测**）：计划 → 搬文件 → 写台账。
+///
+/// 调用方（命令）负责把它包进结构编辑事务：`files_of` 必须已经算过
+/// （[`files_of_rename`]，旧路径与新路径都在单子上）—— 撤销靠的就是那对字节。
+fn apply_renames(ctx: &mut super::Ctx, items: &[AssetRenameInput]) -> Result<(), AppError> {
+    let plan = plan_renames(&ctx.presets, &ctx.shadow_root, items);
+    if let Some(bad) = plan.iter().find(|r| r.problem.is_some()) {
+        return Err(
+            AppError::invalid_argument(format!("「{}」改不了名", bad.new))
+                .with_detail(bad.problem.clone().unwrap_or_default()),
+        );
+    }
+    let todo: Vec<RenameRowView> = plan.into_iter().filter(|r| r.changed).collect();
+    if todo.is_empty() {
+        return Ok(());
+    }
+    /* ① 文件先搬（台账还没动 —— 搬失败时什么都不会留下，
+    已经搬过的由 `run_struct` 按快照退回去） */
+    for row in &todo {
+        move_asset_file(ctx, row)?;
+    }
+    /* ② 台账：`path` / `name` 一起改，最后写一次盘 */
+    let pairs: Vec<(String, String)> = todo.iter().map(|r| (r.id.clone(), r.new.clone())).collect();
+    ctx.presets.rename_assets(&pairs)
+}
+
 /// 一条资产在**盘上**的落点：期望文件名 + 绝对路径 + （仅 `mkPreset`）产物相对路径。
 ///
 /// - 普通资产（有 `path`）：绝对路径 = `presets/assets/<path>` ——
@@ -896,7 +1297,9 @@ fn target_of(
             .unwrap_or_else(|_| slash_path(&abs));
         Ok((name, abs, Some(rel)))
     } else {
-        let abs = presets.assets.resolve(asset)?;
+        /* 真仓库里优先、没有才看草稿（`locate` 的注释说了为什么）——
+        改名还没保存时，新路径只有影子里才有 */
+        let abs = presets.assets.locate(asset)?;
         let name = asset
             .path
             .rsplit(['/', '\\'])
@@ -1680,6 +2083,278 @@ mod tests {
         assert!(
             again.assets.get("a1-extra-image").is_none(),
             "落盘之后重读也没了"
+        );
+    }
+
+    /* ---------- 改名（2026-11-19） ---------- */
+
+    /// 改名用的会话：夹具 + 一条带层高的 BBS、一条 MKP 预设登记。
+    ///
+    /// 走 `Ctx::open_at`（不是 `Ctx::with`）：它会铺影子树、把草稿载荷根挂上 ——
+    /// 改名那条判据（文件在影子里搬、保存才进真仓库）只有在这条路上才测得出来。
+    fn rename_ctx() -> (tempfile::TempDir, tempfile::TempDir, super::super::Ctx) {
+        use crate::fsx::atomic::atomic_write;
+        let (fixture, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let mut text = std::fs::read_to_string(real.join("assets.toml")).expect("夹具台账");
+        text.push_str(
+            "\n[[assets]]\nid = 'a1-bbs-layer'\ntype = 'slicerProfile'\nmachineId = 'A1'\n\
+             name = 'A1 0.2 喷头 0.10 层高'\n\
+             path = 'bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json'\n\
+             slicer = 'bbs'\nprofile = 'process'\n\
+             \n[[assets]]\nid = 'a1-standard'\ntype = 'mkPreset'\nmachineId = 'A1'\n\
+             versionId = 'STANDARD'\nname = 'A1 标准版预设'\n",
+        );
+        atomic_write(&real.join("assets.toml"), text.as_bytes()).expect("写台账");
+        atomic_write(
+            &real.join("assets/bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json"),
+            br#"{
+    "name": "MKPProcess A1 0.2",
+    "print_settings_id": "MKPProcess A1 0.2",
+    "type": "process"
+}
+"#,
+        )
+        .expect("写切片器配置");
+
+        Presets::load_from(&real).expect("加了两条之后仍读得通");
+        let workdir = tempfile::tempdir().expect("工作台临时目录");
+        let ctx = super::super::Ctx::open_at(
+            crate::workbench::store::Store::at(workdir.path().join("workbench")),
+            real,
+        )
+        .expect("开会话");
+        (fixture, workdir, ctx)
+    }
+
+    fn rename_item(id: &str, display: &str) -> AssetRenameInput {
+        AssetRenameInput {
+            id: id.to_owned(),
+            display: display.to_owned(),
+        }
+    }
+
+    /// 预览把三种"改不动"说清楚：层高被改掉、只差大小写、MKP 预设（名字来自版本名）
+    #[test]
+    fn the_rename_plan_refuses_what_it_cannot_do() {
+        let (_fx, _wd, ctx) = rename_ctx();
+        let plan = |items: &[AssetRenameInput]| plan_of(&ctx.presets, &ctx.shadow_root, items);
+
+        let p = plan(&[rename_item("a1-bbs-layer", "快速 A1 0.4")]);
+        assert!(!p.ok);
+        assert!(
+            p.rows[0].problem.as_deref().unwrap_or("").contains("层高"),
+            "改掉尾部数字就等于换了一层高：{:?}",
+            p.rows[0].problem
+        );
+
+        let p = plan(&[rename_item("a1-bbs-layer", "mkpprocess a1 0.2 0.10")]);
+        assert!(
+            p.rows[0]
+                .problem
+                .as_deref()
+                .unwrap_or("")
+                .contains("大小写"),
+            "实测：{:?}",
+            p.rows[0].problem
+        );
+
+        let p = plan(&[rename_item("a1-standard", "随便起个名")]);
+        assert!(
+            p.rows[0]
+                .problem
+                .as_deref()
+                .unwrap_or("")
+                .contains("版本名"),
+            "MKP 预设的名字在版本页改：{:?}",
+            p.rows[0].problem
+        );
+
+        /* 登记了、文件不在 ⇒ 改名没有可搬的那一份（夹具里这条本来就没有文件） */
+        let p = plan(&[rename_item("a1-bbs-04-020", "A1 工艺")]);
+        assert!(
+            p.rows[0]
+                .problem
+                .as_deref()
+                .unwrap_or("")
+                .contains("文件不在"),
+            "实测：{:?}",
+            p.rows[0].problem
+        );
+
+        /* 能改的那一条：预览把新文件名一起摊出来（"所有涉及它的地方"先看一遍） */
+        let p = plan(&[rename_item("a1-bbs-layer", "快速 A1 0.2 0.10")]);
+        assert!(p.ok, "这一条该能改：{:?}", p.rows[0].problem);
+        assert_eq!(
+            p.rows[0].new_path.as_deref(),
+            Some("bbs/Process/0.2mm/快速 A1 0.2 0.10.json"),
+            "只换末段干名，目录与扩展名不动"
+        );
+    }
+
+    /// **改名 = 影子里搬文件 + 台账跟着改；保存才进真仓库；撤销 / 重做来回**
+    #[test]
+    fn renaming_a_slicer_profile_moves_the_shadow_file_and_undo_puts_it_back() {
+        let (_fx, _wd, mut ctx) = rename_ctx();
+        let items = [rename_item("a1-bbs-layer", "快速 A1 0.2 0.10")];
+        let old_rel = "bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json";
+        let new_rel = "bbs/Process/0.2mm/快速 A1 0.2 0.10.json";
+        let real = ctx.real_root.clone();
+        let shadow = ctx.shadow_root.clone();
+
+        super::super::run_struct(
+            &mut ctx,
+            "资产改名",
+            "",
+            |ctx| files_of_rename(&plan_renames(&ctx.presets, &ctx.shadow_root, &items)),
+            |ctx| apply_renames(ctx, &items),
+        )
+        .expect("改名");
+
+        let a = ctx.presets.assets.get("a1-bbs-layer").expect("还在");
+        assert_eq!(a.path, new_rel, "台账路径 = 新文件名");
+        assert_eq!(
+            display_name(&ctx.presets, a),
+            "快速 A1 0.2 0.10",
+            "显示名 = 文件名去扩展名"
+        );
+        assert!(ctx.presets.assets.present(a), "改完名文件还在（在草稿里）");
+
+        assert!(
+            shadow.join("assets").join(new_rel).is_file(),
+            "影子里是新名字"
+        );
+        assert!(
+            !shadow.join("assets").join(old_rel).exists(),
+            "影子里旧的没了（否则保存会留下孤儿）"
+        );
+        assert!(
+            real.join("assets").join(old_rel).is_file(),
+            "真仓库一个字节都不动"
+        );
+        assert!(
+            !real.join("assets").join(new_rel).exists(),
+            "保存之前真仓库没有它"
+        );
+
+        /* 文件内容里的名字也同步了 —— BBS 下拉显示的是它，不是文件名 */
+        let text = std::fs::read_to_string(shadow.join("assets").join(new_rel)).unwrap();
+        assert!(
+            text.contains("\"name\": \"快速 A1 0.2 0.10\""),
+            "实测：{text}"
+        );
+        assert!(
+            text.contains("\"print_settings_id\": \"快速 A1 0.2 0.10\""),
+            "实测：{text}"
+        );
+        assert!(text.ends_with('\n'), "结尾换行照旧");
+
+        /* 撤销：文件与台账一起退回去 */
+        assert_eq!(ctx.history.undo_depth(), 1, "一条命令 = 一条撤销");
+        super::super::undo_in(&mut ctx, None).expect("撤销");
+        assert!(
+            shadow.join("assets").join(old_rel).is_file(),
+            "撤销把旧文件写回来了"
+        );
+        assert!(
+            !shadow.join("assets").join(new_rel).exists(),
+            "撤销把新文件删掉了"
+        );
+        let back = ctx.presets.assets.get("a1-bbs-layer").expect("还在");
+        assert_eq!(back.path, old_rel, "台账路径退回去了");
+        assert_eq!(display_name(&ctx.presets, back), "MKPProcess A1 0.2 0.10");
+
+        /* 重做：再回去，字节与新名字都对得上 */
+        super::super::redo_in(&mut ctx, None).expect("重做");
+        assert!(
+            shadow.join("assets").join(new_rel).is_file(),
+            "重做搬回来了"
+        );
+        assert_eq!(
+            ctx.presets.assets.get("a1-bbs-layer").unwrap().path,
+            new_rel
+        );
+    }
+
+    /// **其余类只改台账 `name`**：文件一个都不搬，显示名跟着走（机型图走这条）
+    #[test]
+    fn renaming_an_image_only_touches_the_ledger_name() {
+        let (_fx, _wd, mut ctx) = rename_ctx();
+        let items = [rename_item("a1-image", "A1 正面图")];
+        super::super::run_struct(
+            &mut ctx,
+            "资产改名",
+            "",
+            |ctx| files_of_rename(&plan_renames(&ctx.presets, &ctx.shadow_root, &items)),
+            |ctx| apply_renames(ctx, &items),
+        )
+        .expect("改名");
+
+        let a = ctx.presets.assets.get("a1-image").expect("还在");
+        assert_eq!(a.name, "A1 正面图", "台账那一格改了");
+        assert_eq!(a.path, "printers/a1.webp", "路径不动");
+        assert_eq!(display_name(&ctx.presets, a), "A1 正面图");
+        assert_eq!(
+            files_of_rename(&plan_renames(&ctx.presets, &ctx.shadow_root, &items)),
+            vec!["assets.toml".to_owned()],
+            "没有切片器 ⇒ 只碰台账一份"
+        );
+
+        /* 落盘的是真有那一行（重读还在） */
+        let again = Presets::load_from(ctx.presets.root()).expect("重读");
+        assert_eq!(
+            again.assets.get("a1-image").expect("还在").name,
+            "A1 正面图"
+        );
+    }
+
+    /// `renamed_path` 的三条门槛：清洗分隔符、拒保留字符、只换末段
+    #[test]
+    fn renamed_path_keeps_the_directory_and_the_extension() {
+        use crate::presetdata::assets::renamed_path;
+        assert_eq!(
+            renamed_path("bbs/Process/0.2mm/a.json", "快速 b").unwrap(),
+            "bbs/Process/0.2mm/快速 b.json"
+        );
+        /* 分隔符剔掉（留着会把文件搬出这个目录） */
+        assert_eq!(renamed_path("bbs/x.json", "a/b").unwrap(), "bbs/ab.json");
+        assert!(
+            renamed_path("bbs/x.json", "a:b").is_err(),
+            "Windows 保留字符"
+        );
+        assert!(renamed_path("bbs/x.json", "   ").is_err(), "空名字");
+        assert!(renamed_path("bbs/x.json", "..").is_err());
+    }
+
+    /// 文件内容里的名字只改**已经写着名字**的那两格；不是 bbs 的一个字节都不碰
+    #[test]
+    fn rewriting_the_preset_name_touches_only_the_two_name_fields() {
+        let src = r#"{
+    "name": "旧名",
+    "print_settings_id": "旧名",
+    "type": "process"
+}
+"#
+        .as_bytes();
+        let out = rewrite_preset_name("新名", Some("bbs"), src).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"name\": \"新名\""));
+        assert!(text.contains("\"print_settings_id\": \"新名\""));
+        assert!(text.contains("\"type\": \"process\""), "别的字段一个不动");
+        assert!(text.ends_with('\n'), "结尾换行照旧");
+        assert_eq!(
+            text.matches("\n    \"").count(),
+            3,
+            "四空格缩进（与那份文件原来一致）：\n{text}"
+        );
+
+        /* Orca 那一档（或任何非 bbs）原样返回 */
+        assert_eq!(rewrite_preset_name("新名", Some("orca"), src).unwrap(), src);
+        /* 没有那两个键就不造字段 */
+        let bare = br#"{"type":"process"}"#;
+        assert_eq!(
+            rewrite_preset_name("新名", Some("bbs"), bare).unwrap(),
+            bare
         );
     }
 }

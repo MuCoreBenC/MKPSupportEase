@@ -963,6 +963,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 「在访达中显示」：前端只传资产 id，路径由后端算（只读、只开窗口、不碰状态）
         app::assets::wb_reveal_asset,
         app::assets::wb_remove_asset,
+        // 改名（2026-11-19）：一条命令 = 一条撤销 = 保存才落盘。预览只算不写，
+        // 与落盘共用 `plan_renames`（预览说能改，落盘就不会被同一件事拒）
+        app::assets::wb_rename_assets_preview,
+        app::assets::wb_rename_assets,
         app::assets::wb_set_asset_delivery,
         app::assets::wb_set_calibration_identity,
         // 「分组」（2026-10-16）：哪几张图共用同一份标注源稿 —— 登记在台账 `[[groups]]`，

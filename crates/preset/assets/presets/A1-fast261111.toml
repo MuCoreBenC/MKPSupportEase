@@ -1,6 +1,6 @@
 # machine: A1
 # variant: fast261111
-# generated_at: 2026-11-17T20:22:40+08:00
+# generated_at: 2026-11-19T11:26:47+08:00
 
 [toolhead]
 # 落笔 G-code
@@ -32,9 +32,9 @@ MKP_extrude_spread = false # 挤出分摊到擦料移动(开关)
 MKP_retract = -6 # 回抽长度(mm)
 MKP_retract_at = "model" # 回抽位置(model/wait/after_dock)
 MKP_retract_speed = 25 # 回抽速度(mm/s)
-offset_x = -0.7 # 笔尖偏移
+offset_x = -0.8 # 笔尖偏移
 offset_y = 24.4 # 笔尖偏移
-offset_z = 4 # 笔尖偏移
+offset_z = 4.1 # 笔尖偏移
 pen_mount_speed = 10000 # 落笔速度
 pen_mount_wait_x = 256 # 落笔等待位 X
 pen_mount_x = 267 # 落笔位 X

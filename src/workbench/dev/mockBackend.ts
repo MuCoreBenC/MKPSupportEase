@@ -373,7 +373,7 @@ const SHADOW_MUTATORS = new Set([
   'wb_set_machine_zones', 'wb_set_bundle_refs', 'wb_add_bundle',
   'wb_rename_bundle', 'wb_copy_bundle', 'wb_assign_bundle_versions',
   'wb_remove_bundle', 'wb_set_calibration_identity', 'wb_set_asset_delivery',
-  'wb_set_group', 'wb_remove_group', 'wb_remove_asset',
+  'wb_set_group', 'wb_remove_group', 'wb_remove_asset', 'wb_rename_assets',
 ])
 function captureShadow(): ShadowFixtures {
   return structuredClone({
@@ -780,6 +780,112 @@ function annoStemOf(assetId: string, assetPath: string): string {
   return pairStem(file.replace(/\.[^.]+$/, ''))
 }
 
+/** 显示名（与后端 `display_name` 同一口径）：MKP 预设 = 版本名、切片器 = 文件名、其余 = 台账名 */
+function displayOfAsset(a: FixtureRef): string {
+  if (a.kind === 'mkPreset') {
+    return (
+      MACHINE_VIEWS.find((m) => m.id === 'A1')?.versions.find((v) => v.id === 'STANDARD')?.name ??
+      a.name
+    )
+  }
+  if (a.kind === 'slicerProfile') {
+    return (a.path.split('/').pop() ?? a.path).replace(/\.json$/i, '')
+  }
+  return a.name
+}
+
+/** 切片器配置的「新名字 → 新路径」（桩版，与后端 `renamed_path` 同一条：只换末段干名） */
+function mockRenamedPath(oldPath: string, raw: string): string | null {
+  const stem = raw.replace(/[\\/:*?"<>|]/g, '').trim()
+  if (stem === '' || stem === '.' || stem === '..') return null
+  const file = oldPath.split('/').pop() ?? oldPath
+  const ext = /\.json$/i.test(file) ? file.slice(file.lastIndexOf('.')) : ''
+  const dir = oldPath.includes('/') ? oldPath.slice(0, oldPath.lastIndexOf('/')) : ''
+  return `${dir === '' ? '' : `${dir}/`}${stem}${ext}`
+}
+
+/**
+ * 改名计划（桩版）：与后端 `plan_renames` 同一套拦法 ——
+ * 层高被改掉、同一批撞同一个文件名、只差大小写、MKP 预设（名字来自版本名）。
+ */
+function mockRenamePlan(items: { id: string; display: string }[]) {
+  const rows = items.map((it) => {
+    const a = ASSETS.find((x) => x.id.toLowerCase() === it.id.trim().toLowerCase())
+    const row: {
+      id: string
+      kind: string | null
+      old: string
+      new: string
+      oldPath: string | null
+      newPath: string | null
+      changed: boolean
+      problem: string | null
+    } = {
+      id: it.id.trim(),
+      kind: a?.kind ?? null,
+      old: a ? displayOfAsset(a) : '',
+      new: it.display.trim(),
+      oldPath: null,
+      newPath: null,
+      changed: false,
+      problem: null,
+    }
+    if (!a) {
+      row.problem = '没有这条资产。'
+      return row
+    }
+    if (row.new === row.old) return row
+    if (a.kind === 'mkPreset') {
+      row.problem = '名字来自版本名，去「机型与版本」页改。'
+      return row
+    }
+    if (a.kind !== 'slicerProfile') {
+      if (row.new === '') row.problem = '名字不能空。'
+      else row.changed = true
+      return row
+    }
+    row.oldPath = a.path
+    const next = mockRenamedPath(a.path, row.new)
+    if (next === null) {
+      row.problem = '这个名字当不了文件名。'
+      return row
+    }
+    row.newPath = next
+    row.new = (next.split('/').pop() ?? next).replace(/\.json$/i, '')
+    const oldLayer = slicerAxes(a.path).layer
+    const newLayer = slicerAxes(next).layer
+    if (oldLayer !== newLayer) {
+      row.problem =
+        oldLayer === null
+          ? '这份没有层高后缀：新名字尾部别加数字。'
+          : `层高从文件名尾部读出来：新名字要以 ${oldLayer} 结尾。`
+    } else if (next === a.path) {
+      row.newPath = null
+    } else if (next.toLowerCase() === a.path.toLowerCase()) {
+      row.problem = '只差大小写，改不动。'
+    } else if (ASSETS.some((o) => o.id !== a.id && o.path.toLowerCase() === next.toLowerCase())) {
+      row.problem = `台账里已经有一条登记在 ${next}。`
+    } else {
+      row.changed = true
+    }
+    return row
+  })
+  const seen = new Map<string, number>()
+  for (const r of rows) {
+    if (r.changed && r.newPath !== null) seen.set(r.newPath, (seen.get(r.newPath) ?? 0) + 1)
+  }
+  for (const r of rows) {
+    if (r.changed && r.newPath !== null && (seen.get(r.newPath) ?? 0) > 1) {
+      r.changed = false
+      r.problem = '这一批里两条改成了同一个文件名。'
+    }
+  }
+  return {
+    rows,
+    ok: rows.length > 0 && rows.every((r) => r.problem === null) && rows.some((r) => r.changed),
+  }
+}
+
 function assetListOf(
   kind: string | null,
   slicer: string | null,
@@ -807,12 +913,7 @@ function assetListOf(
       id: a.id, kind: a.kind, machineId: a.id.startsWith('a1-') && a.kind !== 'model' ? 'A1' : a.id.startsWith('p1s-') ? 'P1S' : null,
       versionId: a.kind === 'mkPreset' ? 'STANDARD' : null,
       // 显示名一律真名：MKP 预设 = 版本名、切片器 = 文件名（与后端同一口径）
-      display:
-        a.kind === 'mkPreset'
-          ? (MACHINE_VIEWS.find((m) => m.id === 'A1')?.versions.find((v) => v.id === 'STANDARD')?.name ?? a.name)
-          : a.kind === 'slicerProfile'
-            ? (a.path.split('/').pop() ?? a.path).replace(/\.json$/i, '')
-            : a.name,
+      display: displayOfAsset(a),
       name: a.name, path: a.path, url: `/assets/${a.path}`, slicer: a.slicer, profile: a.profile,
       // 产物名（只 MKP 预设）—— 与真机同一条规则现算，不写死字面量
       productName:
@@ -2531,6 +2632,33 @@ export function installMockBackend() {
         }
         const at = ASSETS.findIndex((a) => a.id === assetId)
         if (at >= 0) ASSETS.splice(at, 1)
+        return Promise.resolve(assetListOf(null, null, null, null, null, null, null, null))
+      }
+      /* 改名（2026-11-19）：预览与落盘共用 `mockRenamePlan` —— 与后端同一条纪律，
+         预览说能改，落盘就不会被同一件事拒 */
+      case 'wb_rename_assets_preview': {
+        const items = (args?.items as { id: string; display: string }[]) ?? []
+        return Promise.resolve(mockRenamePlan(items))
+      }
+      case 'wb_rename_assets': {
+        const items = (args?.items as { id: string; display: string }[]) ?? []
+        const plan = mockRenamePlan(items)
+        const bad = plan.rows.find((r) => r.problem !== null)
+        if (bad) {
+          return Promise.reject({
+            code: 'INVALID',
+            message: `「${bad.new}」改不了名`,
+            detail: bad.problem,
+            traceId: 'mock',
+          })
+        }
+        for (const r of plan.rows) {
+          if (!r.changed) continue
+          const a = ASSETS.find((x) => x.id === r.id)
+          if (!a) continue
+          if (a.kind === 'slicerProfile' && r.newPath !== null) a.path = r.newPath
+          else a.name = r.new
+        }
         return Promise.resolve(assetListOf(null, null, null, null, null, null, null, null))
       }
       case 'wb_generate_preview': {
