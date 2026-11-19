@@ -1,7 +1,7 @@
 {
   "manifestVersion": 3,
   "channel": "stable",
-  "updated": "2026-11-17T13:34:21Z",
+  "updated": "2026-11-19T04:25:52Z",
   "minimumClient": "0.0.6",
   "version": "",
   "assets": [
@@ -29,8 +29,8 @@
       "machineId": "A1",
       "fileName": "A1-fast261111.toml",
       "relativePath": "delivery/mkp/presets/A1-fast261111.toml",
-      "sha256": "055b22b4b9060a66f03c06e38be62e1b1036c7aedb3af4ff30b965e3c8250274",
-      "size": 5358
+      "sha256": "f2654bc090c0d53bd1549e59158a0413494e56d9ae19220518a823b4d2fa39af",
+      "size": 5360
     },
     {
       "id": "A1_MINI-standard.toml",
@@ -56,8 +56,8 @@
       "machineId": "A1_MINI",
       "fileName": "A1_MINI-fast261111.toml",
       "relativePath": "delivery/mkp/presets/A1_MINI-fast261111.toml",
-      "sha256": "72a6fab744d0a9e4f1079a71e36a6ca2e69cc715229543d790375d1173312ffd",
-      "size": 5361
+      "sha256": "31420cce7cf7aab725695a6357682675c032379f1dc0970694005af1ea065641",
+      "size": 5363
     },
     {
       "id": "P1S-lite.toml",
@@ -108,37 +108,37 @@
       "id": "a1-bbs-04-020",
       "resourceType": "slicerProfile",
       "machineId": "A1",
-      "fileName": "MKPProcess A1 0.4 0.20.json",
-      "relativePath": "assets/bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json",
-      "sha256": "6084dcfa7046dfb75200377ae63b7d9a3e53d6d3bb1ec2ec8915325a5fa80877",
-      "size": 1352
+      "fileName": "SupportEASE A1 0.4 0.20.json",
+      "relativePath": "assets/bbs/Process/0.4mm/SupportEASE A1 0.4 0.20.json",
+      "sha256": "d803896236f0fdb9e5127997411825672f16500a3dc522826e9f30ea135590a4",
+      "size": 1372
     },
     {
       "id": "a1_mini-bbs-04-020",
       "resourceType": "slicerProfile",
       "machineId": "A1_MINI",
-      "fileName": "MKPProcess A1 mini 0.4 0.20.json",
-      "relativePath": "assets/bbs/Process/0.4mm/MKPProcess A1 mini 0.4 0.20.json",
-      "sha256": "74b25732ffc26f20443b6f2939f0ee38e99ef6e1e245719d75f80013afce8244",
-      "size": 1324
+      "fileName": "SupportEASE A1 mini 0.4 0.20.json",
+      "relativePath": "assets/bbs/Process/0.4mm/SupportEASE A1 mini 0.4 0.20.json",
+      "sha256": "3b38dd49568b72eb6ac82ca6179bc3afc0e5901b362300dcafb31730d5ae2eca",
+      "size": 1344
     },
     {
       "id": "p1s-bbs-04-024",
       "resourceType": "slicerProfile",
       "machineId": "P1S",
-      "fileName": "MKPProcess P1S 0.4 0.24.json",
-      "relativePath": "assets/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
-      "sha256": "9d652b83117f10661c0ce4b7f86ad7d8808ba1e02d3d4fee75a919f09ed4759e",
-      "size": 1891
+      "fileName": "SupportEASE P1S 0.4 0.24.json",
+      "relativePath": "assets/bbs/Process/0.4mm/SupportEASE P1S 0.4 0.24.json",
+      "sha256": "5d2c50d7b18359889f228bf9cf781e20623a8ffddca35cf1ba099ca50eaece35",
+      "size": 1911
     },
     {
       "id": "x1c-bbs-04-024",
       "resourceType": "slicerProfile",
       "machineId": "X1C",
-      "fileName": "MKPProcess X1 0.4 0.24.json",
-      "relativePath": "assets/bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json",
-      "sha256": "db15cf311d699ab0985fe917224743dcce9f7bcbe508141570507e24d9b7c3c7",
-      "size": 1945
+      "fileName": "SupportEASE X1 0.4 0.24.json",
+      "relativePath": "assets/bbs/Process/0.4mm/SupportEASE X1 0.4 0.24.json",
+      "sha256": "a05aca8e2ead6ab737632b98d97c417fe5dcfdfea541ed1fbc204e7afc0932b7",
+      "size": 1965
     }
   ]
 }
