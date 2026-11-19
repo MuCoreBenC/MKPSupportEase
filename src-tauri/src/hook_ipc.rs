@@ -334,6 +334,13 @@ pub struct FinishedPayload {
     /// ★ 不是撞塔的失败 / 成功的趟 ⇒ `null`，与从前一字不差。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geo: Option<RelocateGeoPayload>,
+    /// **越界那一趟的俯视几何**（2026-11-19）：允许范围 + 每块模型的轮廓与建议位移。
+    ///
+    /// 结果屏新增的「说明」页拿它画"超出范围那块标红 + 每块一支箭头"那张图 ——
+    /// 与归档那份 [`crate::archive::BoundaryRecord`] **同一个结构**（同一份事实，
+    /// 不各算一份）。别的失败 / 成功 = `null` ⇒ 那一页不摆。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<crate::archive::BoundaryRecord>,
 }
 
 /// **结果读数** —— 成功那一趟的几格读数（界面「结果 · 成功」要摆的）。
@@ -1268,6 +1275,43 @@ mod tests {
                 calib_choice: None,
                 relocation: None,
                 geo: None,
+                boundary: None,
+            })),
+            /* 越界那一条：几何要能过线（报告页与弹窗读的是同一份） */
+            FromHook::Finished(Box::new(FinishedPayload {
+                ok: false,
+                cancelled: false,
+                message: "处理失败".to_owned(),
+                code: Some("E_GCODE_BOUNDARY_001".to_owned()),
+                stage: Some("pass1".to_owned()),
+                exit_code: 1,
+                elapsed_ms: 12,
+                output: None,
+                warnings: Vec::new(),
+                result: None,
+                calib_choice: None,
+                relocation: None,
+                geo: None,
+                boundary: Some(crate::archive::BoundaryRecord {
+                    limit: postprocess::postproc::disk::collision::Box4 {
+                        x_min: -10.0,
+                        x_max: 180.0,
+                        y_min: 0.0,
+                        y_max: 180.0,
+                    },
+                    /* 笔尖比喷嘴偏 +6mm：界面据此另画一层、并把范围换到喷嘴坐标 */
+                    pen: [0.0, 6.0],
+                    pieces: vec![postprocess::postproc::disk::collision::BoundaryPiece {
+                        polygon: vec![[10.0, 10.0], [20.0, 10.0], [20.0, 20.0]],
+                        bbox: postprocess::postproc::disk::collision::Box4 {
+                            x_min: 10.0,
+                            x_max: 20.0,
+                            y_min: 10.0,
+                            y_max: 186.0,
+                        },
+                        shift: [0.0, -6.0],
+                    }],
+                }),
             })),
             FromHook::DevScene {
                 scene: "question".to_owned(),
@@ -1346,6 +1390,7 @@ mod tests {
             calib_choice: None,
             relocation: None,
             geo: None,
+            boundary: None,
         })));
 
         assert!(

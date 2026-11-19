@@ -285,6 +285,11 @@ pub struct HookError {
     ///   它本来就该跟原因一起走。`Box` 的理由同 `collision`：撑大 `HookError` 会让
     ///   每个 `Result<Outcome, HookError>` 一起变大（clippy `result_large_err`）。
     relocation: Option<Box<crate::archive::RelocationRecord>>,
+    /// **越界那一趟的俯视几何**（2026-11-19；只有 `E_GCODE_BOUNDARY_00x` 有）。
+    ///
+    /// 与 `collision` / `relocation` 同一档、同一条理由：它是"为什么没成"的一部分，
+    /// 失败出口只传这个 `Result`，报告页与弹窗那两处都从它取（不是各算一遍）。
+    boundary: Option<Box<crate::archive::BoundaryRecord>>,
 }
 
 impl HookError {
@@ -294,6 +299,7 @@ impl HookError {
             reason,
             collision: None,
             relocation: None,
+            boundary: None,
         }
     }
 
@@ -303,6 +309,7 @@ impl HookError {
             reason,
             collision: None,
             relocation: None,
+            boundary: None,
         }
     }
 
@@ -315,6 +322,7 @@ impl HookError {
             reason,
             collision: None,
             relocation: None,
+            boundary: None,
         }
     }
 
@@ -336,6 +344,17 @@ impl HookError {
     /// 撞塔那一趟的挪塔记录（没走到那一步 ⇒ `None`）。
     pub fn relocation(&self) -> Option<&crate::archive::RelocationRecord> {
         self.relocation.as_ref().map(|b| b.as_ref())
+    }
+
+    /// 把越界那一趟的几何挂上来（链式构造；`None` 原样返回）。
+    pub fn with_boundary_opt(mut self, record: Option<crate::archive::BoundaryRecord>) -> Self {
+        self.boundary = record.map(Box::new);
+        self
+    }
+
+    /// 越界那一趟的几何（不是越界 ⇒ `None`）。
+    pub fn boundary(&self) -> Option<&crate::archive::BoundaryRecord> {
+        self.boundary.as_ref().map(|b| b.as_ref())
     }
 
     pub fn exit_code(&self) -> u8 {
@@ -435,6 +454,47 @@ fn model_map_from(
     ir: Option<&postprocess::ir::Ir>,
 ) -> Option<postprocess::postproc::disk::collision::ModelMapFacts> {
     ir.and_then(|ir| model_map_of(content, ir))
+}
+
+/* ---------- 越界那一趟的俯视几何（2026-11-19）---------- */
+
+/// 越界失败的几何：**判据用的允许范围** + **每块模型的轮廓与建议位移**。
+///
+/// 只有两条边界码会带这一格；别的失败一律 `None`（于是"有没有那张图"是数据说了算）。
+/// 允许范围按码分两档，与判据逐字一致：`_001` = 机型打印范围，`_002` = 涂胶范围 ——
+/// 这一档**不许**在这里另立一套（判据改了这里跟着改）。
+fn boundary_record(
+    err: &HookError,
+    ir: Option<&postprocess::ir::Ir>,
+    content: &[String],
+) -> Option<crate::archive::BoundaryRecord> {
+    use postprocess::postproc::disk::collision::Box4;
+
+    let ir = ir?;
+    let machine = &ir.machine;
+    let limit = match err.reason().code()?.as_str() {
+        "E_GCODE_BOUNDARY_001" => Box4 {
+            x_min: machine.min_x,
+            x_max: machine.max_x,
+            y_min: machine.min_y,
+            y_max: machine.max_y,
+        },
+        "E_GCODE_BOUNDARY_002" => Box4 {
+            x_min: machine.glue_min_x,
+            x_max: machine.glue_max_x,
+            y_min: machine.glue_min_y,
+            y_max: machine.glue_max_y,
+        },
+        _ => return None,
+    };
+    /* 一块模型一条轮廓 + 一个建议位移（越界那块才挪得动 —— 见内核） */
+    let pieces = postprocess::postproc::disk::model_pieces_beyond(content, ir, &limit);
+    Some(crate::archive::BoundaryRecord {
+        limit,
+        /* 笔尖偏移：界面拿它画"笔尖轮廓"那一层、并把判据范围换到喷嘴坐标 */
+        pen: [ir.toolhead.x_offset, ir.toolhead.y_offset],
+        pieces,
+    })
 }
 
 impl std::error::Error for HookError {}
@@ -1311,6 +1371,10 @@ pub fn run(
                     e = tower_failure_error(record, facts).with_relocation(record.clone());
                 }
             }
+            /* 越界那一趟：把几何挂到错误上 —— 归档与结算消息**读同一份**，
+            不在这里各算一遍（`model_pieces_beyond` 要扫全文） */
+            let boundary = boundary_record(&e, Some(&ir_before), &content);
+            e = e.with_boundary_opt(boundary);
             let failed_pipeline = steps.finish(if e.cancelled() {
                 PipelineStatus::Cancelled
             } else {
@@ -1682,6 +1746,8 @@ fn archive_success(
         的时候碰撞检测的那个显示的一样的，复用的」）：报告页擦料塔那一栏的俯视图用它
         画模型。几何与碰撞检测同一套切法（内核 `model_map_facts`），这里只调用、不新算。 */
         model_map: model_map_of(content, &done.detail_facts.ir),
+        /* 成功那趟没有越界几何（越界了就走不到这里）—— 这一格恒 `null` */
+        boundary: None,
         /* 挪过塔就记一笔（成功那趟也可能挪过 —— 那正是"挪完复检通过"） */
         relocation: relocation.cloned(),
         detail,
@@ -1890,6 +1956,8 @@ fn archive_failure(
         /* 模型俯视几何：失败那趟也画（碰撞那一屏的模型框就靠它，report 页的擦料塔
         那一栏同样读它）—— 调用方算好递进来，见 `model_map_from`。 */
         model_map,
+        /* 越界那一趟的几何挂在错误上（`HookError::boundary`）—— 与结算消息同一份 */
+        boundary: err.boundary().cloned(),
         relocation: relocation.cloned(),
         detail: Detail {
             /* 失败那趟不记调试参数：没写产物，记下来也解释不了什么 */
@@ -2734,6 +2802,8 @@ fn finished_payload(
             relocation: out.relocation.clone(),
             /* 成功的趟一律不带画布几何（它走 `relocation` 那条路摆图） */
             geo: None,
+            /* 越界几何只有失败那两条边界码才有 —— 这一格恒 `null` */
+            boundary: None,
         },
         Err(err) => {
             /* 原因与码分家：界面把原因摆正中、码摆小字。
@@ -2771,6 +2841,8 @@ fn finished_payload(
                  *   撞停那趟"本该挪到哪"正是用户要看的；没有记录（比如板上摆不下、
                  *   或压根没走到撞塔）⇒ `None`，两幅图退化成"只有现在"。
                  */
+                /* 越界那一趟：界面「说明」页那张图要的几何（挂在错误上，见 `HookError`） */
+                boundary: err.boundary().cloned(),
                 geo: err
                     .collision()
                     .map(|facts| crate::hook_ipc::RelocateGeoPayload {
@@ -3395,6 +3467,72 @@ mod tests {
             .filter(|n| n != "ref.gcode" && n != "A1_MINI-fast.toml")
             .collect();
         assert!(leftovers.is_empty(), "中间文件残留：{leftovers:?}");
+    }
+
+    /// **越界那一趟的两块几何**（2026-11-19）：允许范围按码取，模型框带笔偏移。
+    ///
+    /// 报告页那张图靠这两格：范围错了会把板外的点画成"允许"，框错了红区就不在实处。
+    #[test]
+    fn a_boundary_failure_carries_its_limit_and_model_box() {
+        let mut ir = postprocess::ir::Ir::default();
+        ir.machine.min_x = 0.0;
+        ir.machine.max_x = 256.0;
+        ir.machine.min_y = 0.0;
+        ir.machine.max_y = 180.0;
+        ir.machine.glue_min_x = 20.0;
+        ir.machine.glue_max_x = 240.0;
+        ir.machine.glue_min_y = 0.0;
+        ir.machine.glue_max_y = 170.0;
+        ir.toolhead.y_offset = 2.0;
+        /* 带 ` E`：模型点只认挤出移动（与切片器产物一致） */
+        let content: Vec<String> = ["G1 X10.0 Y100.0 E0.5", "G1 X20.0 Y179.5 E0.5"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+
+        let boundary = |code: &'static str| {
+            HookError::from(postprocess::diag::PostprocError::Boundary {
+                code,
+                sides: "x".into(),
+            })
+        };
+
+        let rec = boundary_record(&boundary("E_GCODE_BOUNDARY_001"), Some(&ir), &content)
+            .expect("打印边界要有几何");
+        assert_eq!(rec.limit.y_max, 180.0, "允许范围 = 机型打印范围");
+        assert_eq!(rec.pieces.len(), 2, "两块模型各自一条");
+        /* 笔偏移原样带出来（界面靠它画笔尖那一层、并把判据范围换到喷嘴坐标） */
+        assert_eq!(rec.pen, [0.0, 2.0], "笔尖相对喷嘴的偏移");
+
+        let high = rec
+            .pieces
+            .iter()
+            .max_by(|a, b| a.bbox.y_max.total_cmp(&b.bbox.y_max))
+            .expect("两块里必有一块最高");
+        assert!(
+            high.bbox.y_max <= 180.0,
+            "几何是喷嘴坐标（模型自己没出板）：{:?}",
+            high.bbox
+        );
+        assert!(high.shift[1] < 0.0, "判据是笔尖：这一块要往回挪");
+        assert_eq!(high.shift[0], 0.0, "X 没越界");
+
+        /* 线上 / 盘上那份形状就是界面读的那几个键（`limit` / `pen` / `pieces[].*`） */
+        let json = serde_json::to_value(&rec).expect("序列化");
+        assert!(json["limit"]["yMax"].is_number(), "{json}");
+        assert_eq!(json["pen"][1], 2.0, "{json}");
+        assert!(json["pieces"][0]["polygon"].is_array(), "{json}");
+        assert!(json["pieces"][0]["bbox"]["xMin"].is_number(), "{json}");
+        assert!(json["pieces"][0]["shift"][1].is_number(), "{json}");
+
+        let glue = boundary_record(&boundary("E_GCODE_BOUNDARY_002"), Some(&ir), &content)
+            .expect("涂胶范围也要有");
+        assert_eq!(glue.limit.x_min, 20.0, "允许范围 = 涂胶范围");
+
+        /* 别的失败、没有 IR：都不许编几何 */
+        let other = HookError::failed(Reason::new(keys::PRESET_MISSING));
+        assert!(boundary_record(&other, Some(&ir), &content).is_none());
+        assert!(boundary_record(&boundary("E_GCODE_BOUNDARY_001"), None, &content).is_none());
     }
 
     /// 本层用到的每个文案键都**真在表里**（敲错键的表现是用户那边的框里出现

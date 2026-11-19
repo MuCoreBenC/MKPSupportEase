@@ -132,6 +132,7 @@ import ui from '../ui/ui.module.css'
 import ExportModal from './ExportModal'
 import PostProcessModal from '../postprocess/PostProcessModal'
 import CollisionMap from './CollisionMap'
+import BoundaryPlate from './BoundaryPlate'
 import RelocationBoards from './RelocationBoards'
 import { SETTINGS_TARGET_TOWER } from '../settings/targets'
 import type { SettingsTargetId } from '../settings/targets'
@@ -307,6 +308,12 @@ function replayRunOf(d: ReportDetail): PostProcessRun {
        * 也能在「说明」页翻页。没有这一格（没挪过塔 / 旧记录）⇒ 缺省，那一块不摆。
        */
       relocation: d.relocation ?? null,
+      /*
+       * **越界几何照记录给**（2026-11-19）：回放也要能摆那张"超出范围标红 + 箭头"的
+       * 俯视图、也要有「说明」页那颗切换钮 —— 作者：「回放的时候那个切换按钮没有了」。
+       * 旧记录没有这一格 ⇒ `null` ⇒ 回放退回只有信息那一页（与从前一致）。
+       */
+      boundary: d.boundary ?? null,
       /* **碰撞几何照记录给**：失败那趟的「说明」页要拿它画两幅俯视图 */
       geo:
         d.collision == null
@@ -2713,6 +2720,19 @@ export default function PageReport({
                                     slicerTower={detail.tower?.slicerTower}
                                   />
                                 )}
+                                {/* 越界那一趟：同一块画布，凸出允许范围的那一块标红
+                                    （旧记录没有 `boundary` ⇒ 不摆） */}
+                                {g.id === 'result' &&
+                                  detail.boundary != null &&
+                                  (detail.boundary.pieces ?? []).length > 0 && (
+                                    <div className={s.plate}>
+                                      <BoundaryPlate
+                                        boundary={detail.boundary}
+                                        modelMap={detail.modelMap ?? null}
+                                        machineType={detail.summary.machineType}
+                                      />
+                                    </div>
+                                  )}
                               </>
                             )}
                           </div>

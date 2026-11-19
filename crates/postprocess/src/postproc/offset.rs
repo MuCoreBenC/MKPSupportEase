@@ -66,9 +66,12 @@ impl BoundaryError {
     /// 全在 `messages.toml` 那几条 `boundary.*` 里。本函数只做表做不了的那件事 ——
     /// X 与 Y **同时**越界时要拼两段（模板语言里没有循环）。
     fn sides(&self) -> String {
-        let clause = |axis: char, current: f64, lo: f64, hi: f64| {
+        /* 一条轴的说法 = 「现在是多少、允许到哪」+「往哪边挪多少」。
+         * 后者是 2026-11-19 加的：只报"超了 9mm"用户还得自己算挪哪边。 */
+        let clause = |axis: char, current: f64, lo: f64, hi: f64, required_move: f64| {
             // 只剩一种可能：出到界外了（调用点只在越界时才建这条），所以不是下界就是上界
-            let (key, bound) = if current < lo {
+            let below = current < lo;
+            let (key, bound) = if below {
                 ("boundary.limit.min", lo)
             } else {
                 ("boundary.limit.max", hi)
@@ -76,10 +79,13 @@ impl BoundaryError {
             let limit = messages::text(key, &[("value", &format!("{bound:.1}"))]);
             let current = format!("{current:.1}");
             let axis = axis.to_string();
-            messages::text(
+            let head = messages::text(
                 "boundary.clause",
                 &[("axis", &axis), ("current", &current), ("limit", &limit)],
-            )
+            );
+            /* 只报超出多少：往哪挪由报告页那张图上的箭头说（2026-11-19） */
+            let mm = format!("{required_move:.1}");
+            format!("{head}{}", messages::text("boundary.over", &[("mm", &mm)]))
         };
         let mut parts: Vec<String> = Vec::new();
         if self.axis_x {
@@ -88,6 +94,7 @@ impl BoundaryError {
                 self.current_x,
                 self.limit_x_min,
                 self.limit_x_max,
+                self.required_move_x,
             ));
         }
         if self.axis_y {
@@ -96,6 +103,7 @@ impl BoundaryError {
                 self.current_y,
                 self.limit_y_min,
                 self.limit_y_max,
+                self.required_move_y,
             ));
         }
         parts.join(&messages::text("boundary.separator", &[]))
@@ -369,6 +377,48 @@ fn closes_machine_block(head: &str) -> bool {
         || head.starts_with("; EXECUTABLE_BLOCK_END")
 }
 
+/// 模型路径的 X/Y 极值（**G-code 原坐标**，机器起手 / 结束段不算）。
+///
+/// 某一轴一个点都没有 ⇒ `None`（不拿 0 顶替）。
+#[derive(Debug, Clone, Copy, Default)]
+struct XyLimits {
+    x: Option<(f64, f64)>,
+    y: Option<(f64, f64)>,
+}
+
+fn scan_xy_limits(content: &[String]) -> XyLimits {
+    let skip = machine_block_mask(content);
+    let mut limits = XyLimits::default();
+    let (mut min_x, mut max_x) = (f64::INFINITY, f64::NEG_INFINITY);
+    let (mut min_y, mut max_y) = (f64::INFINITY, f64::NEG_INFINITY);
+    for (i, line) in content.iter().enumerate() {
+        if skip[i] {
+            continue;
+        }
+        let head = line.trim_start();
+        /* 切片器出来的坐标都在 G0 / G1 上，别的行不看 */
+        if !(head.starts_with("G1") || head.starts_with("G0")) {
+            continue;
+        }
+        let v = parse_xyze(head.as_bytes());
+        if v.has_x {
+            min_x = min_x.min(v.x);
+            max_x = max_x.max(v.x);
+        }
+        if v.has_y {
+            min_y = min_y.min(v.y);
+            max_y = max_y.max(v.y);
+        }
+    }
+    if min_x.is_finite() {
+        limits.x = Some((min_x, max_x));
+    }
+    if min_y.is_finite() {
+        limits.y = Some((min_y, max_y));
+    }
+    limits
+}
+
 /// 跑管线之前的**粗检**：拿模型路径的 X/Y 极值 + 笔偏移对一遍板范围，明显越界就立刻报。
 ///
 /// # 它不替掉逐行那道闸
@@ -394,37 +444,13 @@ pub(crate) fn check_xy_bounds_early(
         return Ok(());
     }
 
-    let skip = machine_block_mask(content);
-    let mut min_x = f64::INFINITY;
-    let mut max_x = f64::NEG_INFINITY;
-    let mut min_y = f64::INFINITY;
-    let mut max_y = f64::NEG_INFINITY;
-    for (i, line) in content.iter().enumerate() {
-        if skip[i] {
-            continue;
-        }
-        let head = line.trim_start();
-        /* 切片器出来的坐标都在 G0 / G1 上，别的行不看 */
-        if !(head.starts_with("G1") || head.starts_with("G0")) {
-            continue;
-        }
-        let v = parse_xyze(head.as_bytes());
-        if v.has_x {
-            min_x = min_x.min(v.x);
-            max_x = max_x.max(v.x);
-        }
-        if v.has_y {
-            min_y = min_y.min(v.y);
-            max_y = max_y.max(v.y);
-        }
-    }
-
+    let limits = scan_xy_limits(content);
     let machine = &ir_data.machine;
     let (xl, xh) = (machine.min_x - margin, machine.max_x + margin);
     let (yl, yh) = (machine.min_y - margin, machine.max_y + margin);
 
     let mut err: Option<BoundaryError> = None;
-    if min_x.is_finite() {
+    if let Some((min_x, max_x)) = limits.x {
         let (lo, hi) = (
             min_x + ir_data.toolhead.x_offset,
             max_x + ir_data.toolhead.x_offset,
@@ -452,7 +478,7 @@ pub(crate) fn check_xy_bounds_early(
             });
         }
     }
-    if min_y.is_finite() {
+    if let Some((min_y, max_y)) = limits.y {
         let (lo, hi) = (
             min_y + ir_data.toolhead.y_offset,
             max_y + ir_data.toolhead.y_offset,
@@ -547,6 +573,24 @@ mod early_boundary_tests {
             check_xy_bounds_early(&content, &ir_data, EARLY_BOUNDARY_MARGIN_MM).is_ok(),
             "余量内的越界不该由粗检拦下"
         );
+    }
+
+    /// 越界那句只报**超出多少**（2026-11-19）：方向交给报告页那张图上的箭头，
+    /// 句子里不再出现 `Y-` 这种写法。
+    #[test]
+    fn the_boundary_reports_only_how_far_it_spills() {
+        let ir_data = ir_with_pen_y_offset(2.0);
+        let content = lines("G1 X10.0 Y179.5 F3000\n");
+        let err = check_xy_bounds_early(&content, &ir_data, EARLY_BOUNDARY_MARGIN_MM)
+            .expect_err("181.5 越过 180");
+        match err {
+            PostprocError::Boundary { sides, .. } => {
+                assert!(sides.contains("1.5"), "超出量要报出来：{sides}");
+                assert!(!sides.contains("Y-"), "不再写方向：{sides}");
+                assert!(sides.contains("超出"), "要有那一截：{sides}");
+            }
+            other => panic!("该报边界错，实际 {other:?}"),
+        }
     }
 
     /// 调试那一趟：正式坐标本来就走出床外（落笔 267 / 收笔 276），与逐行同一条豁免。

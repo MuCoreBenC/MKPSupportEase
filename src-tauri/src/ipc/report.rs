@@ -142,6 +142,10 @@ pub struct ReportDetail {
     /// 为什么单列一格而不是塞进 `collision`：成功那趟 `collision` 恒为 `null`，
     /// 而作者要看的正是成功那趟。旧记录 / 那趟算不出来 ⇒ `null` ⇒ 页面退回"只有塔"那幅。
     pub model_map: Option<serde_json::Value>,
+    /// **越界那一趟的俯视几何**（`_meta.json` 顶层 `boundary`，2026-11-19）：
+    /// 判据用的允许范围 + 模型框（含笔偏移）。只有 `E_GCODE_BOUNDARY_00x` 有 ——
+    /// 报告页据此把"超出范围的那一块"标红；别的记录 / 旧记录一律 `null`。
+    pub boundary: Option<serde_json::Value>,
     /// **参数快照**（`detail.snapshot`，2026-10-21）：切片那一刻预设 TOML 的全量参数
     /// + IR 终态原样。旧记录没有这个键 ⇒ `null` ⇒ 页面整组不摆。
     pub snapshot: Option<serde_json::Value>,
@@ -486,6 +490,7 @@ fn detail_of(summary: ReportSummary, meta: &serde_json::Value) -> ReportDetail {
         warnings: localized_warnings_in(messages::current(), meta),
         collision: meta.get("collision").cloned(),
         model_map: meta.get("modelMap").cloned(),
+        boundary: meta.get("boundary").cloned(),
         relocation: meta.get("relocation").cloned(),
         invocation: meta.get("invocation").cloned(),
         preset_path: str_at("presetPath"),
@@ -1307,6 +1312,45 @@ mod tests {
         let d = detail_of(summary, &old);
         assert!(d.glue.is_none() && d.tower.is_none() && d.slicer.is_none());
         assert!(d.estimated_print_seconds.is_none());
+    }
+
+    /// **越界那一格原样透传**（2026-11-19）：报告页靠 `boundary.limit` / `boundary.model`
+    /// 画"超出范围标红"那张图 —— 键名漂了图就整块不摆（旧记录本来就没有这一格）。
+    #[test]
+    fn the_boundary_geometry_is_passed_through() {
+        let summary = ReportSummary {
+            id: "x_20261119_100000".into(),
+            day: "2026-11-19".into(),
+            started_at: Some("2026-11-19 10:00:00".into()),
+            finished_at: None,
+            elapsed_ms: None,
+            preset_name: None,
+            machine_type: Some("A1_MINI".into()),
+            gcode_name: None,
+            model_name: None,
+            ok: false,
+            error: Some("处理失败".into()),
+            warning_count: 0,
+        };
+        let meta = serde_json::json!({
+            "boundary": {
+                "limit": {"xMin": -10.0, "xMax": 180.0, "yMin": 0.0, "yMax": 180.0},
+                "pieces": [{
+                    "polygon": [[30.0, 20.0], [150.0, 20.0], [150.0, 189.0]],
+                    "bbox": {"xMin": 30.0, "xMax": 150.0, "yMin": 20.0, "yMax": 189.0},
+                    "shift": [0.0, -9.0]
+                }]
+            }
+        });
+        let d = detail_of(summary.clone(), &meta);
+        let b = d.boundary.expect("越界几何要带出来");
+        assert_eq!(b["limit"]["yMax"], 180.0);
+        assert_eq!(b["pieces"][0]["bbox"]["yMax"], 189.0);
+        assert_eq!(b["pieces"][0]["shift"][1], -9.0);
+
+        /* 旧记录 / 别的失败：这一格是 `null` ⇒ 报告页不摆图 */
+        let d = detail_of(summary, &serde_json::json!({"error": "x"}));
+        assert!(d.boundary.is_none());
     }
 
     /* ---------- 导出（2026-10-11） ---------- */

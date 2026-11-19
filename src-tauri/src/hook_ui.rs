@@ -1011,9 +1011,10 @@ impl HookView {
                 warnings: Vec::new(),
                 result: None,
                 calib_choice: None,
-                /* 重置收场：没有挪塔这回事 */
+                /* 重置收场：没有挪塔这回事，也没有越界几何 */
                 relocation: None,
                 geo: None,
+                boundary: None,
             },
         );
 
@@ -1441,6 +1442,8 @@ mod tests {
             calib_choice: None,
             relocation: None,
             geo: None,
+            /* 这一条只验结论存进快照；越界几何另有一条过线判据 */
+            boundary: None,
         });
         let snap = view.snapshot().expect("结论也在快照里");
         assert!(snap.question.is_none());

@@ -16,9 +16,10 @@ pub use calibration::{
     generate_calibration_gcode_with_centroid, generate_calibration_gcode_with_centroid_rec,
 };
 pub use collision::{
-    AdjustmentTarget, CollisionFacts, CollisionResult, CollisionType, ModelFootprint,
-    ModelMapFacts, MoveAttempt, TowerAsk, TowerAskOutcome, auto_tower_position_for_facts,
-    detect_tower_collision, model_footprint, model_map_facts,
+    AdjustmentTarget, BoundaryPiece, CollisionFacts, CollisionResult, CollisionType,
+    ModelFootprint, ModelMapFacts, MoveAttempt, TowerAsk, TowerAskOutcome,
+    auto_tower_position_for_facts, detect_tower_collision, model_footprint, model_map_facts,
+    model_pieces_beyond,
 };
 
 /// processor.ComputeBBox（对照 bbox_compute.go / model_z_map.go:59）：
