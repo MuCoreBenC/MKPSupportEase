@@ -608,7 +608,19 @@ fn cleanup_mode(dir: &Path, wait_pid: Option<u32>) {
         unsafe { wait_for_process(pid) };
     }
     std::thread::sleep(std::time::Duration::from_millis(400));
-    let _ = std::fs::remove_dir_all(dir);
+
+    // ★ Windows 不允许删除进程的当前工作目录。
+    //   用户从安装目录里双击 uninstall.exe 时，副本继承的那个 cwd 就是安装目录，
+    //   remove_dir_all 会悄悄失败 —— 表现为"东西都删了，文件夹还在"。
+    //   （老 CMD 版里那句 cd /d "%SystemRoot%" 就是在解决同一件事。）
+    let _ = std::env::set_current_dir(std::env::temp_dir());
+
+    for _ in 0..5 {
+        if std::fs::remove_dir_all(dir).is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
     unsafe { schedule_self_delete() };
 }
 
