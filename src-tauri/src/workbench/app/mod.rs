@@ -97,6 +97,9 @@ pub mod preview_tx;
 /// **发布账本**：`presets/delivery/publish-serial.json` —— 发布线身份 + 单调序号。
 /// 只有正式发布事务能推进它；生成 / 预演只沿用（见该文件头）
 pub mod publish_book;
+/// **发布快照**：把 `target/local-release/` 当成可快照的状态 —— 拍一份 / 临时写新版 /
+/// 还原。只动覆盖层，不碰 `presets/delivery/`、不打 tag、不滚版本。
+pub mod publish_snapshot;
 /// **发布事务**（第三刀下半）：audit → generate → 定稿 → 本地 git → 平台 PR/MR，
 /// 串成一次手势 + 平台无关的状态模型。**锁无关内核**，只收 `&Ctx`
 pub mod publish_tx;

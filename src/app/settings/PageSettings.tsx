@@ -1611,9 +1611,8 @@ export default function PageSettings({
           )}
 
           {/*
-           * 更新渠道（2026-11-10 第三版）：**一直都在**（作者：「那个切换不同版本，正式版
-           * 测试版的切换按钮呢」）。它是"跟着哪一路走"的偏好，不是"只有两条候选时才有"。
-           * 哪一路这趟没有候选 ⇒ 那一颗仍可点（换个渠道再检查），只是候选行会退回另一路。
+           * 更新渠道：选中态只认用户点过哪一颗。候选行仍可回退到另一路展示，
+           * 但那不能反过来改写这一格的选中状态 —— 否则只有测试版候选时，点正式版会被顶回去。
            */}
           <div className={`${s.field} ${s.fieldRow}`}>
             <div className={s.fieldText}>
@@ -1632,7 +1631,7 @@ export default function PageSettings({
                   key={c.id}
                   type="button"
                   role="radio"
-                  aria-checked={(picked?.channel ?? channelPick) === c.id}
+                  aria-checked={channelPick === c.id}
                   onClick={() => {
                     track('update.channel', { to: c.id })
                     setChannelPick(c.id)

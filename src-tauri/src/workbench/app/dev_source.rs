@@ -636,14 +636,10 @@ fn spawn_server(repo: &Path, served: &Served) -> Result<Child, AppError> {
     cmd.args(["run", NPM_SCRIPT])
         .current_dir(repo)
         .env(ROOT_ENV, &served.root)
-        .env(BUMP_ENV, "1");
-    /* **有就叠，不问人**：
-    `target/local-release/` 里有清单 ⇒ `/delivery/release*.json` 换成那份；
-    没有 ⇒ 什么都不做，客户端看到的就是已发布的那一版。
-    服务根不变 —— 覆盖的是那两份清单，不是目录。 */
-    if local_manifests(served).next().is_some() {
-        cmd.env(LOCAL_RELEASE_ENV, "1");
-    }
+        .env(BUMP_ENV, "1")
+        /* 覆盖层**一直开着**：`server.mjs` 只在文件存在时才用它，找不到就回落到仓库那份。
+        这样"模拟发布"在服务跑着的时候写进来的清单立刻生效，不用先停服务再起。 */
+        .env(LOCAL_RELEASE_ENV, "1");
     /* 输出继承下去：服务与客户端 dev 的日志就打在起工作台的那个终端里 */
     cmd.stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -1170,7 +1166,11 @@ pub fn wb_dev_source_stop() -> Result<DevSourceStatus, AppError> {
         let repo = crate::workbench::paths::repo_root();
         let mut guard = slot().lock().unwrap_or_else(|e| e.into_inner());
         let Some(mut cur) = guard.take() else {
-            return Ok(base_status(&repo, Some("本来就没在跑".to_owned())));
+            let note = match super::publish_snapshot::restore_on_stop(&repo) {
+                Some(r) => format!("本来就没在跑；{r}"),
+                None => "本来就没在跑".to_owned(),
+            };
+            return Ok(base_status(&repo, Some(note)));
         };
         kill_process_tree(cur.pid);
         /* 包装层自己收一次尸：Windows 上 PID 复用很快，不 wait 就分不清
@@ -1196,6 +1196,11 @@ pub fn wb_dev_source_stop() -> Result<DevSourceStatus, AppError> {
                 }
             }
             Err(e) => format!("已停（不过收尸时出了点岔子：{e}）"),
+        };
+        /* 有发布快照就还原：停服务 = 这一轮测试结束，覆盖层回到拍快照时的样子 */
+        let note = match super::publish_snapshot::restore_on_stop(&repo) {
+            Some(r) => format!("{note}；{r}"),
+            None => note,
         };
         tracing::info!(pid = cur.pid, "本地测试源已停（端口让出来了）");
         Ok(base_status(&repo, Some(note)))

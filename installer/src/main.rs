@@ -165,6 +165,13 @@ fn silent_install_dir() -> PathBuf {
 
 /// 双击 setup.exe 时先看注册表里有没有装过 —— 只认卸载项，不扫 C/D/E/F 盘。
 /// 旧 NSIS 版写的也是同一个键，靠 UninstallString / 目录内容区分是哪一代装的。
+/// 绿色版布局：目录里是 SupportEase.exe（不是安装版的 mkp-support-ease.exe），
+/// 数据在同目录的 app-data/。绿色版卸载只删自己所在的文件夹，
+/// 绝不能碰注册表卸载项 / 快捷方式 / %APPDATA%SupportEase —— 那是安装版的东西。
+fn is_portable_layout(dir: &Path) -> bool {
+    dir.join("SupportEase.exe").exists() && !dir.join(APP_EXE).exists()
+}
+
 fn installed_info() -> serde_json::Value {
     use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
@@ -235,6 +242,7 @@ fn on_message(hwnd: isize, raw: &str) {
                 default_install_dir().to_string_lossy().into_owned()
             },
             "version": app_version(),
+            "portable": is_uninstall() && is_portable_layout(&install_dir_of_self()),
             // 直接随 init 带过去：少一次消息往返，也不会因 WebView 消息时序丢一帧
             "installed": installed_info(),
         })),
@@ -676,24 +684,32 @@ fn remove_uninstall_entry() {
 /// 卸载：删快捷方式 / 卸载项 /（可选）用户数据，然后把「删目录」交给一个临时副本 ——
 /// 运行中的 exe 删不掉自己，必须先跳出安装目录。
 fn run_uninstall(dir: &Path, wipe: bool, mut report: impl FnMut(u32, &str)) -> Result<(), String> {
-    report(4, "正在关闭 SupportEase…");
-    let _ = hidden("taskkill").args(["/f", "/im", APP_EXE]).output();
+    if is_portable_layout(dir) {
+        report(4, "正在关闭 SupportEase…");
+        // 绿色版的主程序叫 SupportEase.exe，进程名也就是它
+        let _ = hidden("taskkill")
+            .args(["/f", "/im", "SupportEase.exe"])
+            .output();
+        report(78, "正在安排文件清理…");
+    } else {
+        report(4, "正在关闭 SupportEase…");
+        let _ = hidden("taskkill").args(["/f", "/im", APP_EXE]).output();
 
-    report(18, "正在删除快捷方式…");
-    let _ = std::fs::remove_file(user_desktop().join(format!("{PRODUCT}.lnk")));
-    let _ = std::fs::remove_file(start_menu_programs().join(format!("{PRODUCT}.lnk")));
+        report(18, "正在删除快捷方式…");
+        let _ = std::fs::remove_file(user_desktop().join(format!("{PRODUCT}.lnk")));
+        let _ = std::fs::remove_file(start_menu_programs().join(format!("{PRODUCT}.lnk")));
 
-    report(32, "正在移除卸载信息…");
-    remove_uninstall_entry();
+        report(32, "正在移除卸载信息…");
+        remove_uninstall_entry();
 
-    if wipe {
-        report(46, "正在删除预设与校准记录…");
-        if let Some(appdata) = std::env::var_os("APPDATA") {
-            let _ = std::fs::remove_dir_all(PathBuf::from(appdata).join(PRODUCT));
+        if wipe {
+            report(46, "正在删除预设与校准记录…");
+            if let Some(appdata) = std::env::var_os("APPDATA") {
+                let _ = std::fs::remove_dir_all(PathBuf::from(appdata).join(PRODUCT));
+            }
         }
+        report(78, "正在安排文件清理…");
     }
-
-    report(78, "正在安排文件清理…");
     let me = std::env::current_exe().map_err(|e| format!("找不到卸载器自身：{e}"))?;
     let helper = std::env::temp_dir().join(format!(
         "SupportEaseUninstall_{}.exe",
@@ -724,6 +740,18 @@ fn cleanup_mode(dir: &Path, wait_pid: Option<u32>) {
     //   remove_dir_all 会悄悄失败 —— 表现为"东西都删了，文件夹还在"。
     //   （老 CMD 版里那句 cd /d "%SystemRoot%" 就是在解决同一件事。）
     let _ = std::env::set_current_dir(std::env::temp_dir());
+
+    // 绿色版的 app-data/EBWebView 带 WebView2 自己加的 Everyone:(DENY)(X)，
+    // 直接 remove_dir_all 会因拒绝访问而留下残骸。照搬老 CMD 版那两句：
+    // takeown 收回所有权 + icacls /reset 去掉那条 DENY，然后再删。
+    let appdata = dir.join("app-data");
+    if appdata.is_dir() {
+        let p = appdata.to_string_lossy().into_owned();
+        let _ = hidden("takeown").args(["/f", &p, "/r", "/d", "y"]).output();
+        let _ = hidden("icacls")
+            .args([&p, "/reset", "/t", "/c", "/q"])
+            .output();
+    }
 
     for _ in 0..5 {
         if std::fs::remove_dir_all(dir).is_ok() {
@@ -810,7 +838,9 @@ fn main() {
         .unwrap_or_default();
     let uninstall = cfg!(feature = "uninstall-only")
         || args.iter().any(|a| a == "--uninstall")
-        || self_name.starts_with("uninstall");
+        || self_name.starts_with("uninstall")
+        // 绿色版里的文件名是「卸载 SupportEase.exe」，双击时同样没有参数
+        || self_name.starts_with("卸载");
     let _ = UNINSTALL.set(uninstall);
     let silent = args.iter().any(|a| a == "--silent" || a == "/S");
 

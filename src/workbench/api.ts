@@ -1967,6 +1967,40 @@ export interface DevSourceStatus {
   checks: CheckRow[]
 }
 
+/**
+ * `publish_snapshot::PublishSnapshotStatus` —— 本地测试源里那份"发布快照"的状态。
+ *
+ * 后端判定、前端只摆按钮：`active` 决定能不能模拟/还原，`applied` 决定要不要提示还原。
+ */
+export interface PublishSnapshotStatus {
+  active: boolean
+  /** 拍快照的时刻（ISO8601） */
+  takenAt: string | null
+  /** 拍快照时的开发版本 */
+  baseVersion: string | null
+  /** 最近一次模拟发布的号；没模拟过 = null */
+  simulatedVersion: string | null
+  /** 模拟发布有没有写进覆盖层 */
+  applied: boolean
+  /** 快照里有没有安装包 */
+  hasPackage: boolean
+  /** 快照里那支安装包的名字 */
+  package: string | null
+  /** 给界面摆的一句话（事实只有一处） */
+  note: string
+}
+
+/** `publish_snapshot::SnapshotApplyProgress` —— 真编那一趟的后台进度 */
+export interface SnapshotApplyProgress {
+  running: boolean
+  /** preparing / bumping / building / manifest / done / failed */
+  stage: string
+  /** 编译日志最后一行 */
+  tail: string
+  finished: string | null
+  error: string | null
+}
+
 /** `dev_source::CheckRow` —— 一条结构化诊断（作者 2026-11-06：不要红字长句） */
 export interface CheckRow {
   item: string
@@ -3456,6 +3490,18 @@ export const wb = {
   previewDeliver: () => invoke<void>('wb_preview_deliver'),
   /** 当前交付进度（不阻塞） */
   previewProgress: () => invoke<PreviewProgress>('wb_preview_progress'),
+
+  /* 「发布快照」：只动 target/local-release 覆盖层，不碰 presets/delivery、不打 tag */
+  /** 当前快照状态（只读） */
+  publishSnapshotStatus: () => invoke<PublishSnapshotStatus>('wb_publish_snapshot_status'),
+  /** 拍一份当前状态的快照（已有快照会拒绝） */
+  publishSnapshotTake: () => invoke<PublishSnapshotStatus>('wb_publish_snapshot_take'),
+  /** 派一趟真编到后台：抬号 → 编译安装包 → 写本地清单，立刻返回 */
+  publishSnapshotApply: () => invoke<PublishSnapshotStatus>('wb_publish_snapshot_apply'),
+  /** 真编进度（不阻塞，界面轮询） */
+  publishSnapshotProgress: () => invoke<SnapshotApplyProgress>('wb_publish_snapshot_progress'),
+  /** 还原到拍快照时的状态，并删掉快照 */
+  publishSnapshotRestore: () => invoke<PublishSnapshotStatus>('wb_publish_snapshot_restore'),
 
   /**
    * **发布软件版本的闸**（第四刀）—— **只读**，一个字节都不写，点几次都没副作用。

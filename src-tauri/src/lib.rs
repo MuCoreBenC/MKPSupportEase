@@ -1111,6 +1111,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::dev_source::wb_dev_source_clear_conflict,
         // 「打开交付目录」—— 路径由后端 DTO 给，界面不自己拼（2026-11-06）
         app::dev_source::wb_open_path,
+        // 「发布快照」：临时写一份本地新版清单 + 安装包，测完还原（只动覆盖层目录）
+        app::publish_snapshot::wb_publish_snapshot_status,
+        app::publish_snapshot::wb_publish_snapshot_take,
+        app::publish_snapshot::wb_publish_snapshot_apply,
+        app::publish_snapshot::wb_publish_snapshot_progress,
+        app::publish_snapshot::wb_publish_snapshot_restore,
         // 本地预览交付事务：编译 → 清单 → 提交 → 打 tag → 滚到下一轮（不推送）
         app::preview_tx::wb_preview_preflight,
         app::preview_tx::wb_preview_deliver,

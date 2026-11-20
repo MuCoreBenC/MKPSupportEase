@@ -26,7 +26,7 @@
 
   .titlebar {
     height: 38px; flex: none; display: flex; align-items: center;
-    padding: 0 6px 0 14px; font-size: 11.5px; color: #97a0a8;
+    padding: 0 6px 0 14px; font-size: 11.5px; color: #1f2328;
   }
   .titlebar .name { display: flex; align-items: center; pointer-events: none; }
   .titlebar .spacer { flex: 1; }
@@ -166,7 +166,7 @@
   @media (prefers-color-scheme: dark) {
     :root { --ink: #e8ecef; --muted: #838d96; --line: #33393f; }
     body { background: #1d2125; }
-    .titlebar { color: #616b73; }
+    .titlebar { color: #e8ecef; }
     .titlebar button { color: #8a949c; }
     .titlebar button:hover { background: #272c31; }
     .titlebar button.close:hover { background: #e81123; color: #fff; }
@@ -239,11 +239,11 @@
     </div>
   </section>
 
-  <!-- 卸载：确认 -->
+  <!-- 卸载：确认（安装版有数据勾选项；绿色版整目录删除，运行时隐藏它） -->
   <section class="stage" data-stage="un-confirm">
-    <h1>卸载 SupportEase</h1>
-    <p class="lead">会从本机移除 SupportEase 程序本身。</p>
-    <label class="keep"><input type="checkbox" id="wipe" /> 同时删除预设、校准记录和日志</label>
+    <h1 id="unTitle">卸载 SupportEase</h1>
+    <p class="lead" id="unLead">会从本机移除 SupportEase 程序本身。</p>
+    <label class="keep" id="wipeRow"><input type="checkbox" id="wipe" /> 同时删除预设、校准记录和日志</label>
     <div class="row2">
       <button class="ghost" id="un-cancel">取消</button>
       <button class="danger" id="un-go">卸载</button>
@@ -345,7 +345,14 @@
       mode = m.mode === 'uninstall' ? 'uninstall' : 'install'
       if (mode === 'uninstall') {
         const name = document.querySelector('.titlebar .name')
-        name.lastChild.textContent = ' SupportEase 卸载程序'
+        name.lastChild.textContent = m.portable ? ' SupportEase 绿色版卸载' : ' SupportEase 卸载程序'
+        if (m.portable) {
+          // 绿色版没有"程序 / 数据"之分：删的就是当前文件夹，含 app-data/ 里的全部数据
+          $('unTitle').textContent = '卸载 SupportEase 绿色版'
+          $('unLead').textContent = '会删除当前文件夹里的程序与全部数据（预设 / 执行记录 / 缓存），没有单独保留选项。'
+          $('wipeRow').style.display = 'none'
+          $('un-sub').textContent = '关闭窗口后会自动删除当前文件夹及其中的全部数据。'
+        }
         stage('un-confirm')
       } else {
         $('dir').value = m.dir || ''

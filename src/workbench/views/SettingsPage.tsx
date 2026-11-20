@@ -56,6 +56,8 @@ import type {
   PortConflict,
   PreviewPlan,
   PublishAccount,
+  PublishSnapshotStatus,
+  SnapshotApplyProgress,
 } from '../api'
 /* 主题那一档与"现在到底深还是浅"都在 `theme.ts` —— 这一页不自己再落一次 `data-theme` */
 import { setTheme, useResolvedDark, useThemePref } from '../theme'
@@ -247,6 +249,11 @@ export default function SettingsPage({ boot }: Props) {
   /* 交付进行中时，后端日志的最后一行 —— 编译要一两分钟，得有东西在动 */
   const [previewTail, setPreviewTail] = useState('')
   const [devNote, setDevNote] = useState<{ text: string; bad: boolean } | null>(null)
+  /* 「发布快照」：真编一版新版 + 安装包，测完完整还原 */
+  const [pubSnap, setPubSnap] = useState<PublishSnapshotStatus | null>(null)
+  const [snapBusy, setSnapBusy] = useState(false)
+  const [snapNote, setSnapNote] = useState<{ text: string; bad: boolean } | null>(null)
+  const [snapProgress, setSnapProgress] = useState<SnapshotApplyProgress | null>(null)
   /**
    * 现读一次状态。
    *
@@ -256,6 +263,7 @@ export default function SettingsPage({ boot }: Props) {
     try {
       const st = await wb.devSourceStatus()
       setDevSrc(st)
+      setPubSnap(await wb.publishSnapshotStatus().catch(() => null))
       /* 顺带问一次"这一版能不能交付"：按钮上的版本号与阻断原因都来自它 */
       setPreviewPlan(await wb.previewPreflight().catch(() => null))
     } catch (e) {
@@ -302,6 +310,8 @@ export default function SettingsPage({ boot }: Props) {
     try {
       const next = await wb.devSourceStop()
       setDevSrc(next)
+      /* 停服务会在后端自动还原快照 —— 把还原后的状态读回来 */
+      setPubSnap(await wb.publishSnapshotStatus().catch(() => null))
       setDevNote({ text: next.note ?? '已停止，端口已释放。', bad: false })
     } catch (e) {
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
@@ -309,6 +319,57 @@ export default function SettingsPage({ boot }: Props) {
       setDevBusy(false)
     }
   }
+
+  /** 「拍快照 / 模拟发布 / 还原」三颗按钮共用的那一下 */
+  const runSnap = async (kind: 'take' | 'apply' | 'restore') => {
+    if (snapBusy) return
+    setSnapBusy(true)
+    setSnapNote(null)
+    try {
+      const next =
+        kind === 'take'
+          ? await wb.publishSnapshotTake()
+          : kind === 'apply'
+            ? await wb.publishSnapshotApply()
+            : await wb.publishSnapshotRestore()
+      setPubSnap(next)
+      setSnapNote(null)
+      if (kind !== 'apply') void readDevSrc()
+      else setSnapProgress(await wb.publishSnapshotProgress().catch(() => null))
+    } catch (e) {
+      setSnapBusy(false)
+      setSnapNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+      void wb.publishSnapshotStatus().then(setPubSnap).catch(() => undefined)
+    } finally {
+      if (kind !== 'apply') setSnapBusy(false)
+    }
+  }
+
+  /** 真编进行中：每秒问一次，结束那刻刷新整页状态 */
+  useEffect(() => {
+    if (snapProgress?.running !== true) return
+    const timer = window.setInterval(() => {
+      void wb
+        .publishSnapshotProgress()
+        .then((p) => {
+          setSnapProgress(p)
+          if (!p.running) {
+            window.clearInterval(timer)
+            setSnapBusy(false)
+            setSnapNote({
+              text:
+                p.finished === 'done'
+                  ? p.tail
+                  : (p.error ?? `停在 ${p.stage}`),
+              bad: p.finished !== 'done',
+            })
+            void readDevSrc()
+          }
+        })
+        .catch(() => undefined)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [snapProgress?.running, readDevSrc])
 
   /** 字节数 → 人话（文件表那一列） */
   const sizeText = (v: number | null): string => {
@@ -1014,6 +1075,69 @@ export default function SettingsPage({ boot }: Props) {
               >
                 在访达中打开安装包位置
               </button>
+            </div>
+
+            {/* ——— 发布快照：临时写一份新版 + 安装包，测完还原 ——— */}
+            <div className={s.vfield} style={{ marginTop: 10 }}>
+              <div className={s.vhead}>
+                <b>发布快照</b>
+                <span className={s.vkey}>
+                  {pubSnap === null
+                    ? '读取中……'
+                    : !pubSnap.active
+                      ? '没有快照'
+                      : pubSnap.applied
+                        ? `已模拟 ${pubSnap.simulatedVersion ?? ''}`
+                        : `已拍（${pubSnap.baseVersion ?? ''}）`}
+                </span>
+              </div>
+              <div className={s.vrow}>
+                <button
+                  type="button"
+                  className={s.btn}
+                  disabled={snapBusy || pubSnap === null || pubSnap.active}
+                  onClick={() => void runSnap('take')}
+                >
+                  拍快照
+                </button>
+                <button
+                  type="button"
+                  className={`${s.btn} ${s.btnPrimary}`}
+                  disabled={snapBusy || pubSnap === null || !pubSnap.active}
+                  title="抬一个预览号，真编安装包，只对本地测试源生效"
+                  onClick={() => void runSnap('apply')}
+                >
+                  {snapBusy && snapProgress?.running === true
+                    ? '正在编译……'
+                    : '模拟发布'}
+                </button>
+                <button
+                  type="button"
+                  className={s.btn}
+                  disabled={snapBusy || pubSnap === null || !pubSnap.active}
+                  onClick={() => void runSnap('restore')}
+                >
+                  还原
+                </button>
+                <span className={s.grow} />
+              </div>
+              {snapProgress?.running === true && (
+                <p className={`${s.vhelp} ${s.mono}`} style={{ opacity: 0.75 }}>
+                  {snapProgress.stage}：{snapProgress.tail}
+                </p>
+              )}
+              {pubSnap?.note !== undefined && pubSnap.note !== '' && (
+                <p className={s.vhelp}>{pubSnap.note}</p>
+              )}
+              {snapNote !== null && (
+                <p
+                  className={s.vhelp}
+                  style={snapNote.bad ? { color: 'var(--danger)' } : undefined}
+                >
+                  {snapNote.text}
+                </p>
+              )}
+              <p className={s.vhelp}>停服务会自动还原。</p>
             </div>
 
             {/* 诊断：只在这几处真有问题时出现，正常轮次差异不上来 */}

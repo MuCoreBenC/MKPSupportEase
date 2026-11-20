@@ -476,15 +476,19 @@ pub fn asset_kind(asset: &ReleaseAsset) -> &str {
     }
 }
 
-/// **Windows 帮手脚本**：退出后由 PowerShell 做静默安装 + 重启 + 记结果。
+/// **Windows 帮手脚本**：退出后由 PowerShell 做静默安装 + 拉起 + 记结果。
 ///
 /// 返回 `powershell -Command` 的实参。与 macOS 的 [`install_script`] 同一套四件事：
 /// 等本进程退出 → 装 → 写 `run/update-result.json` → 拉起新版本。
 ///
 /// ★ **纯函数**：本机 macOS 也能跑判据（不碰注册表、不碰系统）。真机行为只承诺
 ///   Windows CI 编译通过 —— 作者已明确「本机没法真机验证」。
-/// ★ NSIS 的 `/S` 是静默开关，`/D=` 必须**最后一个参数且不加引号**；这里不指定
-///   `/D`，让安装器按自己的默认目录装（与用户第一次安装的目录一致）。
+/// ★ `/S` 是自研安装器认的静默开关；它装完直接退出、不负责拉起客户端（拉起归这段脚本）。
+/// ★ 拉起目标**不是当前 exe**：dev / 绿色版跑在仓库或 portable 目录里，而静默安装进的是
+///   注册表 `InstallLocation`（没有就 `%LOCALAPPDATA%\SupportEase`）那份，exe 名为
+///   `mkp-support-ease.exe`。先按安装目录找，找不到才退回当前 exe。
+/// ★ Windows 这一路也写 `update-install.log`，并把 `ok:true` 挪到**拉起成功之后** ——
+///   旧版在拉起之前就记账，于是"关了没开"在账上仍是成功。
 /// ★ 路径用 PowerShell 单引号（里面单引号翻倍），带空格是常态。
 pub fn windows_install_script(
     app_data: &Path,
@@ -494,22 +498,40 @@ pub fn windows_install_script(
     at: &str,
 ) -> String {
     let q = |s: &str| format!("'{}'", s.replace('\'', "''"));
-    let result = UpdateResult {
+    let ok_json = serde_json::to_string(&UpdateResult {
         version: version.to_owned(),
         ok: true,
         reason: String::new(),
         at: at.to_owned(),
-    };
-    // 结果 JSON 由 `ConvertTo-Json` 生成，不手拼引号（PowerShell 里手拼极易错）
-    let ok_json = serde_json::to_string(&result).unwrap_or_default();
+    })
+    .unwrap_or_default();
+    let fail_json = serde_json::to_string(&UpdateResult {
+        version: version.to_owned(),
+        ok: false,
+        reason: "安装或拉起失败，详见 update-install.log".to_owned(),
+        at: at.to_owned(),
+    })
+    .unwrap_or_default();
     format!(
-        "Start-Sleep -Seconds 1; \
+        "$log = {log}; \
+         function Say($m) {{ Add-Content -LiteralPath $log -Value ((Get-Date -Format o) + ' ' + $m) -Encoding utf8 }}; \
+         Say '安装开始'; \
+         Start-Sleep -Seconds 1; \
          $p = Start-Process -FilePath {setup} -ArgumentList '/S' -Wait -PassThru; \
-         if ($p.ExitCode -ne 0) {{ exit 1 }}; \
-         {ok} | Set-Content -LiteralPath {r} -Encoding utf8; \
-         Start-Process -FilePath {exe}",
+         if ($p.ExitCode -ne 0) {{ Say ('安装失败，退出码 ' + $p.ExitCode); {fail} | Set-Content -LiteralPath {r} -Encoding utf8; exit 1 }}; \
+         Say '安装完成'; \
+         $dir = $null; \
+         try {{ $k = Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SupportEase' -ErrorAction Stop; $dir = $k.InstallLocation }} catch {{ }}; \
+         if ([string]::IsNullOrWhiteSpace($dir)) {{ $dir = Join-Path $env:LOCALAPPDATA 'SupportEase' }}; \
+         $exe = Join-Path $dir 'mkp-support-ease.exe'; \
+         if (-not (Test-Path -LiteralPath $exe)) {{ $exe = {exe} }}; \
+         Say ('拉起 ' + $exe); \
+         try {{ Start-Process -FilePath $exe; {ok} | Set-Content -LiteralPath {r} -Encoding utf8 }} \
+         catch {{ Say ('拉起失败：' + $_.Exception.Message); {fail} | Set-Content -LiteralPath {r} -Encoding utf8; exit 1 }}",
+        log = q(&install_log_path(app_data).display().to_string()),
         setup = q(&setup.display().to_string()),
         ok = q(&ok_json),
+        fail = q(&fail_json),
         r = q(&result_path(app_data).display().to_string()),
         exe = q(&new_exe.display().to_string()),
     )
@@ -1100,6 +1122,19 @@ mod tests {
         );
         assert!(script.contains("SupportEase.exe"), "拉起的是 exe 不是 .app");
         assert!(!script.contains("open "), "不该混进 macOS 的 open");
+        assert!(
+            script.contains("update-install.log"),
+            "Windows 这一路也要留安装日志"
+        );
+        assert!(
+            script.contains("InstallLocation"),
+            "静默装到哪儿就从哪儿拉起，不能总用当前 exe"
+        );
+        assert!(
+            script.find("\"ok\":false").unwrap_or(usize::MAX)
+                < script.find("\"ok\":true").unwrap_or(usize::MAX),
+            "失败账要先备好，成功账只在拉起之后写"
+        );
     }
 
     /// 资产种类：显式 `kind` 优先，老档按 `.exe` 后缀兜底；认不出一律走 macOS 老路径。
