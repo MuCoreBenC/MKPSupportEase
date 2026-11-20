@@ -84,6 +84,7 @@
     background: #f4f6f8; color: #5a636c; font: inherit; font-size: 11.5px; cursor: pointer;
   }
   .path button:hover { background: #eceff2; }
+  .path button:disabled { opacity: .45; cursor: default; }
 
   .note { margin: 12px 0 0; font-size: 11px; color: #a2a9b1; }
   .note a { color: var(--accent); text-decoration: none; }
@@ -255,7 +256,12 @@
     post({ cmd: 'drag' })
   })
 
-  $('browse').onclick = () => post({ cmd: 'browse', current: $('dir').value })
+  // 点一次就锁住，避免用户在对话框出来前连点堆一串请求
+  $('browse').onclick = () => {
+    if ($('browse').disabled) return
+    $('browse').disabled = true
+    setTimeout(() => post({ cmd: 'browse', current: $('dir').value }), 60)
+  }
 
   $('launch').onclick = () => {
     post({ cmd: 'launch', dir: $('dir').value })
@@ -280,6 +286,9 @@
       }
     } else if (m.event === 'dir') {
       if (m.path) $('dir').value = m.path
+      $('browse').disabled = false
+    } else if (m.event === 'dir-cancel') {
+      $('browse').disabled = false
     } else if (m.event === 'progress') {
       $('fill').style.width = m.pct + '%'
       $('pct').textContent = m.pct + '%'

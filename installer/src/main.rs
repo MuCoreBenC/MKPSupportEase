@@ -23,7 +23,8 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
 };
 use webview2_com::{
     take_pwstr, CreateCoreWebView2ControllerCompletedHandler,
-    CreateCoreWebView2EnvironmentCompletedHandler, WebMessageReceivedEventHandler,
+    CreateCoreWebView2EnvironmentCompletedHandler, NavigationCompletedEventHandler,
+    WebMessageReceivedEventHandler,
 };
 use windows::core::{w, HSTRING, PCWSTR, PWSTR};
 use windows::Win32::Foundation::*;
@@ -31,10 +32,16 @@ use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
 };
 use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_DELAY_UNTIL_REBOOT};
-use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_INPROC_SERVER,
+    COINIT_APARTMENTTHREADED,
+};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{
-    OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
+    CreateMutexW, OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
+};
+use windows::Win32::UI::Shell::{
+    FileOpenDialog, IFileOpenDialog, FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
 };
 use windows::Win32::UI::HiDpi::{
     GetDpiForSystem, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
@@ -55,6 +62,8 @@ const PUBLISHER: &str = "MuCoreBenC";
 
 const WM_PROGRESS: u32 = WM_APP + 1;
 const WM_FINISHED: u32 = WM_APP + 2;
+/// WebView2 首帧就绪（或兜底超时）后再显示窗口 —— 先显示窗口会看到一段白框
+const WM_REVEAL: u32 = WM_APP + 3;
 
 thread_local! {
     static WEBVIEW: RefCell<Option<ICoreWebView2>> = const { RefCell::new(None) };
@@ -159,8 +168,11 @@ fn on_message(hwnd: isize, raw: &str) {
         },
         "browse" => {
             let current = v["current"].as_str().unwrap_or("").to_string();
-            if let Some(path) = pick_dir(&current) {
-                send_json(serde_json::json!({ "event": "dir", "path": path }));
+            let picked = unsafe { pick_folder(HWND(hwnd as *mut _), &current) };
+            match picked {
+                Some(path) => send_json(serde_json::json!({ "event": "dir", "path": path })),
+                // 取消也要回一条：前端靠它恢复按钮，否则按钮会一直灰着
+                None => send_json(serde_json::json!({ "event": "dir-cancel" })),
             }
         }
         "launch" => {
@@ -247,6 +259,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             LRESULT(0)
         }
+        WM_REVEAL => {
+            let _ = ShowWindow(hwnd, SW_SHOW);
+            LRESULT(0)
+        }
         WM_CLOSE => {
             let _ = DestroyWindow(hwnd);
             LRESULT(0)
@@ -303,6 +319,24 @@ unsafe fn init_webview(hwnd: HWND) {
                         ));
                         let mut token = 0i64;
                         webview.add_WebMessageReceived(&received, &mut token)?;
+
+                        // 页面画好再让窗口露头：先露窗口会看到一段白框
+                        let reveal = NavigationCompletedEventHandler::create(Box::new(
+                            move |_sender, _args| {
+                                unsafe {
+                                    let _ = PostMessageW(
+                                        Some(hwnd),
+                                        WM_REVEAL,
+                                        WPARAM(0),
+                                        LPARAM(0),
+                                    );
+                                }
+                                Ok(())
+                            },
+                        ));
+                        let mut nav_token = 0i64;
+                        webview.add_NavigationCompleted(&reveal, &mut nav_token)?;
+
                         webview.NavigateToString(&HSTRING::from(build_html()))?;
 
                         WEBVIEW.with(|w| *w.borrow_mut() = Some(webview));
@@ -351,7 +385,7 @@ fn run_install(
     std::fs::create_dir_all(dir).map_err(|e| format!("创建不了安装目录：{e}"))?;
 
     // 覆盖安装：先把还在跑的那个关掉（它正在占着 exe 文件）
-    let _ = Command::new("taskkill").args(["/f", "/im", APP_EXE]).output();
+    let _ = hidden("taskkill").args(["/f", "/im", APP_EXE]).output();
 
     report(6, "正在解压文件…");
     if PAYLOAD.is_empty() {
@@ -409,6 +443,15 @@ fn run_install(
     Ok(())
 }
 
+/// 起控制台程序（taskkill / powershell）时不要新开控制台窗口。
+/// 安装器本身是 GUI 进程，没有控制台可继承 —— 不挂这个标志就会闪一下黑框。
+fn hidden(program: &str) -> Command {
+    use std::os::windows::process::CommandExt;
+    let mut cmd = Command::new(program);
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    cmd
+}
+
 fn quoted(p: &Path) -> String {
     format!("'{}'", p.to_string_lossy().replace('\'', "''"))
 }
@@ -424,7 +467,7 @@ fn create_shortcut(lnk: &Path, target_dir: &Path) -> Result<(), String> {
         quoted(&exe),
         quoted(target_dir),
     );
-    let status = Command::new("powershell")
+    let status = hidden("powershell")
         .args([
             "-NoProfile",
             "-NonInteractive",
@@ -483,7 +526,7 @@ fn remove_uninstall_entry() {
 /// 运行中的 exe 删不掉自己，必须先跳出安装目录。
 fn run_uninstall(dir: &Path, wipe: bool, mut report: impl FnMut(u32, &str)) -> Result<(), String> {
     report(4, "正在关闭 SupportEase…");
-    let _ = Command::new("taskkill").args(["/f", "/im", APP_EXE]).output();
+    let _ = hidden("taskkill").args(["/f", "/im", APP_EXE]).output();
 
     report(18, "正在删除快捷方式…");
     let _ = std::fs::remove_file(user_desktop().join(format!("{PRODUCT}.lnk")));
@@ -553,34 +596,28 @@ unsafe fn schedule_self_delete() {
     );
 }
 
-/// 选文件夹：走系统的 FolderBrowserDialog（PowerShell 一句）。
-/// 它是模态的，会短暂卡住消息循环 —— 与原生对话框的行为一致。
-fn pick_dir(current: &str) -> Option<String> {
-    let script = format!(
-        "Add-Type -AssemblyName System.Windows.Forms;\
-         $d=New-Object System.Windows.Forms.FolderBrowserDialog;\
-         $d.SelectedPath='{}';\
-         if($d.ShowDialog() -eq 'OK'){{$d.SelectedPath}}",
-        current.replace('\'', "''")
-    );
-    let out = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-STA",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-            &script,
-        ])
-        .output()
+/// 选文件夹：系统的 IFileOpenDialog（Vista 起的现代文件夹选择器）。
+///
+/// 不走 PowerShell：那条路会弹一个终端窗口、启动还要半秒，用户等不及会连点，
+/// 于是同时开好几个 PowerShell —— 看起来就是"卡住"。
+unsafe fn pick_folder(hwnd: HWND, _current: &str) -> Option<String> {
+    let dialog: IFileOpenDialog =
+        CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+    let options = dialog.GetOptions().ok()?;
+    dialog
+        .SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)
         .ok()?;
-    let picked = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if picked.is_empty() {
-        None
-    } else {
-        Some(picked)
+    dialog
+        .SetTitle(&HSTRING::from("选择 SupportEase 的安装文件夹"))
+        .ok()?;
+    if dialog.Show(Some(hwnd)).is_err() {
+        return None;
     }
+    let item = dialog.GetResult().ok()?;
+    let name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+    let text = name.to_string().ok();
+    CoTaskMemFree(Some(name.0 as *const _));
+    text
 }
 
 /* ---------- 入口 ---------- */
@@ -609,6 +646,12 @@ fn main() {
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+
+        // 单实例：图标被连点两下时不要开第二个窗口
+        let _instance = CreateMutexW(None, true, w!("Local\\SupportEaseSetupInstance"));
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            return;
+        }
 
         if silent {
             let result = if uninstall {
@@ -679,8 +722,21 @@ fn main() {
             std::mem::size_of_val(&preference) as u32,
         );
 
-        let _ = ShowWindow(hwnd, SW_SHOW);
         init_webview(hwnd);
+
+        // 兜底：WebView2 万一没起来，3 秒后也要把窗口露出来
+        let raw = hwnd.0 as isize;
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            unsafe {
+                let _ = PostMessageW(
+                    Some(HWND(raw as *mut _)),
+                    WM_REVEAL,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            }
+        });
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
