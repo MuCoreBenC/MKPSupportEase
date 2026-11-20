@@ -1,0 +1,37 @@
+[package]
+name = "mkp-installer"
+version = "0.1.0"
+description = "SupportEase 安装程序（Windows）"
+authors = ["MuCoreBenC"]
+license = "AGPL-3.0-only"
+edition = "2021"
+rust-version = "1.77.2"
+publish = false
+
+# ★ 空 workspace 表：这个 crate 在仓库目录里，但**不进根 workspace**。
+#   根 workspace 的 members 是显式列表（见根 Cargo.toml），不带这一份 ——
+#   它只该在 Windows 上编（CI 的 macOS job 跑 `cargo clippy --all-targets`，
+#   把 Windows 专用的安装器拖进去会让那边红）。这行让 `cargo` 不去父目录找 workspace。
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2.5.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.9.1", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 与客户端同一个 zip 档（那里用来读 3MF）；安装器只用解压这一半
+zip = { version = "3.0.0", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+# 写「应用和功能」里那条卸载项。与客户端同一个版本（见 src-tauri/Cargo.toml）
+winreg = "0.55"
+# 卸载器要 MoveFileExW 做「重启后删除自己」那一档
+windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
