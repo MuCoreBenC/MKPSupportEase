@@ -28,6 +28,7 @@ import { api } from '../../api'
 import type { Machine, Plate, ReportBoundaryPiece, ReportBox4, ReportCollision } from '../../api'
 import { useT } from '../../i18n'
 import ZoomLayer from '../../components/zoom/ZoomLayer'
+import { arrowPathOf, minArrowLength } from './arrowGeometry'
 import { boundaryNumbering } from './boundaryNumbering'
 import s from './CollisionMap.module.css'
 
@@ -400,43 +401,44 @@ export default function CollisionMap({
    * 空白处**，压在框上的箭头没有信息量。长度同时夹在 [最小可见长度, 板内边界]
    * 之间 —— 短了看不清，长了戳出板。旧记录没这两格 / 挪不开那一档 ⇒ 不画。
    */
-  /** 一支**如实**的箭头：起点 → 目标（长度 = |vec|）。挪塔那一屏与越界那一屏共用。 */
+  /**
+   * 一支**如实**的箭头：起点 → 目标（长度 = |vec|）。挪塔那一屏与越界那一屏共用。
+   *
+   * `minLen`：越界那一屏给一个最小可见长度（位移可能只有 3mm，真长画出来看不见），
+   * 挪塔那屏不传 —— 那边是"塔要挪多远"，长度必须如实。
+   */
   const exactArrow = (
     from: [number, number],
     vec: [number, number],
+    minLen = 0,
   ): { path: string; transform: string } | null => {
     if (vec[0] === 0 && vec[1] === 0) return null
     const [ox, oy] = bedPt(from[0], from[1])
     const [gx, gy] = bedPt(from[0] + vec[0], from[1] + vec[1])
-    const len = Math.hypot(gx - ox, gy - oy)
+    const len = Math.max(Math.hypot(gx - ox, gy - oy), minLen)
     const ang = Math.atan2(gy - oy, gx - ox)
-    /* 短箭要收镞：否则一支 2mm 的位移会被镞吃掉，看着像没画 */
-    const head = Math.min(Math.max(4, canvasW * 0.05), len * 0.45)
-    const w0 = Math.min(Math.max(3, canvasW * 0.02), len * 0.3)
-    const w1 = w0 * 0.55
-    const hw = head * 1.15
-    if (len <= head * 1.4) return null
-    const body = len - head
+    const path = arrowPathOf(len, canvasW)
+    if (path === null) return null
     return {
-      path:
-        `M 0 ${-w0 / 2} L ${body} ${-w1 / 2} L ${body} ${-hw / 2} L ${len} 0` +
-        ` L ${body} ${hw / 2} L ${body} ${w1 / 2} L 0 ${w0 / 2} Z`,
+      path,
       transform: `translate(${ox} ${oy}) rotate(${(ang * 180) / Math.PI})`,
     }
   }
 
-  /* **越界那一屏**：每块越界的模型一支箭头（中心 → 挪到位的位置，长度就是建议位移） */
+  /*
+   * **越界那一屏**：每块越界的模型一支箭头（中心 → 挪到位的位置）。
+   * 长度 = 建议位移；短于「最小可见长度」时按最小值画（真实距离在右侧那句里）。
+   */
   const boundaryArrows = (pieces ?? [])
     .map((p) => {
       const s = p.shift
       const b = boxOf(p.bbox ?? undefined)
       if (s === undefined || b === null) return null
-      return exactArrow([b.x + b.w / 2, b.y + b.h / 2], s)
+      return exactArrow([b.x + b.w / 2, b.y + b.h / 2], s, minArrowLength(canvasW))
     })
     .filter((a): a is { path: string; transform: string } => a !== null)
 
   /* 序号徽标：与右栏那几条文字共用 `boundaryNumbering` 的排序（编号只有一个来源） */
-  const badgeR = Math.max(8, canvasW * 0.05)
   const badges = numbered
     ? boundaryNumbering(pieces ?? [])
         .map(({ n, piece }) => {
@@ -535,25 +537,29 @@ export default function CollisionMap({
           <path className={s.arrow} d={arrow.path} transform={arrow.transform} />
         )}
         {boundaryArrows.map((a, i) => (
-          <path key={`ba${i}`} className={s.arrow} d={a.path} transform={a.transform} />
-        ))}
-        {/* 序号徽标画在箭头**之后**（这一层 z-index 3，盖在箭身上）：数字永远读得到 */}
-        {badges.map((b) => (
-          <g key={`bd${b.n}`} className={s.badge}>
-            <circle cx={b.x} cy={b.y} r={badgeR} />
-            <text
-              x={b.x}
-              y={b.y}
-              fontSize={badgeR * 1.25}
-              textAnchor="middle"
-              dominantBaseline="central"
-            >
-              {b.n}
-            </text>
-          </g>
+          <path key={`ba${i}`} className={s.arrowHot} d={a.path} transform={a.transform} />
         ))}
       </svg>
     ) : null
+
+  /*
+   * **序号徽标**（2026-11-20）：不再用 SVG `<text>` —— 放大看的时候数字与圆圈会分家
+   * （作者原话：「这个数字 1 它也不是那个 SVG，好像是实时化的…放大这个图片会导致位置偏移」）。
+   * 改成**图容器里的绝对定位元素**，位置按画布百分比算，缩放由同一层 `transform` 带着走；
+   * 尺寸用 `--zoom-k` 反着除（放大层里也保持 ~20px，读得清又不糊住模型）。
+   */
+  const badgeNodes = badges.map((b) => (
+    <span
+      key={`bd${b.n}`}
+      className={s.badge}
+      style={{
+        left: pct(b.x - view.x0, view.w),
+        top: pct(b.y - view.y0, view.h),
+      }}
+    >
+      {b.n}
+    </span>
+  ))
 
   const factSvg = (
     <svg
@@ -806,6 +812,7 @@ export default function CollisionMap({
           </div>
           {factSvg}
           {arrowSvg}
+          {badgeNodes}
         </div>
       ) : (
         /* 没板规格：退回圆角矩形热床（事实照画 —— 不因为装饰缺席吞掉整块图） */
@@ -854,6 +861,7 @@ export default function CollisionMap({
             </div>
           )}
           {arrowSvg}
+          {badgeNodes}
         </div>
       )
 
