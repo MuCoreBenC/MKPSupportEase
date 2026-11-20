@@ -636,6 +636,11 @@ fn run_install(
     Err("这是卸载器，不能用来安装".to_string())
 }
 
+#[cfg(feature = "uninstall-only")]
+fn run_install_portable(_dir: &Path) -> Result<(), String> {
+    Err("这是卸载器，不能用来安装".to_string())
+}
+
 /// 停掉**这个目录里**正在跑的客户端，按完整路径认进程。
 ///
 /// 为什么不能 `taskkill /im mkp-support-ease.exe`：进程名不带路径，工作台 dev
