@@ -654,7 +654,14 @@ fn main() {
         return;
     }
 
-    let uninstall = args.iter().any(|a| a == "--uninstall");
+    // 双击 uninstall.exe 时命令行里不会有 --uninstall：文件名也得认，
+    // 否则那颗卸载会当成安装器再装一遍（用户看到的就是"还是安装程序"）。
+    let self_name = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()))
+        .unwrap_or_default();
+    let uninstall =
+        args.iter().any(|a| a == "--uninstall") || self_name.starts_with("uninstall");
     let _ = UNINSTALL.set(uninstall);
     let silent = args.iter().any(|a| a == "--silent" || a == "/S");
 
