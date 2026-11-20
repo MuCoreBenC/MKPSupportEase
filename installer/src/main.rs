@@ -64,6 +64,8 @@ const PAYLOAD: &[u8] = b"";
 const PRODUCT: &str = "SupportEase";
 const APP_EXE: &str = "mkp-support-ease.exe";
 const PUBLISHER: &str = "MuCoreBenC";
+/// 与客户端共用同一个卸载项键（旧 NSIS 版写的也是这里）
+const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\SupportEase";
 
 const WM_PROGRESS: u32 = WM_APP + 1;
 const WM_FINISHED: u32 = WM_APP + 2;
@@ -141,6 +143,62 @@ fn send_json(value: serde_json::Value) {
     });
 }
 
+/// 双击 setup.exe 时先看注册表里有没有装过 —— 只认卸载项，不扫 C/D/E/F 盘。
+/// 旧 NSIS 版写的也是同一个键，靠 UninstallString / 目录内容区分是哪一代装的。
+fn installed_info() -> serde_json::Value {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let Ok(key) = hkcu.open_subkey(UNINSTALL_KEY) else {
+        return serde_json::json!({ "state": "none" });
+    };
+    let read = |name: &str| -> String {
+        key.get_value::<String, _>(name).unwrap_or_default()
+    };
+    let version = read("DisplayVersion");
+    let location = read("InstallLocation");
+    let uninstall = read("UninstallString");
+    if location.is_empty() {
+        return serde_json::json!({ "state": "none" });
+    }
+
+    let dir = Path::new(&location);
+    let self_installed = uninstall.contains("--uninstall")
+        || (dir.join("uninstall.exe").exists() && dir.join("LICENSE").exists());
+    let generation = if self_installed {
+        "self"
+    } else if !uninstall.is_empty() {
+        "nsis"
+    } else {
+        "unknown"
+    };
+    serde_json::json!({
+        "state": "installed",
+        "version": version,
+        "location": location,
+        "generation": generation,
+        "uninstallString": uninstall,
+    })
+}
+
+/// 「已安装页」点卸载：自研装的就是它目录里那颗小 uninstall.exe；
+/// 旧 NSIS 装的按注册表 UninstallString 原样交给 cmd 执行。
+fn uninstall_existing(location: &str, uninstall_string: &str, generation: &str) {
+    if generation == "self" {
+        let _ = Command::new(Path::new(location).join("uninstall.exe"))
+            .arg("--uninstall")
+            .spawn();
+        return;
+    }
+    if uninstall_string.is_empty() {
+        return;
+    }
+    let _ = hidden("cmd")
+        .args(["/c", "start", "", uninstall_string])
+        .spawn();
+}
+
 fn on_message(hwnd: isize, raw: &str) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
         return;
@@ -155,7 +213,16 @@ fn on_message(hwnd: isize, raw: &str) {
                 default_install_dir().to_string_lossy().into_owned()
             },
             "version": app_version(),
+            // 直接随 init 带过去：少一次消息往返，也不会因 WebView 消息时序丢一帧
+            "installed": installed_info(),
         })),
+        "installed-info" => send_json(installed_info()),
+        "uninstall-existing" => {
+            let location = v["location"].as_str().unwrap_or("").to_string();
+            let uninstall = v["uninstallString"].as_str().unwrap_or("").to_string();
+            let generation = v["generation"].as_str().unwrap_or("").to_string();
+            uninstall_existing(&location, &uninstall, &generation);
+        }
         "close" => unsafe {
             let _ = DestroyWindow(HWND(hwnd as *mut _));
         },
@@ -551,9 +618,8 @@ fn write_uninstall_entry(dir: &Path) -> Result<(), String> {
     use winreg::RegKey;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let path = format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{PRODUCT}");
     let (key, _) = hkcu
-        .create_subkey(&path)
+        .create_subkey(UNINSTALL_KEY)
         .map_err(|e| format!("写不进卸载项：{e}"))?;
 
     let install_location = dir.to_string_lossy().into_owned();
@@ -582,8 +648,7 @@ fn remove_uninstall_entry() {
     use winreg::RegKey;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let path = format!(r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{PRODUCT}");
-    let _ = hkcu.delete_subkey_all(path);
+    let _ = hkcu.delete_subkey_all(UNINSTALL_KEY);
 }
 
 /// 卸载：删快捷方式 / 卸载项 /（可选）用户数据，然后把「删目录」交给一个临时副本 ——
