@@ -23,7 +23,15 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -36,7 +44,7 @@ if (process.platform !== 'win32') {
 }
 
 const clientExe = join(ROOT, 'target', 'release', 'mkp-support-ease.exe')
-const payloadZip = join(ROOT, 'installer', 'payload.zip')
+const payloadBin = join(ROOT, 'installer', 'payload.bin')
 const payloadXz = join(ROOT, 'installer', 'payload.xz')
 const manifest = join(ROOT, 'installer', 'Cargo.toml')
 const installerTarget = join(ROOT, 'target-installer')
@@ -56,14 +64,17 @@ if (!existsSync(clientExe)) {
   process.exit(1)
 }
 
-/* 2. payload：exe + LICENSE → zip（deflate）→ xz（LZMA） */
-rmSync(payloadZip, { force: true })
-run('powershell', [
-  '-NoProfile',
-  '-NonInteractive',
-  '-Command',
-  `Compress-Archive -Path '${clientExe}','${join(ROOT, 'LICENSE')}' -DestinationPath '${payloadZip}' -Force`,
-])
+/* 2. payload：一个极简容器（[license_len][exe_len][license][exe]）再整体 xz。
+ *
+ * 不能先 zip 再 xz：zip 里已经是 deflate 流，LZMA 对已压缩数据没有收益
+ * （实测两层压完还是 9.6 MB）。顺序反过来才对。 */
+const license = readFileSync(join(ROOT, 'LICENSE'))
+const exeBytes = readFileSync(clientExe)
+const head = Buffer.alloc(8)
+head.writeUInt32LE(license.length, 0)
+head.writeUInt32LE(exeBytes.length, 4)
+rmSync(payloadBin, { force: true })
+writeFileSync(payloadBin, Buffer.concat([head, license, exeBytes]))
 
 const cargoEnv = {
   ...process.env,
@@ -74,7 +85,7 @@ run('cargo', ['build', '--release', '--manifest-path', manifest, '--bin', 'pack'
   env: cargoEnv,
 })
 rmSync(payloadXz, { force: true })
-run(join(installerTarget, 'release', 'pack.exe'), [payloadZip, payloadXz])
+run(join(installerTarget, 'release', 'pack.exe'), [payloadBin, payloadXz])
 
 /* 3. 安装器（它把 payload.xz 编进 exe） */
 run('cargo', ['build', '--release', '--manifest-path', manifest, '--bin', 'mkp-installer'], {

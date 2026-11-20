@@ -110,3 +110,4 @@ client-assets/
 .playwright-cli/
 installer/gen
 installer/payload.xz
+installer/payload.bin

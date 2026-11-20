@@ -21,11 +21,10 @@ embed-resource = "3"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# 与客户端同一个 zip 档（那里用来读 3MF）；安装器只用解压这一半
-zip = { version = "3.0.0", default-features = false, features = ["deflate"] }
-# payload 的外层压缩。xz 的压缩率比 deflate 高约 30%（9.6 MB → 6.5 MB），
-# 代价是解压时多一次内存拷贝。选纯 Rust 的 lzma-rs，不引 liblzma 的 C 依赖。
-lzma-rs = "0.3"
+# payload 压缩。xz（LZMA2）比 zip 的 deflate 省约 30%（27 MB 应用 exe → 约 6.5 MB）。
+# lzma-rs 的纯 Rust 编码器实测只压到 16.5 MB（比 deflate 还差），所以这里用
+# liblzma 的绑定：lzma-sys 会把 liblzma 源码编进来，CI 的 MSVC 工具链够用。
+xz2 = "0.1"
 
 # ★ 刻意不引 tauri：它那 5 MB 是框架（命令注册 / 资源协议 / 插件体系），
 #   而安装器只需要「一个 Win32 窗口 + 一个 WebView2 控件 + 一条 JSON 消息」。

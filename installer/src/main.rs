@@ -354,37 +354,40 @@ fn run_install(
     let _ = Command::new("taskkill").args(["/f", "/im", APP_EXE]).output();
 
     report(6, "正在解压文件…");
-    let compressed = PAYLOAD;
-    if compressed.is_empty() {
+    if PAYLOAD.is_empty() {
         return Err("安装包不完整（构建时没打入 payload）".to_string());
     }
-    let mut zip_bytes = Vec::new();
-    lzma_rs::xz_decompress(&mut std::io::Cursor::new(compressed), &mut zip_bytes)
-        .map_err(|e| format!("安装包损坏：{e:?}"))?;
-    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))
-        .map_err(|e| format!("安装包损坏：{e}"))?;
-    let total = archive.len().max(1) as u32;
-    for i in 0..archive.len() {
-        let mut entry = archive
-            .by_index(i)
-            .map_err(|e| format!("读安装包失败：{e}"))?;
-        let name = entry.name().to_string();
-        if name.contains("..") || name.starts_with('/') || name.starts_with('\\') || name.contains(':')
-        {
-            return Err(format!("安装包里有非法路径：{name}"));
-        }
-        let out_path = dir.join(&name);
-        if entry.is_dir() {
-            std::fs::create_dir_all(&out_path).ok();
-            continue;
-        }
-        if let Some(parent) = out_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{e}"))?;
-        }
-        let mut file = std::fs::File::create(&out_path).map_err(|e| format!("写不了 {name}：{e}"))?;
-        std::io::copy(&mut entry, &mut file).map_err(|e| format!("写 {name} 失败：{e}"))?;
-        report(6 + i as u32 * 72 / total, "正在解压文件…");
+    let mut raw = Vec::new();
+    {
+        use std::io::Read;
+        xz2::read::XzDecoder::new(std::io::Cursor::new(PAYLOAD))
+            .read_to_end(&mut raw)
+            .map_err(|e| format!("安装包损坏：{e}"))?;
     }
+    if raw.len() < 8 {
+        return Err("安装包损坏：头部缺失".to_string());
+    }
+    let license_len = u32::from_le_bytes(raw[0..4].try_into().unwrap()) as usize;
+    let exe_len = u32::from_le_bytes(raw[4..8].try_into().unwrap()) as usize;
+    if raw.len() < 8 + license_len + exe_len {
+        return Err("安装包损坏：长度对不上".to_string());
+    }
+
+    report(12, "正在写入许可证…");
+    std::fs::write(dir.join("LICENSE"), &raw[8..8 + license_len])
+        .map_err(|e| format!("写 LICENSE 失败：{e}"))?;
+
+    let exe = &raw[8 + license_len..8 + license_len + exe_len];
+    let mut file =
+        std::fs::File::create(dir.join(APP_EXE)).map_err(|e| format!("写应用失败：{e}"))?;
+    const CHUNK: usize = 1 << 20;
+    let chunks = exe.len().div_ceil(CHUNK).max(1);
+    for (i, part) in exe.chunks(CHUNK).enumerate() {
+        use std::io::Write;
+        file.write_all(part).map_err(|e| format!("写应用失败：{e}"))?;
+        report(16 + (i as u32 * 62 / chunks as u32), "正在解压文件…");
+    }
+    drop(file);
 
     report(82, "正在写入卸载信息…");
     let me = std::env::current_exe().map_err(|e| format!("找不到安装器自身：{e}"))?;
