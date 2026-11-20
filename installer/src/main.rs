@@ -728,14 +728,12 @@ fn main() {
         let raw = hwnd.0 as isize;
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_secs(3));
-            unsafe {
-                let _ = PostMessageW(
-                    Some(HWND(raw as *mut _)),
-                    WM_REVEAL,
-                    WPARAM(0),
-                    LPARAM(0),
-                );
-            }
+            let _ = PostMessageW(
+                Some(HWND(raw as *mut _)),
+                WM_REVEAL,
+                WPARAM(0),
+                LPARAM(0),
+            );
         });
 
         let mut msg = MSG::default();
