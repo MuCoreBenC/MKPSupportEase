@@ -963,16 +963,25 @@ impl AppStateFile {
     ///
     /// 这是"加新字段"的机械承诺之一：新偏好只要进 [`PREF_FIELDS`] 登记，旧文件读出来
     /// 就一定有值，不会出现"旧安装一直没有这一格"。
-    fn heal(&mut self) {
+    /// 返回"补过吗"：补过就由调用方**立刻写回**，用户什么都不点，盘上也是新版要的完整形状。
+    fn heal(&mut self) -> bool {
         let d = super::client_defaults::client_defaults();
-        self.theme.get_or_insert(d.theme);
-        self.locale.get_or_insert(d.locale);
-        self.auto_clean_history.get_or_insert(d.auto_clean_history);
-        self.auto_check_update.get_or_insert(d.auto_check_update);
-        self.update_channel
-            .get_or_insert_with(default_update_channel);
-        self.pin.get_or_insert(PinPref::Off);
-        self.compact.get_or_insert(false);
+        let mut changed = false;
+        macro_rules! fill {
+            ($field:expr, $value:expr) => {
+                if $field.is_none() {
+                    $field = Some($value);
+                    changed = true;
+                }
+            };
+        }
+        fill!(self.theme, d.theme);
+        fill!(self.locale, d.locale);
+        fill!(self.auto_clean_history, d.auto_clean_history);
+        fill!(self.auto_check_update, d.auto_check_update);
+        fill!(self.update_channel, default_update_channel());
+        fill!(self.pin, PinPref::Off);
+        fill!(self.compact, false);
         /* 自检：登记过的偏好补完必须都在。漏补一格，开发构建当场炸 ——
         比等到用户那边"旧档一直没有"早得多。 */
         #[cfg(debug_assertions)]
@@ -985,6 +994,7 @@ impl AppStateFile {
                 );
             }
         }
+        changed
     }
 }
 
@@ -1046,7 +1056,11 @@ fn state_lock() -> MutexGuard<'static, ()> {
 }
 
 /// 读整份状态（**唯一读入口**）。`app-state.json` 在 → 只信它；
-/// 不在 → 按格读旧文件拼快照（缺席 = None）。**读不落盘**：没写过的应用不留状态文件。
+/// 不在 → 按格读旧文件拼快照（缺席 = None）。
+///
+/// 两件事要分清：
+/// - **文件不存在**：读不落盘（没写过的应用不留状态文件）；
+/// - **文件在、但缺新版要的偏好**：补齐后**立刻写回**（升级到新版第一次打开就对表）。
 pub fn load(root: &Path) -> Result<AppStateFile, AppError> {
     let _guard = state_lock();
     load_locked(root)
@@ -1056,8 +1070,10 @@ fn load_locked(root: &Path) -> Result<AppStateFile, AppError> {
     let bytes = match std::fs::read(state_file(root)) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            /* 还没有 app-state.json：按旧三文件拼出来、补齐，但**不落盘**
+            （"没写过的应用不留状态文件"这条规矩优先，第一次写操作才建） */
             let mut s = legacy_snapshot(root)?;
-            s.heal();
+            let _ = s.heal();
             return Ok(s);
         }
         Err(e) => {
@@ -1081,10 +1097,15 @@ fn load_locked(root: &Path) -> Result<AppStateFile, AppError> {
         AppError::corrupted(messages::text("ui.runtime.app_state.347", &[]))
             .with_detail(e.to_string())
     })?;
-    /* 旧文件里"还没有这一格"的偏好，按**此刻的解析默认**补成显式值：
-    读不落盘照旧（下一次任何写操作会把这一份整份写回），但调用方拿到的
-    永远是一份"每个偏好都有值"的状态，不会再出现"旧档升上来一直没有"。 */
-    state.heal();
+    /* 旧文件里"还没有这一格"的偏好，按**此刻的解析默认**补成显式值；补过就立刻写回。
+    装了新版第一次打开，盘上那份就和"新版认识的形状"对齐了 —— 用户什么都不用点，
+    他自己的数据（使用中指针 / 草稿 / 数据源 / 逐参数账）一个字节没动。 */
+    if state.heal() {
+        if let Err(e) = crate::fsx::atomic::atomic_write_json(&state_file(root), &state) {
+            /* 写不回去不算读失败：内存里已经是补齐的那一份，下一次写操作还会再试 */
+            tracing::warn!("补齐后的状态没写回去：{}", e.message);
+        }
+    }
     Ok(state)
 }
 
@@ -2018,6 +2039,35 @@ mod tests {
             assert!(
                 PREF_FIELDS.contains(&key.as_str()) || BUSINESS.contains(&key.as_str()),
                 "新加的格 `{key}` 没登记：偏好放进 PREF_FIELDS，业务数据放进 BUSINESS，并想清楚旧档怎么补"
+            );
+        }
+    }
+
+    /// 旧文件缺新偏好时：**读到就补齐并写回盘**，用户的业务数据原样保留。
+    #[test]
+    fn an_old_file_is_written_back_with_the_new_prefs() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        let old = r#"{ "appStateSchema": 2,
+              "theme": "dark",
+              "activePreset": { "activeSchema": 1, "origin": "local",
+                "fileName": "A1-fast.toml", "sha256": "abc",
+                "path": "presets-local/A1-fast.toml" } }"#;
+        atomic_write(&state_file(d.path()), old.as_bytes()).unwrap();
+
+        let _ = load(d.path()).unwrap();
+
+        let disk = std::fs::read_to_string(state_file(d.path())).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&disk).unwrap();
+        assert_eq!(v["theme"], "dark", "用户自己选的主题不许被改");
+        assert_eq!(
+            v["activePreset"]["fileName"], "A1-fast.toml",
+            "业务数据原样保留"
+        );
+        for key in PREF_FIELDS {
+            assert!(
+                v.get(*key).is_some(),
+                "`{key}` 该在第一次读到时补进盘上那份"
             );
         }
     }
