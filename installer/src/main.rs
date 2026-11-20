@@ -143,6 +143,26 @@ fn send_json(value: serde_json::Value) {
     });
 }
 
+/// 静默更新必须沿用旧安装目录：更新脚本只传 /S、不传 /D（见 updater.rs），
+/// 用户当初装在 D/E/F 盘时若回退默认目录，就会双份安装、且脚本最后拉起的还是旧 exe。
+/// 目录不存在（例如用户自己删了）才回退默认位置。
+fn silent_install_dir() -> PathBuf {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    if let Ok(key) = hkcu.open_subkey(UNINSTALL_KEY) {
+        if let Ok(raw) = key.get_value::<String, _>("InstallLocation") {
+            let trimmed = raw.trim().trim_matches('"');
+            let candidate = PathBuf::from(trimmed);
+            if !trimmed.is_empty() && candidate.is_dir() {
+                return candidate;
+            }
+        }
+    }
+    default_install_dir()
+}
+
 /// 双击 setup.exe 时先看注册表里有没有装过 —— 只认卸载项，不扫 C/D/E/F 盘。
 /// 旧 NSIS 版写的也是同一个键，靠 UninstallString / 目录内容区分是哪一代装的。
 fn installed_info() -> serde_json::Value {
@@ -157,7 +177,9 @@ fn installed_info() -> serde_json::Value {
         key.get_value::<String, _>(name).unwrap_or_default()
     };
     let version = read("DisplayVersion");
+    // 旧 NSIS 写的路径值带引号（"C:\...\SupportEase"），先剥掉再显示/使用
     let location = read("InstallLocation");
+    let location = location.trim().trim_matches('"').to_string();
     let uninstall = read("UninstallString");
     if location.is_empty() {
         return serde_json::json!({ "state": "none" });
@@ -817,7 +839,7 @@ fn main() {
             let result = if uninstall {
                 run_uninstall(&install_dir_of_self(), false, |_, _| {})
             } else {
-                run_install(&default_install_dir(), true, true, |_, _| {})
+                run_install(&silent_install_dir(), true, true, |_, _| {})
             };
             let code = match result {
                 Ok(()) => 0,
