@@ -643,13 +643,32 @@ fn main() {
     let _ = UNINSTALL.set(uninstall);
     let silent = args.iter().any(|a| a == "--silent" || a == "/S");
 
+    // 安装器与卸载器各用各的单实例：开着安装器时点卸载器不该被拦
+    let (mutex_name, class_name) = if uninstall {
+        (
+            w!("Local\\SupportEaseUninstallInstance"),
+            w!("SupportEaseUninstall"),
+        )
+    } else {
+        (
+            w!("Local\\SupportEaseSetupInstance"),
+            w!("SupportEaseSetup"),
+        )
+    };
+
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
 
-        // 单实例：图标被连点两下时不要开第二个窗口
-        let _instance = CreateMutexW(None, true, w!("Local\\SupportEaseSetupInstance"));
+        // 单实例：已经开着一个就把它唤到前台，别再开一个 —— 也不能点了没反应
+        let _instance = CreateMutexW(None, true, mutex_name);
         if GetLastError() == ERROR_ALREADY_EXISTS {
+            if let Ok(existing) = FindWindowW(class_name, PCWSTR::null()) {
+                // SW_RESTORE：窗口被最小化时 SW_SHOW 不会把它拉回来
+                let _ = ShowWindow(existing, SW_RESTORE);
+                let _ = PostMessageW(Some(existing), WM_REVEAL, WPARAM(0), LPARAM(0));
+                let _ = SetForegroundWindow(existing);
+            }
             return;
         }
 
@@ -670,7 +689,6 @@ fn main() {
         }
 
         let hinstance = GetModuleHandleW(None).expect("拿不到模块句柄");
-        let class = w!("SupportEaseSetup");
         let wc = WNDCLASSEXW {
             cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
             style: CS_DROPSHADOW,
@@ -679,7 +697,7 @@ fn main() {
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
             hIcon: LoadIconW(Some(HINSTANCE(hinstance.0)), PCWSTR(1 as *const u16))
                 .unwrap_or_default(),
-            lpszClassName: class,
+            lpszClassName: class_name,
             ..Default::default()
         };
         RegisterClassExW(&wc);
@@ -697,7 +715,7 @@ fn main() {
         };
         let hwnd = match CreateWindowExW(
             WS_EX_APPWINDOW,
-            class,
+            class_name,
             title,
             WS_POPUP | WS_CLIPCHILDREN,
             (screen_w - width) / 2,
