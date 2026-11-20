@@ -15,23 +15,38 @@ publish = false
 [workspace]
 
 [build-dependencies]
-tauri-build = { version = "2.5.1", features = [] }
+# 把 icon.ico 嵌进 exe（资源管理器与任务栏看到的那颗）
+embed-resource = "3"
 
 [dependencies]
-tauri = { version = "2.9.1", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 与客户端同一个 zip 档（那里用来读 3MF）；安装器只用解压这一半
 zip = { version = "3.0.0", default-features = false, features = ["deflate"] }
 
-[target.'cfg(windows)'.dependencies]
+# ★ 刻意不引 tauri：它那 5 MB 是框架（命令注册 / 资源协议 / 插件体系），
+#   而安装器只需要「一个 Win32 窗口 + 一个 WebView2 控件 + 一条 JSON 消息」。
+#   webview2-com 是微软 WebView2 的官方 COM 绑定的薄封装。
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_Dwm",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_Storage_FileSystem",
+] }
+
 # 写「应用和功能」里那条卸载项。与客户端同一个版本（见 src-tauri/Cargo.toml）
 winreg = "0.55"
-# 卸载器要 MoveFileExW 做「重启后删除自己」那一档
-windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
 
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
+panic = "abort"

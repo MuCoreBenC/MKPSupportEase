@@ -1,38 +1,64 @@
-/* SupportEase 的 Windows 安装器。
+/* SupportEase 的 Windows 安装器（轻壳）。
  *
- * 它只做四件事：解压随包的应用 exe、写「应用和功能」里的卸载项、建快捷方式、
- * 把自己复制成 uninstall.exe。界面是 `ui/` 里的三个状态（安装前 / 安装中 / 完成）。
+ * 结构：一个 Win32 无边框窗口 + 一个 WebView2 控件。界面是 `ui/index.html`
+ * （HTML/CSS），中间只有一条 `postMessage(JSON)` 通道 —— **没有 Tauri**。
  *
- * ★ 为什么不用 Tauri 自带的 NSIS：那一套的窗口、按钮、进度条都是 Win32 原生控件，
- *   字体与配色改不动。这里用同一个 WebView2 壳，界面完全由 HTML/CSS 控制。
+ * ★ 为什么不用 Tauri：它那 5 MB 是框架（命令注册 / 资源协议 / 插件体系），
+ *   而这里只需要「一个窗口 + 一个 WebView2 + 一条 JSON 消息」。WebView2 本身
+ *   是系统组件（Win10 1803+ 自带），安装包里不带浏览器内核。
  *
- * ★ 静默安装：`--silent`（也认 NSIS 的 `/S`）。`src-tauri/src/ipc/update.rs` 的更新链
- *   就是靠这个参数在当前版本退出后无界面覆盖安装，**契约不能改**。
+ * ★ 安装本身只做五件事：解压随包的应用 exe、写卸载项、建快捷方式、
+ *   把自己复制成 uninstall.exe、静默模式下不建窗口。
  */
 
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![windows_subsystem = "windows"]
 
-use serde::Serialize;
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
-use tauri::{Emitter, Manager, WebviewWindow};
+use std::process::Command;
 
-/// 由构建脚本在打包前生成（应用 exe + LICENSE 压成 zip）——
-/// build.rs 会把它复制进 OUT_DIR；没有时放一个空 zip 占位，源码目录因此不必带二进制
+use webview2_com::Microsoft::Web::WebView2::Win32::{
+    CreateCoreWebView2EnvironmentWithOptions, ICoreWebView2, ICoreWebView2Controller,
+    ICoreWebView2Environment,
+};
+use webview2_com::{
+    take_pwstr, CreateCoreWebView2ControllerCompletedHandler,
+    CreateCoreWebView2EnvironmentCompletedHandler, WebMessageReceivedEventHandler,
+};
+use windows::core::{w, HSTRING, PCWSTR, PWSTR};
+use windows::Win32::Foundation::*;
+use windows::Win32::Graphics::Dwm::{
+    DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+};
+use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::HiDpi::{
+    GetDpiForSystem, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+};
+use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+use windows::Win32::UI::WindowsAndMessaging::*;
+
+const HTML_TEMPLATE: &str = include_str!("../ui/index.html");
+const ICON_BLACK: &str = include_str!("../ui/icon-sm.b64");
+const ICON_WHITE: &str = include_str!("../ui/icon-sm-white.b64");
+
+/// 由 build.rs 复制进 OUT_DIR（构建脚本生成；没有时是空 zip 占位）
 const PAYLOAD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/payload.zip"));
 
 const PRODUCT: &str = "SupportEase";
 const APP_EXE: &str = "mkp-support-ease.exe";
 const PUBLISHER: &str = "MuCoreBenC";
 
-/// 应用版本（不是安装器自己的 0.1.0）—— 构建脚本用 MKP_APP_VERSION 注入
-fn app_version() -> &'static str {
-    option_env!("MKP_APP_VERSION").unwrap_or("0.0.0")
+const WM_PROGRESS: u32 = WM_APP + 1;
+const WM_FINISHED: u32 = WM_APP + 2;
+
+thread_local! {
+    static WEBVIEW: RefCell<Option<ICoreWebView2>> = const { RefCell::new(None) };
+    static CONTROLLER: RefCell<Option<ICoreWebView2Controller>> = const { RefCell::new(None) };
 }
 
-#[derive(Clone, Serialize)]
-struct Progress {
-    pct: u32,
-    what: String,
+fn app_version() -> &'static str {
+    option_env!("MKP_APP_VERSION").unwrap_or("0.0.0")
 }
 
 fn local_app_data() -> PathBuf {
@@ -59,77 +85,206 @@ fn start_menu_programs() -> PathBuf {
         .join(r"Microsoft\Windows\Start Menu\Programs")
 }
 
-/* ---------- 前端能调的 ---------- */
-
-#[tauri::command]
-fn install_dir() -> String {
-    default_install_dir().to_string_lossy().into_owned()
+fn build_html() -> String {
+    HTML_TEMPLATE
+        .replace("{{ICON_BLACK}}", ICON_BLACK.trim())
+        .replace("{{ICON_WHITE}}", ICON_WHITE.trim())
 }
 
-#[tauri::command]
-fn version() -> String {
-    app_version().to_string()
+/* ---------- 与页面之间的消息 ---------- */
+
+struct Progress {
+    pct: u32,
+    what: String,
 }
 
-#[tauri::command]
-fn install(window: WebviewWindow, dir: String, desktop: bool, start_menu: bool) -> Result<(), String> {
-    run_install(&PathBuf::from(dir), desktop, start_menu, |pct, what| {
-        let _ = window.emit(
-            "install-progress",
-            Progress {
-                pct,
-                what: what.to_string(),
-            },
-        );
-    })
+fn send_json(value: serde_json::Value) {
+    let s = HSTRING::from(value.to_string().as_str());
+    WEBVIEW.with(|w| {
+        if let Some(web) = w.borrow().as_ref() {
+            unsafe {
+                let _ = web.PostWebMessageAsJson(&s);
+            }
+        }
+    });
 }
 
-/// 选文件夹：走系统的 FolderBrowserDialog（PowerShell 一句），不引额外插件
-#[tauri::command]
-fn pick_dir(current: String) -> Option<String> {
-    let script = format!(
-        "Add-Type -AssemblyName System.Windows.Forms;\
-         $d=New-Object System.Windows.Forms.FolderBrowserDialog;\
-         $d.SelectedPath='{}';\
-         if($d.ShowDialog() -eq 'OK'){{$d.SelectedPath}}",
-        current.replace('\'', "''")
-    );
-    let out = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-STA",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-            &script,
-        ])
-        .output()
-        .ok()?;
-    let picked = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if picked.is_empty() {
-        None
-    } else {
-        Some(picked)
+fn on_message(hwnd: isize, raw: &str) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return;
+    };
+    match v["cmd"].as_str().unwrap_or("") {
+        "init" => send_json(serde_json::json!({
+            "event": "init",
+            "dir": default_install_dir().to_string_lossy(),
+            "version": app_version(),
+        })),
+        "close" => unsafe {
+            let _ = DestroyWindow(HWND(hwnd as *mut _));
+        },
+        "minimize" => unsafe {
+            let _ = ShowWindow(HWND(hwnd as *mut _), SW_MINIMIZE);
+        },
+        "drag" => unsafe {
+            let _ = ReleaseCapture();
+            let _ = SendMessageW(
+                HWND(hwnd as *mut _),
+                WM_NCLBUTTONDOWN,
+                Some(WPARAM(HTCAPTION as usize)),
+                Some(LPARAM(0)),
+            );
+        },
+        "browse" => {
+            let current = v["current"].as_str().unwrap_or("").to_string();
+            if let Some(path) = pick_dir(&current) {
+                send_json(serde_json::json!({ "event": "dir", "path": path }));
+            }
+        }
+        "launch" => {
+            let dir = v["dir"].as_str().unwrap_or("").to_string();
+            let _ = Command::new(PathBuf::from(dir).join(APP_EXE)).spawn();
+        }
+        "install" => {
+            let dir = v["dir"].as_str().unwrap_or("").to_string();
+            let desktop = v["desktop"].as_bool().unwrap_or(true);
+            let start_menu = v["startMenu"].as_bool().unwrap_or(true);
+            std::thread::spawn(move || {
+                let result = run_install(Path::new(&dir), desktop, start_menu, |pct, what| {
+                    let boxed = Box::new(Progress {
+                        pct,
+                        what: what.to_string(),
+                    });
+                    unsafe {
+                        let _ = PostMessageW(
+                            Some(HWND(hwnd as *mut _)),
+                            WM_PROGRESS,
+                            WPARAM(0),
+                            LPARAM(Box::into_raw(boxed) as isize),
+                        );
+                    }
+                });
+                let boxed = Box::new(result.err());
+                unsafe {
+                    let _ = PostMessageW(
+                        Some(HWND(hwnd as *mut _)),
+                        WM_FINISHED,
+                        WPARAM(0),
+                        LPARAM(Box::into_raw(boxed) as isize),
+                    );
+                }
+            });
+        }
+        _ => {}
     }
 }
 
-#[tauri::command]
-fn run_installed(dir: String) -> Result<(), String> {
-    std::process::Command::new(PathBuf::from(dir).join(APP_EXE))
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("启动失败：{e}"))
+/* ---------- 窗口过程 ---------- */
+
+unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    match msg {
+        WM_PROGRESS => {
+            let p = Box::from_raw(lp.0 as *mut Progress);
+            send_json(serde_json::json!({ "event": "progress", "pct": p.pct, "what": p.what }));
+            LRESULT(0)
+        }
+        WM_FINISHED => {
+            let result = Box::from_raw(lp.0 as *mut Option<String>);
+            match &*result {
+                None => send_json(serde_json::json!({ "event": "done" })),
+                Some(e) => send_json(serde_json::json!({ "event": "error", "message": e })),
+            }
+            LRESULT(0)
+        }
+        WM_CLOSE => {
+            let _ = DestroyWindow(hwnd);
+            LRESULT(0)
+        }
+        WM_DESTROY => {
+            PostQuitMessage(0);
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(hwnd, msg, wp, lp),
+    }
 }
 
-#[tauri::command]
-fn close_window(window: WebviewWindow) {
-    let _ = window.close();
+/* ---------- WebView2 ---------- */
+
+unsafe fn init_webview(hwnd: HWND) {
+    let data_dir = std::env::temp_dir().join("SupportEaseSetup");
+    let _ = std::fs::create_dir_all(&data_dir);
+
+    let handler =
+        CreateCoreWebView2EnvironmentCompletedHandler::create(Box::new(move |result, env| {
+            let env: Option<ICoreWebView2Environment> = env;
+            let (Some(env), true) = (env, result.is_ok()) else {
+                fallback_no_webview(hwnd);
+                return Ok(());
+            };
+
+            let controller_handler =
+                CreateCoreWebView2ControllerCompletedHandler::create(Box::new(
+                    move |result, controller| {
+                        let (Some(controller), true) = (controller, result.is_ok()) else {
+                            return Ok(());
+                        };
+                        controller.SetIsVisible(true)?;
+                        let webview = controller.CoreWebView2()?;
+                        let mut rc = RECT::default();
+                        GetClientRect(hwnd, &mut rc)?;
+                        controller.SetBounds(rc)?;
+
+                        let settings = webview.Settings()?;
+                        settings.SetAreDefaultContextMenusEnabled(false)?;
+                        settings.SetIsStatusBarEnabled(false)?;
+                        settings.SetAreDevToolsEnabled(false)?;
+
+                        let hwnd_raw = hwnd.0 as isize;
+                        let received = WebMessageReceivedEventHandler::create(Box::new(
+                            move |_sender, args| {
+                                if let Some(args) = args {
+                                    let mut raw = PWSTR::null();
+                                    args.WebMessageAsJson(&mut raw)?;
+                                    on_message(hwnd_raw, &take_pwstr(raw));
+                                }
+                                Ok(())
+                            },
+                        ));
+                        let mut token = 0i64;
+                        webview.add_WebMessageReceived(&received, &mut token)?;
+                        webview.NavigateToString(&HSTRING::from(build_html()))?;
+
+                        WEBVIEW.with(|w| *w.borrow_mut() = Some(webview));
+                        CONTROLLER.with(|c| *c.borrow_mut() = Some(controller));
+                        Ok(())
+                    },
+                ));
+            let _ = env.CreateCoreWebView2Controller(hwnd, &controller_handler);
+            Ok(())
+        }));
+
+    let _ = CreateCoreWebView2EnvironmentWithOptions(
+        None,
+        &HSTRING::from(data_dir.to_string_lossy().as_ref()),
+        None,
+        &handler,
+    );
 }
 
-#[tauri::command]
-fn minimize_window(window: WebviewWindow) {
-    let _ = window.minimize();
+/// 没有 WebView2（Win7/8 或运行时被卸了的机器）：弹一个系统对话框说明，
+/// 然后按静默安装走完 —— 总比"点了没反应"强。
+unsafe fn fallback_no_webview(hwnd: HWND) {
+    let _ = MessageBoxW(
+        Some(hwnd),
+        w!("这台机器没有 WebView2 运行时，安装界面无法显示。\n\n将直接静默安装 SupportEase。"),
+        w!("SupportEase 安装程序"),
+        MB_OK | MB_ICONWARNING,
+    );
+    let code = match run_install(&default_install_dir(), true, true, |_, _| {}) {
+        Ok(()) => 0,
+        Err(_) => 1,
+    };
+    let _ = DestroyWindow(hwnd);
+    std::process::exit(code);
 }
 
 /* ---------- 安装本体 ---------- */
@@ -144,9 +299,7 @@ fn run_install(
     std::fs::create_dir_all(dir).map_err(|e| format!("创建不了安装目录：{e}"))?;
 
     // 覆盖安装：先把还在跑的那个关掉（它正在占着 exe 文件）
-    let _ = std::process::Command::new("taskkill")
-        .args(["/f", "/im", APP_EXE])
-        .output();
+    let _ = Command::new("taskkill").args(["/f", "/im", APP_EXE]).output();
 
     report(6, "正在解压文件…");
     let mut archive =
@@ -157,7 +310,6 @@ fn run_install(
             .by_index(i)
             .map_err(|e| format!("读安装包失败：{e}"))?;
         let name = entry.name().to_string();
-        // payload 是我们自己打的，但仍然按不受信任的输入处理：不许跳出安装目录
         if name.contains("..") || name.starts_with('/') || name.starts_with('\\') || name.contains(':')
         {
             return Err(format!("安装包里有非法路径：{name}"));
@@ -185,10 +337,7 @@ fn run_install(
     }
     if start_menu {
         report(92, "正在创建开始菜单快捷方式…");
-        create_shortcut(
-            &start_menu_programs().join(format!("{PRODUCT}.lnk")),
-            dir,
-        )?;
+        create_shortcut(&start_menu_programs().join(format!("{PRODUCT}.lnk")), dir)?;
     }
 
     report(97, "正在写入卸载信息…");
@@ -213,7 +362,7 @@ fn create_shortcut(lnk: &Path, target_dir: &Path) -> Result<(), String> {
         quoted(&exe),
         quoted(target_dir),
     );
-    let status = std::process::Command::new("powershell")
+    let status = Command::new("powershell")
         .args([
             "-NoProfile",
             "-NonInteractive",
@@ -259,38 +408,112 @@ fn write_uninstall_entry(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// 选文件夹：走系统的 FolderBrowserDialog（PowerShell 一句）。
+/// 它是模态的，会短暂卡住消息循环 —— 与原生对话框的行为一致。
+fn pick_dir(current: &str) -> Option<String> {
+    let script = format!(
+        "Add-Type -AssemblyName System.Windows.Forms;\
+         $d=New-Object System.Windows.Forms.FolderBrowserDialog;\
+         $d.SelectedPath='{}';\
+         if($d.ShowDialog() -eq 'OK'){{$d.SelectedPath}}",
+        current.replace('\'', "''")
+    );
+    let out = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-STA",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            &script,
+        ])
+        .output()
+        .ok()?;
+    let picked = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if picked.is_empty() {
+        None
+    } else {
+        Some(picked)
+    }
+}
+
 /* ---------- 入口 ---------- */
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let silent = args.iter().any(|a| a == "--silent" || a == "/S");
 
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![
-            install_dir,
-            version,
-            install,
-            pick_dir,
-            run_installed,
-            close_window,
-            minimize_window
-        ])
-        .setup(move |app| {
-            let window = app.get_webview_window("main").expect("窗口没建起来");
-            if silent {
-                // 更新链：无界面覆盖安装，装完直接退出（退出码就是结果）
-                let code = match run_install(&default_install_dir(), true, true, |_, _| {}) {
-                    Ok(()) => 0,
-                    Err(e) => {
-                        eprintln!("静默安装失败：{e}");
-                        1
-                    }
-                };
-                std::process::exit(code);
-            }
-            window.show()?;
-            Ok(())
-        })
-        .run(tauri::generate_context!())
-        .expect("安装器启动失败");
+    unsafe {
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+
+        if silent {
+            let code = match run_install(&default_install_dir(), true, true, |_, _| {}) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("静默安装失败：{e}");
+                    1
+                }
+            };
+            std::process::exit(code);
+        }
+
+        let hinstance = GetModuleHandleW(None).expect("拿不到模块句柄");
+        let class = w!("SupportEaseSetup");
+        let wc = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            style: CS_DROPSHADOW,
+            lpfnWndProc: Some(wndproc),
+            hInstance: HINSTANCE(hinstance.0),
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            hIcon: LoadIconW(Some(HINSTANCE(hinstance.0)), PCWSTR(1 as *const u16))
+                .unwrap_or_default(),
+            lpszClassName: class,
+            ..Default::default()
+        };
+        RegisterClassExW(&wc);
+
+        let dpi = GetDpiForSystem().max(96) as i32;
+        let width = 540 * dpi / 96;
+        let height = 430 * dpi / 96;
+        let screen_w = GetSystemMetrics(SM_CXSCREEN);
+        let screen_h = GetSystemMetrics(SM_CYSCREEN);
+
+        let hwnd = match CreateWindowExW(
+            WS_EX_APPWINDOW,
+            class,
+            w!("SupportEase 安装程序"),
+            WS_POPUP | WS_CLIPCHILDREN,
+            (screen_w - width) / 2,
+            (screen_h - height) / 2,
+            width,
+            height,
+            None,
+            None,
+            Some(HINSTANCE(hinstance.0)),
+            None,
+        ) {
+            Ok(h) => h,
+            Err(_) => std::process::exit(1),
+        };
+
+        // Win11 圆角（Win10 上这条会失败，窗口保持方角）
+        let preference = DWMWCP_ROUND;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            &preference as *const _ as *const _,
+            std::mem::size_of_val(&preference) as u32,
+        );
+
+        let _ = ShowWindow(hwnd, SW_SHOW);
+        init_webview(hwnd);
+
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
 }

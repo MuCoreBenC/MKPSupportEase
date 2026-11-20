@@ -142,7 +142,7 @@
 <div class="win">
   <div class="titlebar" data-tauri-drag-region>
     <span class="name" data-tauri-drag-region>
-      <img class="tbicon" src="icon-sm.png" alt="" />
+      <img class="tbicon" src="{{ICON_BLACK}}" alt="" />
       SupportEase 安装程序
     </span>
     <div class="spacer" data-tauri-drag-region></div>
@@ -194,82 +194,82 @@
   </section>
 </div>
 
-<script type="module">
-  const { invoke } = window.__TAURI__.core
-  const { listen } = window.__TAURI__.event
-
+<script>
+  // 与 Rust 之间的唯一通道：postMessage(JSON) → WebView2 的 message 事件
+  const post = (msg) => window.chrome.webview.postMessage(msg)
   const $ = (id) => document.getElementById(id)
   const stage = (name) => {
     document.querySelectorAll('.stage').forEach((s) => s.classList.toggle('on', s.dataset.stage === name))
   }
 
-  let installDir = ''
+  const ICON_BLACK = '{{ICON_BLACK}}'
+  const ICON_WHITE = '{{ICON_WHITE}}'
 
-  window.addEventListener('DOMContentLoaded', async () => {
-    installDir = await invoke('install_dir')
-    $('dir').value = installDir
-    $('ver').textContent = '版本 ' + (await invoke('version'))
-  })
+  $('min').onclick = () => post({ cmd: 'minimize' })
+  $('quit').onclick = () => post({ cmd: 'close' })
+  $('close').onclick = () => post({ cmd: 'close' })
 
-  $('min').onclick = () => invoke('minimize_window')
-  $('quit').onclick = () => invoke('close_window')
-  $('close').onclick = () => invoke('close_window')
+  $('browse').onclick = () => post({ cmd: 'browse', current: $('dir').value })
 
-  $('browse').onclick = async () => {
-    const picked = await invoke('pick_dir', { current: $('dir').value })
-    if (picked) $('dir').value = picked
+  $('launch').onclick = () => {
+    post({ cmd: 'launch', dir: $('dir').value })
+    post({ cmd: 'close' })
   }
 
-  $('launch').onclick = async () => {
-    await invoke('run_installed', { dir: $('dir').value })
-    await invoke('close_window')
-  }
+  let finished = false
 
-  let done = false
-  await listen('install-progress', (event) => {
-    const { pct, what } = event.payload
-    $('fill').style.width = pct + '%'
-    $('pct').textContent = pct + '%'
-    $('what').textContent = what
-    if (pct >= 100 && !done) {
-      done = true
-      setTimeout(() => stage('done'), 400)
+  window.chrome.webview.addEventListener('message', (e) => {
+    const m = e.data || {}
+    if (m.event === 'init') {
+      $('dir').value = m.dir || ''
+      $('ver').textContent = '版本 ' + (m.version || '')
+    } else if (m.event === 'dir') {
+      if (m.path) $('dir').value = m.path
+    } else if (m.event === 'progress') {
+      $('fill').style.width = m.pct + '%'
+      $('pct').textContent = m.pct + '%'
+      $('what').textContent = m.what || ''
+    } else if (m.event === 'done') {
+      if (!finished) {
+        finished = true
+        setTimeout(() => stage('done'), 400)
+      }
+    } else if (m.event === 'error') {
+      finished = true
+      $('error').textContent = m.message || '安装失败'
+      setTimeout(() => {
+        stage('ready')
+        $('go').disabled = false
+      }, 2200)
     }
   })
 
-  $('go').onclick = async () => {
+  $('go').onclick = () => {
     const dir = $('dir').value.trim()
     if (!dir) return
-    installDir = dir
     $('go').disabled = true
     $('error').textContent = ''
     stage('progress')
     $('fill').style.width = '0%'
     $('pct').textContent = '0%'
-    try {
-      await invoke('install', {
-        dir,
-        desktop: $('desktop').checked,
-        startMenu: $('startmenu').checked,
-      })
-    } catch (e) {
-      $('error').textContent = String(e)
-      done = true
-      setTimeout(() => {
-        stage('ready')
-        $('go').disabled = false
-      }, 1600)
-    }
+    post({
+      cmd: 'install',
+      dir,
+      desktop: $('desktop').checked,
+      startMenu: $('startmenu').checked,
+    })
   }
 
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
   const paintIcon = () => {
     document.querySelectorAll('img.tbicon').forEach((img) => {
-      img.src = mq.matches ? 'icon-sm-white.png' : 'icon-sm.png'
+      img.src = mq.matches ? ICON_WHITE : ICON_BLACK
     })
   }
   mq.addEventListener('change', paintIcon)
   paintIcon()
+
+  post({ cmd: 'init' })
 </script>
 </body>
 </html>

@@ -20,5 +20,8 @@ fn main() {
     println!("cargo:rerun-if-changed=payload.zip");
     println!("cargo:rerun-if-env-changed=MKP_APP_VERSION");
 
-    tauri_build::build()
+    // exe 图标（资源管理器 / 任务栏）。embed-resource 调 rc.exe，随 MSVC 工具链来
+    let _ = embed_resource::compile("app.rc", embed_resource::NONE);
+    println!("cargo:rerun-if-changed=app.rc");
+    println!("cargo:rerun-if-changed=icons/icon.ico");
 }
