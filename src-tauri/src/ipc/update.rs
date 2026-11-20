@@ -56,6 +56,11 @@ pub struct UpdateInfoDto {
     /// 只能靠猜。把路径交给界面，就是为了让人能**一键把文件发出去**，
     /// 而不是听我说"你去 ~/Library/Application Support/... 里找找"。
     pub install_log: String,
+    /// **自动检查上次发现的那一版**（`None` = 没有待更新）。
+    ///
+    /// 标题栏那枚"有更新"小胶囊读它：8 秒通知走掉之后还在，且认得测试版
+    /// （`has_update` 只按正式版判定）。
+    pub pending_version: Option<String>,
 }
 
 /// 读当前数据源、问一次更新（**命令壳与 `update_info` 共用这一处**）。
@@ -86,6 +91,7 @@ pub async fn update_info(app: AppHandle) -> Result<UpdateInfoDto, AppError> {
             asset: update.asset,
             last_result: updater::last_result(&root),
             install_log: updater::install_log_path(&root).display().to_string(),
+            pending_version: crate::runtime::app_state::pending_update(&root).unwrap_or(None),
         })
     })
 }

@@ -883,6 +883,12 @@ pub struct AppStateFile {
     ///   读者是 [`crate::runtime::update_check`]；设置页那一格走 `ipc::prefs`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_channel: Option<super::release_info::UpdateChannel>,
+    /// **自动检查发现的待更新版本**（2026-11-21）：上次顺路查到的那一版。
+    ///
+    /// 落盘是为了标题栏那枚"有更新"小胶囊 —— 8 秒通知走掉之后它还得在，
+    /// 且要认得测试版（`hasUpdate` 只按正式版判定）。查到新版就写，查不到就清。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_update: Option<String>,
     /// **主窗置顶档位**（2026-10-17）：`None` = 还没选过 ⇒ `off`。
     ///
     /// 它是"用户点出来的界面状态"，与 `theme` 同一族 —— 所以住在这里，
@@ -944,6 +950,7 @@ impl Default for AppStateFile {
             auto_clean_history: None,
             auto_check_update: None,
             update_channel: None,
+            pending_update: None,
             pin: None,
             compact: None,
             last_window_box: None,
@@ -1021,6 +1028,7 @@ const PREF_FIELDS: &[&str] = &[
     "autoCleanHistory",
     "autoCheckUpdate",
     "updateChannel",
+    "pendingUpdate",
     "pin",
     "compact",
 ];
@@ -1219,6 +1227,7 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         auto_check_update: None,
         /* 更新渠道是 2026-11-20 才有的：旧档里没有（没选过 = 正式版） */
         update_channel: None,
+        pending_update: None,
         /* 窗口置顶 / 窄窗 / 上一次手动几何是 2026-10-17 才有的格：旧档里没有 */
         pin: None,
         compact: None,
@@ -1729,6 +1738,21 @@ pub fn set_update_channel(
     with_state(root, |state| {
         state.update_channel = Some(channel);
         Ok(channel)
+    })
+}
+
+/* ---------- pendingUpdate：自动检查发现的待更新版本 ---------- */
+
+/// 上次自动检查发现的那一版（没有 = `None`）。标题栏那枚小胶囊读它。
+pub fn pending_update(root: &Path) -> Result<Option<String>, AppError> {
+    Ok(load(root)?.pending_update)
+}
+
+/// 记下 / 清掉待更新版本。查到新版写进去，查到"没有新版"就清掉。
+pub fn set_pending_update(root: &Path, version: Option<&str>) -> Result<(), AppError> {
+    with_state(root, |state| {
+        state.pending_update = version.map(str::to_owned);
+        Ok(())
     })
 }
 

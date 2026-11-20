@@ -517,6 +517,8 @@ export default function App() {
                跑着 / 问句收起后照样点得回来；「完成」在那一页由上面那条 effect 折成胶囊，
                点开后一直开着，切走再切回来才立刻折。 */
             postProcess={postProcess}
+            /* 标题栏那枚"有更新"小胶囊：点一下翻到设置页的软件更新那一块 */
+            onOpenUpdate={() => openSettings(SETTINGS_TARGET_UPDATE)}
           />
 
           {/*

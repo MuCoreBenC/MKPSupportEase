@@ -596,6 +596,7 @@ export const ja: Record<StringKey, string> = {
 
   // ---- 关于与更新 ----
   'update.ready': 'インストール可能',
+  'update.chip.available': '更新あり',
   'update.failed': '失敗',
   'update.pause': '一時停止',
   'update.cancel': 'キャンセル',

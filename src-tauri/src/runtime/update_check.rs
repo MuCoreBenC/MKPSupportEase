@@ -212,11 +212,16 @@ pub fn maybe_check_after_catalog(app: &AppHandle) {
     };
     match notified {
         Ok(Some(payload)) => {
+            /* 落盘：8 秒那条通知走掉之后，标题栏那枚小胶囊还得靠它 */
+            let _ = app_state::set_pending_update(&root, Some(&payload.version));
             if let Err(e) = app.emit(UPDATE_AVAILABLE_EVENT, payload) {
                 tracing::warn!("自动检查更新：通知事件没发出去：{e}");
             }
         }
-        Ok(None) => {}
+        Ok(None) => {
+            /* 这一趟没查到新的：把上次留下的那枚胶囊收掉 */
+            let _ = app_state::set_pending_update(&root, None);
+        }
         Err(e) => {
             tracing::debug!("自动检查更新静默跳过：{}", e.message);
             CHECKED.store(false, Ordering::Release);

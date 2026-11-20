@@ -633,6 +633,7 @@ export const zhCN = {
 
   // ---- 关于与更新 ----
   'update.ready': '可安装',
+  'update.chip.available': '可更新',
   'update.failed': '失败',
   'update.pause': '暂停',
   'update.cancel': '取消',

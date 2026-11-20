@@ -595,6 +595,7 @@ export const en: Record<StringKey, string> = {
 
   // ---- 关于与更新 ----
   'update.ready': 'Ready to install',
+  'update.chip.available': 'Update',
   'update.failed': 'Failed',
   'update.pause': 'Pause',
   'update.cancel': 'Cancel',

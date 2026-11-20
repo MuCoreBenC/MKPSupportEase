@@ -617,6 +617,7 @@ export const zhTW: Record<StringKey, string> = {
 
   // ---- 關於與更新 ----
   'update.ready': '可安裝',
+  'update.chip.available': '可更新',
   'update.failed': '失敗',
   'update.pause': '暫停',
   'update.cancel': '取消',

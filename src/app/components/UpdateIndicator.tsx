@@ -70,6 +70,33 @@ function DownloadIcon({ active }: { active: boolean }) {
   )
 }
 
+/**
+ * 「有更新」那一枚（16×16）：**铃铛 + 右上角标**，不是往下掉的箭头、也不是转一圈的箭头。
+ *
+ * 与 [`DownloadIcon`] 分工：那个回答"正在把东西取回来"，这个回答"有一版可以装"。
+ * 用下载/刷新那种箭头去表示"有新版"，用户会以为已经在下了或者要手动刷新。
+ *
+ * ★ 角标与铃铛刻意留出缝（铃铛往左下让了 0.6、角标收到右上）：16px 下两者同色，
+ *   挨在一起会糊成一团，看起来像铃铛缺了一块。
+ */
+function UpdateGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M7.2 3.2a3.5 3.5 0 0 1 3.5 3.5v2.3l1.1 1.7H2.6l1.1-1.7V6.7A3.5 3.5 0 0 1 7.2 3.2z"
+        fill="currentColor"
+      />
+      <path
+        d="M5.5 11.8a1.6 1.6 0 0 0 3.2 0"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <circle cx="13" cy="2.9" r="1.6" fill="currentColor" />
+    </svg>
+  )
+}
+
 /** 字节数 → 人话（MB / GB；`total = 0` 就是"总量未知"） */
 function mb(v: number): string {
   if (v >= 1024 * 1024 * 1024) return `${(v / 1024 / 1024 / 1024).toFixed(2)} GB`
@@ -102,6 +129,8 @@ function isVisible(state: UpdateState): boolean {
 interface Props {
   /** 装好了（退出后重启的账变了） */
   onInstalled: (version: string) => void
+  /** 点那枚"有更新"小胶囊：去设置页的软件更新那一块 */
+  onOpenUpdate: () => void
   /**
    * 开发台：**不用真事件也摆出某一态**（作者 2026-10-14）。
    *
@@ -188,7 +217,11 @@ function buildActions(
   }
 }
 
-export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
+export default function UpdateIndicator({
+  onInstalled,
+  onOpenUpdate,
+  devPreview,
+}: Props) {
   /* 订阅语言（2026-10-26）：下面那些 `t(...)` 是模块级取词，重渲由这一行触发 */
   const tr = useT()
   /* 状态与"有没有新版"来自**全站那一份**（设置页读到的是同一个快照），
@@ -197,6 +230,7 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
   const [open, setOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
 
   /* 演示态：面板默认摊开，一眼看到那一屏 */
   const demo = devPreview !== undefined
@@ -327,6 +361,26 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
     },
     [],
   )
+
+  /* 有新版（正式版，或自动检查按选中渠道发现的测试版）、但还没开始下载：
+     **留一枚常驻小胶囊**。8 秒那条通知走掉之后，用户还能在标题栏看到"有更新"
+     这件事 —— 点一下去设置页那一块，看版本说明再决定装不装。
+     `pendingVersion` 是后端落盘的那一条：它认得测试版，`hasUpdate` 只认正式版。 */
+  const pending = info?.pendingVersion
+  const hasPending = pending !== undefined && pending !== null && pending !== ''
+  if (!isVisible(shown) && (info?.hasUpdate === true || hasPending)) {
+    return (
+      <TitlebarChip
+        testId="update-indicator"
+        icon={<UpdateGlyph />}
+        label={tr('update.chip.available')}
+        title={tr('update.tip', { label: tr('update.chip.available') })}
+        ariaLabel={tr('update.aria', { label: tr('update.chip.available') })}
+        tone="accent"
+        onClick={onOpenUpdate}
+      />
+    )
+  }
 
   if (!isVisible(shown)) return null
 

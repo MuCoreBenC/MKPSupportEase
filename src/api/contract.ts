@@ -2277,6 +2277,13 @@ export interface UpdateInfo {
   lastResult?: UpdateResult | null
   /** 安装日志的绝对路径（点「重启并安装」没反应时要看的就是它） */
   installLog: string
+  /**
+   * 自动检查上次发现的那一版（`undefined` / `null` = 没有待更新）。
+   *
+   * 标题栏那枚"有更新"小胶囊读它 —— `hasUpdate` 只按正式版判定，
+   * 测试版候选进不了那一格，所以另存这一条。
+   */
+  pendingVersion?: string | null
 }
 
 /**
