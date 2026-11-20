@@ -111,3 +111,6 @@ client-assets/
 installer/gen
 installer/payload.xz
 installer/payload.bin
+
+# 更新通知的演示截图（人工核对用，不入库）
+notice-*.png
