@@ -802,7 +802,18 @@ const LEGACY_LOCAL_DIR: &str = "presets-mine";
 const STATE_FILE: &str = "run/app-state.json";
 
 /// **应用持久化状态**（整份）。每格 `Option` + `serde(default)`：
-/// 没有就是"这一格还没状态"，合法；将来加新 section 时旧文件照读，不迁移、不升号。
+/// 没有就是"这一格还没状态"，合法。
+///
+/// # 加新字段的机械规矩（2026-11-21）
+///
+/// 1. **偏好**（界面状态）：字段进 [`PREF_FIELDS`] 登记，并在 [`AppStateFile::heal`]
+///    里给出"缺省值怎么算"。旧文件读出来当场补成显式值，下一次写操作落盘。
+/// 2. **业务数据**：不进 [`PREF_FIELDS`]，由各自的读取方决定"缺席 = 什么"。
+/// 3. **语义变了**（不是单纯多一格）：升 [`APP_STATE_SCHEMA`] 并在 [`migrate_state`]
+///    里加一步；只加格不升号。
+///
+/// 判据 [`every_persisted_key_is_either_a_registered_pref_or_business_data`] 盯着第 1、2 条：
+/// 新加一格不同步登记表，测试就红。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppStateFile {
@@ -944,6 +955,66 @@ impl Default for AppStateFile {
     }
 }
 
+impl AppStateFile {
+    /// 把**还没选过**的界面偏好按当前解析出来的默认补成显式值。
+    ///
+    /// 只补偏好（主题 / 语言 / 三个开关 / 更新渠道 / 置顶 / 窄窗），**业务数据一格不动**
+    /// （使用中指针、草稿、数据源、逐参数账都不在这里）。
+    ///
+    /// 这是"加新字段"的机械承诺之一：新偏好只要进 [`PREF_FIELDS`] 登记，旧文件读出来
+    /// 就一定有值，不会出现"旧安装一直没有这一格"。
+    fn heal(&mut self) {
+        let d = super::client_defaults::client_defaults();
+        self.theme.get_or_insert(d.theme);
+        self.locale.get_or_insert(d.locale);
+        self.auto_clean_history.get_or_insert(d.auto_clean_history);
+        self.auto_check_update.get_or_insert(d.auto_check_update);
+        self.update_channel
+            .get_or_insert_with(default_update_channel);
+        self.pin.get_or_insert(PinPref::Off);
+        self.compact.get_or_insert(false);
+        /* 自检：登记过的偏好补完必须都在。漏补一格，开发构建当场炸 ——
+        比等到用户那边"旧档一直没有"早得多。 */
+        #[cfg(debug_assertions)]
+        {
+            let v = serde_json::to_value(&*self).unwrap_or_default();
+            for key in PREF_FIELDS {
+                debug_assert!(
+                    v.get(key).is_some(),
+                    "偏好 `{key}` 登记了却没在 heal 里补上"
+                );
+            }
+        }
+    }
+}
+
+/// 没选过渠道时的那一档：**跑的是预览构建就查预览**，正式构建查正式版。
+///
+/// 测试的人装的就是 `-preview.N`，还要先去设置页切一次才收得到通知，纯属多余。
+fn default_update_channel() -> super::release_info::UpdateChannel {
+    if crate::runtime::structure::APP_VERSION.contains("-preview") {
+        super::release_info::UpdateChannel::Preview
+    } else {
+        super::release_info::UpdateChannel::Stable
+    }
+}
+
+/// **加新偏好必须在这里登记**：序列化键名（`app-state.json` 里的那个写法）。
+///
+/// 判据 `every_persisted_key_is_either_a_registered_pref_or_business_data` 拿它和整份状态
+/// 序列化出来的键对账 ——
+/// 只加字段不登记，测试就红。登记之后还要回答两件事：缺省值怎么算（[`AppStateFile::heal`]）、
+/// 语义变了要不要升 [`APP_STATE_SCHEMA`]。
+const PREF_FIELDS: &[&str] = &[
+    "theme",
+    "locale",
+    "autoCleanHistory",
+    "autoCheckUpdate",
+    "updateChannel",
+    "pin",
+    "compact",
+];
+
 fn state_file(root: &Path) -> PathBuf {
     root.join(STATE_FILE)
 }
@@ -985,7 +1056,9 @@ fn load_locked(root: &Path) -> Result<AppStateFile, AppError> {
     let bytes = match std::fs::read(state_file(root)) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return legacy_snapshot(root);
+            let mut s = legacy_snapshot(root)?;
+            s.heal();
+            return Ok(s);
         }
         Err(e) => {
             return Err(
@@ -1004,10 +1077,15 @@ fn load_locked(root: &Path) -> Result<AppStateFile, AppError> {
             .with_detail(e.to_string())
     })?;
     migrate_state(&mut value)?;
-    serde_json::from_value(value).map_err(|e| {
+    let mut state: AppStateFile = serde_json::from_value(value).map_err(|e| {
         AppError::corrupted(messages::text("ui.runtime.app_state.347", &[]))
             .with_detail(e.to_string())
-    })
+    })?;
+    /* 旧文件里"还没有这一格"的偏好，按**此刻的解析默认**补成显式值：
+    读不落盘照旧（下一次任何写操作会把这一份整份写回），但调用方拿到的
+    永远是一份"每个偏好都有值"的状态，不会再出现"旧档升上来一直没有"。 */
+    state.heal();
+    Ok(state)
 }
 
 /// **已知代次 → 当前代次**的升级（就地改 JSON 树，只在内存里转，不落盘）。
@@ -1612,11 +1690,14 @@ pub fn set_auto_check_update(root: &Path, enabled: bool) -> Result<bool, AppErro
 
 /* ---------- updateChannel：自动检查按哪一路查 ---------- */
 
-/// 用户选的更新渠道。**还没选过 ⇒ 正式版**。
+/// 用户选的更新渠道。**还没选过 ⇒ 按当前构建决定**（见 [`default_update_channel`]）。
 ///
 /// 读者是 [`crate::runtime::update_check`]（自动检查挑哪份清单）；设置页那格走 `ipc::prefs`。
 pub fn update_channel(root: &Path) -> Result<super::release_info::UpdateChannel, AppError> {
-    Ok(load(root)?.update_channel.unwrap_or_default())
+    /* `load` 已经 heal 过：这里读到的一定是 `Some`；兜底只为"以前写过的旧档"这条退路。 */
+    Ok(load(root)?
+        .update_channel
+        .unwrap_or_else(default_update_channel))
 }
 
 /// 记下更新渠道（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
@@ -1909,6 +1990,53 @@ mod tests {
         assert!(state.preset_source.is_none());
         assert_eq!(state.app_state_schema, APP_STATE_SCHEMA);
         assert!(!state_file(d.path()).exists(), "读不落盘");
+    }
+
+    /// **加新偏好必须有登记**：整份状态序列化出来的每个键，要么是已登记的偏好
+    /// （[`PREF_FIELDS`]），要么是业务数据。新加一格不改这张表，这里就红 ——
+    /// 逼着作者回答"旧档怎么补、要不要升代次"，而不是让旧安装一直缺那一格。
+    #[test]
+    fn every_persisted_key_is_either_a_registered_pref_or_business_data() {
+        const BUSINESS: &[&str] = &[
+            "appStateSchema",
+            "activePreset",
+            "draft",
+            "textDraft",
+            "presetSource",
+            "paramDecisions",
+            "paramOrigins",
+            "lastWindowBox",
+            "slicerWindow",
+            "pinBeforeCompact",
+            "postproc",
+            "presets",
+        ];
+        let mut state = AppStateFile::default();
+        state.heal();
+        let v = serde_json::to_value(&state).unwrap();
+        for key in v.as_object().unwrap().keys() {
+            assert!(
+                PREF_FIELDS.contains(&key.as_str()) || BUSINESS.contains(&key.as_str()),
+                "新加的格 `{key}` 没登记：偏好放进 PREF_FIELDS，业务数据放进 BUSINESS，并想清楚旧档怎么补"
+            );
+        }
+    }
+
+    /// 旧文件里**只有代次**时，读出来每个偏好都得有值 —— 不是 `None` 一直挂着。
+    #[test]
+    fn a_minimal_legacy_file_gets_every_pref_filled() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        atomic_write(&state_file(d.path()), br#"{"appStateSchema":2}"#).unwrap();
+
+        let s = load(d.path()).unwrap();
+        assert!(s.theme.is_some(), "主题该补上");
+        assert!(s.locale.is_some(), "语言该补上");
+        assert!(s.auto_clean_history.is_some(), "自动清理该补上");
+        assert!(s.auto_check_update.is_some(), "自动检查该补上");
+        assert!(s.update_channel.is_some(), "更新渠道该补上");
+        assert!(s.pin.is_some(), "置顶该补上");
+        assert!(s.compact.is_some(), "窄窗该补上");
     }
 
     /// 坏档不静默：解析不了要响，不能装作"没有"

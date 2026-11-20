@@ -256,6 +256,8 @@ pub async fn set_update_channel(app: AppHandle, channel: String) -> Result<Strin
         let root = internal_root(&app)?;
         let parsed = channel_parse(&channel)?;
         let got = runtime::app_state::set_update_channel(&root, parsed)?;
+        /* 切完就能查：不放回名额的话，得重启客户端才可能收到另一路的通知 */
+        runtime::update_check::reset_session_check();
         notify_app_state(&app);
         Ok(channel_wire(got))
     })
