@@ -291,7 +291,12 @@ fn run_logged_env(
         argv.join(" ")
     ));
     let mut cmd = Command::new(argv[0]);
-    cmd.args(&argv[1..]).current_dir(repo);
+    cmd.args(&argv[1..])
+        .current_dir(repo)
+        /* 工作台由 `tauri dev --config tauri.workbench.conf.json` 起，CLI 会把合并后的
+        配置放进 `TAURI_CONFIG`。不清掉的话，从工作台派生的客户端构建会读到工作台配置
+        （空窗口清单 + `SupportEase-Workbench` 标识），编出一颗装上没窗的二进制。 */
+        .env_remove("TAURI_CONFIG");
     for (k, v) in env {
         cmd.env(k, v);
     }

@@ -1304,7 +1304,12 @@ export default function PageSettings({
    * 没带就退回普通那次检查的那一条（`upd`）。两种情形共用同一段版面，
    * 所以先把它们归成同一个形状 —— 下面的 JSX 里不再分叉。
    */
-  const picked = channels.find((c) => c.channel === channelPick) ?? channels[0]
+  /*
+   * 选哪一路就只画哪一路 —— **不拿另一路顶上**。
+   * 旧写法 `?? channels[0]` 会在"选了正式版、但只有测试版候选"时把测试版那张卡摆出来，
+   * 于是正式版页签下写着测试版的号。选中的那一路没有候选，就是"这一路没有新版本"。
+   */
+  const picked = channels.find((c) => c.channel === channelPick)
   const found =
     picked !== undefined
       ? {
@@ -1314,8 +1319,9 @@ export default function PageSettings({
           canInstall: picked.asset !== undefined,
           url: picked.url,
         }
-      : hasUpdate
+      : channelPick === 'stable' && hasUpdate
         ? {
+            /* 老后端 / 这次没带回候选：顶层那六个字段只按**正式版**判定，挂在正式版下 */
             channel: 'stable' as const,
             version: upd?.latestVersion ?? '—',
             notes: upd?.notes,
@@ -1323,6 +1329,8 @@ export default function PageSettings({
             url: jumpUrl,
           }
         : null
+  /** 当前选中那一路到底有没有新版（标题与版本行都按它，不按另一路） */
+  const channelHasUpdate = found !== null
   /* 这一版**已经下好了**：后端 `Ready` 里带着版本与通道，两格都对上才算 */
   const foundReady =
     found !== null &&
@@ -1502,11 +1510,12 @@ export default function PageSettings({
             <div className={s.updateHeadline}>
               {updateBusy ? (
                 <span className={s.updateIdle}>{tr('settings.update.checking')}</span>
-              ) : hasUpdate ? (
+              ) : channelHasUpdate ? (
                 <span className={s.updateFresh}>{tr('settings.update.hasNew')}</span>
               ) : upd !== null ? (
                 /* 「已是最新」是**好消息**（作者 2026-10-05：字体要绿的）；
-                   「没查到」才是灰的（不是坏消息，是不知道）。 */
+                   「没查到」才是灰的（不是坏消息，是不知道）。
+                   ★ 按**选中那一路**判：选了正式版、只有测试版候选时，这里仍是"已是最新"。 */
                 <span className={s.updateLatest}>{tr('settings.update.latest')}</span>
               ) : (
                 <span className={s.updateIdle}>{tr('settings.update.unknown')}</span>
@@ -1515,10 +1524,10 @@ export default function PageSettings({
 
             {/* 版本对照：当前 → 最新。当前版本一定拿得到（来自构建期） */}
             <p className={s.current}>
-              {hasUpdate
+              {channelHasUpdate && found !== null
                 ? tr('settings.update.versionTo', {
                     version: appVersion || '—',
-                    latest: upd.latestVersion ?? '—',
+                    latest: found.version,
                   })
                 : tr('settings.update.version', { version: appVersion || '—' })}
               {installFlavor !== '' && (

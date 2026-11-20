@@ -264,6 +264,8 @@ export default function SettingsPage({ boot }: Props) {
       const st = await wb.devSourceStatus()
       setDevSrc(st)
       setPubSnap(await wb.publishSnapshotStatus().catch(() => null))
+      /* 编译进度也一并读：工作台重启后如果那一趟还在跑，页面得接上它的进度 */
+      setSnapProgress(await wb.publishSnapshotProgress().catch(() => null))
       /* 顺带问一次"这一版能不能交付"：按钮上的版本号与阻断原因都来自它 */
       setPreviewPlan(await wb.previewPreflight().catch(() => null))
     } catch (e) {
@@ -320,28 +322,45 @@ export default function SettingsPage({ boot }: Props) {
     }
   }
 
-  /** 「拍快照 / 模拟发布 / 还原」三颗按钮共用的那一下 */
-  const runSnap = async (kind: 'take' | 'apply' | 'restore') => {
+  /** 「拍快照 / 模拟发布 / 还原 / 清理」共用的那一下 */
+  const runSnap = async (kind: 'take' | 'apply' | 'restore' | 'discard') => {
     if (snapBusy) return
     setSnapBusy(true)
     setSnapNote(null)
+    /* 只有"真编确实在跑"才保持忙碌，交给下面的轮询收尾。
+       其余情况（拍快照 / 还原 / 起步就失败）一律在 finally 里立刻解锁 ——
+       少解一次，三颗按钮就会永久灰着，看起来像"点了没反应"。 */
+    let keepBusy = false
     try {
       const next =
         kind === 'take'
           ? await wb.publishSnapshotTake()
           : kind === 'apply'
             ? await wb.publishSnapshotApply()
-            : await wb.publishSnapshotRestore()
+            : kind === 'discard'
+              ? await wb.publishSnapshotDiscard()
+              : await wb.publishSnapshotRestore()
       setPubSnap(next)
       setSnapNote(null)
-      if (kind !== 'apply') void readDevSrc()
-      else setSnapProgress(await wb.publishSnapshotProgress().catch(() => null))
+      if (kind !== 'apply') {
+        void readDevSrc()
+        return
+      }
+      const p = await wb.publishSnapshotProgress().catch(() => null)
+      setSnapProgress(p)
+      keepBusy = p?.running === true
+      if (!keepBusy) {
+        setSnapNote({
+          text: p?.error ?? '编译进程没起来，看 target/publish-snapshot-apply.log',
+          bad: true,
+        })
+        void readDevSrc()
+      }
     } catch (e) {
-      setSnapBusy(false)
       setSnapNote({ text: isAppError(e) ? e.message : String(e), bad: true })
       void wb.publishSnapshotStatus().then(setPubSnap).catch(() => undefined)
     } finally {
-      if (kind !== 'apply') setSnapBusy(false)
+      if (!keepBusy) setSnapBusy(false)
     }
   }
 
@@ -445,6 +464,18 @@ export default function SettingsPage({ boot }: Props) {
       await wb.openPath(dir)
     } catch (e) {
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    }
+  }
+
+  /** 「复制地址」：写剪贴板走 Rust（webview 那套要先有用户手势，await 过 IPC 就废了） */
+  const copyDevUrl = async () => {
+    const url = devSrc?.url
+    if (url === undefined || url === '') return
+    try {
+      await wb.copyText(url)
+      setDevNote({ text: `已复制 ${url}`, bad: false })
+    } catch {
+      setDevNote({ text: '剪贴板不可用，请手选复制。', bad: true })
     }
   }
 
@@ -963,6 +994,15 @@ export default function SettingsPage({ boot }: Props) {
               <button
                 type="button"
                 className={s.btn}
+                disabled={devSrc === null || devSrc.url === ''}
+                title="把这个地址填进客户端「设置 → 高级设置 → 预设数据源 → 自定义地址」"
+                onClick={() => void copyDevUrl()}
+              >
+                复制地址
+              </button>
+              <button
+                type="button"
+                className={s.btn}
                 disabled={devSrc === null}
                 onClick={() => void openDevRoot()}
               >
@@ -1095,7 +1135,7 @@ export default function SettingsPage({ boot }: Props) {
                 <button
                   type="button"
                   className={s.btn}
-                  disabled={snapBusy || pubSnap === null || pubSnap.active}
+                  disabled={snapBusy || snapProgress?.running === true || pubSnap === null || pubSnap.active}
                   onClick={() => void runSnap('take')}
                 >
                   拍快照
@@ -1103,7 +1143,7 @@ export default function SettingsPage({ boot }: Props) {
                 <button
                   type="button"
                   className={`${s.btn} ${s.btnPrimary}`}
-                  disabled={snapBusy || pubSnap === null || !pubSnap.active}
+                  disabled={snapBusy || snapProgress?.running === true || pubSnap === null || !pubSnap.active}
                   title="抬一个预览号，真编安装包，只对本地测试源生效"
                   onClick={() => void runSnap('apply')}
                 >
@@ -1114,10 +1154,19 @@ export default function SettingsPage({ boot }: Props) {
                 <button
                   type="button"
                   className={s.btn}
-                  disabled={snapBusy || pubSnap === null || !pubSnap.active}
+                  disabled={snapBusy || snapProgress?.running === true || pubSnap === null || !pubSnap.active}
                   onClick={() => void runSnap('restore')}
                 >
                   还原
+                </button>
+                <button
+                  type="button"
+                  className={s.btn}
+                  disabled={snapBusy || snapProgress?.running === true || pubSnap === null || !pubSnap.active}
+                  title="丢掉快照，保留现在这一版（之后可以按当前状态重新拍一份）"
+                  onClick={() => void runSnap('discard')}
+                >
+                  清理快照
                 </button>
                 <span className={s.grow} />
               </div>

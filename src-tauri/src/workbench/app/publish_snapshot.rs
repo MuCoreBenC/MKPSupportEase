@@ -530,6 +530,10 @@ fn spawn_logged(
 ) -> Result<(), AppError> {
     let mut child = cmd
         .current_dir(repo)
+        /* 工作台由 `tauri dev --config tauri.workbench.conf.json` 起，CLI 把合并后的配置
+        放进 `TAURI_CONFIG`。不清掉的话，客户端构建会读到工作台配置（空窗口清单 +
+        `SupportEase-Workbench` 标识），编出一颗带工作台标记、装上没窗的二进制。 */
+        .env_remove("TAURI_CONFIG")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -892,21 +896,23 @@ pub fn wb_publish_snapshot_apply() -> Result<PublishSnapshotStatus, AppError> {
         if progress_for_ui(&repo).running {
             return Err(AppError::invalid_argument("这一趟还在跑。"));
         }
-        /* 先写一条 preparing（pid 未知），子进程起来后用自己的 pid 覆盖。
-        这样工作台立刻返回时界面就已经看得到"在跑"。 */
+        /* 先把进程起起来，拿到 **真实 PID** 再写进度。
+        反过来（先写 running 再起进程）会留出一个没有 PID 的窗口，而读的人把
+        "running 却没有 PID" 当成中断 —— 一点下去界面就报"中断"，看着像没反应。 */
+        let pid = spawn_apply_child(&repo)?;
         let mut p = idle_progress();
         p.running = true;
         p.stage = "preparing".to_owned();
         p.tail = "正在启动编译进程".to_owned();
+        p.pid = Some(pid);
         write_progress(&repo, &p)?;
-
-        spawn_apply_child(&repo)?;
         Ok(status_of(&repo))
     })
 }
 
-/// 起 detached 的 `snapshot-apply`。Windows 上 npm/cargo 经 cmd 垫片，加 `CREATE_NO_WINDOW`。
-fn spawn_apply_child(repo: &Path) -> Result<(), AppError> {
+/// 起 detached 的 `snapshot-apply`，返回它的 PID（进度要用它判活）。
+/// Windows 上 npm/cargo 经 cmd 垫片，加 `CREATE_NO_WINDOW`。
+fn spawn_apply_child(repo: &Path) -> Result<u32, AppError> {
     let mut cmd = if cfg!(windows) {
         let mut c = Command::new("cmd");
         c.arg("/C").arg("cargo");
@@ -925,6 +931,8 @@ fn spawn_apply_child(repo: &Path) -> Result<(), AppError> {
     ])
     .arg(repo)
     .current_dir(repo)
+    /* 工作台的 `TAURI_CONFIG` 不进这一支：它会让里头的 tauri build 合并工作台配置 */
+    .env_remove("TAURI_CONFIG")
     .stdout(Stdio::null())
     .stderr(Stdio::null());
     #[cfg(windows)]
@@ -937,9 +945,28 @@ fn spawn_apply_child(repo: &Path) -> Result<(), AppError> {
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    cmd.spawn()
+    let child = cmd
+        .spawn()
         .map_err(|e| AppError::io("起不了编译子进程").with_detail(e.to_string()))?;
-    Ok(())
+    Ok(child.id())
+}
+
+/// **丢掉快照**：不还原，直接删掉登记表与寄存的产物。
+///
+/// 用途：模拟发布成功、这一版就是要留下继续做，不需要回到旧状态 —— 把旧快照一丢，
+/// 再拍一份新的，基准就是现在这一版。
+#[tauri::command]
+pub fn wb_publish_snapshot_discard() -> Result<PublishSnapshotStatus, AppError> {
+    crate::ipc::traced("wb_publish_snapshot_discard", |_| {
+        let repo = crate::workbench::paths::repo_root();
+        read_manifest(&snapshot_dir(&repo))
+            .ok_or_else(|| AppError::invalid_argument("没有快照可清理。"))?;
+        if progress_for_ui(&repo).running {
+            return Err(AppError::invalid_argument("这一趟还在跑，等它结束再清理。"));
+        }
+        clear_snapshot(&repo);
+        Ok(status_of(&repo))
+    })
 }
 
 #[tauri::command]

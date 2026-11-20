@@ -3502,6 +3502,8 @@ export const wb = {
   publishSnapshotProgress: () => invoke<SnapshotApplyProgress>('wb_publish_snapshot_progress'),
   /** 还原到拍快照时的状态，并删掉快照 */
   publishSnapshotRestore: () => invoke<PublishSnapshotStatus>('wb_publish_snapshot_restore'),
+  /** 丢掉快照：不还原，直接清掉登记与产物（这一版要留着继续做时用） */
+  publishSnapshotDiscard: () => invoke<PublishSnapshotStatus>('wb_publish_snapshot_discard'),
 
   /**
    * **发布软件版本的闸**（第四刀）—— **只读**，一个字节都不写，点几次都没副作用。

@@ -496,6 +496,7 @@ pub fn windows_install_script(
     new_exe: &Path,
     version: &str,
     at: &str,
+    portable_dir: Option<&Path>,
 ) -> String {
     let q = |s: &str| format!("'{}'", s.replace('\'', "''"));
     let ok_json = serde_json::to_string(&UpdateResult {
@@ -512,29 +513,58 @@ pub fn windows_install_script(
         at: at.to_owned(),
     })
     .unwrap_or_default();
-    format!(
-        "$log = {log}; \
-         function Say($m) {{ Add-Content -LiteralPath $log -Value ((Get-Date -Format o) + ' ' + $m) -Encoding utf8 }}; \
-         Say '安装开始'; \
-         Start-Sleep -Seconds 1; \
-         $p = Start-Process -FilePath {setup} -ArgumentList '/S' -Wait -PassThru; \
-         if ($p.ExitCode -ne 0) {{ Say ('安装失败，退出码 ' + $p.ExitCode); {fail} | Set-Content -LiteralPath {r} -Encoding utf8; exit 1 }}; \
-         Say '安装完成'; \
-         $dir = $null; \
-         try {{ $k = Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SupportEase' -ErrorAction Stop; $dir = $k.InstallLocation }} catch {{ }}; \
-         if ([string]::IsNullOrWhiteSpace($dir)) {{ $dir = Join-Path $env:LOCALAPPDATA 'SupportEase' }}; \
-         $exe = Join-Path $dir 'mkp-support-ease.exe'; \
-         if (-not (Test-Path -LiteralPath $exe)) {{ $exe = {exe} }}; \
-         Say ('拉起 ' + $exe); \
-         try {{ Start-Process -FilePath $exe; {ok} | Set-Content -LiteralPath {r} -Encoding utf8 }} \
-         catch {{ Say ('拉起失败：' + $_.Exception.Message); {fail} | Set-Content -LiteralPath {r} -Encoding utf8; exit 1 }}",
-        log = q(&install_log_path(app_data).display().to_string()),
-        setup = q(&setup.display().to_string()),
-        ok = q(&ok_json),
-        fail = q(&fail_json),
-        r = q(&result_path(app_data).display().to_string()),
-        exe = q(&new_exe.display().to_string()),
-    )
+    /* 绿色版：把 `--portable <目录>` 交给安装器，让它就地换掉 `SupportEase.exe`；
+    拉起的也是这一支。安装版那条路原样（静默安装 + 按 InstallLocation 拉起）。 */
+    match portable_dir {
+        Some(dir) => {
+            /* 整串参数包成一个 PowerShell 单引号字面量：路径里有空格也不会被拆开
+               （`-ArgumentList` 收数组时不替你补引号）。 */
+            let portable_args = q(&format!("/S --portable \"{}\"", dir.display()));
+            format!(
+            "$log = {log}; \
+             function Say($m) {{ Add-Content -LiteralPath $log -Value ((Get-Date -Format o) + ' ' + $m) -Encoding utf8 }}; \
+             Say '绿色版更新开始'; \
+             Start-Sleep -Seconds 1; \
+             $p = Start-Process -FilePath {setup} -ArgumentList {portableArgs} -Wait -PassThru; \
+             if ($p.ExitCode -ne 0) {{ Say ('替换失败，退出码 ' + $p.ExitCode); {fail} | Set-Content -LiteralPath {r} -Encoding utf8; exit 1 }}; \
+             Say '替换完成'; \
+             $exe = Join-Path {dir} 'SupportEase.exe'; \
+             Say ('拉起 ' + $exe); \
+             try {{ Start-Process -FilePath $exe; {ok} | Set-Content -LiteralPath {r} -Encoding utf8 }} \
+             catch {{ Say ('拉起失败：' + $_.Exception.Message); {fail} | Set-Content -LiteralPath {r} -Encoding utf8; exit 1 }}",
+            log = q(&install_log_path(app_data).display().to_string()),
+            setup = q(&setup.display().to_string()),
+            portableArgs = portable_args,
+            dir = q(&dir.display().to_string()),
+            ok = q(&ok_json),
+            fail = q(&fail_json),
+            r = q(&result_path(app_data).display().to_string()),
+            )
+            }
+            None => format!(
+            "$log = {log}; \
+             function Say($m) {{ Add-Content -LiteralPath $log -Value ((Get-Date -Format o) + ' ' + $m) -Encoding utf8 }}; \
+             Say '安装开始'; \
+             Start-Sleep -Seconds 1; \
+             $p = Start-Process -FilePath {setup} -ArgumentList '/S' -Wait -PassThru; \
+             if ($p.ExitCode -ne 0) {{ Say ('安装失败，退出码 ' + $p.ExitCode); {fail} | Set-Content -LiteralPath {r} -Encoding utf8; exit 1 }}; \
+             Say '安装完成'; \
+             $dir = $null; \
+             try {{ $k = Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SupportEase' -ErrorAction Stop; $dir = $k.InstallLocation }} catch {{ }}; \
+             if ([string]::IsNullOrWhiteSpace($dir)) {{ $dir = Join-Path $env:LOCALAPPDATA 'SupportEase' }}; \
+             $exe = Join-Path $dir 'mkp-support-ease.exe'; \
+             if (-not (Test-Path -LiteralPath $exe)) {{ $exe = {exe} }}; \
+             Say ('拉起 ' + $exe); \
+             try {{ Start-Process -FilePath $exe; {ok} | Set-Content -LiteralPath {r} -Encoding utf8 }} \
+             catch {{ Say ('拉起失败：' + $_.Exception.Message); {fail} | Set-Content -LiteralPath {r} -Encoding utf8; exit 1 }}",
+            log = q(&install_log_path(app_data).display().to_string()),
+            setup = q(&setup.display().to_string()),
+            ok = q(&ok_json),
+            fail = q(&fail_json),
+            r = q(&result_path(app_data).display().to_string()),
+            exe = q(&new_exe.display().to_string()),
+        ),
+    }
 }
 
 /// Windows 上「装完之后拉起哪一个 exe」：NSIS 装到与**当前进程**同一目录，
@@ -1103,8 +1133,14 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let setup = d.path().join("SupportEase_0.0.10_x64-setup.exe");
         let exe = Path::new(r"C:\Program Files\SupportEase\SupportEase.exe");
-        let script =
-            windows_install_script(d.path(), &setup, exe, "0.0.10", "2026-11-05T00:00:00Z");
+        let script = windows_install_script(
+            d.path(),
+            &setup,
+            exe,
+            "0.0.10",
+            "2026-11-05T00:00:00Z",
+            None,
+        );
         assert!(
             script.contains("Start-Sleep -Seconds 1"),
             "要先等本进程退出"
@@ -1134,6 +1170,36 @@ mod tests {
             script.find("\"ok\":false").unwrap_or(usize::MAX)
                 < script.find("\"ok\":true").unwrap_or(usize::MAX),
             "失败账要先备好，成功账只在拉起之后写"
+        );
+    }
+
+    /// **绿色版更新只换自己那份 exe**（作者 2026-11-20：绿色版更新后拉起了安装版）。
+    /// 判据：脚本带 `--portable '<目录>'`，拉起的也是该目录下的 `SupportEase.exe`。
+    #[test]
+    fn the_portable_install_script_replaces_and_relaunches_its_own_exe() {
+        let d = tempfile::tempdir().unwrap();
+        let setup = d.path().join("SupportEase_0.0.11_x64-setup.exe");
+        let dir = Path::new(r"D:\Tools\SupportEase");
+        let script = windows_install_script(
+            d.path(),
+            &setup,
+            Path::new(r"D:\Tools\SupportEase\SupportEase.exe"),
+            "0.0.11",
+            "2026-11-20T00:00:00Z",
+            Some(dir),
+        );
+        assert!(script.contains("--portable"), "要把绿色版目录交给安装器");
+        assert!(
+            script.contains(r"D:\Tools\SupportEase"),
+            "安装目录必须是绿色版自己那一层"
+        );
+        assert!(
+            script.contains("SupportEase.exe"),
+            "拉起的应当是绿色版的主程序"
+        );
+        assert!(
+            !script.contains("mkp-support-ease.exe"),
+            "绿色版这一路不该去碰安装版的 exe 名"
         );
     }
 

@@ -207,7 +207,21 @@ pub async fn install_update(app: AppHandle) -> Result<(), AppError> {
     #[cfg(target_os = "windows")]
     {
         let new_exe = updater::running_exe()?;
-        let script = updater::windows_install_script(&root, &staged, &new_exe, version, &at);
+        /* 绿色版：更新只换掉自己目录里的 `SupportEase.exe`，绝不落进安装目录 ——
+        否则一次更新会把绿色版变成另一份安装版（作者 2026-11-20 真机踩的）。 */
+        let portable_dir = if crate::fsx::paths::is_portable_install() {
+            new_exe.parent().map(std::path::Path::to_path_buf)
+        } else {
+            None
+        };
+        let script = updater::windows_install_script(
+            &root,
+            &staged,
+            &new_exe,
+            version,
+            &at,
+            portable_dir.as_deref(),
+        );
         let mut cmd = std::process::Command::new("powershell");
         cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
         // 不弹控制台窗口（DETACHED_PROCESS | CREATE_NO_WINDOW 的形状由 Windows SDK 常量给）

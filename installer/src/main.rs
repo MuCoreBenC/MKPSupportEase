@@ -572,6 +572,60 @@ fn run_install(
     Ok(())
 }
 
+/// 绿色版自更新：把这个目录里的 `SupportEase.exe` 换成 payload 里的应用本体。
+///
+/// 只做三件：停掉目录里那一支进程 → 写 `SupportEase.exe` → 写 LICENSE。**不碰**
+/// 注册表卸载项 / 快捷方式 / `%APPDATA%` —— 绿色版的数据在旁边的 `app-data/`。
+#[cfg(not(feature = "uninstall-only"))]
+fn run_install_portable(dir: &Path) -> Result<(), String> {
+    if PAYLOAD.is_empty() {
+        return Err("安装包不完整（构建时没打入 payload）".to_string());
+    }
+    let mut raw = Vec::new();
+    {
+        use std::io::Read;
+        xz2::read::XzDecoder::new(std::io::Cursor::new(PAYLOAD))
+            .read_to_end(&mut raw)
+            .map_err(|e| format!("安装包损坏：{e}"))?;
+    }
+    let app = app_bytes(&raw)?;
+    stop_app_in_dir(dir, "SupportEase.exe");
+    /* 被结束的进程要一点时间才放开 exe 文件句柄：直接写会撞"拒绝访问"。
+       最多等 3 秒，仍写不进去就如实报错（不假装成功）。 */
+    let target = dir.join("SupportEase.exe");
+    let mut last = String::new();
+    for _ in 0..30 {
+        match std::fs::write(&target, app) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last = e.to_string();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    }
+    Err(format!("写应用失败：{last}"))
+}
+
+/// 容器 `[license_len][app_len][un_len][license][app][un]` 里的应用字节。
+#[cfg(not(feature = "uninstall-only"))]
+fn app_bytes(raw: &[u8]) -> Result<&[u8], String> {
+    if raw.len() < 12 {
+        return Err("安装包损坏：头部缺失".to_string());
+    }
+    let license_len = u32::from_le_bytes(raw[0..4].try_into().unwrap()) as usize;
+    let app_len = u32::from_le_bytes(raw[4..8].try_into().unwrap()) as usize;
+    let un_len = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as usize;
+    let expected = 12usize
+        .saturating_add(license_len)
+        .saturating_add(app_len)
+        .saturating_add(un_len);
+    if raw.len() < expected {
+        return Err("安装包损坏：长度对不上".to_string());
+    }
+    let app_start = 12 + license_len;
+    Ok(&raw[app_start..app_start + app_len])
+}
+
 #[cfg(feature = "uninstall-only")]
 fn run_install(
     _dir: &Path,
@@ -959,6 +1013,10 @@ fn main() {
         if silent {
             let result = if uninstall {
                 run_uninstall(&install_dir_of_self(), false, |_, _| {})
+            } else if let Some(dir) = arg_value(&args, "--portable") {
+                /* 绿色版自更新：**只把这个目录里的 SupportEase.exe 换掉**。
+                   绝不能落到安装目录 —— 那等于把绿色版变成一份安装版（作者 2026-11-20 真机踩的）。 */
+                run_install_portable(Path::new(&dir))
             } else {
                 run_install(&silent_install_dir(), true, true, |_, _| {})
             };

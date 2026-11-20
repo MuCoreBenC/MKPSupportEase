@@ -1349,6 +1349,9 @@ fn npm_build(repo_root: &Path) -> Result<std::process::Output, AppError> {
     };
     cmd.args(["run", "tauri", "--", "build"])
         .current_dir(repo_root)
+        /* 工作台带着 `TAURI_CONFIG`（`tauri dev --config …` 注入的合并配置）；
+        不清掉的话客户端构建会读到工作台那套（空窗口清单），编出一颗装上没窗的包。 */
+        .env_remove("TAURI_CONFIG")
         .output()
         .map_err(|e| AppError::io("起不了 npm").with_detail(e.to_string()))
 }

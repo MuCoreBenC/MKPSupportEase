@@ -1119,6 +1119,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::publish_snapshot::wb_publish_snapshot_apply,
         app::publish_snapshot::wb_publish_snapshot_progress,
         app::publish_snapshot::wb_publish_snapshot_restore,
+        app::publish_snapshot::wb_publish_snapshot_discard,
         // 本地预览交付事务：编译 → 清单 → 提交 → 打 tag → 滚到下一轮（不推送）
         app::preview_tx::wb_preview_preflight,
         app::preview_tx::wb_preview_deliver,
