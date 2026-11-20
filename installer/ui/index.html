@@ -241,7 +241,7 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="#6b7785" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 12.5 5 5L20 6.5"/></svg>
     </div>
     <h2>SupportEase 已卸载</h2>
-    <p class="sub" id="un-sub">预设和校准记录还在本地，重新安装后可以直接用。</p>
+    <p class="sub" id="un-sub">关闭窗口后会自动清理安装文件夹。预设和校准记录已保留。</p>
     <button class="ghost" id="un-close">关闭</button>
   </section>
 </div>
@@ -355,8 +355,8 @@
   }
   $('wipe').onchange = (e) => {
     $('un-sub').textContent = e.target.checked
-      ? '预设、校准记录和日志已经一起删除。'
-      : '预设和校准记录还在本地，重新安装后可以直接用。'
+      ? '预设、校准记录和日志已一起删除。关闭窗口后会自动清理安装文件夹。'
+      : '关闭窗口后会自动清理安装文件夹。预设和校准记录已保留。'
   }
 
   const mq = window.matchMedia('(prefers-color-scheme: dark)')
