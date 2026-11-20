@@ -1005,7 +1005,10 @@ fn base_status(repo: &Path, note: Option<String>) -> DevSourceStatus {
     DevSourceStatus {
         running: false,
         pid: None,
-        url: origin(),
+        /* 没在跑时给的也是**客户端该填的那一串**（带 `/delivery`）。
+        只给 origin 的话，复制出去填进客户端会「取不到预设数据」——
+        交付根那层的 `filesRoot: ".."` 要从 `/delivery` 这一级解回去。 */
+        url: format!("{}/{}", origin(), DELIVERY_SUBDIR),
         source: None,
         source_root: String::new(),
         repo_root: repo.display().to_string(),
