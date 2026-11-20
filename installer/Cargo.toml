@@ -23,6 +23,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 与客户端同一个 zip 档（那里用来读 3MF）；安装器只用解压这一半
 zip = { version = "3.0.0", default-features = false, features = ["deflate"] }
+# payload 的外层压缩。xz 的压缩率比 deflate 高约 30%（9.6 MB → 6.5 MB），
+# 代价是解压时多一次内存拷贝。选纯 Rust 的 lzma-rs，不引 liblzma 的 C 依赖。
+lzma-rs = "0.3"
 
 # ★ 刻意不引 tauri：它那 5 MB 是框架（命令注册 / 资源协议 / 插件体系），
 #   而安装器只需要「一个 Win32 窗口 + 一个 WebView2 控件 + 一条 JSON 消息」。
@@ -50,3 +53,8 @@ lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# 构建脚本用它把 payload.zip 压成 payload.xz（不进最终安装器）
+[[bin]]
+name = "pack"
+path = "src/bin/pack.rs"

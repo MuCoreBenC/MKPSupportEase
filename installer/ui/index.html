@@ -109,12 +109,31 @@
   .done h2 { font-size: 21px; margin: 18px 0 4px; }
   .done .sub { color: var(--muted); font-size: 11.5px; margin: 0 0 24px; }
   .done .row { display: flex; gap: 10px; align-items: center; }
-  .done .ghost {
-    width: 96px; height: 40px; border-radius: 999px; border: 1px solid var(--line);
-    background: #fff; color: #4d565f; font: inherit; font-size: 12.5px; cursor: pointer;
+  .ghost {
+    width: 110px; height: 42px; border-radius: 999px; border: 1px solid var(--line);
+    background: #fff; color: #4d565f; font: inherit; font-size: 13px; cursor: pointer;
   }
-  .done .ghost:hover { background: #f7f8f9; }
+  .ghost:hover { background: #f7f8f9; }
+  .done .ghost { width: 96px; height: 40px; font-size: 12.5px; }
+  .lead { color: var(--muted); font-size: 12.5px; margin: 10px 0 0; }
   .done .primary { margin-top: 0; width: 150px; height: 40px; font-size: 13.5px; }
+
+  /* 卸载 */
+  :root { --danger: #c8453c; --danger-hover: #b13a32; }
+  .danger {
+    width: 120px; height: 42px; border: 0; border-radius: 999px;
+    background: var(--danger); color: #fff; font: inherit; font-size: 14px; font-weight: 600;
+    letter-spacing: .4px; cursor: pointer; box-shadow: 0 7px 16px rgba(200, 69, 60, .22);
+  }
+  .danger:hover { background: var(--danger-hover); }
+  .keep {
+    margin-top: 20px; display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: #4d565f; cursor: pointer;
+  }
+  .row2 { display: flex; gap: 10px; margin-top: 26px; align-items: center; }
+  .tick.grey { background: #f0f2f4; }
+  .tick.grey svg { stroke: #6b7785; }
+  .un-done .sub { max-width: 420px; text-align: center; }
 
   /* 深色（跟随系统） */
   @media (prefers-color-scheme: dark) {
@@ -132,7 +151,7 @@
     .path button:hover { background: #2f353a; }
     input[type="checkbox"] { background: #24292e; border-color: #4a525a; }
     .bar { background: #2c3238; }
-    .done .ghost { background: #24292e; border-color: #33393f; color: #b6bfc7; }
+    .ghost { background: #24292e; border-color: #33393f; color: #b6bfc7; }
     .tick { background: rgba(32, 178, 90, .16); }
     .note a { color: #5ddc92; }
   }
@@ -153,7 +172,7 @@
   </div>
 
   <!-- 待安装 -->
-  <section class="stage on" data-stage="ready">
+  <section class="stage" data-stage="ready">
     <h1>SupportEase</h1>
     <div class="ver" id="ver">版本 —</div>
     <button class="primary" id="go">快速安装</button>
@@ -171,9 +190,20 @@
     <p class="note">不需要管理员权限 · 以 AGPL-3.0 许可发布</p>
   </section>
 
-  <!-- 安装中 -->
+  <!-- 卸载：确认 -->
+  <section class="stage" data-stage="un-confirm">
+    <h1>卸载 SupportEase</h1>
+    <p class="lead">会从本机移除 SupportEase 程序本身。</p>
+    <label class="keep"><input type="checkbox" id="wipe" /> 同时删除预设、校准记录和日志</label>
+    <div class="row2">
+      <button class="ghost" id="un-cancel">取消</button>
+      <button class="danger" id="un-go">卸载</button>
+    </div>
+  </section>
+
+  <!-- 安装中 / 卸载中 -->
   <section class="stage installing" data-stage="progress">
-    <h2>正在安装</h2>
+    <h2 id="progTitle">正在安装</h2>
     <p class="sub">马上就好，请不要关闭窗口。</p>
     <div class="bar"><i id="fill"></i></div>
     <div class="progressline"><span id="what">正在准备…</span><span id="pct">0%</span></div>
@@ -192,6 +222,16 @@
       <button class="primary" id="launch">立即体验</button>
     </div>
   </section>
+
+  <!-- 卸载：完成 -->
+  <section class="stage done un-done" data-stage="un-done">
+    <div class="tick grey">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#6b7785" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 12.5 5 5L20 6.5"/></svg>
+    </div>
+    <h2>SupportEase 已卸载</h2>
+    <p class="sub" id="un-sub">预设和校准记录还在本地，重新安装后可以直接用。</p>
+    <button class="ghost" id="un-close">关闭</button>
+  </section>
 </div>
 
 <script>
@@ -209,6 +249,12 @@
   $('quit').onclick = () => post({ cmd: 'close' })
   $('close').onclick = () => post({ cmd: 'close' })
 
+  // 无边框窗口拖动：交给系统的「非客户区」逻辑，鼠标移动由 Windows 接管
+  document.querySelector('.titlebar').addEventListener('mousedown', (e) => {
+    if (e.target.closest('button')) return
+    post({ cmd: 'drag' })
+  })
+
   $('browse').onclick = () => post({ cmd: 'browse', current: $('dir').value })
 
   $('launch').onclick = () => {
@@ -217,12 +263,21 @@
   }
 
   let finished = false
+  let mode = 'install'
 
   window.chrome.webview.addEventListener('message', (e) => {
     const m = e.data || {}
     if (m.event === 'init') {
-      $('dir').value = m.dir || ''
-      $('ver').textContent = '版本 ' + (m.version || '')
+      mode = m.mode === 'uninstall' ? 'uninstall' : 'install'
+      if (mode === 'uninstall') {
+        const name = document.querySelector('.titlebar .name')
+        name.lastChild.textContent = ' SupportEase 卸载程序'
+        stage('un-confirm')
+      } else {
+        $('dir').value = m.dir || ''
+        $('ver').textContent = '版本 ' + (m.version || '')
+        stage('ready')
+      }
     } else if (m.event === 'dir') {
       if (m.path) $('dir').value = m.path
     } else if (m.event === 'progress') {
@@ -232,13 +287,13 @@
     } else if (m.event === 'done') {
       if (!finished) {
         finished = true
-        setTimeout(() => stage('done'), 400)
+        setTimeout(() => stage(mode === 'uninstall' ? 'un-done' : 'done'), 400)
       }
     } else if (m.event === 'error') {
       finished = true
-      $('error').textContent = m.message || '安装失败'
+      $('error').textContent = m.message || '操作失败'
       setTimeout(() => {
-        stage('ready')
+        stage(mode === 'uninstall' ? 'un-confirm' : 'ready')
         $('go').disabled = false
       }, 2200)
     }
@@ -249,15 +304,34 @@
     if (!dir) return
     $('go').disabled = true
     $('error').textContent = ''
-    stage('progress')
+    $('progTitle').textContent = '正在安装'
     $('fill').style.width = '0%'
     $('pct').textContent = '0%'
+    $('what').textContent = '正在准备…'
+    stage('progress')
     post({
       cmd: 'install',
       dir,
       desktop: $('desktop').checked,
       startMenu: $('startmenu').checked,
     })
+  }
+
+  $('un-cancel').onclick = () => post({ cmd: 'close' })
+  $('un-close').onclick = () => post({ cmd: 'close' })
+  $('un-go').onclick = () => {
+    $('error').textContent = ''
+    $('progTitle').textContent = '正在卸载'
+    $('fill').style.width = '0%'
+    $('pct').textContent = '0%'
+    $('what').textContent = '正在准备…'
+    stage('progress')
+    post({ cmd: 'uninstall', wipe: $('wipe').checked })
+  }
+  $('wipe').onchange = (e) => {
+    $('un-sub').textContent = e.target.checked
+      ? '预设、校准记录和日志已经一起删除。'
+      : '预设和校准记录还在本地，重新安装后可以直接用。'
   }
 
   const mq = window.matchMedia('(prefers-color-scheme: dark)')

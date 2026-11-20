@@ -36,7 +36,9 @@ if (process.platform !== 'win32') {
 }
 
 const clientExe = join(ROOT, 'target', 'release', 'mkp-support-ease.exe')
-const payload = join(ROOT, 'installer', 'payload.zip')
+const payloadZip = join(ROOT, 'installer', 'payload.zip')
+const payloadXz = join(ROOT, 'installer', 'payload.xz')
+const manifest = join(ROOT, 'installer', 'Cargo.toml')
 const installerTarget = join(ROOT, 'target-installer')
 const installerExe = join(installerTarget, 'release', 'mkp-installer.exe')
 const outDir = join(ROOT, 'target', 'release', 'bundle', 'nsis')
@@ -54,21 +56,30 @@ if (!existsSync(clientExe)) {
   process.exit(1)
 }
 
-/* 2. payload.zip：exe + LICENSE */
-rmSync(payload, { force: true })
+/* 2. payload：exe + LICENSE → zip（deflate）→ xz（LZMA） */
+rmSync(payloadZip, { force: true })
 run('powershell', [
   '-NoProfile',
   '-NonInteractive',
   '-Command',
-  `Compress-Archive -Path '${clientExe}','${join(ROOT, 'LICENSE')}' -DestinationPath '${payload}' -Force`,
+  `Compress-Archive -Path '${clientExe}','${join(ROOT, 'LICENSE')}' -DestinationPath '${payloadZip}' -Force`,
 ])
 
-/* 3. 安装器 */
-run(
-  'cargo',
-  ['build', '--release', '--manifest-path', join(ROOT, 'installer', 'Cargo.toml')],
-  { env: { ...process.env, MKP_APP_VERSION: version, CARGO_TARGET_DIR: installerTarget } },
-)
+const cargoEnv = {
+  ...process.env,
+  MKP_APP_VERSION: version,
+  CARGO_TARGET_DIR: installerTarget,
+}
+run('cargo', ['build', '--release', '--manifest-path', manifest, '--bin', 'pack'], {
+  env: cargoEnv,
+})
+rmSync(payloadXz, { force: true })
+run(join(installerTarget, 'release', 'pack.exe'), [payloadZip, payloadXz])
+
+/* 3. 安装器（它把 payload.xz 编进 exe） */
+run('cargo', ['build', '--release', '--manifest-path', manifest, '--bin', 'mkp-installer'], {
+  env: cargoEnv,
+})
 if (!existsSync(installerExe)) {
   console.error(`没找到安装器产物：${installerExe}`)
   process.exit(1)
