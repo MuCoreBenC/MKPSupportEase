@@ -38,7 +38,7 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::{
-    CreateMutexW, OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
+    OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
 };
 use windows::Win32::UI::Shell::{
     FileOpenDialog, IFileOpenDialog, FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
@@ -166,11 +166,26 @@ fn on_message(hwnd: isize, raw: &str) {
                 Some(LPARAM(0)),
             );
         },
+        "default-dir" => send_json(serde_json::json!({
+            "event": "dir",
+            "path": default_install_dir().to_string_lossy(),
+        })),
         "browse" => {
             let current = v["current"].as_str().unwrap_or("").to_string();
             let picked = unsafe { pick_folder(HWND(hwnd as *mut _), &current) };
             match picked {
-                Some(path) => send_json(serde_json::json!({ "event": "dir", "path": path })),
+                Some(path) => {
+                    // 用户选的是"装在哪个位置"，不是"装在哪个文件夹"：自动补一层产品名。
+                    // 选中的目录本来就叫 SupportEase 时不再叠加。
+                    let mut target = PathBuf::from(&path);
+                    if target.file_name().and_then(|n| n.to_str()) != Some(PRODUCT) {
+                        target = target.join(PRODUCT);
+                    }
+                    send_json(serde_json::json!({
+                        "event": "dir",
+                        "path": target.to_string_lossy(),
+                    }))
+                }
                 // 取消也要回一条：前端靠它恢复按钮，否则按钮会一直灰着
                 None => send_json(serde_json::json!({ "event": "dir-cancel" })),
             }
@@ -643,32 +658,24 @@ fn main() {
     let _ = UNINSTALL.set(uninstall);
     let silent = args.iter().any(|a| a == "--silent" || a == "/S");
 
-    // 安装器与卸载器各用各的单实例：开着安装器时点卸载器不该被拦
-    let (mutex_name, class_name) = if uninstall {
-        (
-            w!("Local\\SupportEaseUninstallInstance"),
-            w!("SupportEaseUninstall"),
-        )
+    // 安装器与卸载器各用各的窗口类名：开着安装器时点卸载器不该被拦
+    let class_name = if uninstall {
+        w!("SupportEaseUninstall")
     } else {
-        (
-            w!("Local\\SupportEaseSetupInstance"),
-            w!("SupportEaseSetup"),
-        )
+        w!("SupportEaseSetup")
     };
 
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
 
-        // 单实例：已经开着一个就把它唤到前台，别再开一个 —— 也不能点了没反应
-        let _instance = CreateMutexW(None, true, mutex_name);
-        if GetLastError() == ERROR_ALREADY_EXISTS {
-            if let Ok(existing) = FindWindowW(class_name, PCWSTR::null()) {
-                // SW_RESTORE：窗口被最小化时 SW_SHOW 不会把它拉回来
-                let _ = ShowWindow(existing, SW_RESTORE);
-                let _ = PostMessageW(Some(existing), WM_REVEAL, WPARAM(0), LPARAM(0));
-                let _ = SetForegroundWindow(existing);
-            }
+        // 单实例：按窗口类名判断已经开着一个没有 —— 找到就把那个唤到前台，
+        // 不开第二个，也不能"点了没反应"。
+        // （不用命名互斥量：实测残留句柄会让新进程误判成"已存在"，直接退出。）
+        if let Ok(existing) = FindWindowW(class_name, PCWSTR::null()) {
+            let _ = ShowWindow(existing, SW_RESTORE);
+            let _ = PostMessageW(Some(existing), WM_REVEAL, WPARAM(0), LPARAM(0));
+            let _ = SetForegroundWindow(existing);
             return;
         }
 
@@ -728,7 +735,12 @@ fn main() {
             None,
         ) {
             Ok(h) => h,
-            Err(_) => std::process::exit(1),
+            Err(e) => {
+                let msg = format!("CreateWindowExW 失败：{e:?}");
+                let _ = std::fs::write(std::env::temp_dir().join("mkp-setup-fail.txt"), &msg);
+                let _ = MessageBoxW(None, &HSTRING::from(msg), w!("SupportEase"), MB_OK);
+                std::process::exit(1);
+            }
         };
 
         // Win11 圆角（Win10 上这条会失败，窗口保持方角）
