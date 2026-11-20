@@ -525,6 +525,27 @@ fn create_shortcut(lnk: &Path, target_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// 「应用和功能」里显示的大小取自卸载项的 EstimatedSize（KB）。
+/// 不写这一项时系统就空着那一栏 —— 不是它算不出来，是我们没告诉它。
+fn dir_size_kb(path: &Path) -> u32 {
+    fn walk(path: &Path) -> u64 {
+        let Ok(entries) = std::fs::read_dir(path) else {
+            return 0;
+        };
+        entries.flatten().fold(0u64, |sum, entry| {
+            let Ok(meta) = entry.metadata() else {
+                return sum;
+            };
+            if meta.is_dir() {
+                sum + walk(&entry.path())
+            } else {
+                sum + meta.len()
+            }
+        })
+    }
+    (walk(path) / 1024).min(u32::MAX as u64) as u32
+}
+
 fn write_uninstall_entry(dir: &Path) -> Result<(), String> {
     use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
@@ -551,6 +572,8 @@ fn write_uninstall_entry(dir: &Path) -> Result<(), String> {
     set("UninstallString", &uninstall_string)?;
     key.set_value("NoModify", &1u32).ok();
     key.set_value("NoRepair", &1u32).ok();
+    // DWORD，单位 KB —— 「应用和功能」就靠它显示大小
+    key.set_value("EstimatedSize", &dir_size_kb(dir)).ok();
     Ok(())
 }
 
