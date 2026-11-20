@@ -109,10 +109,12 @@
     font-weight: 500; max-width: 330px; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap;
   }
-  .installed-actions { display: flex; gap: 10px; align-items: center; margin-top: 24px; }
-  .installed-actions .primary { margin-top: 0; width: 190px; }
-  .installed-actions .danger { width: 100px; }
-  .installed-actions .ghost { width: 90px; }
+  .installed-actions { width: 452px; margin-top: 16px; }
+  /* B：主按钮独占一行，卸载/取消并排；.stage 已整体居中，这里只收紧与提示语的间距 */
+  .installed-actions .primary { display: block; margin-top: 0; width: 100%; }
+  .installed-actions .row { display: flex; gap: 10px; margin-top: 10px; }
+  .installed-actions .ghost { flex: 1; }
+  .stage[data-stage="installed"] .lead { margin-top: 14px; }
 
   /* 安装中 */
   .installing h2 { font-size: 20px; margin: 14px 0 3px; font-weight: 600; }
@@ -223,15 +225,18 @@
     <h1>已安装 SupportEase</h1>
     <div class="ver" id="instLead">检测到本机已有的安装</div>
     <div class="installed-info">
-      <div><span>当前版本</span><b id="instVer">—</b></div>
+      <div><span>已安装版本</span><b id="instVer">—</b></div>
+      <div><span>此安装包版本</span><b id="instPkg">—</b></div>
       <div><span>安装位置</span><b id="instLoc" title="">—</b></div>
     </div>
+    <p class="lead" id="instHint"></p>
     <div class="installed-actions">
-      <button class="ghost" id="instCancel">取消</button>
-      <button class="danger" id="instUninstall">卸载</button>
       <button class="primary" id="instReinstall">重新安装 / 升级</button>
+      <div class="row">
+        <button class="ghost" id="instUninstall">卸载</button>
+        <button class="ghost" id="instCancel">取消</button>
+      </div>
     </div>
-    <p class="lead">重新安装会覆盖当前目录，卸载会移除程序。</p>
   </section>
 
   <!-- 卸载：确认 -->
@@ -282,6 +287,19 @@
   // 与 Rust 之间的唯一通道：postMessage(JSON) → WebView2 的 message 事件
   const post = (msg) => window.chrome.webview.postMessage(msg)
   const $ = (id) => document.getElementById(id)
+
+  // 0.0.11-preview.6 > 0.0.11-preview.5 > 0.0.11-preview.1，正式版高于同号预览版
+  function compareVersion(a, b) {
+    const pa = String(a).split(/[.-]/)
+    const pb = String(b).split(/[.-]/)
+    for (let i = 0; i < 3; i++) {
+      const d = (Number(pa[i]) || 0) - (Number(pb[i]) || 0)
+      if (d) return d
+    }
+    const na = pa[3] === 'preview' ? Number(pa[4]) || 0 : 999
+    const nb = pb[3] === 'preview' ? Number(pb[4]) || 0 : 999
+    return na - nb
+  }
   const stage = (name) => {
     document.querySelectorAll('.stage').forEach((s) => s.classList.toggle('on', s.dataset.stage === name))
   }
@@ -319,6 +337,7 @@
   let finished = false
   let mode = 'install'
   let installed = null
+  let packageVersion = ''
 
   window.chrome.webview.addEventListener('message', (e) => {
     const m = e.data || {}
@@ -331,13 +350,23 @@
       } else {
         $('dir').value = m.dir || ''
         $('ver').textContent = '版本 ' + (m.version || '')
+        packageVersion = m.version || ''
         // 注册表结果随 init 一起回来：装过就走「已安装管理页」
         const info = m.installed
         if (info && info.state === 'installed') {
           installed = info
           $('instVer').textContent = info.version || '未知版本'
+          $('instPkg').textContent = packageVersion || '未知版本'
           $('instLoc').textContent = info.location || ''
           $('instLoc').title = info.location || ''
+          const cmp = compareVersion(info.version || '', packageVersion)
+          // 安装包更旧：不提供安装入口，只有卸载 / 取消
+          $('instReinstall').style.display = cmp > 0 ? 'none' : ''
+          $('instHint').textContent = cmp < 0
+            ? '可升级到 ' + packageVersion
+            : cmp > 0
+              ? '此安装包更旧，不能覆盖安装'
+              : '已是当前版本'
           stage('installed')
         } else {
           stage('ready')
