@@ -342,6 +342,8 @@ export const ja: Record<StringKey, string> = {
   'settings.update.flipArt': 'アイコンを裏返す',
   'settings.update.unknown': '更新を確認できませんでした',
   'settings.update.version': '現在のバージョン {version}',
+  'settings.update.flavorPortable': 'ポータブル版',
+  'settings.update.flavorInstalled': 'インストール版',
   'settings.update.versionTo': '現在 {version} → 最新 {latest}',
   'settings.update.failed': '今回の確認に失敗しました：{detail}',
   'settings.update.hint': '公開先に接続できない場合は「確認できません」と表示します。',

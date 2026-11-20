@@ -4542,6 +4542,12 @@ export interface MkpApi {
   getAppVersion(): Promise<string>
 
   /**
+   * 当前安装形态：`portable`（绿色版，exe 旁边有 `app-data`）/ `installed`。
+   * 设置页把它摆在版本号旁边 —— 两档更新链不同，用户得知道自己跑的是哪一档。
+   */
+  getInstallFlavor(): Promise<string>
+
+  /**
    * 检查**软件**更新（`release.json`）—— 与预设数据链**完全分开**。
    *
    * 只读、不在启动/首屏路径上（设置页打开时才调；铁律：云端不参与首屏）。

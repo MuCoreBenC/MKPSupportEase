@@ -341,6 +341,8 @@ export const en: Record<StringKey, string> = {
   'settings.update.flipArt': 'Flip the icon',
   'settings.update.unknown': 'Couldn’t check for updates',
   'settings.update.version': 'Current version {version}',
+  'settings.update.flavorPortable': 'Portable',
+  'settings.update.flavorInstalled': 'Installed',
   'settings.update.versionTo': 'Current {version} → latest {latest}',
   'settings.update.failed': 'The check failed: {detail}',
   'settings.update.hint': 'When the release server is unreachable, it says so.',

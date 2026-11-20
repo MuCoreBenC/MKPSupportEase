@@ -456,6 +456,7 @@ export const bridgeApi: MkpApi = {
   applyRemoteUpdate: () => call('applyRemoteUpdate', 'apply_remote_update'),
   /* ——— 软件更新（release.json）—— 与预设数据两条链 ——— */
   getAppVersion: () => call('getAppVersion', 'get_app_version'),
+  getInstallFlavor: () => call('getInstallFlavor', 'get_install_flavor'),
   checkSoftwareUpdate: () => call('checkSoftwareUpdate', 'check_software_update'),
   /* 应用内更新（第五刀）：命令名与前端一一对应，后端在 `ipc/update.rs` */
   updateInfo: () => call('updateInfo', 'update_info'),

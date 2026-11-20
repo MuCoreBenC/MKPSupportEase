@@ -28,7 +28,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -44,6 +44,8 @@ const LOCAL_RELEASE_DIR: &str = "local-release";
 const SNAPSHOT_MANIFEST: &str = "snapshot.json";
 /// 真编过程的日志（放在快照外面，还原后还能查）。
 const APPLY_LOG: &str = "publish-snapshot-apply.log";
+/// 真编进度（落盘，工作台重启后还能读到）。
+const APPLY_STATE: &str = "apply.json";
 /// 客户端「重新检查」读的预览通道清单。
 const RELEASE_PREVIEW: &str = "release-preview.json";
 const SCHEMA: u32 = 2;
@@ -63,17 +65,20 @@ pub struct PublishSnapshotStatus {
     pub note: String,
 }
 
-/// 真编那一趟的进度。**后台返回、前端轮询**，不阻塞界面。
-#[derive(Debug, Clone, Serialize)]
+/// 真编那一趟的进度。**落在盘上、前端轮询**，不阻塞界面。
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotApplyProgress {
     pub running: bool,
-    /// `preparing` / `bumping` / `building` / `manifest` / `done` / `failed`
+    /// `preparing` / `bumping` / `building` / `manifest` / `done` / `failed` / `interrupted`
     pub stage: String,
     /// 编译日志的最后一行
     pub tail: String,
     pub finished: Option<String>,
     pub error: Option<String>,
+    /// 跑这一趟的子进程 PID；重启后据此判断它是不是中途没了
+    #[serde(default)]
+    pub pid: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,18 +120,10 @@ struct SnapshotManifest {
     entries: Vec<ManagedEntry>,
 }
 
-/* ---------- 进度槽 ---------- */
+/* ---------- 进度（落盘） ---------- */
 
-static PROGRESS: OnceLock<Mutex<Option<SnapshotApplyProgress>>> = OnceLock::new();
-
-fn progress_slot() -> &'static Mutex<Option<SnapshotApplyProgress>> {
-    PROGRESS.get_or_init(|| Mutex::new(None))
-}
-
-fn set_progress(p: SnapshotApplyProgress) {
-    if let Ok(mut guard) = progress_slot().lock() {
-        *guard = Some(p);
-    }
+fn progress_path(repo: &Path) -> PathBuf {
+    snapshot_dir(repo).join(APPLY_STATE)
 }
 
 fn idle_progress() -> SnapshotApplyProgress {
@@ -136,7 +133,70 @@ fn idle_progress() -> SnapshotApplyProgress {
         tail: String::new(),
         finished: None,
         error: None,
+        pid: None,
     }
+}
+
+/// 写一次进度。落盘是唯一真相：跑编译的是 detached 子进程，工作台随时可能不在。
+fn write_progress(repo: &Path, p: &SnapshotApplyProgress) -> Result<(), AppError> {
+    let text = serde_json::to_string_pretty(p)
+        .map_err(|e| AppError::io("进度写不出来").with_detail(e.to_string()))?;
+    crate::fsx::atomic::atomic_write(&progress_path(repo), format!("{text}\n").as_bytes())
+        .map_err(|e| AppError::io("写不进编译进度").with_detail(e.message))
+}
+
+fn read_progress_file(repo: &Path) -> Option<SnapshotApplyProgress> {
+    let text = fs::read_to_string(progress_path(repo)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// 进程还活着吗。`sysinfo` 已在用（dev_source 同一套），不引新依赖。
+fn pid_alive(pid: u32) -> bool {
+    use sysinfo::{Pid, ProcessesToUpdate, System};
+    let mut sys = System::new();
+    sys.refresh_processes(ProcessesToUpdate::All, true);
+    sys.process(Pid::from_u32(pid)).is_some()
+}
+
+/// 界面读到的那一份。核心：盘上说在跑、但那个 PID 已经不在 ⇒ 如实报 `interrupted`，
+/// 不能让界面一直显示"正在编译"却永远等不到结果。
+fn progress_for_ui(repo: &Path) -> SnapshotApplyProgress {
+    let Some(mut p) = read_progress_file(repo) else {
+        return idle_progress();
+    };
+    if p.running {
+        match p.pid {
+            Some(pid) if pid_alive(pid) => {}
+            Some(_) => {
+                p.running = false;
+                p.stage = "interrupted".to_owned();
+                p.finished = Some("interrupted".to_owned());
+                p.error = Some("工作台退出，编译子进程也不在了。点「还原」回到模拟前。".to_owned());
+            }
+            None => {
+                p.running = false;
+                p.stage = "interrupted".to_owned();
+                p.finished = Some("interrupted".to_owned());
+                p.error =
+                    Some("这一趟没有 PID 记录，按中断处理。点「还原」回到模拟前。".to_owned());
+            }
+        }
+    }
+    p
+}
+
+fn progress_stage(repo: &Path, pid: u32, stage: &str, tail: &str) {
+    let _ = write_progress(
+        repo,
+        &SnapshotApplyProgress {
+            running: true,
+            stage: stage.to_owned(),
+            tail: tail.to_owned(),
+            finished: None,
+            error: None,
+            pid: Some(pid),
+        },
+    );
 }
 
 /* ---------- 路径 ---------- */
@@ -536,14 +596,6 @@ fn write_apply_log(repo: &Path, log: &SharedLog) {
     let _ = crate::fsx::atomic::atomic_write(&path, text.as_bytes());
 }
 
-fn progress_stage(stage: &str, tail: &str) {
-    let mut p = idle_progress();
-    p.running = true;
-    p.stage = stage.to_owned();
-    p.tail = tail.to_owned();
-    set_progress(p);
-}
-
 /// Windows：`npm run build:installer` 造出自研安装器，写一份 `nsis` 清单指到它。
 fn write_windows_manifest(repo: &Path, version: &str) -> Result<String, AppError> {
     let bundle = repo.join("target/release/bundle/nsis");
@@ -631,10 +683,17 @@ fn verify_macos_manifest(repo: &Path, version: &str) -> Result<String, AppError>
     Ok(name)
 }
 
+/// 跑在 detached 子进程里的那一趟。进度全程写盘，不依赖调用方进程还活着。
+/// 给 bin 入口用：`snapshot-apply <repo>`。
+pub fn run_apply_child(repo: PathBuf) {
+    apply_transaction(repo);
+}
+
 fn apply_transaction(repo: PathBuf) {
+    let pid = std::process::id();
     let log: SharedLog = Arc::new(Mutex::new(Vec::new()));
     let result = (|| -> Result<(String, String), AppError> {
-        progress_stage("preparing", "读快照");
+        progress_stage(&repo, pid, "preparing", "读快照");
         let snap = snapshot_dir(&repo);
         let mut m = read_manifest(&snap)
             .ok_or_else(|| AppError::invalid_argument("快照不在了或被改坏了"))?;
@@ -642,12 +701,12 @@ fn apply_transaction(repo: PathBuf) {
             AppError::invalid_argument(format!("版本号认不出：{}", m.base_version))
         })?;
 
-        progress_stage("bumping", &format!("抬到 {version}"));
+        progress_stage(&repo, pid, "bumping", &format!("抬到 {version}"));
         set_dev_version(&repo, &version)?;
         run_logged(&repo, &log, "node", &["scripts/version.mjs", "sync"], &[])?;
         run_logged(&repo, &log, "node", &["scripts/version.mjs", "check"], &[])?;
 
-        progress_stage("building", "编译安装包（这一步最久）");
+        progress_stage(&repo, pid, "building", "编译安装包（这一步最久）");
         /* 本地演练在工作区里跑，源码本来就是脏的；只给这一趟开 `MKPSE_LOCAL_SNAPSHOT`，
         tauri-dev 的脏树闸（发版用）因此不动，工作台标记那道闸仍在。 */
         let env = [("MKPSE_LOCAL_SNAPSHOT", "1")];
@@ -660,7 +719,7 @@ fn apply_transaction(repo: PathBuf) {
             return Err(AppError::invalid_argument("本机不支持本地安装包构建"));
         }
 
-        progress_stage("manifest", "写本地清单");
+        progress_stage(&repo, pid, "manifest", "写本地清单");
         let package = if cfg!(target_os = "windows") {
             write_windows_manifest(&repo, &version)?
         } else {
@@ -683,6 +742,7 @@ fn apply_transaction(repo: PathBuf) {
         }
     }
     let mut p = idle_progress();
+    p.pid = Some(pid);
     match result {
         Ok((version, package)) => {
             p.stage = "done".to_owned();
@@ -697,7 +757,7 @@ fn apply_transaction(repo: PathBuf) {
             p.tail = e.message;
         }
     }
-    set_progress(p);
+    let _ = write_progress(&repo, &p);
 }
 
 /* ---------- 状态 ---------- */
@@ -716,8 +776,16 @@ fn status_of(repo: &Path) -> PublishSnapshotStatus {
             note: "没有快照。点「拍快照」先存一份当前状态。".to_owned(),
         };
     };
+    /* 中断残留：快照在、没写 simulated，但版本已经被抬走了 —— 老实说出来，
+    不能让人对着"还没模拟发布"却看到版本号不对的界面猜。 */
+    let version_moved = dev_version(repo).ok().is_some_and(|v| v != m.base_version);
     let note = if let Some(err) = m.last_error.as_deref() {
         format!("上一趟没编成：{err}。点「还原」回到模拟前。")
+    } else if m.simulated_version.is_none() && version_moved {
+        format!(
+            "上次编译在半途停了，版本已从 {} 抬走。点「还原」回到模拟前。",
+            m.base_version
+        )
     } else {
         match m.simulated_version.as_deref() {
             Some(v) => format!("已模拟发布 {v}；点「还原」回到模拟前。"),
@@ -748,10 +816,7 @@ pub fn wb_publish_snapshot_status() -> Result<PublishSnapshotStatus, AppError> {
 #[tauri::command]
 pub fn wb_publish_snapshot_progress() -> Result<SnapshotApplyProgress, AppError> {
     crate::ipc::traced("wb_publish_snapshot_progress", |_| {
-        Ok(progress_slot()
-            .lock()
-            .map(|g| g.clone().unwrap_or_else(idle_progress))
-            .unwrap_or_else(|_| idle_progress()))
+        Ok(progress_for_ui(&crate::workbench::paths::repo_root()))
     })
 }
 
@@ -766,11 +831,7 @@ pub fn wb_publish_snapshot_take() -> Result<PublishSnapshotStatus, AppError> {
                 "已经有快照了。先点「还原」再拍新的。",
             ));
         }
-        if progress_slot()
-            .lock()
-            .map(|g| g.as_ref().is_some_and(|p| p.running))
-            .unwrap_or(false)
-        {
+        if progress_for_ui(&repo).running {
             return Err(AppError::invalid_argument("模拟发布还在跑，等它结束。"));
         }
         let live = local_release_dir(&repo);
@@ -811,12 +872,16 @@ pub fn wb_publish_snapshot_take() -> Result<PublishSnapshotStatus, AppError> {
                 entries,
             },
         )?;
-        set_progress(idle_progress());
+        let _ = write_progress(&repo, &idle_progress());
         Ok(status_of(&repo))
     })
 }
 
-/// 派一趟真编到后台，**立刻返回**；进度靠 `wb_publish_snapshot_progress` 轮询。
+/// 派一趟真编到**独立进程**（`snapshot-apply`），立刻返回。
+///
+/// 编译要好几分钟，还改工作区；放在独立进程里有两个好处：工作台崩了它照样跑完，
+/// 进度写盘；工作台重启后读盘就知道走到哪一步。用 `cargo run` 起它（这个 bin 带
+/// workbench feature，默认构建编不到）——只在工作台开发期用。
 #[tauri::command]
 pub fn wb_publish_snapshot_apply() -> Result<PublishSnapshotStatus, AppError> {
     crate::ipc::traced("wb_publish_snapshot_apply", |_| {
@@ -824,22 +889,57 @@ pub fn wb_publish_snapshot_apply() -> Result<PublishSnapshotStatus, AppError> {
         let snap = snapshot_dir(&repo);
         read_manifest(&snap)
             .ok_or_else(|| AppError::invalid_argument("没有快照。先点「拍快照」。"))?;
-        {
-            let mut guard = progress_slot().lock().unwrap_or_else(|e| e.into_inner());
-            if guard.as_ref().is_some_and(|p| p.running) {
-                return Err(AppError::invalid_argument("这一趟还在跑。"));
-            }
-            *guard = Some(SnapshotApplyProgress {
-                running: true,
-                stage: "preparing".to_owned(),
-                tail: String::new(),
-                finished: None,
-                error: None,
-            });
+        if progress_for_ui(&repo).running {
+            return Err(AppError::invalid_argument("这一趟还在跑。"));
         }
-        std::thread::spawn(move || apply_transaction(repo));
-        Ok(status_of(&crate::workbench::paths::repo_root()))
+        /* 先写一条 preparing（pid 未知），子进程起来后用自己的 pid 覆盖。
+        这样工作台立刻返回时界面就已经看得到"在跑"。 */
+        let mut p = idle_progress();
+        p.running = true;
+        p.stage = "preparing".to_owned();
+        p.tail = "正在启动编译进程".to_owned();
+        write_progress(&repo, &p)?;
+
+        spawn_apply_child(&repo)?;
+        Ok(status_of(&repo))
     })
+}
+
+/// 起 detached 的 `snapshot-apply`。Windows 上 npm/cargo 经 cmd 垫片，加 `CREATE_NO_WINDOW`。
+fn spawn_apply_child(repo: &Path) -> Result<(), AppError> {
+    let mut cmd = if cfg!(windows) {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg("cargo");
+        c
+    } else {
+        Command::new("cargo")
+    };
+    cmd.args([
+        "run",
+        "--quiet",
+        "--features",
+        "workbench",
+        "--bin",
+        "snapshot-apply",
+        "--",
+    ])
+    .arg(repo)
+    .current_dir(repo)
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0000_0008 | 0x0800_0000); // DETACHED_PROCESS | CREATE_NO_WINDOW
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    cmd.spawn()
+        .map_err(|e| AppError::io("起不了编译子进程").with_detail(e.to_string()))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -864,11 +964,7 @@ pub fn restore(repo: &Path) -> Result<(), AppError> {
     let Some(m) = read_manifest(&snap) else {
         return Ok(());
     };
-    if progress_slot()
-        .lock()
-        .map(|g| g.as_ref().is_some_and(|p| p.running))
-        .unwrap_or(false)
-    {
+    if progress_for_ui(repo).running {
         return Err(AppError::invalid_argument("这一趟还在跑，等它结束再还原。"));
     }
     let store = store_dir(repo);
@@ -876,7 +972,6 @@ pub fn restore(repo: &Path) -> Result<(), AppError> {
         restore_entry(repo, &store, entry)?;
     }
     clear_snapshot(repo);
-    set_progress(idle_progress());
     Ok(())
 }
 

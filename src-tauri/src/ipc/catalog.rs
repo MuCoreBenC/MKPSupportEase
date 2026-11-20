@@ -1403,6 +1403,18 @@ pub async fn get_app_version() -> Result<String, AppError> {
     Ok(runtime::structure::APP_VERSION.to_owned())
 }
 
+/// 当前是哪一档安装形态：`portable`（绿色版，exe 旁边有 `app-data`）/ `installed`。
+/// 设置页把它摆在版本号旁边 —— 两档的更新链不同，用户得知道自己跑的是哪一档。
+#[tauri::command]
+pub fn get_install_flavor() -> Result<String, AppError> {
+    Ok(if crate::fsx::paths::is_portable_install() {
+        "portable"
+    } else {
+        "installed"
+    }
+    .to_owned())
+}
+
 /// 检查**软件**更新（`release.json`）—— 与预设数据链完全分开的一条。
 ///
 /// - 只读、`async`、**不在启动 / 首屏路径**（设置页打开时才调；铁律 2：云端不参与首屏）；

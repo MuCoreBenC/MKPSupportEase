@@ -40,6 +40,8 @@ windows = { version = "0.62", features = [
   "Win32_Graphics_Dwm",
   "Win32_System_Com",
   "Win32_System_LibraryLoader",
+  # 覆盖安装时按完整路径找目标进程（不靠 taskkill 按名字误杀工作台 dev）
+  "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Threading",
   "Win32_Security",
   "Win32_Storage_FileSystem",

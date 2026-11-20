@@ -353,6 +353,8 @@ export const zhTW: Record<StringKey, string> = {
   'settings.update.flipArt': '翻轉圖示',
   'settings.update.unknown': '沒查到更新',
   'settings.update.version': '當前版本 {version}',
+  'settings.update.flavorPortable': '綠色版',
+  'settings.update.flavorInstalled': '安裝版',
   'settings.update.versionTo': '目前 {version} → 最新 {latest}',
   'settings.update.failed': '這次檢查失敗了：{detail}',
   'settings.update.hint': '連不上發布位址時，會顯示沒查到。',

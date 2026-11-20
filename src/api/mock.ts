@@ -3997,6 +3997,10 @@ export const mockApi: MkpApi = {
     return MOCK_APP_VERSION
   },
 
+  async getInstallFlavor() {
+    return 'installed'
+  },
+
   /*
    * 屏幕引导（2026-10-15）：**浏览器里没有这一档** —— 它要读切片器窗口的坐标，
    * 那是 macOS Accessibility 的活，浏览器里既没有切片器也没有那个 API。

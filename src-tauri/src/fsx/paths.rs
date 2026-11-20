@@ -127,6 +127,17 @@ fn portable_root_near(exe: &Path) -> Option<PathBuf> {
     dir.is_dir().then_some(dir)
 }
 
+/// 当前进程是不是绿色版（exe 旁边有 `app-data`）。设置页把它摆在版本号旁边，
+/// 让人一眼分清自己跑的是解压即用的那份还是装到本机的那份。
+/// 判据与 [`portable_root_near`] 同一条，不在界面另立一套。
+pub fn is_portable_install() -> bool {
+    std::env::current_exe()
+        .ok()
+        .as_deref()
+        .and_then(portable_root_near)
+        .is_some()
+}
+
 /// 钩子进程那侧的内部根（没有 `AppHandle` 时用）。
 ///
 /// 平台规则与 Tauri 的 `app_data_dir()` 对齐（Windows `%APPDATA%\<标识符>`、

@@ -637,6 +637,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::apply_remote_update,
         // 软件更新（release.json）—— 与预设数据两条链：设置页「软件更新」块的两个口子
         ipc::catalog::get_app_version,
+        ipc::catalog::get_install_flavor,
         ipc::catalog::check_software_update,
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
@@ -853,6 +854,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::apply_remote_update,
         // 软件更新（release.json）—— 与上面那份清单一字不差
         ipc::catalog::get_app_version,
+        ipc::catalog::get_install_flavor,
         ipc::catalog::check_software_update,
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,

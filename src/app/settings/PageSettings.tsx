@@ -601,6 +601,8 @@ export default function PageSettings({
   const [updateBusy, setUpdateBusy] = useState(true)
   /* 问更新读到的那份「当前版本」：即使远端问不到也要能显示它（它来自构建期，一定拿得到） */
   const [appVersion, setAppVersion] = useState('')
+  /* 哪一档：绿色版 / 安装版。版本号旁边摆出来，两档更新链不同 */
+  const [installFlavor, setInstallFlavor] = useState('')
 
   /*
    * **下载任务的状态**（2026-11-06 作者：下载完按钮还是「尝试测试版」，再点又重下一遍）。
@@ -767,11 +769,13 @@ export default function PageSettings({
     setUpdateBusy(true)
     setUpdateErr(null)
     try {
-      const [version, got] = await Promise.all([
+      const [version, flavor, got] = await Promise.all([
         api.getAppVersion().catch(() => ''),
+        api.getInstallFlavor().catch(() => ''),
         api.checkSoftwareUpdate(),
       ])
       setAppVersion(version || got.currentVersion)
+      setInstallFlavor(flavor)
       setUpdate(got)
       /* 顺手刷新共享快照：卡片要靠它判"已就绪的是不是这一版"，上次安装的账与
          日志路径也在这份里（`checkSoftwareUpdate` 只谈候选，这几格它不带） */
@@ -781,8 +785,12 @@ export default function PageSettings({
          如实留"没查到"，**并且把原因摆出来**（吞掉原因 = 失败和"没有新版"长一样） */
       setUpdate(null)
       setUpdateErr(errorText(e))
-      const v = await api.getAppVersion().catch(() => '')
+      const [v, flavor] = await Promise.all([
+        api.getAppVersion().catch(() => ''),
+        api.getInstallFlavor().catch(() => ''),
+      ])
       setAppVersion(v)
+      setInstallFlavor(flavor)
     } finally {
       setUpdateBusy(false)
     }
@@ -1513,6 +1521,16 @@ export default function PageSettings({
                     latest: upd.latestVersion ?? '—',
                   })
                 : tr('settings.update.version', { version: appVersion || '—' })}
+              {installFlavor !== '' && (
+                <span
+                  className={s.badge}
+                  data-on={installFlavor === 'portable' ? 'true' : undefined}
+                >
+                  {installFlavor === 'portable'
+                    ? tr('settings.update.flavorPortable')
+                    : tr('settings.update.flavorInstalled')}
+                </span>
+              )}
             </p>
 
             {/* 更新说明：长文案时这块自己滚（`.notes` 封顶） */}

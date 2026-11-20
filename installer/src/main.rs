@@ -502,8 +502,9 @@ fn run_install(
     report(2, "正在准备安装目录…");
     std::fs::create_dir_all(dir).map_err(|e| format!("创建不了安装目录：{e}"))?;
 
-    // 覆盖安装：先把还在跑的那个关掉（它正在占着 exe 文件）
-    let _ = hidden("taskkill").args(["/f", "/im", APP_EXE]).output();
+    // 覆盖安装：只关掉这个目录里还在跑的那一个（它正占着 exe 文件）。
+    // 按路径认，不动同名的 dev / 别处安装 / 绿色版进程。
+    stop_app_in_dir(dir, APP_EXE);
 
     report(6, "正在解压文件…");
     if PAYLOAD.is_empty() {
@@ -581,7 +582,77 @@ fn run_install(
     Err("这是卸载器，不能用来安装".to_string())
 }
 
-/// 起控制台程序（taskkill / powershell）时不要新开控制台窗口。
+/// 停掉**这个目录里**正在跑的客户端，按完整路径认进程。
+///
+/// 为什么不能 `taskkill /im mkp-support-ease.exe`：进程名不带路径，工作台 dev
+/// （`target-workbench/debug/mkp-support-ease.exe`）与客户端同名，会被一起杀掉 ——
+/// 用户装一次 / 卸一次，开着的工作台就没了。这里遍历进程快照，只认可执行文件的完整路径
+/// 等于该目录那一支的；装在别处、dev 目录、绿色版目录的同名进程都不动。
+///
+/// 走 Win32 API，不启 PowerShell / cmd —— 安装器是 GUI，不弹终端。
+fn stop_app_in_dir(dir: &Path, exe: &str) {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    use windows::Win32::System::Threading::{
+        OpenProcess, QueryFullProcessImageNameW, TerminateProcess, PROCESS_NAME_FORMAT,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+    };
+    use windows::core::PWSTR;
+
+    let target = dir.join(exe);
+    let Ok(target_str) = target.into_os_string().into_string() else {
+        return;
+    };
+    let target_lower = target_str.to_ascii_lowercase();
+
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return;
+        };
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        let mut ok = Process32FirstW(snap, &mut entry).is_ok();
+        while ok {
+            let pid = entry.th32ProcessID;
+            if pid != 0 {
+                let name = String::from_utf16_lossy(&entry.szExeFile)
+                    .trim_end_matches('\0')
+                    .to_ascii_lowercase();
+                if name == exe.to_ascii_lowercase() {
+                    if let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                        let mut buf = [0u16; 2048];
+                        let mut len = buf.len() as u32;
+                        let got = QueryFullProcessImageNameW(
+                            h,
+                            PROCESS_NAME_FORMAT(0),
+                            PWSTR(buf.as_mut_ptr()),
+                            &mut len,
+                        );
+                        let _ = CloseHandle(h);
+                        if got.is_ok() {
+                            let path = String::from_utf16_lossy(&buf[..len as usize]);
+                            if path.to_ascii_lowercase() == target_lower {
+                                if let Ok(kill) = OpenProcess(PROCESS_TERMINATE, false, pid) {
+                                    let _ = TerminateProcess(kill, 1);
+                                    let _ = CloseHandle(kill);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ok = Process32NextW(snap, &mut entry).is_ok();
+        }
+        let _ = CloseHandle(snap);
+    }
+}
+
+/// 起控制台程序（cmd / takeown / icacls）时不要新开控制台窗口。
 /// 安装器本身是 GUI 进程，没有控制台可继承 —— 不挂这个标志就会闪一下黑框。
 fn hidden(program: &str) -> Command {
     use std::os::windows::process::CommandExt;
@@ -590,36 +661,58 @@ fn hidden(program: &str) -> Command {
     cmd
 }
 
-fn quoted(p: &Path) -> String {
-    format!("'{}'", p.to_string_lossy().replace('\'', "''"))
-}
-
+/// 用 Win32 `IShellLinkW` + `IPersistFile` 建 `.lnk`，不启 PowerShell。
+/// 安装器是 GUI 进程，起终端会闪黑框；COM 这一条在同进程里完成。
 fn create_shortcut(lnk: &Path, target_dir: &Path) -> Result<(), String> {
+    use windows::core::{Interface, GUID, PCWSTR};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitialize, CoUninitialize, CLSCTX_INPROC_SERVER, IPersistFile,
+    };
+    use windows::Win32::UI::Shell::IShellLinkW;
+
     if let Some(parent) = lnk.parent() {
-        std::fs::create_dir_all(parent).ok();
+        std::fs::create_dir_all(parent).map_err(|e| format!("建快捷方式目录失败：{e}"))?;
     }
     let exe = target_dir.join(APP_EXE);
-    let script = format!(
-        "$s=(New-Object -ComObject WScript.Shell).CreateShortcut({});$s.TargetPath={};$s.WorkingDirectory={};$s.Save()",
-        quoted(lnk),
-        quoted(&exe),
-        quoted(target_dir),
-    );
-    let status = hidden("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-WindowStyle",
-            "Hidden",
-            "-Command",
-            &script,
-        ])
-        .status()
-        .map_err(|e| format!("调不起 PowerShell：{e}"))?;
-    if !status.success() {
-        return Err(format!("创建快捷方式失败：{}", lnk.display()));
+    let exe_w = exe
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let dir_w = target_dir
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let lnk_w = lnk
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+
+    // CLSID_ShellLink = {00021401-0000-0000-C000-000000000046}
+    const CLSID_SHELL_LINK: GUID = GUID::from_u128(0x00021401_0000_0000_c000_000000000046);
+
+    unsafe {
+        let _ = CoInitialize(None);
+        let result = (|| {
+            let link: IShellLinkW =
+                CoCreateInstance(&CLSID_SHELL_LINK, None, CLSCTX_INPROC_SERVER)
+                    .map_err(|e| format!("建 ShellLink 失败：{e}"))?;
+            link.SetPath(PCWSTR(exe_w.as_ptr()))
+                .map_err(|e| format!("设快捷方式目标失败：{e}"))?;
+            link.SetWorkingDirectory(PCWSTR(dir_w.as_ptr()))
+                .map_err(|e| format!("设起始位置失败：{e}"))?;
+            let persist: IPersistFile = link
+                .cast()
+                .map_err(|e| format!("取 IPersistFile 失败：{e}"))?;
+            persist
+                .Save(PCWSTR(lnk_w.as_ptr()), true)
+                .map_err(|e| format!("存快捷方式失败：{e}"))
+        })();
+        CoUninitialize();
+        result
     }
-    Ok(())
 }
 
 /// 「应用和功能」里显示的大小取自卸载项的 EstimatedSize（KB）。
@@ -686,14 +779,12 @@ fn remove_uninstall_entry() {
 fn run_uninstall(dir: &Path, wipe: bool, mut report: impl FnMut(u32, &str)) -> Result<(), String> {
     if is_portable_layout(dir) {
         report(4, "正在关闭 SupportEase…");
-        // 绿色版的主程序叫 SupportEase.exe，进程名也就是它
-        let _ = hidden("taskkill")
-            .args(["/f", "/im", "SupportEase.exe"])
-            .output();
+        // 绿色版的主程序叫 SupportEase.exe；也只认这个目录里的那一支
+        stop_app_in_dir(dir, "SupportEase.exe");
         report(78, "正在安排文件清理…");
     } else {
         report(4, "正在关闭 SupportEase…");
-        let _ = hidden("taskkill").args(["/f", "/im", APP_EXE]).output();
+        stop_app_in_dir(dir, APP_EXE);
 
         report(18, "正在删除快捷方式…");
         let _ = std::fs::remove_file(user_desktop().join(format!("{PRODUCT}.lnk")));

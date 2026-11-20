@@ -50,6 +50,14 @@ name = "preview"
 path = "src/bin/preview.rs"
 required-features = ["workbench"]
 
+# 发布快照的命令行入口（2026-11-20）：工作台「模拟发布」把它当独立进程起，
+# 进度写盘；也支持 `restore <repo>` 走同一个还原内核。
+# 带 workbench feature 才编得出来 —— 客户端默认构建里没有这个 bin。
+[[bin]]
+name = "snapshot-apply"
+path = "src/bin/snapshot-apply.rs"
+required-features = ["workbench"]
+
 # 清译文台账（2026-11-02）：按 `key=labelEn,descJa` 点名摘掉「待重译」标记。
 #
 # ★ 必须显式写出来，否则 cargo 会把 `src/bin/clear-stale.rs` 当自动发现的 bin

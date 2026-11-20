@@ -364,6 +364,8 @@ export const zhCN = {
   'settings.update.unknown': '没查到更新',
   'settings.update.version': '当前版本 {version}',
   'settings.update.versionTo': '当前 {version} → 最新 {latest}',
+  'settings.update.flavorPortable': '绿色版',
+  'settings.update.flavorInstalled': '安装版',
   'settings.update.failed': '这次检查失败了：{detail}',
   'settings.update.hint': '连不上发布地址时，会显示没查到。',
   'settings.update.recheck': '检查更新',
