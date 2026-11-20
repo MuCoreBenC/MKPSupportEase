@@ -52,7 +52,7 @@
    *
    * 这一块整个住在一个 `<button>` 里，而 global.css 那条 `button { user-select: none }`
    * 把它压住了 —— 这里显式打开（类选择器压过元素选择器）。名字下面的橙字提示与
-   * 云端差异也是给人看的字，跟着一起可选；`?` 是装饰（`.info`，aria-hidden），仍关着。
+   * 云端差异也是给人看的字，跟着一起可选；`?` 是装饰（共用 Tip 圈，aria-hidden），仍关着。
    * 前缀与标准成对写，理由见 global.css 的「拖选（selection）的划分」。
    */
   user-select: text;
@@ -63,7 +63,8 @@
   color: var(--accent-deep);
 }
 
-.left:hover .info {
+/* 行悬停时 `?` 一起转强调色；圈是共用件，靠稳定钩子 data-tip-dot 选中 */
+.left:hover [data-tip-dot] {
   border-color: var(--accent);
   color: var(--accent-deep);
 }
@@ -79,11 +80,10 @@
   min-width: 0;
 }
 
-/* 第一行：行名 + `?`（见 `.info` 的注）—— 后面那几行注记各占满一行 */
+/* 第一行：行名 + `?`（共用 Tip 圈，间距由圈自身的 margin-left 给）—— 后面那几行注记各占满一行 */
 .head {
   display: flex;
   align-items: center;
-  gap: 6px;
   min-width: 0;
 }
 
@@ -286,29 +286,6 @@
 .syncBtnGhost:focus-visible {
   outline: none;
   border-color: var(--line-strong);
-}
-
-/*
- * `?` 是**行名的后缀**，不是右边那一列的件（2026-10-21 作者：「tooltip 跟着标题后面，
- * 可以适当缩小」）：它住进 `.labelWrap` 的第一行（`.head`），紧贴名字 6px，
- * 不跟名字下面的橙字 / 云端差异挤成第二列；名字换行 / 省略时它跟着走。
- * 尺寸从 15px 收到 13px —— 它只是「点这一行看说明」的记号，不该和正文同重。
- */
-.info {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 13px;
-  height: 13px;
-  border: 1px solid var(--line-strong);
-  border-radius: 50%;
-  font-size: 10px;
-  line-height: 1;
-  color: var(--text-3);
-  /* 装饰性问号（aria-hidden）—— 行名开了可拖选，它不跟着进选区 */
-  user-select: none;
-  -webkit-user-select: none;
 }
 
 .right {
