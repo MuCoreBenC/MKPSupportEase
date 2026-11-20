@@ -379,6 +379,10 @@ export const bridgeApi: MkpApi = {
   getAutoCheckUpdate: () => call('getAutoCheckUpdate', 'get_auto_check_update'),
   setAutoCheckUpdate: (enabled) =>
     call('setAutoCheckUpdate', 'set_auto_check_update', { enabled }),
+  /* 更新渠道（2026-11-20）：落 updateChannel 格。自动检查按它挑清单 */
+  getUpdateChannel: () => call('getUpdateChannel', 'get_update_channel'),
+  setUpdateChannel: (channel) =>
+    call('setUpdateChannel', 'set_update_channel', { channel }),
   /* 预设页偏好（2026-10-20）：「复制出来的也跟着云端更新」—— 落 presets 格。
      关（出厂）⇒ 复制件不认云端：账本与逐参数更新账两个出口都把它滤掉 */
   getCopiesFollowCloud: () => call('getCopiesFollowCloud', 'get_copies_follow_cloud'),

@@ -4177,6 +4177,17 @@ export interface MkpApi {
   setAutoCheckUpdate(enabled: boolean): Promise<boolean>
 
   /**
+   * **更新渠道**（2026-11-20）：`stable` / `preview`。**没选过 = `stable`**。
+   *
+   * 落 `run/app-state.json` 的 `updateChannel` 格 —— 自动检查要按它挑清单，
+   * 只记在前端的话重启就忘、自动检查永远只查正式版。
+   */
+  getUpdateChannel(): Promise<string>
+
+  /** 换更新渠道：立即生效并落盘（认不出的值整次拒绝，不静默写成正式版）。 */
+  setUpdateChannel(channel: string): Promise<string>
+
+  /**
    * **复制出来的那一份跟不跟云端**（2026-10-20；出厂 = 关）。
    *
    * 回的是**解析后的 `boolean`**：盘上那一格"没选过"是 `null`，"没选过怎么解释"

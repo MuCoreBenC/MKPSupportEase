@@ -864,6 +864,14 @@ pub struct AppStateFile {
     /// 读者是 [`crate::runtime::update_check`]；设置页那一格走 `ipc::prefs` 的命令。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_check_update: Option<bool>,
+    /// **更新渠道**（2026-11-20）：设置页「更新渠道」选的是哪一路。
+    /// `None` = 还没选过 ⇒ 正式版。
+    ///
+    /// ★ 它必须住盘上：自动检查读完清单要按这条挑通道 —— 只记在前端的话，
+    ///   选「测试版」重启就忘，自动检查永远只查正式版。
+    ///   读者是 [`crate::runtime::update_check`]；设置页那一格走 `ipc::prefs`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_channel: Option<super::release_info::UpdateChannel>,
     /// **主窗置顶档位**（2026-10-17）：`None` = 还没选过 ⇒ `off`。
     ///
     /// 它是"用户点出来的界面状态"，与 `theme` 同一族 —— 所以住在这里，
@@ -924,6 +932,7 @@ impl Default for AppStateFile {
             locale: None,
             auto_clean_history: None,
             auto_check_update: None,
+            update_channel: None,
             pin: None,
             compact: None,
             last_window_box: None,
@@ -1109,6 +1118,8 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         auto_clean_history: None,
         /* 自动检查更新是 2026-11-05 才有的：旧档里本来就没有它（没选过 = 开着） */
         auto_check_update: None,
+        /* 更新渠道是 2026-11-20 才有的：旧档里没有（没选过 = 正式版） */
+        update_channel: None,
         /* 窗口置顶 / 窄窗 / 上一次手动几何是 2026-10-17 才有的格：旧档里没有 */
         pin: None,
         compact: None,
@@ -1596,6 +1607,26 @@ pub fn set_auto_check_update(root: &Path, enabled: bool) -> Result<bool, AppErro
     with_state(root, |state| {
         state.auto_check_update = Some(enabled);
         Ok(enabled)
+    })
+}
+
+/* ---------- updateChannel：自动检查按哪一路查 ---------- */
+
+/// 用户选的更新渠道。**还没选过 ⇒ 正式版**。
+///
+/// 读者是 [`crate::runtime::update_check`]（自动检查挑哪份清单）；设置页那格走 `ipc::prefs`。
+pub fn update_channel(root: &Path) -> Result<super::release_info::UpdateChannel, AppError> {
+    Ok(load(root)?.update_channel.unwrap_or_default())
+}
+
+/// 记下更新渠道（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
+pub fn set_update_channel(
+    root: &Path,
+    channel: super::release_info::UpdateChannel,
+) -> Result<super::release_info::UpdateChannel, AppError> {
+    with_state(root, |state| {
+        state.update_channel = Some(channel);
+        Ok(channel)
     })
 }
 

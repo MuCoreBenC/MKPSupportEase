@@ -235,6 +235,51 @@ pub async fn set_auto_check_update(app: AppHandle, enabled: bool) -> Result<bool
     })
 }
 
+/* ---------- 更新渠道（2026-11-20）：设置页「更新渠道」那一格 ---------- */
+
+/// 用户选的更新渠道：`stable` / `preview`。**没选过 = `stable`**。
+///
+/// ★ 它住盘上而不是前端：自动检查（`runtime::update_check`）要按这条挑清单，
+///   只记在前端的话，重启就忘、自动检查永远只查正式版。
+#[tauri::command]
+pub async fn get_update_channel(app: AppHandle) -> Result<String, AppError> {
+    traced("getUpdateChannel", |_| {
+        let root = internal_root(&app)?;
+        Ok(channel_wire(runtime::app_state::update_channel(&root)?))
+    })
+}
+
+/// 换更新渠道：`stable` / `preview`。认不出就整次拒绝（不静默写成正式版）。
+#[tauri::command]
+pub async fn set_update_channel(app: AppHandle, channel: String) -> Result<String, AppError> {
+    traced("setUpdateChannel", |_| {
+        let root = internal_root(&app)?;
+        let parsed = channel_parse(&channel)?;
+        let got = runtime::app_state::set_update_channel(&root, parsed)?;
+        notify_app_state(&app);
+        Ok(channel_wire(got))
+    })
+}
+
+fn channel_wire(c: runtime::release_info::UpdateChannel) -> String {
+    match c {
+        runtime::release_info::UpdateChannel::Stable => "stable",
+        runtime::release_info::UpdateChannel::Preview => "preview",
+    }
+    .to_owned()
+}
+
+fn channel_parse(raw: &str) -> Result<runtime::release_info::UpdateChannel, AppError> {
+    match raw.trim() {
+        "stable" => Ok(runtime::release_info::UpdateChannel::Stable),
+        "preview" => Ok(runtime::release_info::UpdateChannel::Preview),
+        other => Err(AppError::invalid_argument(messages::text(
+            "ui.ipc.prefs.493",
+            &[("channel", other)],
+        ))),
+    }
+}
+
 /* ---------- 界面语言（2026-10-25）：设置页「界面语言」那一块 ---------- */
 
 /// 当前界面语言。`null` = **还没选过** ⇒ 界面按"跟随系统"（与 `get_theme` 同一口径）。

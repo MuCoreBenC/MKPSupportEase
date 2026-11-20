@@ -695,6 +695,8 @@ export default function PageSettings({
   const [autoCheckUpdate, setAutoCheckUpdate] = useState<boolean | null>(null)
   const [autoCheckBusy, setAutoCheckBusy] = useState(false)
   const [autoCheckErr, setAutoCheckErr] = useState<Text | null>(null)
+  /* 「更新渠道」落盘失败时的那一句（成功不提示，选中态本身就是回执） */
+  const [channelErr, setChannelErr] = useState<Text | null>(null)
 
   /*
    * **备份与恢复**（2026-10-17 / 2026-11-09）。
@@ -845,6 +847,35 @@ export default function PageSettings({
   useEffect(() => {
     void readAutoCheckUpdate()
   }, [readAutoCheckUpdate])
+
+  /** 更新渠道：打开这一页时读一次盘上那一格（不联网）。 */
+  const readUpdateChannel = useCallback(async () => {
+    try {
+      const got = await api.getUpdateChannel()
+      setChannelPick(got === 'preview' ? 'preview' : 'stable')
+      setChannelErr(null)
+    } catch {
+      /* 读不回来就按默认（正式版）显示，不挡整页 —— 下一次点选会重新落盘 */
+    }
+  }, [])
+
+  useEffect(() => {
+    void readUpdateChannel()
+  }, [readUpdateChannel])
+
+  /** 换渠道：先亮选中态，再落盘；写失败退回原来那一档并说明原因。 */
+  const pickChannel = async (next: 'stable' | 'preview') => {
+    const prev = channelPick
+    if (prev === next) return
+    setChannelPick(next)
+    setChannelErr(null)
+    try {
+      await api.setUpdateChannel(next)
+    } catch (e) {
+      setChannelPick(prev)
+      setChannelErr(msg('settings.history.writeFailed', { detail: errorText(e) }))
+    }
+  }
 
   /** 在系统浏览器里打开 Release 页（**走命令**，不走 `<a>`） */
   const openReleasePage = async (url: string) => {
@@ -1624,7 +1655,11 @@ export default function PageSettings({
                 {tr('settings.update.autoCheck')}
                 <Tip text={tr('settings.update.autoCheckHint')} />
               </div>
-              <p className={s.current}>{tr('settings.update.autoCheckNote')}</p>
+              <p className={s.current}>
+                {channelPick === 'preview'
+                  ? tr('settings.update.autoCheckNotePreview')
+                  : tr('settings.update.autoCheckNote')}
+              </p>
             </div>
             <Switch
               checked={autoCheckUpdate ?? false}
@@ -1661,7 +1696,7 @@ export default function PageSettings({
                   aria-checked={channelPick === c.id}
                   onClick={() => {
                     track('update.channel', { to: c.id })
-                    setChannelPick(c.id)
+                    void pickChannel(c.id)
                   }}
                 >
                   {tr(c.label)}
@@ -1669,6 +1704,9 @@ export default function PageSettings({
               ))}
             </div>
           </div>
+          {channelErr !== null && (
+            <p className={`${s.note} ${s.noteBad}`}>{say(channelErr)}</p>
+          )}
 
           {/*
            * 「上次更新没成」+ **安装日志在哪儿**：安装脚本在应用退出之后才跑，那时界面上
