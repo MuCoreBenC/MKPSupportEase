@@ -54,7 +54,12 @@ const ICON_BLACK: &str = include_str!("../ui/icon-sm.b64");
 const ICON_WHITE: &str = include_str!("../ui/icon-sm-white.b64");
 
 /// 由 build.rs 复制进 OUT_DIR（构建脚本生成；没有时是空文件，运行时明确报错）
+#[cfg(not(feature = "uninstall-only"))]
 const PAYLOAD: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/payload.xz"));
+
+/// 卸载器不内嵌 payload —— 这一份 exe 只有界面 + 删除逻辑
+#[cfg(feature = "uninstall-only")]
+const PAYLOAD: &[u8] = b"";
 
 const PRODUCT: &str = "SupportEase";
 const APP_EXE: &str = "mkp-support-ease.exe";
@@ -390,6 +395,7 @@ unsafe fn fallback_no_webview(hwnd: HWND) {
 
 /* ---------- 安装本体 ---------- */
 
+#[cfg(not(feature = "uninstall-only"))]
 fn run_install(
     dir: &Path,
     desktop: bool,
@@ -413,20 +419,28 @@ fn run_install(
             .read_to_end(&mut raw)
             .map_err(|e| format!("安装包损坏：{e}"))?;
     }
-    if raw.len() < 8 {
+    // 容器：[license_len][app_len][uninstaller_len][license][app][uninstaller]
+    if raw.len() < 12 {
         return Err("安装包损坏：头部缺失".to_string());
     }
     let license_len = u32::from_le_bytes(raw[0..4].try_into().unwrap()) as usize;
-    let exe_len = u32::from_le_bytes(raw[4..8].try_into().unwrap()) as usize;
-    if raw.len() < 8 + license_len + exe_len {
+    let app_len = u32::from_le_bytes(raw[4..8].try_into().unwrap()) as usize;
+    let un_len = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as usize;
+    let expected = 12usize
+        .saturating_add(license_len)
+        .saturating_add(app_len)
+        .saturating_add(un_len);
+    if raw.len() < expected {
         return Err("安装包损坏：长度对不上".to_string());
     }
+    let app_start = 12 + license_len;
+    let un_start = app_start + app_len;
 
     report(12, "正在写入许可证…");
-    std::fs::write(dir.join("LICENSE"), &raw[8..8 + license_len])
+    std::fs::write(dir.join("LICENSE"), &raw[12..app_start])
         .map_err(|e| format!("写 LICENSE 失败：{e}"))?;
 
-    let exe = &raw[8 + license_len..8 + license_len + exe_len];
+    let exe = &raw[app_start..un_start];
     let mut file =
         std::fs::File::create(dir.join(APP_EXE)).map_err(|e| format!("写应用失败：{e}"))?;
     const CHUNK: usize = 1 << 20;
@@ -438,9 +452,11 @@ fn run_install(
     }
     drop(file);
 
-    report(82, "正在写入卸载信息…");
-    let me = std::env::current_exe().map_err(|e| format!("找不到安装器自身：{e}"))?;
-    std::fs::copy(&me, dir.join("uninstall.exe")).map_err(|e| format!("写卸载器失败：{e}"))?;
+    report(82, "正在写入卸载器…");
+    // 放进去的是单独编的、不带 payload 的小 exe（约 0.4 MB），
+    // 而不是把带 payload 的安装器整个复制过去（那会多占 7 MB 磁盘）
+    std::fs::write(dir.join("uninstall.exe"), &raw[un_start..expected])
+        .map_err(|e| format!("写卸载器失败：{e}"))?;
 
     if desktop {
         report(88, "正在创建桌面快捷方式…");
@@ -456,6 +472,16 @@ fn run_install(
 
     report(100, "完成");
     Ok(())
+}
+
+#[cfg(feature = "uninstall-only")]
+fn run_install(
+    _dir: &Path,
+    _desktop: bool,
+    _start_menu: bool,
+    _report: impl FnMut(u32, &str),
+) -> Result<(), String> {
+    Err("这是卸载器，不能用来安装".to_string())
 }
 
 /// 起控制台程序（taskkill / powershell）时不要新开控制台窗口。
@@ -660,8 +686,9 @@ fn main() {
         .ok()
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()))
         .unwrap_or_default();
-    let uninstall =
-        args.iter().any(|a| a == "--uninstall") || self_name.starts_with("uninstall");
+    let uninstall = cfg!(feature = "uninstall-only")
+        || args.iter().any(|a| a == "--uninstall")
+        || self_name.starts_with("uninstall");
     let _ = UNINSTALL.set(uninstall);
     let silent = args.iter().any(|a| a == "--silent" || a == "/S");
 

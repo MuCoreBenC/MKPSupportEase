@@ -55,7 +55,23 @@ codegen-units = 1
 strip = true
 panic = "abort"
 
-# 构建脚本用它把 payload.zip 压成 payload.xz（不进最终安装器）
+[features]
+default = []
+# 不带 payload 的卸载器：单独编一份，只有界面 + 删除逻辑（约 0.4 MB）。
+# 安装时把它从 payload 里解出来当 uninstall.exe —— 不再把带 payload 的安装器
+# 整个复制过去（那会让安装目录里平白多 7 MB）。
+uninstall-only = []
+
+[[bin]]
+name = "mkp-installer"
+path = "src/main.rs"
+
+[[bin]]
+name = "mkp-uninstaller"
+path = "src/main.rs"
+required-features = ["uninstall-only"]
+
+# 构建脚本用它把 payload.bin 压成 payload.xz（不进最终安装器）
 [[bin]]
 name = "pack"
 path = "src/bin/pack.rs"

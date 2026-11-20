@@ -64,23 +64,46 @@ if (!existsSync(clientExe)) {
   process.exit(1)
 }
 
-/* 2. payload：一个极简容器（[license_len][exe_len][license][exe]）再整体 xz。
- *
- * 不能先 zip 再 xz：zip 里已经是 deflate 流，LZMA 对已压缩数据没有收益
- * （实测两层压完还是 9.6 MB）。顺序反过来才对。 */
-const license = readFileSync(join(ROOT, 'LICENSE'))
-const exeBytes = readFileSync(clientExe)
-const head = Buffer.alloc(8)
-head.writeUInt32LE(license.length, 0)
-head.writeUInt32LE(exeBytes.length, 4)
-rmSync(payloadBin, { force: true })
-writeFileSync(payloadBin, Buffer.concat([head, license, exeBytes]))
-
 const cargoEnv = {
   ...process.env,
   MKP_APP_VERSION: version,
   CARGO_TARGET_DIR: installerTarget,
 }
+
+/* 2a. 卸载器：单独编一份不带 payload 的（约 0.4 MB）。
+ *
+ * 不这么做的话只能把安装器本体（带整个 payload）复制成 uninstall.exe，
+ * 用户安装目录里就会平白多出 7 MB。 */
+run('cargo', [
+  'build',
+  '--release',
+  '--manifest-path',
+  manifest,
+  '--bin',
+  'mkp-uninstaller',
+  '--features',
+  'uninstall-only',
+], { env: cargoEnv })
+const uninstaller = join(installerTarget, 'release', 'mkp-uninstaller.exe')
+if (!existsSync(uninstaller)) {
+  console.error(`没找到卸载器产物：${uninstaller}`)
+  process.exit(1)
+}
+
+/* 2b. payload：极简容器（三段长度 + license + 应用 + 卸载器）再整体 xz。
+ *
+ * 不能先 zip 再 xz：zip 里已经是 deflate 流，LZMA 对已压缩数据没有收益
+ * （实测两层压完还是 9.6 MB）。顺序反过来才对。 */
+const license = readFileSync(join(ROOT, 'LICENSE'))
+const appBytes = readFileSync(clientExe)
+const uninstallerBytes = readFileSync(uninstaller)
+const head = Buffer.alloc(12)
+head.writeUInt32LE(license.length, 0)
+head.writeUInt32LE(appBytes.length, 4)
+head.writeUInt32LE(uninstallerBytes.length, 8)
+rmSync(payloadBin, { force: true })
+writeFileSync(payloadBin, Buffer.concat([head, license, appBytes, uninstallerBytes]))
+
 run('cargo', ['build', '--release', '--manifest-path', manifest, '--bin', 'pack'], {
   env: cargoEnv,
 })
