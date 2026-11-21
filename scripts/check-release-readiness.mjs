@@ -129,7 +129,7 @@ check('tag 未被占用，或与 HEAD 同一笔提交', () => {
   return '未发布'
 })
 
-if (!localTag && !remoteTagLine) {
+if (!localTag && !remoteTagCommitSha) {
   check('发布分支有可合并的提交（不然 GitHub 会拒开空 PR）', () => {
     const n = Number(tryRun('git', ['rev-list', '--count', 'origin/main..HEAD']) ?? '0')
     if (n === 0) fail('分支与 origin/main 同一点：先把版本号 / 发版说明那一笔合进 main，再从新分支开始')
