@@ -1630,6 +1630,8 @@ export interface ReleaseTxReport {
   review: RemoteReview | null
   release: RemoteRelease | null
   artifact: ArtifactInfo | null
+  /** Windows 绿色版 zip（与安装版一起进 Release；非 Windows 为 null） */
+  portable: ArtifactInfo | null
   /** ② `release.json` 那一笔所在的分支 */
   infoBranch: string | null
   /** ② 的 PR —— **它由人合并**，合并完客户端才看得到新版本 */

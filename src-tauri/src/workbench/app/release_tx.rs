@@ -208,10 +208,10 @@ fn validate_release_source(
 }
 
 /// **软件版本的发布通道**（M6，2026-10-05 定成架构规则）：
-/// Release 与安装包附件住在 **Gitee**（发布仓库 = 设置里的 Gitee 账户），
+/// Release 的主地址在 **Gitee**（发布仓库 = 设置里的 Gitee 账户），
 /// 与 `target`（PR / tag / 推送，跟仓库 remote 走）**刻意分开** ——
-/// 代码主线在 GitHub，发布面（Release + 附件 + 数据源镜像）在 Gitee。
-/// 客户端只读 `release.json → asset.url`，永远不知道发布平台细节。
+/// 代码主线在 GitHub，发布主面在 Gitee；GitHub 做同字节镜像（`sources.github`）。
+/// 客户端按用户当前源读 `release.json → assets[].sources`，不写死任何一家。
 pub struct ReleaseChannel<'a> {
     pub hosting: &'a dyn Hosting,
     /// Gitee 的发布目标（owner/repo/凭据）
@@ -986,8 +986,8 @@ fn run_inner(
 
     /* ---------- ⑩ 建 Release + 上传安装包（M6：走 Gitee 发布通道） ---------- */
 
-    // ★ **架构规则**（总纲 §5-M6）：软件版本的 Release 与附件**只发 Gitee**。
-    //   没有发布通道 = preflight 就该拦下（这里兜底，话说清楚）。
+    // ★ **架构规则**（总纲 §5-M6）：软件版本 Release 的主地址在 Gitee；
+    //   GitHub 由 `release.mjs` 事后镜像同字节资产，清单写 `sources.github`。
     let Some(ch) = release else {
         return Err(AppError::invalid_argument(
             "软件版本的 Release 与安装包发布到 Gitee（总纲 §5-M6）——              先在设置里配好 Gitee 发布账户（仓库地址 / 用户名 / Token）",
