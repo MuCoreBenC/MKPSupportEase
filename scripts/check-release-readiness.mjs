@@ -105,13 +105,25 @@ check('分支与工作区', () => {
 const tag = `v${version}`
 const head = tryRun('git', ['rev-parse', 'HEAD']) ?? ''
 const localTag = tryRun('git', ['rev-parse', '-q', '--verify', `refs/tags/${tag}^{commit}`])
-const remoteTagLine = tryRun('git', ['ls-remote', '--tags', 'origin', `refs/tags/${tag}`])
+/* 必须带 `*`：不带星时 git 只回 raw tag 对象那一行，没有 `^{}` 剥皮行。 */
+const remoteTagLines = tryRun('git', ['ls-remote', '--tags', 'origin', `refs/tags/${tag}*`])
+/* annotated tag 有两行：`refs/tags/vX` 是 **tag 对象** SHA，`refs/tags/vX^{}` 才是提交。
+   拿第一行跟 HEAD 比会把"同一笔提交"误报成 tag 分叉（2026-11-21 0.0.12 就这么误判过）。 */
+function remoteTagCommit(raw) {
+  if (!raw) return null
+  const rows = raw.trim().split('\n').filter(Boolean)
+  const peeled = rows.find((line) => line.includes(`${tag}^{}`))
+  const picked = peeled ?? rows[0]
+  return picked ? picked.split(/\s+/)[0] : null
+}
+const remoteTagCommitSha = remoteTagCommit(remoteTagLines)
 
 check('tag 未被占用，或与 HEAD 同一笔提交', () => {
   if (localTag && localTag !== head) fail(`本地 ${tag} 指向 ${localTag.slice(0, 8)}，HEAD 是 ${head.slice(0, 8)}`)
-  if (remoteTagLine) {
-    const remote = remoteTagLine.split(/\s+/)[0]
-    if (remote !== head) fail(`远端 ${tag} 指向 ${remote.slice(0, 8)}，与当前 HEAD 不同 —— 不许重打/移动`)
+  if (remoteTagCommitSha) {
+    if (remoteTagCommitSha !== head) {
+      fail(`远端 ${tag} 指向 ${remoteTagCommitSha.slice(0, 8)}，与当前 HEAD 不同 —— 不许重打/移动`)
+    }
     return '远端已有（补包趟）'
   }
   return '未发布'
@@ -165,7 +177,7 @@ check('GitHub 凭据可用（真发版前先问一次远端）', () => {
   return `${c.source} · ${c.username} · ls-remote ok`
 })
 
-info('Windows 这趟会构建并上传 NSIS 安装包（.exe），不是绿色版；绿色版不在发布事务里。')
+info('Windows 这趟会构建安装版（.exe）与绿色版（.zip），两档都进 Release。')
 info('macOS 的 .dmg 要在 Mac 上用补包趟单独打；CI 只跑检查，不打包。')
 
 if (failed > 0) {

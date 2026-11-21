@@ -10,7 +10,7 @@
 import {
   refusalFor,
   titleFor,
-  titleMismatch,
+  prTitleFrom,
   NO_PR_PATTERNS,
   ALLOWED_PREFIX,
 } from './pr.mjs'
@@ -42,19 +42,22 @@ check('chore/gitignore 放行', refusalFor('chore/gitignore') === null, refusalF
 check('没前缀的被拒', refusalFor('my-branch') !== null, refusalFor('my-branch'))
 check('空分支名被拒', refusalFor('') !== null)
 
-console.log('\n标题：取最新提交主题\n')
+console.log('\n标题：PR 自己的属性\n')
 check('多空格归一', titleFor('  a   b  ') === 'a b', titleFor('  a   b  '))
 check('原样保留中文与标点', titleFor('test: 解耦 + 0.0.11') === 'test: 解耦 + 0.0.11')
 check('空串不炸', titleFor('') === '')
-
-console.log('\n标题：对不上就拦\n')
 check(
-  '旧标题 vs 新提交 ⇒ 拦',
-  titleMismatch('备份与恢复一扇框两页；0.0.11', 'test: 测试判据与业务数据解耦') !== null,
+  '显式标题优先于提交',
+  prTitleFrom({ explicit: '显式标题', firstCommit: '最早提交', branch: 'feat/x' }) === '显式标题',
 )
-check('完全一致 ⇒ 放行', titleMismatch('test: 解耦', 'test: 解耦') === null)
-check('只差首尾空白 ⇒ 放行', titleMismatch(' test: 解耦 ', 'test: 解耦') === null)
-check('空提交主题 ⇒ 拦', titleMismatch('x', '') !== null)
+check(
+  '没显式标题时取最早提交（后续提交不参与）',
+  prTitleFrom({ explicit: null, firstCommit: '最早提交', branch: 'feat/x' }) === '最早提交',
+)
+check(
+  '连最早提交都没有才退回分支名',
+  prTitleFrom({ explicit: null, firstCommit: '', branch: 'feat/x' }) === 'feat/x',
+)
 
 console.log('\n反空转：判据表不许被清空\n')
 check('NO_PR_PATTERNS 至少 4 条', NO_PR_PATTERNS.length >= 4, String(NO_PR_PATTERNS.length))

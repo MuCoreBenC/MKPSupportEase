@@ -419,19 +419,13 @@ if (tryRun('git', ['rev-parse', '-q', '--verify', `refs/tags/v${version}`])) {
 
 /* ---------- 3. 校验链（**没有任何写操作**） ---------- */
 
-const tauriDir = `${ROOT}/src-tauri`
+step('校验：web（与 CI 同一入口）')
+runLive(process.execPath, ['scripts/check/run.mjs', 'web'])
+ok('web 检查过')
 
-step('校验：前端')
-runLive('npm', ['run', 'lint'])
-runLive('npx', ['tsc', '-b'])
-runLive('npm', ['run', 'build'])
-ok('lint / tsc / build 过')
-
-step('校验：Rust')
-runLive('cargo', ['fmt', '--all', '--', '--check'], { cwd: tauriDir })
-runLive('cargo', ['clippy', '--all-targets', '--', '-D', 'warnings'], { cwd: tauriDir })
-runLive('cargo', ['test'], { cwd: tauriDir })
-ok('fmt / clippy / test 过')
+step('校验：rust（与 CI 同一入口）')
+runLive(process.execPath, ['scripts/check/run.mjs', 'rust'])
+ok('rust 检查过')
 
 /* ---------- 4. 第一趟：版本号 → 提交 → 推送 → PR（**内核**） ---------- */
 
