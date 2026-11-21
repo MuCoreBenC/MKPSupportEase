@@ -648,6 +648,12 @@ fn run_inner(
     }
     let append = matches!(slot, ReleaseSlot::Append | ReleaseSlot::InfoOnly);
     let info_only = slot == ReleaseSlot::InfoOnly;
+    /* 旧版本产物必须在**构建开始前**拦住：只补清单不构建，跳过。 */
+    if opts.build && !info_only {
+        if let Err(e) = assert_no_stale_bundles(repo_root, &version) {
+            blocked.push(e.message);
+        }
+    }
     // 版本派生不一致 = 有人手改了别处。给了新版本号的话 `bump` 会把它推平，
     // 所以只在"沿用当前真值"时它才是问题。
     if opts.version.is_none() {
@@ -897,6 +903,10 @@ fn run_inner(
             size: p.size,
             path: p.path.display().to_string(),
         });
+    }
+
+    if let Some(b) = built.as_ref() {
+        validate_built_artifacts(b, portable.as_ref(), &version)?;
     }
 
     /* ---------- ⑧ 构建与产物校验都过了，才创建并推送 tag ---------- */
@@ -1337,6 +1347,119 @@ fn artifact_name(path: &Path, fallback: impl FnOnce() -> String) -> String {
         .unwrap_or_else(fallback)
 }
 
+/// 某个目录里带目标扩展名、但文件名不含当前版本号的残留产物。
+/// **纯函数**：判据直接喂它造文件，不依赖真仓库。
+fn stale_bundle_files(dir: &Path, version: &str, ext: &str) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.is_file()
+                        && p.extension().and_then(|s| s.to_str()) == Some(ext)
+                        && p.file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| !n.contains(version))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// **构建前**拦住旧版本产物：`bundle/nsis` / `bundle/macos` 与 `dist-portable`
+/// 里只要还有别的版本，就不让构建开始。否则会在编译十几分钟后才报“找到多份”，
+/// 或者在清单里挑错一份。
+fn assert_no_stale_bundles(repo_root: &Path, version: &str) -> Result<(), AppError> {
+    let Some(plan) = installer_plan() else {
+        return Ok(());
+    };
+    let mut stale = Vec::new();
+    if let Some(dir) = bundle_dir(repo_root, plan.dir) {
+        stale.extend(stale_bundle_files(&dir, version, plan.ext));
+    }
+    stale.extend(stale_bundle_files(
+        &repo_root.join("dist-portable"),
+        version,
+        "zip",
+    ));
+    if stale.is_empty() {
+        return Ok(());
+    }
+    stale.sort();
+    Err(AppError::invalid_argument(format!(
+        "构建目录里有旧版本产物 —— 先移出 {}，再开始构建；\
+         否则会在构建完才发现多份包，或者挑错要发的那一份",
+        stale
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("、")
+    )))
+}
+
+/// 构建后、打 tag 前核对：文件名必须是磁盘真名、大小必须与磁盘一致；
+/// 绿色版 zip 里必须真的有主程序与卸载器。**不含远端 SHA 回读**（那是 P1 的事）。
+fn validate_built_artifacts(
+    built: &BuiltArtifact,
+    portable: Option<&BuiltArtifact>,
+    version: &str,
+) -> Result<(), AppError> {
+    fn one(a: &BuiltArtifact, version: &str, label: &str) -> Result<(), AppError> {
+        let meta = std::fs::metadata(&a.path)
+            .map_err(|e| AppError::io(format!("{label}路径读不到")).with_detail(e.to_string()))?;
+        if !meta.is_file() {
+            return Err(AppError::io(format!(
+                "{label}不是文件：{}",
+                a.path.display()
+            )));
+        }
+        if meta.len() != a.size {
+            return Err(AppError::invalid_argument(format!(
+                "{label}大小对不上：记录 {}，磁盘 {} —— 产物在记录之后被改过",
+                a.size,
+                meta.len()
+            )));
+        }
+        let real = artifact_name(&a.path, || a.name.clone());
+        if real != a.name {
+            return Err(AppError::invalid_argument(format!(
+                "{label}文件名对不上：清单/上传记的是 {}，磁盘是 {}",
+                a.name, real
+            )));
+        }
+        if !a.name.contains(version) {
+            return Err(AppError::invalid_argument(format!(
+                "{label}文件名不含目标版本 {version}：{}",
+                a.name
+            )));
+        }
+        Ok(())
+    }
+
+    one(built, version, "安装包")?;
+    if let Some(p) = portable {
+        one(p, version, "绿色版")?;
+        let f = std::fs::File::open(&p.path)
+            .map_err(|e| AppError::io("绿色版 zip 打不开").with_detail(e.to_string()))?;
+        let mut archive = zip::ZipArchive::new(f)
+            .map_err(|e| AppError::io("绿色版不是合法 zip").with_detail(e.to_string()))?;
+        let names: Vec<String> = (0..archive.len())
+            .filter_map(|i| archive.by_index(i).ok().map(|e| e.name().to_owned()))
+            .collect();
+        if !names.iter().any(|n| n.ends_with("SupportEase.exe")) {
+            return Err(AppError::invalid_argument(
+                "绿色版 zip 里没有 SupportEase.exe —— 解压出来不是能用的绿色版",
+            ));
+        }
+        if !names.iter().any(|n| n.contains("卸载")) {
+            return Err(AppError::invalid_argument(
+                "绿色版 zip 里没有卸载器 —— 缺了它用户没法干净卸载",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// **构建本平台的安装包**。
 ///
 /// macOS 走 `npm run tauri -- build`；Windows 走 `npm run build:installer` —— 自研安装器
@@ -1462,6 +1585,7 @@ fn assert_artifact_speaks_version(repo_root: &Path, want: &str) -> Result<(), Ap
 }
 
 fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
+    assert_no_stale_bundles(repo_root, &version_of(repo_root))?;
     let plan = installer_plan().ok_or_else(|| {
         AppError::invalid_argument(format!(
             "本机是 {} —— 安装包只在 macOS（dmg）与 Windows（NSIS）上构建",
@@ -3329,6 +3453,89 @@ mod tests {
         assert_eq!(
             artifact_name(p, || "SupportEase_0.0.13_x64.exe".to_owned()),
             "SupportEase_0.0.13_x64-setup.exe"
+        );
+    }
+
+    /// 旧版本残留必须在构建前就能被识别；当前版本自己的包不算残留。
+    #[test]
+    fn stale_bundle_files_are_only_old_versions() {
+        let d = tempfile::tempdir().unwrap();
+        let current = d.path().join("SupportEase_0.0.13_x64-setup.exe");
+        let old = d.path().join("SupportEase_0.0.12_x64-setup.exe");
+        crate::fsx::atomic::atomic_write(&current, b"new").unwrap();
+        crate::fsx::atomic::atomic_write(&old, b"old").unwrap();
+        let got = stale_bundle_files(d.path(), "0.0.13", "exe");
+        assert_eq!(got, vec![old]);
+    }
+
+    /// 预检入口确实会在构建前拒绝旧 bundle（不是只在纯函数里成立）。
+    #[test]
+    fn stale_bundle_blocks_before_build() {
+        let Some(plan) = installer_plan() else {
+            return;
+        };
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("target/release/bundle").join(plan.dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = dir.join(format!("SupportEase_0.0.12_x64.{}", plan.ext));
+        crate::fsx::atomic::atomic_write(&old, b"old").unwrap();
+        let err = assert_no_stale_bundles(d.path(), "0.0.13").unwrap_err();
+        assert!(err.message.contains("旧版本"), "{}", err.message);
+    }
+
+    /// 构建后、tag 前：文件名/大小/绿色版 zip 内容任何一项不对，都不许再往下打 tag。
+    #[test]
+    fn built_artifact_validation_refuses_wrong_name_and_broken_zip() {
+        use std::io::Write as _;
+
+        let d = tempfile::tempdir().unwrap();
+        let setup = d.path().join("SupportEase_0.0.13_x64-setup.exe");
+        crate::fsx::atomic::atomic_write(&setup, b"setup").unwrap();
+        let built = BuiltArtifact {
+            name: "SupportEase_0.0.13_x64-setup.exe".to_owned(),
+            size: 5,
+            path: setup,
+        };
+        let good_zip = d.path().join("SupportEase_0.0.13_x64-portable.zip");
+        {
+            /* 测试造 zip：zip writer 要 File，不走产品数据落盘。 */
+            #[allow(clippy::disallowed_methods)]
+            let f = std::fs::File::create(&good_zip).unwrap();
+            let mut zw = zip::ZipWriter::new(f);
+            for name in ["SupportEase.exe", "卸载 SupportEase.exe"] {
+                zw.start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                zw.write_all(b"x").unwrap();
+            }
+            zw.finish().unwrap();
+        }
+        let portable = BuiltArtifact {
+            name: "SupportEase_0.0.13_x64-portable.zip".to_owned(),
+            size: std::fs::metadata(&good_zip).unwrap().len(),
+            path: good_zip,
+        };
+        assert!(validate_built_artifacts(&built, Some(&portable), "0.0.13").is_ok());
+
+        let wrong = BuiltArtifact {
+            name: "SupportEase_0.0.13_x64.exe".to_owned(),
+            size: built.size,
+            path: built.path.clone(),
+        };
+        assert!(
+            validate_built_artifacts(&wrong, Some(&portable), "0.0.13").is_err(),
+            "模板拼的名字必须被拒"
+        );
+
+        let empty_zip = d.path().join("SupportEase_0.0.13_x64-portable.zip");
+        crate::fsx::atomic::atomic_write(&empty_zip, b"not a zip").unwrap();
+        let broken = BuiltArtifact {
+            name: "SupportEase_0.0.13_x64-portable.zip".to_owned(),
+            size: 9,
+            path: empty_zip,
+        };
+        assert!(
+            validate_built_artifacts(&built, Some(&broken), "0.0.13").is_err(),
+            "坏 zip 必须被拒"
         );
     }
 

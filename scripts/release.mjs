@@ -350,7 +350,13 @@ if (existsSync(bypassLog)) {
 if (flagArgsOnly) {
   if (!version) die('--args-only 需要显式给版本号')
   console.log(
-    JSON.stringify({ channel, current, suggested, version: resolveVersion(version, channel) }),
+    JSON.stringify({
+      channel,
+      current,
+      suggested,
+      version: resolveVersion(version, channel),
+      summary,
+    }),
   )
   process.exit(0)
 }

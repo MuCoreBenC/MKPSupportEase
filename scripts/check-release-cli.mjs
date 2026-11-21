@@ -82,6 +82,14 @@ check('三种通道写法等价', () => {
   }
 })
 
+/* ②b Windows shell 拆词回归：说明里的空格与中文必须原样穿过参数层 */
+check('说明文字完整穿过参数层（不按空格截断）', () => {
+  const notes = 'Windows 更新 双平台 资产；回执 补全'
+  const r = run(['9.9.9', notes, '--channel=stable'])
+  eq(r.code, 0, '退出码')
+  eq(JSON.parse(r.out).summary, notes, '说明')
+})
+
 /* ③ 串台两种：都必须在**写盘之前**停（这是不可撤销的那一类） */
 check('正式通道拒绝预览号', () => {
   const r = run(['0.0.10-preview.2', 'x'])
