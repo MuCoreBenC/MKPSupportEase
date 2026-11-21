@@ -396,6 +396,83 @@ fn append_ledger(repo: &Path, report: &PreviewReport) -> Result<(), AppError> {
         .map_err(|e| AppError::io("写不进账本").with_detail(e.message))
 }
 
+/// Windows 的本地覆盖层清单：`local-release.mjs` 只认 macOS 的 .app/.dmg，
+/// 这里按自研安装包（nsis）写同一份 `release-preview.json`，字段与真实清单一致。
+#[cfg(target_os = "windows")]
+fn write_windows_preview_manifest(repo: &Path, version: &str) -> Result<(), AppError> {
+    use sha2::{Digest, Sha256};
+
+    let bundle = repo.join("target/release/bundle/nsis");
+    let setup = std::fs::read_dir(&bundle)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && p.extension().and_then(|s| s.to_str()) == Some("exe")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("SupportEase"))
+        })
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.contains(version))
+        })
+        .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+        .ok_or_else(|| AppError::io(format!("bundle/nsis 下没有 {version} 的安装包")))?;
+    let name = setup
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| AppError::io("安装包名字读不出来"))?
+        .to_owned();
+    let live = repo.join("target/local-release");
+    std::fs::create_dir_all(&live)
+        .map_err(|e| AppError::io("建不了本地发布目录").with_detail(e.to_string()))?;
+    let dest = live.join(&name);
+    std::fs::copy(&setup, &dest)
+        .map_err(|e| AppError::io("拷不了安装包").with_detail(e.to_string()))?;
+    let bytes = std::fs::read(&dest)
+        .map_err(|e| AppError::io("读不了安装包").with_detail(e.to_string()))?;
+    let port = std::env::var("PRESET_TEST_PORT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .filter(|p| *p > 0)
+        .unwrap_or(8787);
+    let origin = format!("http://127.0.0.1:{port}");
+    let manifest = serde_json::json!({
+        "releaseSchema": 1,
+        "version": version,
+        "notes": format!("本地预览交付 {version}"),
+        "url": format!("{origin}/delivery/release-preview.json"),
+        "asset": {
+            "name": name,
+            "url": format!("{origin}/delivery/{name}"),
+            "size": bytes.len(),
+            "sha256": format!("{:x}", Sha256::digest(&bytes)),
+            "platform": "windows",
+            "kind": "nsis",
+        },
+    });
+    let text = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| AppError::io("清单写不出来").with_detail(e.to_string()))?;
+    crate::fsx::atomic::atomic_write(
+        &live.join("release-preview.json"),
+        format!("{text}\n").as_bytes(),
+    )
+    .map_err(|e| AppError::io("写不进本地清单").with_detail(e.message))?;
+    let history = live.join("history");
+    std::fs::create_dir_all(&history)
+        .map_err(|e| AppError::io("建不了清单历史目录").with_detail(e.to_string()))?;
+    crate::fsx::atomic::atomic_write(
+        &history.join(format!("{version}.json")),
+        format!("{text}\n").as_bytes(),
+    )
+    .map_err(|e| AppError::io("写不进历史清单").with_detail(e.message))
+}
+
 /// 把 worktree 里的 bundle 整棵搬到主仓 target（Windows 没有 rsync）。
 fn copy_bundle(from: &Path, to: &Path) -> Result<(), AppError> {
     if !from.is_dir() {
@@ -567,7 +644,12 @@ pub fn deliver(confirm: bool) -> Result<PreviewReport, AppError> {
     write_journal(&repo, &report);
 
     /* ③ 摆好清单（它自己校验"清单号 = 包内号"） */
-    if let Err(e) = run_logged(&repo, &mut log, &["node", "scripts/local-release.mjs"]) {
+    let manifest_result = if cfg!(target_os = "windows") {
+        write_windows_preview_manifest(&repo, &plan.version)
+    } else {
+        run_logged(&repo, &mut log, &["node", "scripts/local-release.mjs"])
+    };
+    if let Err(e) = manifest_result {
         report.stage = "failed".to_owned();
         report.message = format!("写清单失败，这一版没有冻结：{}", e.message);
         write_journal(&repo, &report);
