@@ -33,6 +33,23 @@
         "platform": "macos",
         "kind": "appZip"
       }
+    },
+    {
+      "version": "0.0.11-preview.15",
+      "commit": "e65b794b7de1d8e849a44694b5821035adf6d258",
+      "tag": "v0.0.11-preview.15",
+      "at": "2026-11-21T07:04:32Z",
+      "channel": "preview",
+      "target": "local",
+      "result": "ok",
+      "asset": {
+        "name": "SupportEase_0.0.11-preview.15_x64-setup.exe",
+        "url": "http://127.0.0.1:8787/delivery/SupportEase_0.0.11-preview.15_x64-setup.exe",
+        "size": 9479168,
+        "sha256": "ba376b01bbe26fb5a0804b2379d75e7d4ff8fdccc3a39a05cba92e99b4b60feb",
+        "platform": "windows",
+        "kind": "nsis"
+      }
     }
   ]
 }
