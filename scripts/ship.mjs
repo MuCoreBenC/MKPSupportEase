@@ -165,12 +165,34 @@ export function verdict({ tag, release, manifestVersion, wantVersion, channel })
   return { effective, lines, channel }
 }
 
-function checkEffective(choice, version) {
+/**
+ * Release 到底在不在：**按清单里的发布仓库问**。
+ *
+ * 软件版本的 Release 按 M6 只发 Gitee；以前这里写死查 GitHub，于是每次真发完
+ * 都会误报“Release 没有”，逼人去补一个没人用的 GitHub 镜像。清单的 `url`
+ * 就是权威落点，从它取 owner/repo 再问 Gitee API。问不到才退回 GitHub（老账）。
+ */
+async function releaseExists(version, manifestText) {
+  try {
+    const url = new URL(JSON.parse(manifestText).url)
+    if (url.hostname !== 'gitee.com') throw new Error('not gitee')
+    const [owner, repo] = url.pathname.split('/').filter(Boolean)
+    const res = await fetch(
+      `https://gitee.com/api/v5/repos/${owner}/${repo}/releases/tags/v${version}`,
+    )
+    return res.ok
+  } catch {
+    return Boolean(
+      tryRun('gh', ['release', 'view', `v${version}`, '--json', 'tagName', '--jq', '.tagName']),
+    )
+  }
+}
+
+async function checkEffective(choice, version) {
   if (!choice.tag) return null
   info('核对：远端 tag / Release / main 上的清单')
 
   const tag = tryRun('git', ['ls-remote', '--tags', 'origin', `refs/tags/v${version}`])
-  const release = tryRun('gh', ['release', 'view', `v${version}`, '--json', 'tagName', '--jq', '.tagName'])
 
   const rel = choice.key === 'stable' ? 'presets/delivery/release.json' : 'presets/delivery/release-preview.json'
   tryRun('git', ['fetch', 'origin', 'main', '--quiet'])
@@ -183,6 +205,7 @@ function checkEffective(choice, version) {
       manifestVersion = null
     }
   }
+  const release = manifestText ? await releaseExists(version, manifestText) : false
 
   return verdict({
     tag: Boolean(tag),
@@ -227,7 +250,7 @@ async function main() {
 
   if (args.includes('--check')) {
     const ch = choiceFromKey(natural) ?? SHIPS[1]
-    const r = checkEffective(ch, version)
+    const r = await checkEffective(ch, version)
     if (!r) return ok(`${version} 是本机开发号，不是发过的版本 —— 没有可核对的 tag / 清单`)
     printVerdict(r, ch)
     return
@@ -350,7 +373,7 @@ async function main() {
   }
 
   console.log('')
-  const r = checkEffective(choice, version)
+  const r = await checkEffective(choice, version)
   printVerdict(r, choice)
 }
 
