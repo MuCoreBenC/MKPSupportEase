@@ -290,7 +290,15 @@ fn run_logged_env(
             .join(" "),
         argv.join(" ")
     ));
-    let mut cmd = Command::new(argv[0]);
+    /* Windows 上 npm 是 npm.cmd，CreateProcess 不会替你补后缀（会报"起不来 npm"）；
+    和 release_tx 的 npm_build 走同一条 cmd /C。 */
+    let mut cmd = if cfg!(windows) && argv[0] == "npm" {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg("npm");
+        c
+    } else {
+        Command::new(argv[0])
+    };
     cmd.args(&argv[1..])
         .current_dir(repo)
         /* 工作台由 `tauri dev --config tauri.workbench.conf.json` 起，CLI 会把合并后的
@@ -388,6 +396,38 @@ fn append_ledger(repo: &Path, report: &PreviewReport) -> Result<(), AppError> {
         .map_err(|e| AppError::io("写不进账本").with_detail(e.message))
 }
 
+/// 把 worktree 里的 bundle 整棵搬到主仓 target（Windows 没有 rsync）。
+fn copy_bundle(from: &Path, to: &Path) -> Result<(), AppError> {
+    if !from.is_dir() {
+        return Ok(());
+    }
+    if to.exists() {
+        std::fs::remove_dir_all(to)
+            .map_err(|e| AppError::io("清不了旧 bundle").with_detail(e.to_string()))?;
+    }
+    fn walk(src: &Path, dst: &Path) -> Result<(), AppError> {
+        std::fs::create_dir_all(dst)
+            .map_err(|e| AppError::io("建不了 bundle 目录").with_detail(e.to_string()))?;
+        for entry in std::fs::read_dir(src)
+            .map_err(|e| AppError::io("读不了 bundle 目录").with_detail(e.to_string()))?
+        {
+            let entry =
+                entry.map_err(|e| AppError::io("读不了 bundle 条目").with_detail(e.to_string()))?;
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+            if src_path.is_dir() {
+                walk(&src_path, &dst_path)?;
+            } else {
+                std::fs::copy(&src_path, &dst_path)
+                    .map(|_| ())
+                    .map_err(|e| AppError::io("拷不了 bundle 文件").with_detail(e.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+    walk(from, to)
+}
+
 /// 从**确定的 commit** 构建：在 `target/` 下开一个 detach 的 worktree，用完删掉。
 ///
 /// `CARGO_TARGET_DIR` 仍指向主仓库 `target/`（复用编译缓存，避免整套重编）；
@@ -404,30 +444,21 @@ fn build_from_snapshot(repo: &Path, commit: &str, log: &mut LogBuf) -> Result<()
 
     let target = repo.join("target");
     let target_arg = target.to_string_lossy().into_owned();
-    let built = run_logged_env(
-        &wt,
-        log,
-        &["npm", "run", "tauri", "--", "build"],
-        &[("CARGO_TARGET_DIR", &target_arg)],
-    );
+    /* Windows 必须用自研安装器的双内核包；tauri build 的单内核 NSIS 会让绿色版自更新
+    再次变成安装版。macOS 仍是 tauri build（dmg）。 */
+    let build_args: &[&str] = if cfg!(windows) {
+        &["npm", "run", "build:installer"]
+    } else {
+        &["npm", "run", "tauri", "--", "build"]
+    };
+    let built = run_logged_env(&wt, log, build_args, &[("CARGO_TARGET_DIR", &target_arg)]);
 
-    /* 产物从 worktree 的 bundle 搬回主仓 target —— 后两步（清单/校验）都在主仓看它 */
+    /* 产物从 worktree 的 bundle 搬回主仓 target —— 后两步（清单/校验）都在主仓看它。
+    rsync 不是 Windows 标配，这里用同一份 Rust 递归拷贝，两平台一致。 */
     if built.is_ok() {
         let from = wt.join("target/release/bundle");
         let to = repo.join("target/release/bundle");
-        if from.is_dir() {
-            let _ = run_logged(
-                repo,
-                log,
-                &[
-                    "rsync",
-                    "-a",
-                    "--delete",
-                    &format!("{}/", from.display()),
-                    &format!("{}/", to.display()),
-                ],
-            );
-        }
+        copy_bundle(&from, &to)?;
     }
     let _ = Command::new("git")
         .args(["worktree", "remove", "--force", &wt_arg])
