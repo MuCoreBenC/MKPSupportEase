@@ -167,6 +167,7 @@ export default tseslint.config(
       'target-workbench',
       'src-tauri/target',
       'src-tauri/gen',
+      '.scratch',
     ],
   },
   {
