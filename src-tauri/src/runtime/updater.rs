@@ -528,6 +528,8 @@ pub fn windows_install_script(
              $p = Start-Process -FilePath {setup} -ArgumentList {portableArgs} -Wait -PassThru; \
              if ($p.ExitCode -ne 0) {{ Say ('替换失败，退出码 ' + $p.ExitCode); {fail} | Set-Content -LiteralPath {r} -Encoding utf8; exit 1 }}; \
              Say '替换完成'; \
+             Say '清理暂存安装包'; \
+             Remove-Item -LiteralPath {setup} -Force -ErrorAction SilentlyContinue; \
              $exe = Join-Path {dir} 'SupportEase.exe'; \
              Say ('拉起 ' + $exe); \
              try {{ Start-Process -FilePath $exe; {ok} | Set-Content -LiteralPath {r} -Encoding utf8 }} \
@@ -549,6 +551,8 @@ pub fn windows_install_script(
              $p = Start-Process -FilePath {setup} -ArgumentList '/S' -Wait -PassThru; \
              if ($p.ExitCode -ne 0) {{ Say ('安装失败，退出码 ' + $p.ExitCode); {fail} | Set-Content -LiteralPath {r} -Encoding utf8; exit 1 }}; \
              Say '安装完成'; \
+             Say '清理暂存安装包'; \
+             Remove-Item -LiteralPath {setup} -Force -ErrorAction SilentlyContinue; \
              $dir = $null; \
              try {{ $k = Get-ItemProperty -Path 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\SupportEase' -ErrorAction Stop; $dir = $k.InstallLocation }} catch {{ }}; \
              if ([string]::IsNullOrWhiteSpace($dir)) {{ $dir = Join-Path $env:LOCALAPPDATA 'SupportEase' }}; \
@@ -1167,6 +1171,10 @@ mod tests {
             "静默装到哪儿就从哪儿拉起，不能总用当前 exe"
         );
         assert!(
+            script.contains("Remove-Item -LiteralPath") && script.contains("清理暂存安装包"),
+            "装完要清掉暂存安装包，别一直躺在 run/update"
+        );
+        assert!(
             script.find("\"ok\":false").unwrap_or(usize::MAX)
                 < script.find("\"ok\":true").unwrap_or(usize::MAX),
             "失败账要先备好，成功账只在拉起之后写"
@@ -1200,6 +1208,10 @@ mod tests {
         assert!(
             !script.contains("mkp-support-ease.exe"),
             "绿色版这一路不该去碰安装版的 exe 名"
+        );
+        assert!(
+            script.contains("Remove-Item -LiteralPath") && script.contains("清理暂存安装包"),
+            "绿色版装完也要清暂存，包留在 app-data/run/update 会越攒越多"
         );
     }
 

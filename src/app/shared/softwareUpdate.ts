@@ -25,6 +25,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 
 import { api, listen } from '../../api'
+import { STORAGE } from '../../api/storageKeys'
 import type { UpdateInfo, UpdateState } from '../../api/contract'
 
 interface Snapshot {
@@ -92,4 +93,40 @@ export function useSoftwareUpdate(): SoftwareUpdateView {
   }, [])
   const snap = useSyncExternalStore(subscribe, () => snapshot)
   return { state: snap.state, info: snap.info, refresh: refreshSoftwareUpdate }
+}
+
+/* ---------------------------------------------------------------------------
+ * 标题栏胶囊的唯一判据（用户故事见 docs/SOFTWARE-UPDATE-SPEC.md）
+ *
+ * `hasUpdate` **不在这里**：它只按正式版清单回答"设置页那张卡摆不摆"，关掉自动检查 /
+ * 换渠道之后它仍可能是 true，拿它判胶囊就会出现"关了还一直在"。
+ * ------------------------------------------------------------------------- */
+export type UpdateChipIntent = 'progress' | 'pending' | 'none'
+
+export function updateChipIntent(
+  state: UpdateState,
+  pending: string | null | undefined,
+  ignored: string | null | undefined,
+): UpdateChipIntent {
+  if (
+    state.state === 'downloading' ||
+    state.state === 'paused' ||
+    state.state === 'ready' ||
+    state.state === 'failed'
+  ) {
+    return 'progress'
+  }
+  if (pending === null || pending === undefined || pending.trim() === '') return 'none'
+  if (ignored === pending) return 'none'
+  return 'pending'
+}
+
+/** 用户忽略掉的那一版（纯前端偏好；读不到 = 没忽略过） */
+export function readIgnoredUpdateVersion(): string | null {
+  try {
+    const raw = localStorage.getItem(STORAGE.clientIgnoredUpdateVersion)
+    return raw === null ? null : (JSON.parse(raw) as string | null)
+  } catch {
+    return null
+  }
 }

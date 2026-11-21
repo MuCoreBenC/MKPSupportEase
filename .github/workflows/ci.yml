@@ -299,3 +299,12 @@ jobs:
       - name: 测试（workbench）
         if: steps.scope.outputs.code == '1'
         run: cargo test -p mkp-support-ease --features workbench
+
+      # The installer is a standalone Windows crate: the clippy/test jobs above never compile it.
+      # Dual-kernel payload and the --version self-report live here; skipping this let local simulation pass while real release broke.
+      - name: Installer check (Windows standalone crate)
+        if: steps.scope.outputs.code == '1'
+        env:
+          MKP_APP_VERSION: 0.0.0
+          CARGO_TARGET_DIR: target-installer
+        run: cargo check --manifest-path installer/Cargo.toml --bin mkp-installer --bin mkp-uninstaller

@@ -517,28 +517,11 @@ fn run_install(
             .read_to_end(&mut raw)
             .map_err(|e| format!("安装包损坏：{e}"))?;
     }
-    // 容器：[license_len][app_len][uninstaller_len][license][app][uninstaller]
-    if raw.len() < 12 {
-        return Err("安装包损坏：头部缺失".to_string());
-    }
-    let license_len = u32::from_le_bytes(raw[0..4].try_into().unwrap()) as usize;
-    let app_len = u32::from_le_bytes(raw[4..8].try_into().unwrap()) as usize;
-    let un_len = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as usize;
-    let expected = 12usize
-        .saturating_add(license_len)
-        .saturating_add(app_len)
-        .saturating_add(un_len);
-    if raw.len() < expected {
-        return Err("安装包损坏：长度对不上".to_string());
-    }
-    let app_start = 12 + license_len;
-    let un_start = app_start + app_len;
+    let (license, exe, uninstaller, _portable) = payload_parts(&raw)?;
 
     report(12, "正在写入许可证…");
-    std::fs::write(dir.join("LICENSE"), &raw[12..app_start])
-        .map_err(|e| format!("写 LICENSE 失败：{e}"))?;
+    std::fs::write(dir.join("LICENSE"), license).map_err(|e| format!("写 LICENSE 失败：{e}"))?;
 
-    let exe = &raw[app_start..un_start];
     let mut file =
         std::fs::File::create(dir.join(APP_EXE)).map_err(|e| format!("写应用失败：{e}"))?;
     const CHUNK: usize = 1 << 20;
@@ -553,7 +536,7 @@ fn run_install(
     report(82, "正在写入卸载器…");
     // 放进去的是单独编的、不带 payload 的小 exe（约 0.4 MB），
     // 而不是把带 payload 的安装器整个复制过去（那会多占 7 MB 磁盘）
-    std::fs::write(dir.join("uninstall.exe"), &raw[un_start..expected])
+    std::fs::write(dir.join("uninstall.exe"), uninstaller)
         .map_err(|e| format!("写卸载器失败：{e}"))?;
 
     if desktop {
@@ -588,7 +571,7 @@ fn run_install_portable(dir: &Path) -> Result<(), String> {
             .read_to_end(&mut raw)
             .map_err(|e| format!("安装包损坏：{e}"))?;
     }
-    let app = app_bytes(&raw)?;
+    let (_license, _installed, _uninstaller, app) = payload_parts(&raw)?;
     stop_app_in_dir(dir, "SupportEase.exe");
     /* 被结束的进程要一点时间才放开 exe 文件句柄：直接写会撞"拒绝访问"。
        最多等 3 秒，仍写不进去就如实报错（不假装成功）。 */
@@ -606,24 +589,36 @@ fn run_install_portable(dir: &Path) -> Result<(), String> {
     Err(format!("写应用失败：{last}"))
 }
 
-/// 容器 `[license_len][app_len][un_len][license][app][un]` 里的应用字节。
+/// 容器 `[license_len][app_len][un_len][portable_len][license][app][un][portable]` 拆四段。
+///
+/// 第四段是**绿色版内核**：它与安装版内核的唯一差别是 Tauri 的
+/// `appDirectoriesOverride = "./app-data"`。绿色版自更新必须写这一支，否则 exe 被换成
+/// 安装版内核后数据根会漂到 `%APPDATA%\SupportEase`，原来的 `app-data/` 就成了空壳。
 #[cfg(not(feature = "uninstall-only"))]
-fn app_bytes(raw: &[u8]) -> Result<&[u8], String> {
-    if raw.len() < 12 {
+fn payload_parts(raw: &[u8]) -> Result<(&[u8], &[u8], &[u8], &[u8]), String> {
+    if raw.len() < 16 {
         return Err("安装包损坏：头部缺失".to_string());
     }
-    let license_len = u32::from_le_bytes(raw[0..4].try_into().unwrap()) as usize;
-    let app_len = u32::from_le_bytes(raw[4..8].try_into().unwrap()) as usize;
-    let un_len = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as usize;
-    let expected = 12usize
-        .saturating_add(license_len)
-        .saturating_add(app_len)
-        .saturating_add(un_len);
+    let lens: [usize; 4] = [0, 4, 8, 12].map(|i| {
+        u32::from_le_bytes(raw[i..i + 4].try_into().unwrap()) as usize
+    });
+    let expected = 16usize
+        .saturating_add(lens[0])
+        .saturating_add(lens[1])
+        .saturating_add(lens[2])
+        .saturating_add(lens[3]);
     if raw.len() < expected {
         return Err("安装包损坏：长度对不上".to_string());
     }
-    let app_start = 12 + license_len;
-    Ok(&raw[app_start..app_start + app_len])
+    let license_end = 16 + lens[0];
+    let app_end = license_end + lens[1];
+    let un_end = app_end + lens[2];
+    Ok((
+        &raw[16..license_end],
+        &raw[license_end..app_end],
+        &raw[app_end..un_end],
+        &raw[un_end..expected],
+    ))
 }
 
 #[cfg(feature = "uninstall-only")]
@@ -972,6 +967,13 @@ fn arg_value(args: &[String], name: &str) -> Option<String> {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    /* 自报版本：发布事务构建完要核对"包里说的号 = 要发的号"。
+       这一支在窗口 / 单实例检查之前就退，不装任何东西。 */
+    if args.iter().any(|a| a == "--version") {
+        println!("{}", app_version());
+        return;
+    }
 
     // 临时副本：删完安装目录就退，不进消息循环
     if let Some(dir) = arg_value(&args, "--cleanup") {

@@ -597,6 +597,11 @@ export const ja: Record<StringKey, string> = {
   // ---- 关于与更新 ----
   'update.ready': 'インストール可能',
   'update.chip.available': '更新あり',
+  'update.chip.tip': '開いて確認か無視',
+  'update.chip.panel': 'ソフトウェア更新',
+  'update.chip.found': '{version} が見つかりました',
+  'update.chip.view': '確認',
+  'update.chip.ignore': '無視',
   'update.failed': '失敗',
   'update.pause': '一時停止',
   'update.cancel': 'キャンセル',

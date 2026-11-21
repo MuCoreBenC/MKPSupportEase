@@ -254,6 +254,11 @@ export default function SettingsPage({ boot }: Props) {
   const [snapBusy, setSnapBusy] = useState(false)
   const [snapNote, setSnapNote] = useState<{ text: string; bad: boolean } | null>(null)
   const [snapProgress, setSnapProgress] = useState<SnapshotApplyProgress | null>(null)
+  /*
+   * 模拟发布用哪一版：留空 = 快照基准 +1；填 `14` 这类简写或完整号就跳号。
+   * 解析与"必须比基准新"的判据全在后端，这里只负责把人打的原文送过去。
+   */
+  const [snapVersion, setSnapVersion] = useState('')
   /**
    * 现读一次状态。
    *
@@ -336,7 +341,7 @@ export default function SettingsPage({ boot }: Props) {
         kind === 'take'
           ? await wb.publishSnapshotTake()
           : kind === 'apply'
-            ? await wb.publishSnapshotApply()
+            ? await wb.publishSnapshotApply(snapVersion.trim())
             : kind === 'discard'
               ? await wb.publishSnapshotDiscard()
               : await wb.publishSnapshotRestore()
@@ -1140,11 +1145,22 @@ export default function SettingsPage({ boot }: Props) {
                 >
                   拍快照
                 </button>
+                <input
+                  type="text"
+                  className={s.inp}
+                  style={{ flex: '0 0 152px', width: 152 }}
+                  value={snapVersion}
+                  disabled={snapBusy || snapProgress?.running === true || pubSnap === null || !pubSnap.active}
+                  placeholder="指定号，如 14"
+                  aria-label="模拟发布版本号"
+                  title="留空 = 快照基准 +1；可填 14，或 0.0.11-preview.14 这样的完整号。必须比基准新。"
+                  onChange={(e) => setSnapVersion(e.target.value)}
+                />
                 <button
                   type="button"
                   className={`${s.btn} ${s.btnPrimary}`}
                   disabled={snapBusy || snapProgress?.running === true || pubSnap === null || !pubSnap.active}
-                  title="抬一个预览号，真编安装包，只对本地测试源生效"
+                  title="按指定号真编安装包，只对本地测试源生效，不打 tag"
                   onClick={() => void runSnap('apply')}
                 >
                   {snapBusy && snapProgress?.running === true

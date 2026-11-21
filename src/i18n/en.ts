@@ -596,6 +596,11 @@ export const en: Record<StringKey, string> = {
   // ---- 关于与更新 ----
   'update.ready': 'Ready to install',
   'update.chip.available': 'Update',
+  'update.chip.tip': 'Open to view or ignore',
+  'update.chip.panel': 'Software update',
+  'update.chip.found': 'Found {version}',
+  'update.chip.view': 'View',
+  'update.chip.ignore': 'Ignore',
   'update.failed': 'Failed',
   'update.pause': 'Pause',
   'update.cancel': 'Cancel',

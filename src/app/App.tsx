@@ -14,6 +14,8 @@ import { FieldLayer } from '../components/field'
 import { msg, useT } from '../i18n'
 import NotifyHost from './notify/NotifyHost'
 import { dismiss, notify } from './notify/notify'
+/* 「忽略某一版」只压这条自动通知；设置页的检查结果照旧 */
+import { readIgnoredUpdateVersion } from './shared/softwareUpdate'
 import { SETTINGS_TARGET_UPDATE } from './settings/targets'
 import { useDensity } from '../hooks/useDensity'
 import { detectPlatform } from '../hooks/usePlatform'
@@ -369,6 +371,8 @@ export default function App() {
     void listen<{ version: string }>('software-update-available', (payload) => {
       const version = payload?.version
       if (!alive || !version || lastNotifiedVersion.current === version) return
+      /* 这一版用户按过「忽略」：后端仍照常发现它，但不再弹这条通知 */
+      if (readIgnoredUpdateVersion() === version) return
       lastNotifiedVersion.current = version
       let id = ''
       id = notify({

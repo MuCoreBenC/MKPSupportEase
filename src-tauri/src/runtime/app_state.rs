@@ -1028,7 +1028,6 @@ const PREF_FIELDS: &[&str] = &[
     "autoCleanHistory",
     "autoCheckUpdate",
     "updateChannel",
-    "pendingUpdate",
     "pin",
     "compact",
 ];
@@ -2050,6 +2049,7 @@ mod tests {
             "presetSource",
             "paramDecisions",
             "paramOrigins",
+            "pendingUpdate",
             "lastWindowBox",
             "slicerWindow",
             "pinBeforeCompact",
@@ -2720,6 +2720,23 @@ mod tests {
 
         assert!(set_auto_check_update(d.path(), true).unwrap());
         assert!(auto_check_update(d.path()).unwrap());
+    }
+
+    /// 待更新账能写能清（docs/SOFTWARE-UPDATE-SPEC.md S3 / S4 的落盘那一半）：
+    /// 关自动检查 / 换渠道时命令层调 `set_pending_update(None)`，清完标题栏胶囊就没了依据。
+    #[test]
+    fn pending_update_roundtrips_and_can_be_cleared() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(pending_update(d.path()).unwrap().is_none());
+
+        set_pending_update(d.path(), Some("0.0.12-preview.1")).unwrap();
+        assert_eq!(
+            pending_update(d.path()).unwrap().as_deref(),
+            Some("0.0.12-preview.1")
+        );
+
+        set_pending_update(d.path(), None).unwrap();
+        assert!(pending_update(d.path()).unwrap().is_none());
     }
 
     /// **认字符串是契约**：只认三个字面量（盘上 / 界面 / 前端都认它），

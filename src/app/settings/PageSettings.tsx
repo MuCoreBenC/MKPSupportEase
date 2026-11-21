@@ -871,6 +871,8 @@ export default function PageSettings({
     setChannelErr(null)
     try {
       await api.setUpdateChannel(next)
+      /* 换路时后端把上一路的 pendingUpdate 作废了 —— 重问一次快照，胶囊不挂着旧结论 */
+      await refreshUpdate()
     } catch (e) {
       setChannelPick(prev)
       setChannelErr(msg('settings.history.writeFailed', { detail: errorText(e) }))
@@ -1042,6 +1044,8 @@ export default function PageSettings({
     track('update.autoCheck', { on: next })
     try {
       setAutoCheckUpdate(await api.setAutoCheckUpdate(next))
+      /* 后端关开关时清了 pendingUpdate —— 立刻重问快照，标题栏那枚胶囊当场消失 */
+      await refreshUpdate()
     } catch (e) {
       setAutoCheckErr(msg('settings.history.writeFailed', { detail: errorText(e) }))
     } finally {

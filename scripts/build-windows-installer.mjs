@@ -44,6 +44,11 @@ if (process.platform !== 'win32') {
 }
 
 const clientExe = join(ROOT, 'target', 'release', 'mkp-support-ease.exe')
+const genDir = join(ROOT, 'installer', 'gen')
+/* 两档内核分开装进同一个 setup：安装版写 InstallLocation，绿色版自更新只换自己的 exe。
+   它们唯一的差别是 Tauri 的 appDirectoriesOverride（数据根 app-data vs %APPDATA%）。 */
+const installedExe = join(genDir, 'app-installed.exe')
+const portableExe = join(genDir, 'app-portable.exe')
 const payloadBin = join(ROOT, 'installer', 'payload.bin')
 const payloadXz = join(ROOT, 'installer', 'payload.xz')
 const manifest = join(ROOT, 'installer', 'Cargo.toml')
@@ -57,12 +62,28 @@ const run = (cmd, args, opts = {}) => {
   if (r.status !== 0) process.exit(r.status ?? 1)
 }
 
-/* 1. 客户端本体 */
+/* 1. 两档客户端本体：先默认配置（安装版），存下来；再绿色版配置，同样存下来。
+   两次都走 tauri-dev.mjs：CARGO_TARGET_DIR 对齐 + 工作区闸都在那层。 */
+mkdirSync(genDir, { recursive: true })
 run(process.execPath, [join(ROOT, 'scripts', 'tauri-dev.mjs'), 'build', '--no-bundle'])
 if (!existsSync(clientExe)) {
   console.error(`没找到客户端产物：${clientExe}`)
   process.exit(1)
 }
+copyFileSync(clientExe, installedExe)
+
+run(process.execPath, [
+  join(ROOT, 'scripts', 'tauri-dev.mjs'),
+  'build',
+  '--no-bundle',
+  '--config',
+  join(ROOT, 'src-tauri', 'tauri.portable.conf.json'),
+])
+if (!existsSync(clientExe)) {
+  console.error(`没找到绿色版产物：${clientExe}`)
+  process.exit(1)
+}
+copyFileSync(clientExe, portableExe)
 
 const cargoEnv = {
   ...process.env,
@@ -90,19 +111,21 @@ if (!existsSync(uninstaller)) {
   process.exit(1)
 }
 
-/* 2b. payload：极简容器（三段长度 + license + 应用 + 卸载器）再整体 xz。
+/* 2b. payload：极简容器（四段长度 + license + 安装版内核 + 卸载器 + 绿色版内核）再整体 xz。
  *
- * 不能先 zip 再 xz：zip 里已经是 deflate 流，LZMA 对已压缩数据没有收益
- * （实测两层压完还是 9.6 MB）。顺序反过来才对。 */
+ * 第四段是这次分开的那一刀：绿色版自更新写它，安装版写第三段位置的内核。
+ * 不能先 zip 再 xz：zip 里已经是 deflate 流，LZMA 对已压缩数据没有收益。 */
 const license = readFileSync(join(ROOT, 'LICENSE'))
-const appBytes = readFileSync(clientExe)
+const installedBytes = readFileSync(installedExe)
 const uninstallerBytes = readFileSync(uninstaller)
-const head = Buffer.alloc(12)
+const portableBytes = readFileSync(portableExe)
+const head = Buffer.alloc(16)
 head.writeUInt32LE(license.length, 0)
-head.writeUInt32LE(appBytes.length, 4)
+head.writeUInt32LE(installedBytes.length, 4)
 head.writeUInt32LE(uninstallerBytes.length, 8)
+head.writeUInt32LE(portableBytes.length, 12)
 rmSync(payloadBin, { force: true })
-writeFileSync(payloadBin, Buffer.concat([head, license, appBytes, uninstallerBytes]))
+writeFileSync(payloadBin, Buffer.concat([head, license, installedBytes, uninstallerBytes, portableBytes]))
 
 run('cargo', ['build', '--release', '--manifest-path', manifest, '--bin', 'pack'], {
   env: cargoEnv,

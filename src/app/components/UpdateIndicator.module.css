@@ -1,0 +1,38 @@
+/*
+ * 「可更新」胶囊点开的那张小面板。
+ *
+ * 挂在标题栏那枚胶囊外面（`position: relative`）—— 标题栏 `.bar` 没有 mask / overflow，
+ * 面板往下面内容区伸出去不会被裁（那条坑见 TopTabs.module.css 的头注释）。
+ */
+
+.wrap {
+  position: relative;
+  display: flex;
+  flex: none;
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 1;
+  width: 224px;
+  padding: 12px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lift);
+  color: var(--text-1);
+}
+
+.panelText {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.panelActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}

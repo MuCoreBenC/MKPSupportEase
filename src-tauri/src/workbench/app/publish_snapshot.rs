@@ -479,6 +479,67 @@ fn parse_version(raw: &str) -> Option<(u32, u32, u32, Option<String>, u32)> {
     }
 }
 
+/// 版本排序键（与 [`next_preview`] 的 rank 同口径）：只用来比谁更新。
+fn version_key(raw: &str) -> Option<(u32, u32, u32, u8, u32)> {
+    let (major, minor, patch, kind, seq) = parse_version(raw)?;
+    let rank = match kind.as_deref() {
+        Some("dev") => 0,
+        Some("alpha") | Some("a") => 1,
+        Some("beta") | Some("b") => 2,
+        Some("preview") | Some("pre") => 3,
+        Some("rc") => 4,
+        None => 5,
+        Some(_) => return None,
+    };
+    Some((major, minor, patch, rank, seq))
+}
+
+/// 「模拟发布」到底用哪一号：留空 = 基准的下一个预览号；填 `14` = 基准同段的
+/// `preview.14`；填全号 = 规范化后原样用。**必须严格比快照基准新** —— 否则客户端
+/// `is_newer_version` 不认，界面上不会出现那张更新卡，测了等于没测。
+fn resolve_requested_version(base: &str, requested: Option<&str>) -> Result<String, AppError> {
+    let bad_base = || AppError::invalid_argument(format!("快照基准版本号认不出：{base}"));
+    let raw = requested.map(str::trim).filter(|s| !s.is_empty());
+    let version = match raw {
+        None => next_preview(base).ok_or_else(bad_base)?,
+        Some(s) if s.bytes().all(|b| b.is_ascii_digit()) => {
+            let (major, minor, patch, _, _) = parse_version(base).ok_or_else(bad_base)?;
+            let seq: u32 = s
+                .parse()
+                .map_err(|_| AppError::invalid_argument(format!("预览号必须是正整数：{s}")))?;
+            if seq == 0 {
+                return Err(AppError::invalid_argument("预览号从 1 开始"));
+            }
+            format!("{major}.{minor}.{patch}-preview.{seq}")
+        }
+        Some(s) => {
+            let (major, minor, patch, kind, seq) = parse_version(s).ok_or_else(|| {
+                AppError::invalid_argument(format!(
+                    "版本号认不出：{s}（填 14 或 0.0.11-preview.14）"
+                ))
+            })?;
+            let kind = kind.unwrap_or_default();
+            if kind != "preview" && kind != "pre" {
+                return Err(AppError::invalid_argument(format!(
+                    "模拟发布只认预览版号：{s}"
+                )));
+            }
+            if seq == 0 {
+                return Err(AppError::invalid_argument(format!("预览号要带序号：{s}")));
+            }
+            format!("{major}.{minor}.{patch}-preview.{seq}")
+        }
+    };
+    let base_key = version_key(base).ok_or_else(bad_base)?;
+    let key = version_key(&version).ok_or_else(bad_base)?;
+    if key <= base_key {
+        return Err(AppError::invalid_argument(format!(
+            "模拟发布的号 {version} 不比快照基准 {base} 新 —— 客户端不会提示更新"
+        )));
+    }
+    Ok(version)
+}
+
 fn origin() -> String {
     let port = std::env::var("PRESET_TEST_PORT")
         .ok()
@@ -688,12 +749,12 @@ fn verify_macos_manifest(repo: &Path, version: &str) -> Result<String, AppError>
 }
 
 /// 跑在 detached 子进程里的那一趟。进度全程写盘，不依赖调用方进程还活着。
-/// 给 bin 入口用：`snapshot-apply <repo>`。
-pub fn run_apply_child(repo: PathBuf) {
-    apply_transaction(repo);
+/// 给 bin 入口用：`snapshot-apply <repo> [版本]`。
+pub fn run_apply_child(repo: PathBuf, requested: Option<String>) {
+    apply_transaction(repo, requested);
 }
 
-fn apply_transaction(repo: PathBuf) {
+fn apply_transaction(repo: PathBuf, requested: Option<String>) {
     let pid = std::process::id();
     let log: SharedLog = Arc::new(Mutex::new(Vec::new()));
     let result = (|| -> Result<(String, String), AppError> {
@@ -701,9 +762,7 @@ fn apply_transaction(repo: PathBuf) {
         let snap = snapshot_dir(&repo);
         let mut m = read_manifest(&snap)
             .ok_or_else(|| AppError::invalid_argument("快照不在了或被改坏了"))?;
-        let version = next_preview(&m.base_version).ok_or_else(|| {
-            AppError::invalid_argument(format!("版本号认不出：{}", m.base_version))
-        })?;
+        let version = resolve_requested_version(&m.base_version, requested.as_deref())?;
 
         progress_stage(&repo, pid, "bumping", &format!("抬到 {version}"));
         set_dev_version(&repo, &version)?;
@@ -883,23 +942,29 @@ pub fn wb_publish_snapshot_take() -> Result<PublishSnapshotStatus, AppError> {
 
 /// 派一趟真编到**独立进程**（`snapshot-apply`），立刻返回。
 ///
+/// `version` 可留空（基准 +1）；填 `14` 或全号则按指定号模拟。号在这一层就定死并核对，
+/// 填错当场报错，不等后台日志。
+///
 /// 编译要好几分钟，还改工作区；放在独立进程里有两个好处：工作台崩了它照样跑完，
 /// 进度写盘；工作台重启后读盘就知道走到哪一步。用 `cargo run` 起它（这个 bin 带
 /// workbench feature，默认构建编不到）——只在工作台开发期用。
 #[tauri::command]
-pub fn wb_publish_snapshot_apply() -> Result<PublishSnapshotStatus, AppError> {
+pub fn wb_publish_snapshot_apply(
+    version: Option<String>,
+) -> Result<PublishSnapshotStatus, AppError> {
     crate::ipc::traced("wb_publish_snapshot_apply", |_| {
         let repo = crate::workbench::paths::repo_root();
         let snap = snapshot_dir(&repo);
-        read_manifest(&snap)
+        let m = read_manifest(&snap)
             .ok_or_else(|| AppError::invalid_argument("没有快照。先点「拍快照」。"))?;
         if progress_for_ui(&repo).running {
             return Err(AppError::invalid_argument("这一趟还在跑。"));
         }
+        let version = resolve_requested_version(&m.base_version, version.as_deref())?;
         /* 先把进程起起来，拿到 **真实 PID** 再写进度。
         反过来（先写 running 再起进程）会留出一个没有 PID 的窗口，而读的人把
         "running 却没有 PID" 当成中断 —— 一点下去界面就报"中断"，看着像没反应。 */
-        let pid = spawn_apply_child(&repo)?;
+        let pid = spawn_apply_child(&repo, Some(&version))?;
         let mut p = idle_progress();
         p.running = true;
         p.stage = "preparing".to_owned();
@@ -912,7 +977,7 @@ pub fn wb_publish_snapshot_apply() -> Result<PublishSnapshotStatus, AppError> {
 
 /// 起 detached 的 `snapshot-apply`，返回它的 PID（进度要用它判活）。
 /// Windows 上 npm/cargo 经 cmd 垫片，加 `CREATE_NO_WINDOW`。
-fn spawn_apply_child(repo: &Path) -> Result<u32, AppError> {
+fn spawn_apply_child(repo: &Path, version: Option<&str>) -> Result<u32, AppError> {
     let mut cmd = if cfg!(windows) {
         let mut c = Command::new("cmd");
         c.arg("/C").arg("cargo");
@@ -929,12 +994,15 @@ fn spawn_apply_child(repo: &Path) -> Result<u32, AppError> {
         "snapshot-apply",
         "--",
     ])
-    .arg(repo)
-    .current_dir(repo)
-    /* 工作台的 `TAURI_CONFIG` 不进这一支：它会让里头的 tauri build 合并工作台配置 */
-    .env_remove("TAURI_CONFIG")
-    .stdout(Stdio::null())
-    .stderr(Stdio::null());
+    .arg(repo);
+    if let Some(v) = version {
+        cmd.arg(v);
+    }
+    cmd.current_dir(repo)
+        /* 工作台的 `TAURI_CONFIG` 不进这一支：它会让里头的 tauri build 合并工作台配置 */
+        .env_remove("TAURI_CONFIG")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -1033,6 +1101,44 @@ mod tests {
             Some("0.0.11-preview.1")
         );
         assert_eq!(next_preview("not-a-version"), None);
+    }
+
+    #[test]
+    fn requested_preview_accepts_short_or_full_and_rejects_not_newer() {
+        let base = "0.0.11-preview.12";
+        /* 留空 / 空串 = 基准 +1（老行为一字不变） */
+        assert_eq!(
+            resolve_requested_version(base, None).unwrap(),
+            "0.0.11-preview.13"
+        );
+        assert_eq!(
+            resolve_requested_version(base, Some("  ")).unwrap(),
+            "0.0.11-preview.13"
+        );
+        /* 「14」按基准补段；完整号原样规范化 */
+        assert_eq!(
+            resolve_requested_version(base, Some("14")).unwrap(),
+            "0.0.11-preview.14"
+        );
+        assert_eq!(
+            resolve_requested_version(base, Some("0.0.11-preview.14")).unwrap(),
+            "0.0.11-preview.14"
+        );
+        /* 不比基准新的号一律拒 —— 客户端不会把它们当成更新 */
+        for bad in [
+            "12",
+            "11",
+            "0.0.11-preview.12",
+            "0.0.11",
+            "rc.2",
+            "abc",
+            "0",
+        ] {
+            assert!(
+                resolve_requested_version(base, Some(bad)).is_err(),
+                "{bad} 不该被接受"
+            );
+        }
     }
 
     #[test]

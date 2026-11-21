@@ -3,9 +3,10 @@
 //! 两个动作，都调工作台里同一份内核，不另写逻辑：
 //!
 //! ```text
-//! cargo run --features workbench --bin snapshot-apply -- restore <repo>   # 还原到拍快照时
-//! cargo run --features workbench --bin snapshot-apply -- <repo>           # 真编（工作台按钮调起）
+//! cargo run --features workbench --bin snapshot-apply -- restore <repo>       # 还原到拍快照时
+//! cargo run --features workbench --bin snapshot-apply -- <repo> [版本]        # 真编（工作台按钮调起）
 //! ```
+//! 版本可填 `14`（按快照基准补成 `0.0.11-preview.14`）或完整号；留空 = 基准 +1。
 //!
 //! 工作台那颗「模拟发布」按钮把这一支当**独立进程**起，跑
 //! `publish_snapshot::run_apply_child()` —— 抬号 / 真编安装包 / 写本地清单。进度全程写
@@ -24,8 +25,9 @@ fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     if argv.iter().any(|a| a == "-h" || a == "--help") {
         println!(
-            "用法：snapshot-apply <repo>            真编（工作台「模拟发布」调起）\n\
-                   snapshot-apply restore <repo>   还原到拍快照时的状态"
+            "用法：snapshot-apply <repo> [版本]    真编（工作台「模拟发布」调起）\n\
+                   版本可填 14 或 0.0.11-preview.14；留空 = 基准 +1\n\
+                   snapshot-apply restore <repo>  还原到拍快照时的状态"
         );
         return ExitCode::SUCCESS;
     }
@@ -49,6 +51,6 @@ fn main() -> ExitCode {
         eprintln!("缺仓库根参数。用法：snapshot-apply <repo>");
         return ExitCode::from(2);
     };
-    publish_snapshot::run_apply_child(PathBuf::from(repo));
+    publish_snapshot::run_apply_child(PathBuf::from(repo), argv.get(1).cloned());
     ExitCode::SUCCESS
 }

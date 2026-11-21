@@ -225,11 +225,18 @@ pub async fn get_auto_check_update(app: AppHandle) -> Result<bool, AppError> {
 /// 开关自动检查。落盘成功后广播一声 —— 前端那一格显示的永远是盘上真账。
 ///
 /// 关掉只影响「拉目录之后顺路查」；设置页手动点「重新检查」照旧可用。
+/// **关的同时清掉待更新账** —— 否则标题栏那枚胶囊是旧检查留下的，关了还挂着。
 #[tauri::command]
 pub async fn set_auto_check_update(app: AppHandle, enabled: bool) -> Result<bool, AppError> {
     traced("setAutoCheckUpdate", |_| {
         let root = internal_root(&app)?;
         let got = runtime::app_state::set_auto_check_update(&root, enabled)?;
+        if enabled {
+            runtime::update_check::reset_session_check();
+        } else if let Err(e) = runtime::app_state::set_pending_update(&root, None) {
+            /* 开关已经写进盘了，不能因为清账失败把它退回去 —— 如实记下，下次检查会覆盖 */
+            tracing::warn!("关自动检查时没清掉待更新账：{}", e.message);
+        }
         notify_app_state(&app);
         Ok(got)
     })
@@ -256,6 +263,10 @@ pub async fn set_update_channel(app: AppHandle, channel: String) -> Result<Strin
         let root = internal_root(&app)?;
         let parsed = channel_parse(&channel)?;
         let got = runtime::app_state::set_update_channel(&root, parsed)?;
+        /* 胶囊是上一路的结论，换路即作废 —— 不清就会出现"切到正式版还挂着测试版的更新" */
+        if let Err(e) = runtime::app_state::set_pending_update(&root, None) {
+            tracing::warn!("换渠道时没清掉待更新账：{}", e.message);
+        }
         /* 切完就能查：不放回名额的话，得重启客户端才可能收到另一路的通知 */
         runtime::update_check::reset_session_check();
         notify_app_state(&app);

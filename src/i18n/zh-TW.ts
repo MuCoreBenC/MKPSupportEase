@@ -618,6 +618,11 @@ export const zhTW: Record<StringKey, string> = {
   // ---- 關於與更新 ----
   'update.ready': '可安裝',
   'update.chip.available': '可更新',
+  'update.chip.tip': '點開查看或忽略',
+  'update.chip.panel': '軟體更新',
+  'update.chip.found': '發現 {version}',
+  'update.chip.view': '查看',
+  'update.chip.ignore': '忽略',
   'update.failed': '失敗',
   'update.pause': '暫停',
   'update.cancel': '取消',

@@ -3496,8 +3496,14 @@ export const wb = {
   publishSnapshotStatus: () => invoke<PublishSnapshotStatus>('wb_publish_snapshot_status'),
   /** 拍一份当前状态的快照（已有快照会拒绝） */
   publishSnapshotTake: () => invoke<PublishSnapshotStatus>('wb_publish_snapshot_take'),
-  /** 派一趟真编到后台：抬号 → 编译安装包 → 写本地清单，立刻返回 */
-  publishSnapshotApply: () => invoke<PublishSnapshotStatus>('wb_publish_snapshot_apply'),
+  /**
+   * 派一趟真编到后台：抬号 → 编译安装包 → 写本地清单，立刻返回。
+   *
+   * `version` 留空 = 快照基准 +1；填 `14` / `0.0.11-preview.14` 就按指定号模拟。
+   * 必须比基准新，后端当场拒（客户端只认严格更新的版本）。
+   */
+  publishSnapshotApply: (version?: string) =>
+    invoke<PublishSnapshotStatus>('wb_publish_snapshot_apply', { version: version ?? null }),
   /** 真编进度（不阻塞，界面轮询） */
   publishSnapshotProgress: () => invoke<SnapshotApplyProgress>('wb_publish_snapshot_progress'),
   /** 还原到拍快照时的状态，并删掉快照 */
