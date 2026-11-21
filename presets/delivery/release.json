@@ -5,15 +5,15 @@
   "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.13",
   "assets": [
     {
-      "name": "SupportEase_0.0.13_x64.exe",
-      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.13/SupportEase_0.0.13_x64.exe",
+      "name": "SupportEase_0.0.13_x64-setup.exe",
+      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.13/SupportEase_0.0.13_x64-setup.exe",
       "size": 9367552,
       "sha256": "b15fa9590ac1db846fe1f7130109d55c6adc301e359b345f9392d92d86a85092",
       "platform": "windows",
       "kind": "nsis",
       "sources": {
-        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.13/SupportEase_0.0.13_x64.exe",
-        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.13/SupportEase_0.0.13_x64.exe"
+        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.13/SupportEase_0.0.13_x64-setup.exe",
+        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.13/SupportEase_0.0.13_x64-setup.exe"
       }
     },
     {
