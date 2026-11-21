@@ -61,8 +61,19 @@ pub fn fetch_stable_info(root: &Path) -> Result<release_info::ReleaseInfo, AppEr
 }
 
 /// 取一份「有没有新版本」的结论（正式版，自动通知与标题栏共用这一处）。
+///
+/// 资产地址按**用户当前选的源**挑：同一份清单里 `sources.gitee` / `sources.github`
+/// 各有一条；选 GitHub 就下 GitHub 的包，不再退回“打开 Gitee 下载页”。
 pub fn fetch_update(root: &Path) -> Result<release_info::SoftwareUpdate, AppError> {
-    Ok(release_info::to_update(&fetch_stable_info(root)?))
+    let resolved = source::resolve_source(root)?;
+    let source_name = resolved.mode().wire();
+    let release_url = resolved.release_url()?;
+    let info = release_info::parse(&net::get_release(&release_url)?)?;
+    Ok(release_info::to_update_for_source(
+        &info,
+        super::structure::APP_VERSION,
+        Some(source_name),
+    ))
 }
 
 /// 由两份清单拼出**用户主动检查**时并列展示的候选（纯函数，判据不联网）。
@@ -75,6 +86,15 @@ pub fn candidates_from_infos(
     stable: &release_info::ReleaseInfo,
     preview: Option<&release_info::ReleaseInfo>,
 ) -> Vec<release_info::UpdateCandidate> {
+    candidates_from_infos_with_source(stable, preview, None)
+}
+
+/// 同上，但资产地址按用户当前源挑（`gitee` / `github`）。
+pub fn candidates_from_infos_with_source(
+    stable: &release_info::ReleaseInfo,
+    preview: Option<&release_info::ReleaseInfo>,
+    source: Option<&str>,
+) -> Vec<release_info::UpdateCandidate> {
     /* ★ **只摆比当前版本新的**（2026-11-06 作者："没有新的正式版就不显示出来嘛，
      * 不要显示旧版"）。装了 `0.0.10-dev` 时，正式版线上还是 `0.0.6` —— 它比当前旧，
      * 不是"有新版"，也不该给一颗"切回正式版"的按钮：回退是用户自己要做的决定，
@@ -84,18 +104,20 @@ pub fn candidates_from_infos(
      * 从此共用同一个结论，不会出现"卡片藏了但按钮还在"的半截状态。 */
     let mut list = Vec::new();
     if release_info::is_newer_version(&stable.version, super::structure::APP_VERSION) {
-        list.push(release_info::UpdateCandidate::from_info(
+        list.push(release_info::UpdateCandidate::from_info_with_source(
             release_info::UpdateChannel::Stable,
             stable,
+            source,
         ));
     }
     if let Some(p) = preview {
         if p.version.trim() != stable.version.trim()
             && release_info::is_newer_version(&p.version, super::structure::APP_VERSION)
         {
-            list.push(release_info::UpdateCandidate::from_info(
+            list.push(release_info::UpdateCandidate::from_info_with_source(
                 release_info::UpdateChannel::Preview,
                 p,
+                source,
             ));
         }
     }
@@ -118,6 +140,7 @@ pub fn fetch_update_bundle(
     AppError,
 > {
     let resolved = source::resolve_source(root)?;
+    let source_name = resolved.mode().wire();
     let stable_url = resolved.release_url()?;
     let stable = release_info::parse(&net::get_release(&stable_url)?)?;
 
@@ -132,8 +155,12 @@ pub fn fetch_update_bundle(
         },
     };
     Ok((
-        release_info::to_update(&stable),
-        candidates_from_infos(&stable, preview.as_ref()),
+        release_info::to_update_for_source(
+            &stable,
+            super::structure::APP_VERSION,
+            Some(source_name),
+        ),
+        candidates_from_infos_with_source(&stable, preview.as_ref(), Some(source_name)),
     ))
 }
 
@@ -152,7 +179,16 @@ pub fn auto_notification(
     stable: &release_info::ReleaseInfo,
     current: &str,
 ) -> Option<UpdateAvailable> {
-    let u = release_info::to_update_for(stable, current);
+    auto_notification_for(stable, current, None)
+}
+
+/// 同上，资产地址按用户当前源挑。
+pub fn auto_notification_for(
+    stable: &release_info::ReleaseInfo,
+    current: &str,
+    source: Option<&str>,
+) -> Option<UpdateAvailable> {
+    let u = release_info::to_update_for_source(stable, current, source);
     if u.has_update {
         Some(UpdateAvailable {
             version: u.latest_version,
@@ -196,10 +232,16 @@ pub fn maybe_check_after_catalog(app: &AppHandle) {
     /* ④ 查；失败静默，且把名额放回去（离线时别把机会用掉） */
     let notified = match channel {
         release_info::UpdateChannel::Stable => match fetch_stable_info(&root) {
-            Ok(stable) => Ok(auto_notification(
-                &stable,
-                crate::runtime::structure::APP_VERSION,
-            )),
+            Ok(stable) => {
+                let source_name = source::current_mode(&root)
+                    .unwrap_or(source::SourceMode::Gitee)
+                    .wire();
+                Ok(auto_notification_for(
+                    &stable,
+                    crate::runtime::structure::APP_VERSION,
+                    Some(source_name),
+                ))
+            }
             Err(e) => Err(e),
         },
         release_info::UpdateChannel::Preview => match fetch_update_candidates(&root) {

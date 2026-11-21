@@ -385,6 +385,8 @@ pub struct ReleaseTxReport {
     pub release: Option<RemoteRelease>,
     /// 上传上去的安装包（dmg，给愿意手动装的人）
     pub artifact: Option<ArtifactInfo>,
+    /// Windows 绿色版 zip（与安装版一起进 Release；非 Windows 为 `None`）
+    pub portable: Option<ArtifactInfo>,
     /// ★ **应用内更新用的 `.app.zip`**（第五刀）：客户端在程序里下载它、自动替换并重启。
     /// **没有它客户端就退回"打开下载页"** —— 那条路仍然成立
     pub zip: Option<crate::runtime::release_info::ReleaseAsset>,
@@ -419,6 +421,7 @@ impl ReleaseTxReport {
             review: None,
             release: None,
             artifact: None,
+            portable: None,
             zip: None,
             info_branch: None,
             info_review: None,
@@ -432,6 +435,42 @@ impl ReleaseTxReport {
 
 fn tag_of(version: &str) -> String {
     format!("{TAG_PREFIX}{version}")
+}
+
+/// `github.com/{owner}/{repo}`（从 `origin` 读；发布面仍是 Gitee，GitHub 只做镜像）。
+fn github_owner_repo(git: &Git) -> Option<(String, String)> {
+    let remote = git.remote_url().ok()?;
+    let s = remote.trim().trim_end_matches(".git");
+    let i = s.find("github.com")?;
+    let rest = s[i + "github.com".len()..].trim_start_matches(['/', ':']);
+    let mut parts = rest.split('/').filter(|p| !p.is_empty());
+    Some((parts.next()?.to_owned(), parts.next()?.to_owned()))
+}
+
+/// 一份 Release 资产在两边的下载地址。`url` 是 Gitee 主地址，`sources` 带 GitHub 镜像。
+fn mirrored_asset(
+    name: &str,
+    gitee_url: String,
+    size: u64,
+    sha256: String,
+    platform: &str,
+    kind: &str,
+    github_url: Option<String>,
+) -> crate::runtime::release_info::ReleaseAsset {
+    let mut sources = std::collections::BTreeMap::new();
+    sources.insert("gitee".to_owned(), gitee_url.clone());
+    if let Some(u) = github_url {
+        sources.insert("github".to_owned(), u);
+    }
+    crate::runtime::release_info::ReleaseAsset {
+        name: name.to_owned(),
+        url: gitee_url,
+        size,
+        sha256,
+        platform: Some(platform.to_owned()),
+        kind: Some(kind.to_owned()),
+        sources: Some(sources),
+    }
 }
 
 /// **打了 tag 就得让清单同代，且通道身份一致**（2026-11-05；预览通道同日补）。
@@ -635,6 +674,7 @@ fn run_inner(
         review: None,
         release: None,
         artifact: None,
+        portable: None,
         zip: None,
         info_branch: None,
         info_review: None,
@@ -851,6 +891,13 @@ fn run_inner(
         report.stage = ReleaseStage::Built;
         report.summary.push_str(&format!("已构建 {}。", built.name));
     }
+    if let Some(p) = &portable {
+        report.portable = Some(ArtifactInfo {
+            name: p.name.clone(),
+            size: p.size,
+            path: p.path.display().to_string(),
+        });
+    }
 
     /* ---------- ⑧ 构建与产物校验都过了，才创建并推送 tag ---------- */
 
@@ -1042,6 +1089,7 @@ fn run_inner(
                             sha256: sha,
                             platform: Some("macos".to_owned()),
                             kind: Some("appZip".to_owned()),
+                            sources: None,
                         });
                         report.summary.push_str(&format!(
                             "已上传 {zip_name}（{} 字节，应用内更新用）。",
@@ -1085,12 +1133,83 @@ fn run_inner(
         Some(p) => (p.notes.clone(), p.url.clone()),
         None => (opts.notes.clone(), release.url.clone()),
     };
+    /* 双平台 / 双源资产：主地址 Gitee，`sources.github` 给选了 GitHub 的客户端。
+    Windows 两份（安装版 nsis + 绿色版 portable），macOS 仍是 `.app.zip`。 */
+    let mut platform_assets: Vec<crate::runtime::release_info::ReleaseAsset> = Vec::new();
+    let gh = github_owner_repo(&git);
+    if let Some(b) = built.as_ref() {
+        let gitee = format!(
+            "https://gitee.com/{}/{}/releases/download/{}/{}",
+            g.owner, g.repo, tag, b.name
+        );
+        let github = gh.as_ref().map(|(o, r)| {
+            format!(
+                "https://github.com/{o}/{r}/releases/download/{tag}/{}",
+                b.name
+            )
+        });
+        platform_assets.push(mirrored_asset(
+            &b.name,
+            gitee,
+            b.size,
+            sha256_file(&b.path)?,
+            "windows",
+            "nsis",
+            github,
+        ));
+    }
+    if let Some(p) = portable.as_ref() {
+        let gitee = format!(
+            "https://gitee.com/{}/{}/releases/download/{}/{}",
+            g.owner, g.repo, tag, p.name
+        );
+        let github = gh.as_ref().map(|(o, r)| {
+            format!(
+                "https://github.com/{o}/{r}/releases/download/{tag}/{}",
+                p.name
+            )
+        });
+        platform_assets.push(mirrored_asset(
+            &p.name,
+            gitee,
+            p.size,
+            sha256_file(&p.path)?,
+            "windows",
+            "portable",
+            github,
+        ));
+    }
+    if let Some(z) = report.zip.as_ref() {
+        let mut z = z.clone();
+        if let Some(gitee) = z.sources.as_ref().and_then(|s| s.get("gitee")).cloned() {
+            z.url = gitee;
+        }
+        if let Some((o, r)) = gh.as_ref() {
+            z.sources.get_or_insert_with(Default::default).insert(
+                "github".to_owned(),
+                format!(
+                    "https://github.com/{o}/{r}/releases/download/{tag}/{}",
+                    z.name
+                ),
+            );
+        }
+        platform_assets.push(z);
+    }
+    /* 只补清单（tag/产物都在）时没有新构建：保留上一份的 assets，一个字节都不改。 */
+    if platform_assets.is_empty() {
+        platform_assets = previous
+            .as_ref()
+            .and_then(|p| p.assets.clone())
+            .unwrap_or_default();
+    }
+    let assets_param = (!platform_assets.is_empty()).then_some(platform_assets.as_slice());
+
     let want_info = release_info_text(
         &version,
         &info_notes,
         &info_url,
         report.zip.as_ref(),
-        None, // 双平台资产：下一轮预览发布事务才写
+        assets_param,
         previous.as_ref(),
     )?;
     /* ⓪ 「动了 tag 的版本号，就必须让清单跟着动」（2026-11-05 作者原话）。
@@ -1116,6 +1235,7 @@ fn run_inner(
         &info_notes,
         &info_url,
         report.zip.as_ref(),
+        assets_param,
     )?;
     // ★ 分支名必须带合规前缀（`chore/`）—— 本机闸门⑥ 会拒没有前缀的分支名
     //   （`release/0.0.1` 这种在提交那一步会被钩子挡下来，白跑一趟）。
@@ -1592,6 +1712,7 @@ fn release_info_text(
             "url": a.url,
             "size": a.size,
             "sha256": a.sha256,
+            "sources": a.sources,
         });
     }
     if let Some(list) = assets {
@@ -1600,7 +1721,7 @@ fn release_info_text(
             .map(|a| {
                 serde_json::json!({
                     "name": a.name, "url": a.url, "size": a.size, "sha256": a.sha256,
-                    "platform": a.platform, "kind": a.kind,
+                    "platform": a.platform, "kind": a.kind, "sources": a.sources,
                 })
             })
             .collect::<Vec<_>>());
@@ -1627,9 +1748,10 @@ fn write_release_info(
     notes: &str,
     url: &str,
     asset: Option<&crate::runtime::release_info::ReleaseAsset>,
+    assets: Option<&[crate::runtime::release_info::ReleaseAsset]>,
 ) -> Result<String, AppError> {
     let previous = previous_release_info(repo_root, rel);
-    let text = release_info_text(version, notes, url, asset, None, previous.as_ref())?;
+    let text = release_info_text(version, notes, url, asset, assets, previous.as_ref())?;
     let path = repo_root.join(rel);
     fsx::atomic::atomic_write(&path, text.as_bytes())?;
     // 写完立刻自己解析一遍：**写进去的东西必须是客户端读得懂的东西**（代次 / 版本形状）
@@ -2810,6 +2932,7 @@ mod tests {
             "修了几个问题",
             "https://host/r/tag/v0.0.2",
             None,
+            None,
         )
         .expect("该写得出来");
         assert_eq!(rel, RELEASE_INFO_REL);
@@ -2837,6 +2960,7 @@ mod tests {
             sha256: "ab".to_owned(),
             platform: None,
             kind: None,
+            sources: None,
         };
         let e = validate_release_source(
             "0.0.6",
@@ -2872,6 +2996,7 @@ mod tests {
             sha256: "ab".to_owned(),
             platform: None,
             kind: None,
+            sources: None,
         };
         validate_release_source(
             "0.0.6",
@@ -3188,6 +3313,35 @@ mod tests {
         assert!(err.message.contains("发布通道"), "{}", err.message);
     }
 
+    /// 清单写入必须把 Windows 双源资产完整带上：客户端选 GitHub 时读的那一条不能丢。
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_written_manifest_carries_both_source_urls() {
+        let a = mirrored_asset(
+            "SupportEase_0.0.12_x64-setup.exe",
+            "https://gitee.com/o/r/releases/download/v0.0.12/setup.exe".to_owned(),
+            10,
+            "aa".to_owned(),
+            "windows",
+            "nsis",
+            Some("https://github.com/o/r/releases/download/v0.0.12/setup.exe".to_owned()),
+        );
+        let text = release_info_text(
+            "0.0.12",
+            "说明",
+            "https://gitee.com/o/r/releases/tag/v0.0.12",
+            None,
+            Some(&[a]),
+            None,
+        )
+        .unwrap();
+        let info = release_info::parse(text.as_bytes()).unwrap();
+        let gitee = info.asset_for_host(Some("gitee")).expect("Gitee 该有");
+        let github = info.asset_for_host(Some("github")).expect("GitHub 该有");
+        assert!(gitee.url.starts_with("https://gitee.com/"));
+        assert!(github.url.starts_with("https://github.com/"));
+    }
+
     /// 补平台**不许把别的平台的安装包抹掉**（2026-10-07 的真机场景：Windows 那一趟
     /// 没有 `.app.zip`，而 `release.json` 里那一格正是 macOS 的应用内更新的入口）。
     #[test]
@@ -3199,6 +3353,7 @@ mod tests {
             sha256: "ab".to_owned(),
             platform: None,
             kind: None,
+            sources: None,
         };
         let prev = release_info::ReleaseInfo {
             version: "0.0.6".to_owned(),
@@ -3230,6 +3385,7 @@ mod tests {
             sha256: "cd".to_owned(),
             platform: None,
             kind: None,
+            sources: None,
         };
         let text = release_info_text("0.0.6", "", url, Some(&new), None, Some(&prev)).unwrap();
         assert_eq!(
@@ -3414,6 +3570,7 @@ mod tests {
             "试试新东西",
             "https://gitee.com/o/r/releases/tag/v0.0.10-preview.1",
             None,
+            None,
         )
         .expect("预览清单该写得出来");
         assert_eq!(rel, RELEASE_PREVIEW_REL, "预览通道的落点");
@@ -3443,12 +3600,12 @@ mod tests {
         let rel = info_rel_for(release_info::UpdateChannel::Preview);
         let url = "https://gitee.com/o/r/releases/tag/v0.0.10-preview.1";
 
-        let first =
-            write_release_info(root, rel, "0.0.10-preview.1", "说明", url, None).expect("第一次写");
+        let first = write_release_info(root, rel, "0.0.10-preview.1", "说明", url, None, None)
+            .expect("第一次写");
         let text_first = std::fs::read_to_string(root.join(&first)).unwrap();
 
-        let second =
-            write_release_info(root, rel, "0.0.10-preview.1", "说明", url, None).expect("第二次写");
+        let second = write_release_info(root, rel, "0.0.10-preview.1", "说明", url, None, None)
+            .expect("第二次写");
         let text_second = std::fs::read_to_string(root.join(&second)).unwrap();
         assert_eq!(
             text_first, text_second,

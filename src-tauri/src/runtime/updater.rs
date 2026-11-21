@@ -1225,6 +1225,7 @@ mod tests {
             sha256: String::new(),
             platform: None,
             kind: None,
+            sources: None,
         };
         assert_eq!(asset_kind(&base), "nsis", "老档没 kind 时按后缀认");
         let mut zip = base.clone();

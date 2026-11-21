@@ -47,6 +47,13 @@
 安装包先落在 `run/update/`（绿色版就是 `app-data/run/update/`）；装完由安装脚本
 清掉这一份暂存，失败则留着供排查。那份 `.exe` 是**两档内核的载体**，不是"安装版跑错地方"。
 
+**S5.5 · 下载源**
+设置里选的源（GitHub / Gitee）决定这一包从哪儿下：`release.json` 的
+`assets[]` 每份资产都带 `sources.gitee` 与 `sources.github`，客户端按当前源换 `url`。
+选 GitHub 就下 GitHub 上同一份 setup，选 Gitee 就下 Gitee 上那一份；两边的文件名、
+大小、SHA-256 必须一致，下载后仍走原来的大小/SHA 校验和静默安装。**不许**因为
+源不同就退回“打开下载页”，也不许写死 Gitee。
+
 **S6 · 复查没有更新**
 下一次自动检查没查到新版：后端清掉 `pendingUpdate`，胶囊消失。
 查询失败（离线 / 没发过版）静默，名额放回去；本次不改动胶囊。
