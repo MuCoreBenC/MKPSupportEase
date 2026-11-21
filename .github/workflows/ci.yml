@@ -60,55 +60,12 @@ jobs:
       # 那个脚本的第一条约束就是"任何情况下都不能让 npm install 失败"，这一步顺带天天在验它。
       - run: npm ci
 
-      # 版本号：已发布的号永不再用；开发版本必须是下一个号的 `-dev`
-      # （2026-11-04 作者裁定。发布 = 去掉 -dev + 打不可变 tag；发完立刻 next）。
-      - name: 版本号（已发布号不许再用）
-        run: npm run version:check
-
-      - name: eslint + stylelint
-        run: npm run lint
-
-      - name: 类型检查
-        run: npx tsc -b
-
-      - name: 构建
-        run: npm run build
-
-      # 判据 1（DATA-ARCHITECTURE.md §5）：铁律不许只写在文档里。扫客户端构建产物，
-      # 开发源 TOML / 模拟数据 / 工作台内容出现即红。只对客户端构建跑——
-      # 工作台构建故意带那些东西，不在本判据管辖内
-      - name: 安装包产物扫描
-        run: npm run check:bundle
-
-      # 判据 2（DATA-ARCHITECTURE.md §5 第 2 条）：启动零网络。
-      # 扫源码而不是产物：要看的是"程序起来那一刻动没动网络"，那是代码形状的问题，
-      # 产物里问不出来。三道闸——网络符号只许住在 runtime/net.rs、启动段零联网、
-      # 前端不许绕过 IPC 自己发 HTTP
-      - name: 启动零网络扫描
-        run: npm run check:zero-network
-
-      # 判据：Rust 侧要求的 Channel 参数，前端必须真的挂上一条（2026-10-06 首页
-      # 「下载并应用」死路）。Tauri 的 Channel 没有 Deserialize ⇒ 必填参数 ⇒
-      # 契约里的"onTick 可选"只能在 bridge 兑现；不兑现时命令体一行都不跑，
-      # 界面只拿到兜底的「出了点问题，请重试」。编译期抓不到、mock 那条路也不经过。
-      - name: Channel 参数扫描
-        run: npm run check:channel-args
-
-      # 资源寻址 M6 判据（`docs/RESOURCE-ADDRESSING-ROADMAP.md` §5-M6）：
-      # 0.0.6 起 release.json 的下载地址一律来自 Gitee Release（发布仓库），
-      # 禁止 github.com/.../releases。v≤0.0.5 是断代前的历史记录，照旧合法。
-      - name: 软件发布源扫描（断代后禁 GitHub Releases）
-        run: npm run check:release-source
-
-      # 判据：**开发时生成的东西不许混进正式交付**（作者 2026-10-28）。
-      # `.gitignore` 里那句「`presets/delivery/` 只由发布命令动它」一直只是注释 ——
-      # 这一条把它变成机器闸：交付目录变了却没写发布账本 = 这批字节不是发出来的；
-      # 内核产物（`crates/preset/assets/presets/*`、`catalog.generated.json`）变了
-      # 却没有源变更 = 测试残留。本地 pre-push 跑同一份脚本，这里兜住 `--no-verify`。
-      # checkout 要全历史：`<base>...HEAD` 才比得出来。
-      - name: 产物边界（开发产物不许进正式交付）
-        run: npm run check:artifacts -- --base "origin/${{ github.base_ref || 'main' }}"
+      # 与本地同一入口：node scripts/check/run.mjs web。
+      # 本地跑 `npm run check:web` 绿，CI 不应再因为同一条检查红。
+      - name: 检查（web，与本地同一入口）
+        run: npm run check:web
         env:
+          CHECK_BASE: origin/${{ github.base_ref || 'main' }}
           GITHUB_BASE_REF: ${{ github.base_ref }}
 
   rust:
@@ -174,48 +131,12 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      - name: 格式
+      # 与本地同一入口：node scripts/check/run.mjs rust。
+      # 含 fmt / 两组 clippy / 两组 test / 寻址立法扫描；本地 `npm run check:rust` 绿，
+      # CI 不应再因为同一条检查红。
+      - name: 检查（rust，与本地同一入口）
         if: steps.scope.outputs.code == '1'
-        run: cargo fmt --all -- --check
-
-      # --all-targets 让测试代码也过 clippy；clippy.toml 的 disallowed-methods 在这里生效。
-      #
-      # **两种 feature 组合都要跑。** 工作台是 `#[cfg(feature = "workbench")]` 门内的，
-      # 不启用 feature 时那整棵子树**连编译都不会被碰** —— 于是它的写盘约束、
-      # 它的 264 条判据，在 CI 里等于从来没有被检过。这不是覆盖率的小数点问题，
-      # 而是唯一会写 `presets/`（用户数据）的那棵树整个不在场。
-      - name: clippy（默认 feature）
-        if: steps.scope.outputs.code == '1'
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: clippy（workbench）
-        if: steps.scope.outputs.code == '1'
-        run: cargo clippy --all-targets -p mkp-support-ease --features workbench -- -D warnings
-
-      - name: 测试（默认 feature）
-        if: steps.scope.outputs.code == '1'
-        run: cargo test
-
-      - name: 测试（workbench）
-        if: steps.scope.outputs.code == '1'
-        run: cargo test -p mkp-support-ease --features workbench
-
-      # 资源寻址立法（`docs/RESOURCE-ADDRESSING-ROADMAP.md` §6.4）：
-      # ① 拼接越界 —— join_url 只许住在 runtime/resolver（模块可见性是墙，这条 grep
-      #    是绊线：谁把拼接函数挪出去/抄一份，这里红）；② 交付面禁止绝对 URL ——
-      #    source.json 是双镜像（GitHub/Gitee）共用的寻址规则声明，写死任何一家
-      #    的绝对地址等于把另一家镜像的用户指回去。真正的逐条对账由发布闸
-      #    ⑯（client/url-reconciliation，直调生产 Resolver）与 Golden Fixture 负责。
-      - name: 寻址立法扫描（拼接越界 + 交付面无绝对 URL）
-        run: |
-          if grep -rnE 'join_url\s*\(' src-tauri/src --include='*.rs' | grep -v 'runtime/resolver' | grep -vE '^[^:]+:[0-9]+:\s*(//|///)'; then
-            echo "::error::路径拼接跑出了 runtime/resolver —— 寻址唯一出口在 resolver 模块"
-            exit 1
-          fi
-          if grep -E 'https?://' presets/delivery/source.json; then
-            echo "::error::交付面（source.json）禁止绝对 URL —— 双镜像共用同一份寻址声明"
-            exit 1
-          fi
+        run: npm run check:rust
 
   # Windows 侧单独一个 job，**不并进 rust 的 matrix**：
   # matrix 会把 job 名变成 `rust (macos-latest)`，而 ruleset 里的必需检查叫 `rust` ——
@@ -276,37 +197,9 @@ jobs:
           restore-keys: |
             cargo-${{ runner.os }}-
 
-      # ★ **2026-10-07 起这一档也跑 `workbench`**：它原来刻意不跑，理由是
-      #   `src/workbench/**` 里没有平台编译分支（在 Windows 上再跑一遍得不到新信息，
-      #   只多花一份 runner）。**那条理由到期了** —— 软件发布那一刀按宿主分流：
-      #   `release_tx.rs` 的 `installer_plan()`（macOS → dmg / Windows → NSIS）、
-      #   `npm_build()`（`npm` 在 Windows 上必须过一层 `cmd /C`，否则"程序找不到"）、
-      #   应用内更新的 `.app.zip` 只有 macOS 有。这几段在 macOS 上一行都不会被编译，
-      #   **只有这里能替它们把关**。当初那句"哪天工作台里出现了平台分支，这里要跟着加上"
-      #   就是这条改动的由来。
-      - name: clippy（默认 feature）
+      # 与本地同一入口：node scripts/check/run.mjs rust-windows。
+      # 含 fmt / 两组 clippy / 两组 test / 寻址扫描 / Windows 安装器独立 crate。
+      # 本地 `npm run check:rust-windows` 绿，CI 不应再因为同一条检查红。
+      - name: 检查（rust-windows，与本地同一入口）
         if: steps.scope.outputs.code == '1'
-        run: cargo clippy --all-targets -- -D warnings
-
-      - name: clippy（workbench）
-        if: steps.scope.outputs.code == '1'
-        run: cargo clippy --all-targets -p mkp-support-ease --features workbench -- -D warnings
-
-      - name: 测试（默认 feature）
-        if: steps.scope.outputs.code == '1'
-        run: cargo test
-
-      - name: 测试（workbench）
-        if: steps.scope.outputs.code == '1'
-        run: cargo test -p mkp-support-ease --features workbench
-
-      # The installer is a standalone Windows crate: the clippy/test jobs above never compile it.
-      # Dual-kernel payload and the --version self-report live here; skipping this let local simulation pass while real release broke.
-      - name: Installer check (Windows standalone crate)
-        if: steps.scope.outputs.code == '1'
-        env:
-          MKP_APP_VERSION: 0.0.0
-          CARGO_TARGET_DIR: target-installer
-        run: |
-          cargo check --manifest-path installer/Cargo.toml --bin mkp-installer
-          cargo check --manifest-path installer/Cargo.toml --bin mkp-uninstaller --features uninstall-only
+        run: npm run check:rust-windows

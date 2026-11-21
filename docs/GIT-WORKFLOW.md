@@ -69,7 +69,7 @@
 | Require linear history | 开（配 squash 合并） |
 | Block force pushes | 开 |
 | Restrict deletions | 开 |
-| Required status checks | `web`、`rust` 两个 job |
+| Required status checks | `web`、`rust-windows` 两个 job（`rust` 在 macOS 跑、不是必需，见 `.github/workflows/ci.yml` 与 `scripts/setup-ruleset.mjs`） |
 | **Do not allow bypassing** | **开** —— `bypass_actors` 是空数组，仓库 admin 也绕不过 |
 
 **tag（`tags-v-no-delete`）**：`refs/tags/v*` 只做 restrict deletions。
@@ -109,7 +109,7 @@
 git switch -c feat/<something>
 # 改、提交（闸①⑥⑦ 在守着）
 git push -u origin HEAD
-npm run pr              # 建 PR —— 标题取自最新提交
+npm run pr              # 建 PR / 更新同一个 PR（幂等是目标，见 RELEASE-RUNBOOK §1）
 npm run pr -- --merge   # 等 CI 全绿后 squash 合并
 ```
 
@@ -153,24 +153,20 @@ git push -u origin HEAD
 npm run pr -- --merge
 ```
 
-### 4.2 建 PR 的三条判据（`scripts/pr.mjs`）
+### 4.2 建 PR 的判据（`scripts/pr.mjs`）
 
-直接 `gh pr create` 会踩三个坑，脚本把它们钉住了：
-
-| 判据 | 规则 | 为什么 |
-| --- | --- | --- |
-| 分支 | `main` 不许；`chore/next-preview-*`、`chore/version-*`、`chore/next-dev-version` 不许 | 进号是本地动作，合并它等于把 main 的号往回拨 |
-| 标题 | **必须等于最新提交的主题** | 只允许 squash ⇒ main 上那一条的标题就是 PR 标题 |
-| 已有 PR | 标题对得上才复用；对不上就停 | 复用旧 PR 会让合并记录写着上一轮的内容 |
+不许直接 `gh pr create`。**目标协议**见 [`RELEASE-RUNBOOK.md`](RELEASE-RUNBOOK.md) §1：
+一个任务一个分支一个 PR；后续提交只更新原 PR；PR 标题独立，改标题走 `gh pr edit`，
+不关旧开新；CI 全绿才合并；进号分支不建 PR。
 
 ```bash
-npm run pr                  # 建 / 校验
-npm run pr -- --replace     # 标题对不上：关掉旧的开新的
-npm run pr -- --merge       # 建 + 等 CI + squash 合并
+npm run pr                  # 建 / 更新同一个 PR（幂等）
+npm run pr -- --merge       # 等 CI 全绿后 squash 合并
 npm run pr -- --list        # 看还有哪些 PR 开着（收旧 PR 用）
 ```
 
-PR 正文由 `origin/main..HEAD` 的提交列表自动生成 —— 手写正文正是"标题与内容对不上"的来源。
+`scripts/pr.mjs` 已按目标协议实现：按分支查 `--state all`，open 复用、merged 直接返回；
+标题取 `--title` / 最早提交 / 分支名，不再跟最新提交绑定。
 判据本身有自检：`node scripts/check-pr.mjs`（在 `npm run lint` 里）。
 
 ### 4.3 三道会把时间翻倍的闸
@@ -192,7 +188,7 @@ PR 正文由 `origin/main..HEAD` 的提交列表自动生成 —— 手写正文
 所以 `presets publish` **不能**当"攒批中的一步"：它推的那一下会把当前分支上
 所有未推的提交一起带上去。要省轮次就把排在它后面的改动先做完，或者接受多一轮。
 
-### 4.5 时间账（2026-11-12 实测）
+### 4.5 时间账（2026-11-12 实测；阶段耗时口径见 RELEASE-RUNBOOK §7）
 
 | 环节 | 耗时 | 备注 |
 | --- | --- | --- |

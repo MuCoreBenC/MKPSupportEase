@@ -18,16 +18,16 @@
  * | 判据 | 规则 |
  * |---|---|
  * | 分支 | `main` 不许；`chore/next-preview-*`、`chore/version-*`、`chore/next-dev-version` 不许（进号不 PR） |
- * | 标题 | **必须**等于最新提交的主题 —— squash 之后 main 上那一条就是它 |
- * | 已有 PR | 标题对得上才复用；对不上就停，给 `--replace` 让你显式换 |
+ * | 标题 | **PR 自己的属性**：`--title` 显式给 > 分支最早提交 > 分支名；后续提交不改它 |
+ * | 已有 PR | 同一个分支只复用 / 更新同一个 PR，**绝不因标题变化关旧开新** |
  *
  * # 用法
  *
  * ```bash
- * npm run pr                  # 建 / 校验已有 PR（标题取最新提交）
- * npm run pr -- --replace     # 标题对不上时：关掉旧的开新的
+ * npm run pr                  # 建 / 更新同一个 PR
+ * npm run pr -- --title "…"   # 显式改标题（走 gh pr edit，不重开）
  * npm run pr -- --merge       # 建 + 等 CI 全绿 + squash 合并
- * npm run pr -- --list        # 列出 open PR（含标题与提交数），收旧 PR 用
+ * npm run pr -- --list        # 列出 open PR（含标题与提交数）
  * ```
  *
  * # 它不做的事
@@ -72,26 +72,20 @@ export function refusalFor(branch) {
 }
 
 /**
- * PR 标题该是什么：**最新提交的主题**。
+ * PR 标题该是什么：**PR 自己的属性**，不跟最新提交走。
  *
- * 理由：仓库只允许 squash 合并，main 上那一条提交的标题就是 PR 标题。
- * 标题与最新提交不一致 ⇒ 合并后的历史指向别的东西。
+ * 取值顺序：`--title` 显式给的 > 分支上**最早**那条提交的主题 > 分支名。
+ * 用最早那条而不是最新，是因为后续修复提交不该把已经开着的 PR 标题顶掉。
  */
+export function prTitleFrom({ explicit, firstCommit, branch }) {
+  return titleFor(explicit) || titleFor(firstCommit) || titleFor(branch)
+}
+
+/** 空白归一；只做这一件事，不做业务判断。 */
 export function titleFor(subject) {
   return String(subject || '')
     .replace(/\s+/g, ' ')
     .trim()
-}
-
-/**
- * 已有 PR 的标题与最新提交对不上时，返回一句为什么；对得上返回 `null`。
- */
-export function titleMismatch(prTitle, subject) {
-  const want = titleFor(subject)
-  const got = titleFor(prTitle)
-  if (!want) return '最新提交没有主题，取不出标题'
-  if (got === want) return null
-  return `PR 标题「${got}」≠ 最新提交「${want}」—— 合并后 main 上那一条会是旧标题`
 }
 
 /* ---------- 命令 ---------- */
@@ -120,8 +114,18 @@ const info = (m) => console.log(`  ${m}`)
 async function main() {
   const args = argv.slice(2)
   const has = (f) => args.includes(f)
+  const argOf = (name) => {
+    const i = args.indexOf(name)
+    if (i >= 0) return args[i + 1] ?? ''
+    const pref = `${name}=`
+    const eq = args.find((a) => a.startsWith(pref))
+    return eq ? eq.slice(pref.length) : null
+  }
 
   if (has('--list')) return listPrs()
+  if (has('--replace')) {
+    info('--replace 已退役：标题不再跟提交绑定，同一个 PR 只更新不关闭。')
+  }
 
   const branch = tryRun('git', ['branch', '--show-current'])
   if (!branch) die('取不到当前分支（在 detached HEAD 上？）')
@@ -134,37 +138,37 @@ async function main() {
     ])
   }
 
-  const subject = tryRun('git', ['log', '-1', '--format=%s'])
-  if (!subject) die('取不到最新提交')
-  const title = titleFor(subject)
-
   const dirty = tryRun('git', ['status', '--porcelain'])
   if (dirty) die('工作区不干净 —— 先提交，PR 里不该有未入库的东西', [dirty.split('\n').slice(0, 8).join('\n')])
 
   const ahead = tryRun('git', ['rev-list', '--count', 'origin/main..HEAD'])
   if (ahead === '0') die('这个分支相对 origin/main 没有提交，没什么可开的 PR')
 
-  /* 已有 PR：标题对得上才复用 */
-  const existing = openPrFor(branch)
+  /* 标题是 PR 自己的属性：显式给了就用；否则用**最早**那条提交（后续修复不改它）。 */
+  const firstCommit = (tryRun('git', ['log', '--reverse', '--format=%s', 'origin/main..HEAD']) || '')
+    .split('\n')
+    .filter(Boolean)[0]
+  const title = prTitleFrom({ explicit: argOf('--title'), firstCommit, branch })
+  if (!title) die('取不出 PR 标题：加 --title "..."')
+
+  /* 已有 PR（含已合并的）：只复用 / 更新，绝不因为标题变化关闭重开。 */
+  const existing = prForBranch(branch)
+  if (existing && existing.state === 'MERGED') {
+    ok(`#${existing.number} 已经合并过，不重复建 PR`)
+    info(existing.url)
+    return
+  }
   if (existing) {
-    const bad = titleMismatch(existing.title, title)
-    if (bad) {
-      if (!has('--replace')) {
-        die(bad, [
-          `旧 PR：#${existing.number}（${existing.url}）`,
-          `关掉重开：gh pr close ${existing.number} --comment "标题与当前内容不符，重开" && npm run pr`,
-          `或者一条命令：npm run pr -- --replace`,
-        ])
-      }
-      info(`关掉旧 PR #${existing.number}（标题对不上）`)
-      run('gh', ['pr', 'close', String(existing.number), '--comment', '标题与当前内容不符，按新提交重开'])
-      ok(`已关闭 #${existing.number}`)
-    } else {
-      ok(`复用已有 PR #${existing.number}（标题与最新提交一致）`)
-      info(existing.url)
-      if (has('--merge')) return await mergePr(existing.number, title)
-      return printNext()
+    ok(`复用已有 PR #${existing.number}`)
+    info(existing.url)
+    if (argOf('--title') !== null && existing.title !== title) {
+      run('gh', ['pr', 'edit', String(existing.number), '--title', title])
+      ok(`已更新 PR 标题：${title}`)
+    } else if (existing.title !== title) {
+      info(`保留已有标题：${existing.title}（改标题请显式传 --title）`)
     }
+    if (has('--merge')) return await mergePr(existing.number, existing.title)
+    return printNext()
   }
 
   const body = prBody()
@@ -178,7 +182,7 @@ async function main() {
   if (!created) die('gh pr create 失败（看上面的报错）')
   const url = created.split('\n').pop().trim()
   ok(`建好 PR：${url}`)
-  info(`标题（= 合并后 main 上的那一条）：${title}`)
+  info(`标题：${title}（后续提交不会改它；要改请 gh pr edit 或 --title）`)
 
   const number = tryRun('gh', ['pr', 'view', '--json', 'number', '--jq', '.number'])
   if (has('--merge')) {
@@ -196,16 +200,17 @@ function printNext() {
 `)
 }
 
-function openPrFor(branch) {
+function prForBranch(branch) {
   const out = tryRun('gh', [
     'pr', 'list',
     '--head', branch,
-    '--state', 'open',
-    '--json', 'number,title,url',
+    '--state', 'all',
+    '--json', 'number,title,url,state',
   ])
   if (!out) return null
   const list = JSON.parse(out || '[]')
-  return list[0] ?? null
+  /* 同分支可能既有已合并的旧 PR、又有新开的；优先 open。 */
+  return list.find((p) => p.state === 'OPEN') ?? list[0] ?? null
 }
 
 function prBody() {
@@ -222,7 +227,7 @@ function prBody() {
     '',
     '## 闸',
     '',
-    '- 标题 = 最新一条提交的主题（squash 之后 main 上那一条就是它）',
+    '- PR 标题是 PR 自己的属性；后续提交只更新同一个 PR，不关旧开新',
     '- 合并方式只有 squash；merge commit 被仓库规则拒绝',
   ].join('\n')
 }
@@ -251,11 +256,11 @@ async function mergePr(number, title) {
     await sleep(15000)
   }
 
-  // 合并前再核一次：推送中途改过提交就会在这里被抓住
-  const fresh = openPrFor(tryRun('git', ['branch', '--show-current']))
-  if (!fresh) die('合并前查不到 PR 了')
-  const bad = titleMismatch(fresh.title, tryRun('git', ['log', '-1', '--format=%s']))
-  if (bad) die(bad, ['CI 期间又推了提交，标题要跟着改：npm run pr -- --replace'])
+  // 合并前再核一次状态（标题不参与判断）
+  const fresh = prForBranch(tryRun('git', ['branch', '--show-current']))
+  if (!fresh || fresh.number !== number || fresh.state !== 'OPEN') {
+    die('合并前查不到这个仍开着的 PR 了')
+  }
 
   run('gh', ['pr', 'merge', String(number), '--squash', '--delete-branch'])
   ok(`已 squash 合并 #${number}`)
@@ -280,7 +285,7 @@ function listPrs() {
     console.log(`         ${p.title}`)
     console.log(`         开了 ${days} 天\n`)
   }
-  console.log('  标题与分支当前内容对不上的，关掉重开：gh pr close <n> && npm run pr\n')
+  console.log('  同一个分支只会有一个 PR；要改标题：gh pr edit <n> --title "..."（不关旧开新）\n')
 }
 
 function sleep(ms) {
