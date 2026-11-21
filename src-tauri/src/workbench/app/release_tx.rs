@@ -114,22 +114,32 @@ pub struct InstallerPlan {
     pub dir: &'static str,
     /// 认的产物后缀，同时也是 asset 命名的后缀（`dmg` / `exe`）
     pub ext: &'static str,
+    /// 写进清单 `assets[].platform` 的词（与客户端 `host_platform()` 同一词表）
+    pub platform: &'static str,
+    /// 写进清单 `assets[].kind`
+    pub kind: &'static str,
     /// 给人看的一句话
     pub label: &'static str,
 }
 
 /// 本机能打什么。**别的一律 `None`** —— 不假装能构建，也不悄悄换一种产物顶上。
+///
+/// ★ 平台与类型在这里**一次定死**，清单、上传、核验都读它，不在别处再判一遍。
 pub fn installer_plan() -> Option<InstallerPlan> {
     if cfg!(target_os = "macos") {
         Some(InstallerPlan {
             dir: "dmg",
             ext: "dmg",
+            platform: "macos",
+            kind: "dmg",
             label: "dmg",
         })
     } else if cfg!(target_os = "windows") {
         Some(InstallerPlan {
             dir: "nsis",
             ext: "exe",
+            platform: "windows",
+            kind: "nsis",
             label: "NSIS 安装包",
         })
     } else {
@@ -471,6 +481,43 @@ fn mirrored_asset(
         kind: Some(kind.to_owned()),
         sources: Some(sources),
     }
+}
+
+/// 把**这一趟真的在 Release 上**的产物摊成清单资产（纯函数）。
+///
+/// 平台、类型、文件名、字节数、SHA-256 全部来自产物自己；这一层只补两个下载地址。
+/// 于是"macOS 的 dmg 被标成 windows/nsis"那种错没有地方可以发生 —— 这里没有字面量可写。
+fn manifest_assets(
+    on_release: &[&BuiltArtifact],
+    owner: &str,
+    repo: &str,
+    tag: &str,
+    github: Option<&(String, String)>,
+) -> Vec<crate::runtime::release_info::ReleaseAsset> {
+    on_release
+        .iter()
+        .map(|a| {
+            let gitee = format!(
+                "https://gitee.com/{owner}/{repo}/releases/download/{tag}/{}",
+                a.name
+            );
+            let mirror = github.map(|(o, r)| {
+                format!(
+                    "https://github.com/{o}/{r}/releases/download/{tag}/{}",
+                    a.name
+                )
+            });
+            mirrored_asset(
+                &a.name,
+                gitee,
+                a.size,
+                a.sha256.clone(),
+                a.platform,
+                a.kind,
+                mirror,
+            )
+        })
+        .collect()
 }
 
 /// **打了 tag 就得让清单同代，且通道身份一致**（2026-11-05；预览通道同日补）。
@@ -863,17 +910,27 @@ fn run_inner(
 
     /* ---------- ⑦ 构建 + 产物自报版本核对（**tag 仍未创建**） ---------- */
 
-    let (built, portable) = if opts.build && !info_only {
-        let built = build_installer(repo_root)?;
+    /* 本次发布**唯一**的产物列表：安装包 + 绿色版（Windows）+ 应用内更新包（macOS）。
+    名字 / 大小 / SHA-256 / 平台 / 类型都在造它的那一刻定下；上传与写清单都只遍历这一份。 */
+    let mut artifacts: Vec<BuiltArtifact> = Vec::new();
+    if opts.build && !info_only {
+        artifacts.push(build_installer(repo_root)?);
         /* ★ **构建完先问一遍产物自己是谁**（2026-11-06 作者：「你这都是 0.0.4 了，
         里面还显示 0.0.3，那不是很不合理吗？」）。核对不过就停在 Built 之前 ——
         不建 tag、不建 Release、不上传、不写清单：宁可这一趟失败，也不发一个"名不副实"的包。 */
         assert_artifact_speaks_version(repo_root, &version)?;
-        let portable = if cfg!(target_os = "windows") {
-            Some(build_portable(repo_root, &version)?)
-        } else {
-            None
-        };
+        if cfg!(target_os = "windows") {
+            artifacts.push(build_portable(repo_root, &version)?);
+        }
+        if cfg!(target_os = "macos") {
+            /* 打不出 .app.zip **不挡发版**：这一版退回「打开下载页」，清单里就没有它。 */
+            match build_app_zip(repo_root, &version) {
+                Ok(z) => artifacts.push(z),
+                Err(e) => report.summary.push_str(&format!(
+                    "打不出应用内更新的 zip（{e}）—— 这一版退回「打开下载页」。"
+                )),
+            }
+        }
         /* 构建期间 HEAD 被切走 ⇒ 这个包不是构建基线那一笔的产物，不许往上挂 */
         let now = git.rev_parse("HEAD")?;
         if now != build_head {
@@ -883,21 +940,19 @@ fn run_inner(
                 short_sha(&now),
             )));
         }
-        (Some(built), portable)
     } else {
         report.summary.push_str("（本次不构建安装包）");
-        (None, None)
-    };
-    if let Some(built) = &built {
+    }
+    if let Some(b) = artifacts.iter().find(|a| a.kind != "portable") {
         report.artifact = Some(ArtifactInfo {
-            name: built.name.clone(),
-            size: built.size,
-            path: built.path.display().to_string(),
+            name: b.name.clone(),
+            size: b.size,
+            path: b.path.display().to_string(),
         });
         report.stage = ReleaseStage::Built;
-        report.summary.push_str(&format!("已构建 {}。", built.name));
+        report.summary.push_str(&format!("已构建 {}。", b.name));
     }
-    if let Some(p) = &portable {
+    if let Some(p) = artifacts.iter().find(|a| a.kind == "portable") {
         report.portable = Some(ArtifactInfo {
             name: p.name.clone(),
             size: p.size,
@@ -905,8 +960,8 @@ fn run_inner(
         });
     }
 
-    if let Some(b) = built.as_ref() {
-        validate_built_artifacts(b, portable.as_ref(), &version)?;
+    if !artifacts.is_empty() {
+        validate_built_artifacts(&artifacts, &version)?;
     }
 
     /* ---------- ⑧ 构建与产物校验都过了，才创建并推送 tag ---------- */
@@ -994,10 +1049,11 @@ fn run_inner(
         return Ok(report);
     }
 
-    /* ---------- ⑩ 建 Release + 上传安装包（M6：走 Gitee 发布通道） ---------- */
+    /* ---------- ⑩ 建 Release + 上传**产物列表里的每一份**（M6：主地址 Gitee） ---------- */
 
-    // ★ **架构规则**（总纲 §5-M6）：软件版本 Release 的主地址在 Gitee；
-    //   GitHub 由 `release.mjs` 事后镜像同字节资产，清单写 `sources.github`。
+    // ★ **架构规则**（总纲 §5-M6）：软件版本 Release 的主地址在 Gitee。
+    //   macOS 的 `.app.zip` 与 Windows 的绿色版走**同一条上传路径** —— 不再有"上传完
+    //   再单独打一个 zip"的第二段：那样它永远进不了同一个列表，镜像也就跟着漏。
     let Some(ch) = release else {
         return Err(AppError::invalid_argument(
             "软件版本的 Release 与安装包发布到 Gitee（总纲 §5-M6）——              先在设置里配好 Gitee 发布账户（仓库地址 / 用户名 / Token）",
@@ -1018,107 +1074,58 @@ fn run_inner(
     report.stage = ReleaseStage::ReleaseCreated;
     report.summary.push_str("已建 Release。");
 
+    /* 这一趟**真的在 Release 上**的那些 —— 清单只写它们，不写没传上去的名字。 */
+    let mut on_release: Vec<&BuiltArtifact> = Vec::new();
     if info_only {
         report
             .summary
             .push_str("产物已在 Release 上，这一趟只补 release.json，不重传。");
     } else {
-        let Some(built) = built.as_ref() else {
+        if artifacts.is_empty() {
             return Err(AppError::invalid_argument(
                 "这一趟没有构建产物，不能建 Release / 上传；先构建再发",
             ));
-        };
-        let uploaded = ch.hosting.upload_asset(&super::platform::AssetUpload {
-            owner: g.owner.clone(),
-            repo: g.repo.clone(),
-            release_id: release.id,
-            name: built.name.clone(),
-            content_type: super::platform::content_type_for(&built.name).to_owned(),
-            path: built.path.clone(),
-        })?;
-        report.stage = ReleaseStage::AssetUploaded;
-        report.summary.push_str(&format!(
-            "已上传 {}（{} 字节）。",
-            uploaded.name, uploaded.size
-        ));
-        if let Some(p) = portable.as_ref() {
+        }
+        for a in &artifacts {
             let put = ch.hosting.upload_asset(&super::platform::AssetUpload {
                 owner: g.owner.clone(),
                 repo: g.repo.clone(),
                 release_id: release.id,
-                name: p.name.clone(),
-                content_type: "application/zip".to_owned(),
-                path: p.path.clone(),
-            })?;
+                name: a.name.clone(),
+                content_type: super::platform::content_type_for(&a.name).to_owned(),
+                path: a.path.clone(),
+            });
+            match put {
+                Ok(p) => {
+                    /* **回执必须与本地产物一致**：大小对不上说明传上去的不是这一份
+                    （截断 / 换了文件），清单写下去客户端永远校验不过。 */
+                    if p.size != a.size {
+                        return Err(AppError::invalid_argument(format!(
+                            "{} 上传回执 {} 字节，本地 {} 字节 —— 传上去的不是这一份，不写清单",
+                            a.name, p.size, a.size
+                        )));
+                    }
+                    report
+                        .summary
+                        .push_str(&format!("已上传 {}（{} 字节）。", p.name, p.size));
+                    on_release.push(a);
+                }
+                /* `.app.zip` 传不上去**不挡发版**：这一版退回「打开下载页」。
+                其余产物传不上去是硬错 —— 清单不能宣告一个下不到的地址。 */
+                Err(e) if a.kind == "appZip" => report.summary.push_str(&format!(
+                    "应用内更新的 zip 传不上去（{e}）—— 这一版退回「打开下载页」。"
+                )),
+                Err(e) => return Err(e),
+            }
+        }
+        if on_release.iter().any(|a| a.kind != "appZip") {
+            report.stage = ReleaseStage::AssetUploaded;
+        }
+        if !on_release.iter().any(|a| a.kind == "appZip") && cfg!(target_os = "macos") {
             report
                 .summary
-                .push_str(&format!("已上传绿色版 {}（{} 字节）。", put.name, put.size));
+                .push_str("这一版客户端走「打开下载页」（没有应用内更新的 zip）。");
         }
-    }
-
-    /* ---------- ⑧之二  应用内更新用的 `.app.zip`（第五刀；**只有 macOS 有这条路**） ---------- */
-    //
-    // dmg 是"给人手动装的"，zip 是"给程序自己下载并替换的" —— 两种用途，两个文件。
-    // ★ 这一步**失败不挡发版**：打不出 zip 就如实说"这一版只能打开下载页"，
-    //   release.json 里就没有 `asset`，客户端照旧退回那条路（比整个发版失败好）。
-    //
-    // ★ 2026-10-07：客户端那条应用内更新（`runtime::updater`）替换的是
-    //   `/Applications/SupportEase.app`，靠系统 `ditto` / `unzip` —— **它只认 macOS**。
-    //   Windows 版没有对应的替换路径（NSIS 静默安装那套客户端还没接），所以这里**不做**、
-    //   `release.json` 里也就没有 `asset`：客户端的 Windows 版走"打开下载页"，
-    //   而 Release 页上那份 `.exe` 就在那儿。**不假装打一个 zip 出来顶上。**
-    if cfg!(target_os = "macos") {
-        match build_app_zip(repo_root, &version) {
-            Ok(zip) => {
-                let zip_name = zip.name.clone();
-                match ch.hosting.upload_asset(&super::platform::AssetUpload {
-                    owner: g.owner.clone(),
-                    repo: g.repo.clone(),
-                    release_id: release.id,
-                    name: zip.name.clone(),
-                    content_type: super::platform::content_type_for(&zip.name).to_owned(),
-                    path: zip.path.clone(),
-                }) {
-                    Ok(put) => {
-                        let sha = sha256_file(&zip.path).unwrap_or_default();
-                        // ★ 下载地址**用平台回给我们的那个**（`browser_download_url`），
-                        //   不自己拼 —— 2026-10-05 真机踩过：拼出来的
-                        //   `…/releases/tag/v0.0.4/download/v0.0.4/…` 多了一层 `/tag/{tag}`，
-                        //   GitHub 宽容地重定向了（能下），但**换到 Gitee 就未必**，
-                        //   而"平台告诉我们它的下载页在哪"是唯一跨平台可靠的说法。
-                        //   平台没给（某些 Gitee 版本）才回退到 Release 页。
-                        let url = if put.url.trim().is_empty() {
-                            release.url.clone()
-                        } else {
-                            put.url.clone()
-                        };
-                        report.zip = Some(crate::runtime::release_info::ReleaseAsset {
-                            name: zip_name.clone(),
-                            url,
-                            size: put.size,
-                            sha256: sha,
-                            platform: Some("macos".to_owned()),
-                            kind: Some("appZip".to_owned()),
-                            sources: None,
-                        });
-                        report.summary.push_str(&format!(
-                            "已上传 {zip_name}（{} 字节，应用内更新用）。",
-                            put.size
-                        ));
-                    }
-                    Err(e) => report.summary.push_str(&format!(
-                        "应用内更新的 zip 传不上去（{e}）—— 这一版退回「打开下载页」。"
-                    )),
-                }
-            }
-            Err(e) => report.summary.push_str(&format!(
-                "打不出应用内更新的 zip（{e}）—— 这一版退回「打开下载页」。"
-            )),
-        }
-    } else {
-        report
-            .summary
-            .push_str("应用内更新（.app.zip）只对 macOS 包做 —— 这一版客户端走「打开下载页」。");
     }
 
     /* ---------- ⑨ 写清单（`release.json` / `release-preview.json`）→ 它自己的分支与 PR
@@ -1143,68 +1150,11 @@ fn run_inner(
         Some(p) => (p.notes.clone(), p.url.clone()),
         None => (opts.notes.clone(), release.url.clone()),
     };
-    /* 双平台 / 双源资产：主地址 Gitee，`sources.github` 给选了 GitHub 的客户端。
-    Windows 两份（安装版 nsis + 绿色版 portable），macOS 仍是 `.app.zip`。 */
-    let mut platform_assets: Vec<crate::runtime::release_info::ReleaseAsset> = Vec::new();
+    /* 双平台 / 双源资产：**从同一份产物列表摊开** —— 平台与类型读产物自己带的那两个词，
+    不在这一层再判一次（从前这里写死 `windows/nsis`，macOS 的 dmg 就被标成 Windows）。
+    主地址 Gitee，`sources.github` 给选了 GitHub 的客户端。 */
     let gh = github_owner_repo(&git);
-    if let Some(b) = built.as_ref() {
-        let gitee = format!(
-            "https://gitee.com/{}/{}/releases/download/{}/{}",
-            g.owner, g.repo, tag, b.name
-        );
-        let github = gh.as_ref().map(|(o, r)| {
-            format!(
-                "https://github.com/{o}/{r}/releases/download/{tag}/{}",
-                b.name
-            )
-        });
-        platform_assets.push(mirrored_asset(
-            &b.name,
-            gitee,
-            b.size,
-            sha256_file(&b.path)?,
-            "windows",
-            "nsis",
-            github,
-        ));
-    }
-    if let Some(p) = portable.as_ref() {
-        let gitee = format!(
-            "https://gitee.com/{}/{}/releases/download/{}/{}",
-            g.owner, g.repo, tag, p.name
-        );
-        let github = gh.as_ref().map(|(o, r)| {
-            format!(
-                "https://github.com/{o}/{r}/releases/download/{tag}/{}",
-                p.name
-            )
-        });
-        platform_assets.push(mirrored_asset(
-            &p.name,
-            gitee,
-            p.size,
-            sha256_file(&p.path)?,
-            "windows",
-            "portable",
-            github,
-        ));
-    }
-    if let Some(z) = report.zip.as_ref() {
-        let mut z = z.clone();
-        if let Some(gitee) = z.sources.as_ref().and_then(|s| s.get("gitee")).cloned() {
-            z.url = gitee;
-        }
-        if let Some((o, r)) = gh.as_ref() {
-            z.sources.get_or_insert_with(Default::default).insert(
-                "github".to_owned(),
-                format!(
-                    "https://github.com/{o}/{r}/releases/download/{tag}/{}",
-                    z.name
-                ),
-            );
-        }
-        platform_assets.push(z);
-    }
+    let mut platform_assets = manifest_assets(&on_release, &g.owner, &g.repo, &tag, gh.as_ref());
     /* 只补清单（tag/产物都在）时没有新构建：保留上一份的 assets，一个字节都不改。 */
     if platform_assets.is_empty() {
         platform_assets = previous
@@ -1212,6 +1162,11 @@ fn run_inner(
             .and_then(|p| p.assets.clone())
             .unwrap_or_default();
     }
+    /* 老客户端的单资产入口（`asset` 格）就是 macOS 的应用内更新包 —— 从同一份列表里取。 */
+    report.zip = platform_assets
+        .iter()
+        .find(|a| a.kind.as_deref() == Some("appZip"))
+        .cloned();
     let assets_param = (!platform_assets.is_empty()).then_some(platform_assets.as_slice());
 
     let want_info = release_info_text(
@@ -1331,11 +1286,44 @@ const RELEASE_STAGE_CANDIDATES: [&str; 4] = [
     version::LOCK_REL,
 ];
 
-/// 构建出来的安装包（名字 + 大小 + 绝对路径）。
+/// 一份**已构建、可上传**的发布产物 —— 本次发布的**唯一产物事实**。
+///
+/// 平台、类型、文件名、字节数、SHA-256 在构建完成时一次填好：清单、上传器、
+/// 核验器都读这一份，谁也不再自己推导（从前清单处把平台写死成 Windows，macOS
+/// 的 dmg 就被标成了 `windows/nsis`）。
+#[derive(Debug, Clone)]
 struct BuiltArtifact {
     name: String,
     size: u64,
+    sha256: String,
     path: PathBuf,
+    platform: &'static str,
+    kind: &'static str,
+}
+
+impl BuiltArtifact {
+    /// 从刚构建出来的文件造一条产物事实。大小与 SHA **只在这里读一次**，
+    /// 之后写清单不再碰磁盘 —— 中间文件被换掉的话，清单写的就是别的东西了。
+    fn new(
+        path: PathBuf,
+        name: String,
+        platform: &'static str,
+        kind: &'static str,
+    ) -> Result<Self, AppError> {
+        let size = std::fs::metadata(&path).map(|m| m.len()).map_err(|e| {
+            AppError::io(format!("读不了刚构建的产物：{}", path.display()))
+                .with_detail(e.to_string())
+        })?;
+        let sha256 = sha256_file(&path)?;
+        Ok(Self {
+            name,
+            size,
+            sha256,
+            path,
+            platform,
+            kind,
+        })
+    }
 }
 
 /// 资产名取**磁盘上的真名**；取不到才退回模板。Windows 安装器是 `…-setup.exe`，
@@ -1397,13 +1385,10 @@ fn assert_no_stale_bundles(repo_root: &Path, version: &str) -> Result<(), AppErr
     )))
 }
 
-/// 构建后、打 tag 前核对：文件名必须是磁盘真名、大小必须与磁盘一致；
-/// 绿色版 zip 里必须真的有主程序与卸载器。**不含远端 SHA 回读**（那是 P1 的事）。
-fn validate_built_artifacts(
-    built: &BuiltArtifact,
-    portable: Option<&BuiltArtifact>,
-    version: &str,
-) -> Result<(), AppError> {
+/// 构建后、打 tag 前核对**每一份**产物：文件名必须是磁盘真名、大小必须与磁盘一致；
+/// 压缩包类还要真的解得开、里面有该有的东西。**SHA 不在这里重算** ——
+/// 它是 [`BuiltArtifact::new`] 在构建完成时读的那一份（同一时刻的事实，只读一次）。
+fn validate_built_artifacts(list: &[BuiltArtifact], version: &str) -> Result<(), AppError> {
     fn one(a: &BuiltArtifact, version: &str, label: &str) -> Result<(), AppError> {
         let meta = std::fs::metadata(&a.path)
             .map_err(|e| AppError::io(format!("{label}路径读不到")).with_detail(e.to_string()))?;
@@ -1436,25 +1421,43 @@ fn validate_built_artifacts(
         Ok(())
     }
 
-    one(built, version, "安装包")?;
-    if let Some(p) = portable {
-        one(p, version, "绿色版")?;
-        let f = std::fs::File::open(&p.path)
-            .map_err(|e| AppError::io("绿色版 zip 打不开").with_detail(e.to_string()))?;
+    /// zip 里的条目名（解不开 = 这一份不是能发的 zip）。
+    fn zip_names(a: &BuiltArtifact, label: &str) -> Result<Vec<String>, AppError> {
+        let f = std::fs::File::open(&a.path)
+            .map_err(|e| AppError::io(format!("{label} zip 打不开")).with_detail(e.to_string()))?;
         let mut archive = zip::ZipArchive::new(f)
-            .map_err(|e| AppError::io("绿色版不是合法 zip").with_detail(e.to_string()))?;
-        let names: Vec<String> = (0..archive.len())
+            .map_err(|e| AppError::io(format!("{label}不是合法 zip")).with_detail(e.to_string()))?;
+        Ok((0..archive.len())
             .filter_map(|i| archive.by_index(i).ok().map(|e| e.name().to_owned()))
-            .collect();
-        if !names.iter().any(|n| n.ends_with("SupportEase.exe")) {
-            return Err(AppError::invalid_argument(
-                "绿色版 zip 里没有 SupportEase.exe —— 解压出来不是能用的绿色版",
-            ));
-        }
-        if !names.iter().any(|n| n.contains("卸载")) {
-            return Err(AppError::invalid_argument(
-                "绿色版 zip 里没有卸载器 —— 缺了它用户没法干净卸载",
-            ));
+            .collect())
+    }
+
+    for a in list {
+        match a.kind {
+            "portable" => {
+                one(a, version, "绿色版")?;
+                let names = zip_names(a, "绿色版")?;
+                if !names.iter().any(|n| n.ends_with("SupportEase.exe")) {
+                    return Err(AppError::invalid_argument(
+                        "绿色版 zip 里没有 SupportEase.exe —— 解压出来不是能用的绿色版",
+                    ));
+                }
+                if !names.iter().any(|n| n.contains("卸载")) {
+                    return Err(AppError::invalid_argument(
+                        "绿色版 zip 里没有卸载器 —— 缺了它用户没法干净卸载",
+                    ));
+                }
+            }
+            "appZip" => {
+                one(a, version, "应用内更新包")?;
+                let names = zip_names(a, "应用内更新包")?;
+                if !names.iter().any(|n| n.contains(".app/")) {
+                    return Err(AppError::invalid_argument(
+                        "应用内更新包 zip 里没有 .app —— 客户端替换不了",
+                    ));
+                }
+            }
+            _ => one(a, version, "安装包")?,
         }
     }
     Ok(())
@@ -1638,17 +1641,12 @@ fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
                         .with_detail(String::from_utf8_lossy(&patched.stderr).trim().to_owned()));
                 }
             }
-            let size = std::fs::metadata(one).map(|m| m.len()).unwrap_or(0);
             /* 资产名必须用**磁盘上的真名**：Windows 自研安装器是 `…-setup.exe`，
             按 `asset_name()` 模板拼会得到 `…_x64.exe`，清单与实际附件就对不上。 */
             let name = artifact_name(one, || {
                 super::platform::asset_name(PRODUCT, &version_of(repo_root), arch_name(), plan.ext)
             });
-            Ok(BuiltArtifact {
-                name,
-                size,
-                path: one.clone(),
-            })
+            BuiltArtifact::new(one.clone(), name, plan.platform, plan.kind)
         }
         many => Err(AppError::io(format!(
             "bundle/{} 下不止一份 {} —— 自己确认要发哪一份",
@@ -1694,16 +1692,12 @@ fn build_portable(repo_root: &Path, version: &str) -> Result<BuiltArtifact, AppE
             "dist-portable 下没有 {version} 的绿色版 zip"
         )));
     };
-    let size = std::fs::metadata(one).map(|m| m.len()).unwrap_or(0);
-    Ok(BuiltArtifact {
-        name: one
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default()
-            .to_owned(),
-        size,
-        path: one.clone(),
-    })
+    let name = one
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_owned();
+    BuiltArtifact::new(one.clone(), name, "windows", "portable")
 }
 
 /// 走的是 `CreateProcess`，它**不会**替你补 `.cmd` 后缀 —— 直接起会报"程序找不到"。
@@ -1779,12 +1773,7 @@ fn build_app_zip(repo_root: &Path, version: &str) -> Result<BuiltArtifact, AppEr
         return Err(AppError::io("打包 .app.zip 失败")
             .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
     }
-    let size = std::fs::metadata(&zip_path).map(|m| m.len()).unwrap_or(0);
-    Ok(BuiltArtifact {
-        name,
-        size,
-        path: zip_path,
-    })
+    BuiltArtifact::new(zip_path, name, "macos", "appZip")
 }
 
 /// 文件的 SHA-256（小写十六进制；读不到就空字符串 —— 那就是"不校验"）
@@ -3280,6 +3269,8 @@ mod tests {
         releases: std::cell::RefCell<Vec<super::super::platform::ReleaseSpec>>,
         /// 发布仓库上这一版的附件名（判据按它造「补平台 / 发过了」两种局面）
         assets: std::cell::RefCell<Vec<String>>,
+        /// 这一趟真的被上传的文件名（按调用顺序）
+        uploads: std::cell::RefCell<Vec<String>>,
     }
 
     impl super::super::platform::Hosting for FakeHosting {
@@ -3356,10 +3347,13 @@ mod tests {
             &self,
             up: &super::super::platform::AssetUpload,
         ) -> Result<super::super::platform::UploadedAsset, AppError> {
+            self.uploads.borrow_mut().push(up.name.clone());
+            /* 回执大小照磁盘给：内核会拿它跟本地产物核对，写死一个数会让判据失真 */
+            let size = std::fs::metadata(&up.path).map(|m| m.len()).unwrap_or(0);
             Ok(super::super::platform::UploadedAsset {
                 name: up.name.clone(),
-                size: 42,
-                url: "https://fake/download".to_owned(),
+                size,
+                url: format!("https://fake/download/{}", up.name),
             })
         }
         fn release_assets(
@@ -3491,11 +3485,13 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let setup = d.path().join("SupportEase_0.0.13_x64-setup.exe");
         crate::fsx::atomic::atomic_write(&setup, b"setup").unwrap();
-        let built = BuiltArtifact {
-            name: "SupportEase_0.0.13_x64-setup.exe".to_owned(),
-            size: 5,
-            path: setup,
-        };
+        let built = BuiltArtifact::new(
+            setup,
+            "SupportEase_0.0.13_x64-setup.exe".to_owned(),
+            "windows",
+            "nsis",
+        )
+        .unwrap();
         let good_zip = d.path().join("SupportEase_0.0.13_x64-portable.zip");
         {
             /* 测试造 zip：zip writer 要 File，不走产品数据落盘。 */
@@ -3509,34 +3505,80 @@ mod tests {
             }
             zw.finish().unwrap();
         }
-        let portable = BuiltArtifact {
-            name: "SupportEase_0.0.13_x64-portable.zip".to_owned(),
-            size: std::fs::metadata(&good_zip).unwrap().len(),
-            path: good_zip,
-        };
-        assert!(validate_built_artifacts(&built, Some(&portable), "0.0.13").is_ok());
+        let portable = BuiltArtifact::new(
+            good_zip,
+            "SupportEase_0.0.13_x64-portable.zip".to_owned(),
+            "windows",
+            "portable",
+        )
+        .unwrap();
+        assert!(validate_built_artifacts(&[built.clone(), portable.clone()], "0.0.13").is_ok());
 
         let wrong = BuiltArtifact {
             name: "SupportEase_0.0.13_x64.exe".to_owned(),
-            size: built.size,
-            path: built.path.clone(),
+            ..built.clone()
         };
         assert!(
-            validate_built_artifacts(&wrong, Some(&portable), "0.0.13").is_err(),
+            validate_built_artifacts(&[wrong], "0.0.13").is_err(),
             "模板拼的名字必须被拒"
         );
 
         let empty_zip = d.path().join("SupportEase_0.0.13_x64-portable.zip");
         crate::fsx::atomic::atomic_write(&empty_zip, b"not a zip").unwrap();
-        let broken = BuiltArtifact {
-            name: "SupportEase_0.0.13_x64-portable.zip".to_owned(),
-            size: 9,
-            path: empty_zip,
-        };
+        let broken = BuiltArtifact::new(
+            empty_zip,
+            "SupportEase_0.0.13_x64-portable.zip".to_owned(),
+            "windows",
+            "portable",
+        )
+        .unwrap();
         assert!(
-            validate_built_artifacts(&built, Some(&broken), "0.0.13").is_err(),
+            validate_built_artifacts(&[built, broken], "0.0.13").is_err(),
             "坏 zip 必须被拒"
         );
+    }
+
+    /// 清单里的平台 / 类型 / SHA 必须**来自产物自己**：这一层没有字面量可写，
+    /// SHA 也不重算（重算就会把假的那一份盖掉 —— 判据正是要它盖不掉）。
+    #[test]
+    fn manifest_assets_come_from_the_artifact_not_from_literals() {
+        let d = tempfile::tempdir().unwrap();
+        let dmg = d.path().join("SupportEase_0.0.13_aarch64.dmg");
+        crate::fsx::atomic::atomic_write(&dmg, b"payload").unwrap();
+        let a = BuiltArtifact {
+            sha256: "deadbeef".to_owned(),
+            ..BuiltArtifact::new(
+                dmg,
+                "SupportEase_0.0.13_aarch64.dmg".to_owned(),
+                "macos",
+                "dmg",
+            )
+            .unwrap()
+        };
+        let gh = ("gh-owner".to_owned(), "gh-repo".to_owned());
+        let list = manifest_assets(&[&a], "o", "r", "v0.0.13", Some(&gh));
+        assert_eq!(
+            list[0].platform.as_deref(),
+            Some("macos"),
+            "不许被写成 windows"
+        );
+        assert_eq!(list[0].kind.as_deref(), Some("dmg"), "不许被写成 nsis");
+        assert_eq!(list[0].sha256, "deadbeef", "清单必须用产物里那一份 SHA");
+        assert!(list[0]
+            .url
+            .starts_with("https://gitee.com/o/r/releases/download/v0.0.13/"));
+        assert!(list[0].sources.as_ref().unwrap()["github"]
+            .starts_with("https://github.com/gh-owner/gh-repo/releases/download/v0.0.13/"));
+    }
+
+    /// 安装包平台词必须与客户端 `host_platform()` 同一套 —— 两边各写一个词就是归类错误的源头。
+    #[test]
+    fn installer_plan_speaks_the_client_platform_word() {
+        let Some(plan) = installer_plan() else {
+            return;
+        };
+        assert_eq!(plan.platform, crate::runtime::release_info::host_platform());
+        assert_eq!(plan.kind, if plan.ext == "dmg" { "dmg" } else { "nsis" });
     }
 
     /// 清单写入必须把 Windows 双源资产完整带上：客户端选 GitHub 时读的那一条不能丢。
