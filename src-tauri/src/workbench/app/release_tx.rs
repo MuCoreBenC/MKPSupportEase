@@ -1194,7 +1194,12 @@ struct BuiltArtifact {
     path: PathBuf,
 }
 
-/// **构建本平台的安装包**（`npm run tauri -- build`）。
+/// **构建本平台的安装包**。
+///
+/// macOS 走 `npm run tauri -- build`；Windows 走 `npm run build:installer` —— 自研安装器
+/// 的 payload 里有**两档内核**（安装版 / 绿色版），绿色版自更新写 `--portable` 那一支。
+/// 真发版若沿用 Tauri 的 NSIS 单内核包，绿色版更新会被装成安装版（数据根漂到
+/// `%APPDATA%`），所以两条链必须都走各自真正的构建命令。
 ///
 /// 走 npm script 而不是直接 `npx tauri`：那确保用的是本项目 `node_modules` 里那一版 CLI，
 /// 而不是 PATH 上碰巧存在的另一个。
@@ -1248,9 +1253,66 @@ fn assert_artifact_speaks_version(repo_root: &Path, want: &str) -> Result<(), Ap
     Ok(())
 }
 
-/// Windows：`exe` 的版本资源这一刀不动（那边由 NSIS 安装器与 Release 说明保证），
-/// 保留同名空实现，让调用点不必再写一遍平台分支。
-#[cfg(not(target_os = "macos"))]
+/// Windows：自研安装器在构建时把 `MKP_APP_VERSION` 编进 payload（`--version` 自报）。
+/// 这里真跑一遍刚编出来的 setup，把包里那个号与要发的号对账 —— 不再留空实现。
+#[cfg(target_os = "windows")]
+fn assert_artifact_speaks_version(repo_root: &Path, want: &str) -> Result<(), AppError> {
+    let dir = bundle_dir(repo_root, "nsis").ok_or_else(|| {
+        AppError::io("找不到 nsis 目录（构建说成功，但 bundle/nsis 下什么都没有）")
+            .with_detail(bundle_candidates_text(repo_root, "nsis"))
+    })?;
+    let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map_err(|e| AppError::io("读不了 nsis 目录").with_detail(e.to_string()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.is_file()
+                && p.extension().and_then(|s| s.to_str()) == Some("exe")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(PRODUCT))
+        })
+        .collect();
+    found.sort();
+    let setup = match found.as_slice() {
+        [one] => one,
+        [] => return Err(AppError::io("bundle/nsis 下没有安装包")),
+        many => {
+            return Err(AppError::io(format!(
+                "bundle/nsis 下有 {} 份安装包 —— 自己确认要发哪一份",
+                many.len()
+            ))
+            .with_detail(
+                many.iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join("、"),
+            ))
+        }
+    };
+    let out = std::process::Command::new(setup)
+        .arg("--version")
+        .output()
+        .map_err(|e| AppError::io("读不了安装包自报的版本").with_detail(e.to_string()))?;
+    if !out.status.success() {
+        return Err(AppError::io("安装包 --version 没成功返回")
+            .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
+    }
+    let got = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if got != want {
+        return Err(AppError::invalid_argument(format!(
+            "包内自报 {got}，这次要发的是 {want} —— 两个号不是同一个，发出去就对不上账"
+        ))
+        .with_detail(
+            "多半是改了版本号却没重新编译（`MKP_APP_VERSION` 是编译期常量）。\
+             重编一份再发：npm run build:installer"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// 非 macOS / 非 Windows 的兜底：没有本平台安装包链，保持空实现让调用点不必分支。
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
 fn assert_artifact_speaks_version(repo_root: &Path, want: &str) -> Result<(), AppError> {
     let _ = (repo_root, want);
     Ok(())
@@ -1334,7 +1396,7 @@ fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
     }
 }
 
-/// `npm run tauri -- build`。
+/// 构建本平台安装包：macOS `npm run tauri -- build`，Windows `npm run build:installer`。
 ///
 /// ★ **Windows 上必须过一层 `cmd /C`**：那边 `npm` 是 `npm.cmd`，而 `Command::new("npm")`
 /// 走的是 `CreateProcess`，它**不会**替你补 `.cmd` 后缀 —— 直接起会报"程序找不到"。
@@ -1347,8 +1409,15 @@ fn npm_build(repo_root: &Path) -> Result<std::process::Output, AppError> {
     } else {
         std::process::Command::new("npm")
     };
-    cmd.args(["run", "tauri", "--", "build"])
-        .current_dir(repo_root)
+    if cfg!(target_os = "windows") {
+        cmd.args(["run", "build:installer"]);
+    } else {
+        cmd.args(["run", "tauri", "--", "build"]);
+    }
+    cmd.current_dir(repo_root)
+        /* 工作台带着 `TAURI_CONFIG`（`tauri dev --config …` 注入的合并配置）；
+        不清掉的话客户端构建会读到工作台那套（空窗口清单），编出一颗装上没窗的包。 */
+        .env_remove("TAURI_CONFIG")
         .output()
         .map_err(|e| AppError::io("起不了 npm").with_detail(e.to_string()))
 }

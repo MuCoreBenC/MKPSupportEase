@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>SupportEase 安装程序</title>
+<style>
+  :root {
+    --accent: #20b25a;
+    --accent-hover: #1a9d4f;
+    --ink: #1f2328;
+    --muted: #8b939c;
+    --line: #e6e8eb;
+    --danger: #c8453c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body {
+    background: #fff;
+    font: 13px/1.55 "Microsoft YaHei UI", "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+
+  .win { width: 100vw; height: 100vh; display: flex; flex-direction: column; }
+
+  .titlebar {
+    height: 38px; flex: none; display: flex; align-items: center;
+    padding: 0 6px 0 14px; font-size: 11.5px; color: #1f2328;
+  }
+  .titlebar .name { display: flex; align-items: center; pointer-events: none; }
+  .titlebar .spacer { flex: 1; }
+  .titlebar .btns { display: flex; }
+  .titlebar button {
+    width: 30px; height: 26px; border: 0; background: none; cursor: pointer;
+    color: #7c848c; border-radius: 5px; font-size: 12px; font-family: inherit;
+  }
+  .titlebar button:hover { background: #f1f3f5; }
+  .titlebar button.close:hover { background: #e81123; color: #fff; }
+
+  .tbicon { width: 18px; height: 18px; display: block; margin-right: 7px; flex: none; }
+
+  .stage { flex: 1; display: none; flex-direction: column; align-items: center; justify-content: center; padding-bottom: 20px; }
+  .stage.on { display: flex; }
+
+  h1 { font-size: 27px; margin: 0; letter-spacing: .3px; }
+  .ver { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+
+  .primary {
+    margin-top: 22px; width: 216px; height: 42px; border: 0; border-radius: 999px;
+    background: var(--accent); color: #fff; font: inherit; font-size: 15px; font-weight: 600;
+    letter-spacing: .4px; cursor: pointer;
+    box-shadow: 0 7px 16px rgba(32, 178, 90, .24);
+  }
+  .primary:hover { background: var(--accent-hover); }
+  .primary:disabled { opacity: .55; cursor: default; }
+
+  .opts { margin-top: 20px; display: flex; gap: 26px; }
+  .opts label {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 12px; color: #4d565f; cursor: pointer;
+  }
+  input[type="checkbox"] {
+    appearance: none; width: 15px; height: 15px; margin: 0; flex: none; cursor: pointer;
+    border: 1.5px solid #cfd6db; border-radius: 4px; background: #fff; position: relative;
+  }
+  input[type="checkbox"]:hover { border-color: #b4bec6; }
+  input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+  input[type="checkbox"]:checked::after {
+    content: ""; position: absolute; left: 4px; top: 1px;
+    width: 3.5px; height: 7px; border: solid #fff; border-width: 0 1.8px 1.8px 0;
+    transform: rotate(45deg);
+  }
+
+  .path { margin-top: 14px; display: flex; gap: 7px; width: 452px; }
+  .path input {
+    flex: 1; font: inherit; font-size: 11.5px; color: #5a636c;
+    padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px;
+    background: #fafbfc; user-select: text;
+  }
+  .path input:focus { outline: none; border-color: #c3ccd4; background: #fff; }
+  .path button {
+    flex: none; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px;
+    background: #f4f6f8; color: #5a636c; font: inherit; font-size: 11.5px; cursor: pointer;
+  }
+  .path button:hover { background: #eceff2; }
+  .path button:disabled { opacity: .45; cursor: default; }
+
+  .note { margin: 12px 0 0; font-size: 11px; color: #a2a9b1; }
+  .note a { color: var(--accent); text-decoration: none; }
+  .note a:hover { text-decoration: underline; }
+
+  .pathfoot {
+    width: 452px; margin-top: 10px; display: flex; align-items: center;
+    justify-content: space-between; font-size: 11px;
+  }
+  .pathfoot .reset { color: var(--accent); text-decoration: none; cursor: pointer; }
+  .pathfoot .reset:hover { text-decoration: underline; }
+  .pathfoot .hint { color: #a2a9b1; }
+
+  /* 检测到已安装时的管理页 */
+  .installed-info { width: 452px; margin-top: 16px; }
+  .installed-info div {
+    display: flex; justify-content: space-between; gap: 16px;
+    padding: 5px 0; font-size: 12px; color: #5B6470;
+  }
+  .installed-info span { flex: none; color: #8b939c; }
+  .installed-info b {
+    font-weight: 500; max-width: 330px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  .installed-actions { width: 452px; margin-top: 16px; }
+  /* B：主按钮独占一行，卸载/取消并排；.stage 已整体居中，这里只收紧与提示语的间距 */
+  .installed-actions .primary { display: block; margin-top: 0; width: 100%; }
+  .installed-actions .row { display: flex; gap: 10px; margin-top: 10px; }
+  .installed-actions .ghost { flex: 1; }
+  .stage[data-stage="installed"] .lead { margin-top: 14px; }
+
+  /* 安装中 */
+  .installing h2 { font-size: 20px; margin: 14px 0 3px; font-weight: 600; }
+  .installing .sub { color: var(--muted); font-size: 11.5px; margin: 0 0 24px; }
+  .bar { width: 452px; height: 6px; border-radius: 99px; background: #eef1f3; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width .25s ease; }
+  .progressline {
+    width: 452px; margin-top: 9px; display: flex; justify-content: space-between;
+    font-size: 11px; color: var(--muted);
+  }
+  .error { color: var(--danger); font-size: 11.5px; margin-top: 12px; max-width: 452px; text-align: center; }
+
+  /* 完成 */
+  .tick {
+    width: 68px; height: 68px; border-radius: 50%; background: rgba(32, 178, 90, .12);
+    display: grid; place-items: center;
+  }
+  .tick svg { width: 32px; height: 32px; }
+  .done h2 { font-size: 21px; margin: 18px 0 4px; }
+  .done .sub { color: var(--muted); font-size: 11.5px; margin: 0 0 24px; }
+  .done .row { display: flex; gap: 10px; align-items: center; }
+  .ghost {
+    width: 110px; height: 42px; border-radius: 999px; border: 1px solid var(--line);
+    background: #fff; color: #4d565f; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .ghost:hover { background: #f7f8f9; }
+  .done .ghost { width: 96px; height: 40px; font-size: 12.5px; }
+  .lead { color: var(--muted); font-size: 12.5px; margin: 10px 0 0; }
+  .done .primary { margin-top: 0; width: 150px; height: 40px; font-size: 13.5px; }
+
+  /* 卸载 */
+  :root { --danger: #c8453c; --danger-hover: #b13a32; }
+  .danger {
+    width: 120px; height: 42px; border: 0; border-radius: 999px;
+    background: var(--danger); color: #fff; font: inherit; font-size: 14px; font-weight: 600;
+    letter-spacing: .4px; cursor: pointer; box-shadow: 0 7px 16px rgba(200, 69, 60, .22);
+  }
+  .danger:hover { background: var(--danger-hover); }
+  .keep {
+    margin-top: 20px; display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: #4d565f; cursor: pointer;
+  }
+  .row2 { display: flex; gap: 10px; margin-top: 26px; align-items: center; }
+  .tick.grey { background: #f0f2f4; }
+  .tick.grey svg { stroke: #6b7785; }
+  .un-done .sub { max-width: 420px; text-align: center; }
+
+  /* 深色（跟随系统） */
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #e8ecef; --muted: #838d96; --line: #33393f; }
+    body { background: #1d2125; }
+    .titlebar { color: #e8ecef; }
+    .titlebar button { color: #8a949c; }
+    .titlebar button:hover { background: #272c31; }
+    .titlebar button.close:hover { background: #e81123; color: #fff; }
+    .ver, .note { color: #78828a; }
+    .opts label { color: #b6bfc7; }
+    .path input { background: #24292e; border-color: #33393f; color: #b6bfc7; }
+    .path input:focus { background: #262b30; border-color: #4a525a; }
+    .path button { background: #272c31; border-color: #33393f; color: #b6bfc7; }
+    .path button:hover { background: #2f353a; }
+    input[type="checkbox"] { background: #24292e; border-color: #4a525a; }
+    .bar { background: #2c3238; }
+    .ghost { background: #24292e; border-color: #33393f; color: #b6bfc7; }
+    .tick { background: rgba(32, 178, 90, .16); }
+    .note a { color: #5ddc92; }
+  }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="titlebar" data-tauri-drag-region>
+    <span class="name" data-tauri-drag-region>
+      <img class="tbicon" src="{{ICON_BLACK}}" alt="" />
+      SupportEase 安装程序
+    </span>
+    <div class="spacer" data-tauri-drag-region></div>
+    <span class="btns">
+      <button id="min" title="最小化">─</button>
+      <button id="quit" class="close" title="关闭">✕</button>
+    </span>
+  </div>
+
+  <!-- 待安装（默认显示：即使 init 消息迟到也不会白屏） -->
+  <section class="stage on" data-stage="ready">
+    <h1>SupportEase</h1>
+    <div class="ver" id="ver">版本 —</div>
+    <button class="primary" id="go">快速安装</button>
+
+    <div class="opts">
+      <label><input type="checkbox" id="desktop" checked /> 创建桌面快捷方式</label>
+      <label><input type="checkbox" id="startmenu" checked /> 创建开始菜单快捷方式</label>
+    </div>
+
+    <div class="path">
+      <input type="text" id="dir" value="" spellcheck="false" />
+      <button id="browse">浏览...</button>
+    </div>
+
+    <div class="pathfoot">
+      <a class="reset" id="resetdir">恢复默认位置</a>
+      <span class="hint">不需要管理员权限 · 以 AGPL-3.0 许可发布</span>
+    </div>
+  </section>
+
+  <!-- 检测到已安装：管理页 -->
+  <section class="stage" data-stage="installed">
+    <h1>已安装 SupportEase</h1>
+    <div class="ver" id="instLead">检测到本机已有的安装</div>
+    <div class="installed-info">
+      <div><span>已安装版本</span><b id="instVer">—</b></div>
+      <div><span>此安装包版本</span><b id="instPkg">—</b></div>
+      <div><span>安装位置</span><b id="instLoc" title="">—</b></div>
+    </div>
+    <p class="lead" id="instHint"></p>
+    <div class="installed-actions">
+      <button class="primary" id="instReinstall">重新安装 / 升级</button>
+      <div class="row">
+        <button class="ghost" id="instUninstall">卸载</button>
+        <button class="ghost" id="instCancel">取消</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 卸载：确认（安装版有数据勾选项；绿色版整目录删除，运行时隐藏它） -->
+  <section class="stage" data-stage="un-confirm">
+    <h1 id="unTitle">卸载 SupportEase</h1>
+    <p class="lead" id="unLead">会从本机移除 SupportEase 程序本身。</p>
+    <label class="keep" id="wipeRow"><input type="checkbox" id="wipe" /> 同时删除预设、校准记录和日志</label>
+    <div class="row2">
+      <button class="ghost" id="un-cancel">取消</button>
+      <button class="danger" id="un-go">卸载</button>
+    </div>
+  </section>
+
+  <!-- 安装中 / 卸载中 -->
+  <section class="stage installing" data-stage="progress">
+    <h2 id="progTitle">正在安装</h2>
+    <p class="sub">马上就好，请不要关闭窗口。</p>
+    <div class="bar"><i id="fill"></i></div>
+    <div class="progressline"><span id="what">正在准备…</span><span id="pct">0%</span></div>
+    <p class="error" id="error"></p>
+  </section>
+
+  <!-- 完成 -->
+  <section class="stage done" data-stage="done">
+    <div class="tick">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#17924a" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m4 12.5 5 5L20 6.5"/></svg>
+    </div>
+    <h2>SupportEase 已经安装完成</h2>
+    <p class="sub">桌面和开始菜单里都能找到它。</p>
+    <div class="row">
+      <button class="ghost" id="close">关闭</button>
+      <button class="primary" id="launch">立即体验</button>
+    </div>
+  </section>
+
+  <!-- 卸载：完成 -->
+  <section class="stage done un-done" data-stage="un-done">
+    <div class="tick grey">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#6b7785" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m4 12.5 5 5L20 6.5"/></svg>
+    </div>
+    <h2>SupportEase 已卸载</h2>
+    <p class="sub" id="un-sub">关闭窗口后会自动清理安装文件夹。预设和校准记录已保留。</p>
+    <button class="ghost" id="un-close">关闭</button>
+  </section>
+</div>
+
+<script>
+  // 与 Rust 之间的唯一通道：postMessage(JSON) → WebView2 的 message 事件
+  const post = (msg) => window.chrome.webview.postMessage(msg)
+  const $ = (id) => document.getElementById(id)
+
+  // 0.0.11-preview.6 > 0.0.11-preview.5 > 0.0.11-preview.1，正式版高于同号预览版
+  function compareVersion(a, b) {
+    const pa = String(a).split(/[.-]/)
+    const pb = String(b).split(/[.-]/)
+    for (let i = 0; i < 3; i++) {
+      const d = (Number(pa[i]) || 0) - (Number(pb[i]) || 0)
+      if (d) return d
+    }
+    const na = pa[3] === 'preview' ? Number(pa[4]) || 0 : 999
+    const nb = pb[3] === 'preview' ? Number(pb[4]) || 0 : 999
+    return na - nb
+  }
+  const stage = (name) => {
+    document.querySelectorAll('.stage').forEach((s) => s.classList.toggle('on', s.dataset.stage === name))
+  }
+
+  const ICON_BLACK = '{{ICON_BLACK}}'
+  const ICON_WHITE = '{{ICON_WHITE}}'
+
+  $('min').onclick = () => post({ cmd: 'minimize' })
+  $('quit').onclick = () => post({ cmd: 'close' })
+  $('close').onclick = () => post({ cmd: 'close' })
+
+  // 无边框窗口拖动：交给系统的「非客户区」逻辑，鼠标移动由 Windows 接管
+  document.querySelector('.titlebar').addEventListener('mousedown', (e) => {
+    if (e.target.closest('button')) return
+    post({ cmd: 'drag' })
+  })
+
+  // 点一次就锁住，避免用户在对话框出来前连点堆一串请求
+  $('browse').onclick = () => {
+    if ($('browse').disabled) return
+    $('browse').disabled = true
+    setTimeout(() => post({ cmd: 'browse', current: $('dir').value }), 60)
+  }
+
+  $('resetdir').onclick = (e) => {
+    e.preventDefault()
+    post({ cmd: 'default-dir' })
+  }
+
+  $('launch').onclick = () => {
+    post({ cmd: 'launch', dir: $('dir').value })
+    post({ cmd: 'close' })
+  }
+
+  let finished = false
+  let mode = 'install'
+  let installed = null
+  let packageVersion = ''
+
+  window.chrome.webview.addEventListener('message', (e) => {
+    const m = e.data || {}
+    if (m.event === 'init') {
+      mode = m.mode === 'uninstall' ? 'uninstall' : 'install'
+      if (mode === 'uninstall') {
+        const name = document.querySelector('.titlebar .name')
+        name.lastChild.textContent = m.portable ? ' SupportEase 绿色版卸载' : ' SupportEase 卸载程序'
+        if (m.portable) {
+          // 绿色版没有"程序 / 数据"之分：删的就是当前文件夹，含 app-data/ 里的全部数据
+          $('unTitle').textContent = '卸载 SupportEase 绿色版'
+          $('unLead').textContent = '会删除当前文件夹里的程序与全部数据（预设 / 执行记录 / 缓存），没有单独保留选项。'
+          $('wipeRow').style.display = 'none'
+          $('un-sub').textContent = '关闭窗口后会自动删除当前文件夹及其中的全部数据。'
+        }
+        stage('un-confirm')
+      } else {
+        $('dir').value = m.dir || ''
+        $('ver').textContent = '版本 ' + (m.version || '')
+        packageVersion = m.version || ''
+        // 注册表结果随 init 一起回来：装过就走「已安装管理页」
+        const info = m.installed
+        if (info && info.state === 'installed') {
+          installed = info
+          $('instVer').textContent = info.version || '未知版本'
+          $('instPkg').textContent = packageVersion || '未知版本'
+          $('instLoc').textContent = info.location || ''
+          $('instLoc').title = info.location || ''
+          const cmp = compareVersion(info.version || '', packageVersion)
+          // 安装包更旧：不提供安装入口，只有卸载 / 取消
+          $('instReinstall').style.display = cmp > 0 ? 'none' : ''
+          $('instHint').textContent = cmp < 0
+            ? '可升级到 ' + packageVersion
+            : cmp > 0
+              ? '此安装包更旧，不能覆盖安装'
+              : '已是当前版本'
+          stage('installed')
+        } else {
+          stage('ready')
+        }
+      }
+    } else if (m.event === 'installed-info') {
+      if (m.state === 'installed') {
+        installed = m
+        $('instVer').textContent = m.version || '未知版本'
+        $('instLoc').textContent = m.location || ''
+        $('instLoc').title = m.location || ''
+        stage('installed')
+      } else {
+        stage('ready')
+      }
+    } else if (m.event === 'dir') {
+      if (m.path) $('dir').value = m.path
+      $('browse').disabled = false
+    } else if (m.event === 'dir-cancel') {
+      $('browse').disabled = false
+    } else if (m.event === 'progress') {
+      $('fill').style.width = m.pct + '%'
+      $('pct').textContent = m.pct + '%'
+      $('what').textContent = m.what || ''
+    } else if (m.event === 'done') {
+      if (!finished) {
+        finished = true
+        setTimeout(() => stage(mode === 'uninstall' ? 'un-done' : 'done'), 400)
+      }
+    } else if (m.event === 'error') {
+      finished = true
+      $('error').textContent = m.message || '操作失败'
+      setTimeout(() => {
+        stage(mode === 'uninstall' ? 'un-confirm' : 'ready')
+        $('go').disabled = false
+      }, 2200)
+    }
+  })
+
+  $('go').onclick = () => {
+    const dir = $('dir').value.trim()
+    if (!dir) return
+    $('go').disabled = true
+    $('error').textContent = ''
+    $('progTitle').textContent = '正在安装'
+    $('fill').style.width = '0%'
+    $('pct').textContent = '0%'
+    $('what').textContent = '正在准备…'
+    stage('progress')
+    post({
+      cmd: 'install',
+      dir,
+      desktop: $('desktop').checked,
+      startMenu: $('startmenu').checked,
+    })
+  }
+
+  $('instCancel').onclick = () => post({ cmd: 'close' })
+  $('instUninstall').onclick = () => {
+    post({
+      cmd: 'uninstall-existing',
+      location: installed?.location || '',
+      uninstallString: installed?.uninstallString || '',
+      generation: installed?.generation || '',
+    })
+    post({ cmd: 'close' })
+  }
+  $('instReinstall').onclick = () => {
+    if (installed?.location) $('dir').value = installed.location
+    $('go').textContent = '重新安装'
+    stage('ready')
+  }
+
+  $('un-cancel').onclick = () => post({ cmd: 'close' })
+  $('un-close').onclick = () => post({ cmd: 'close' })
+  $('un-go').onclick = () => {
+    $('error').textContent = ''
+    $('progTitle').textContent = '正在卸载'
+    $('fill').style.width = '0%'
+    $('pct').textContent = '0%'
+    $('what').textContent = '正在准备…'
+    stage('progress')
+    post({ cmd: 'uninstall', wipe: $('wipe').checked })
+  }
+  $('wipe').onchange = (e) => {
+    $('un-sub').textContent = e.target.checked
+      ? '预设、校准记录和日志已一起删除。关闭窗口后会自动清理安装文件夹。'
+      : '关闭窗口后会自动清理安装文件夹。预设和校准记录已保留。'
+  }
+
+  const mq = window.matchMedia('(prefers-color-scheme: dark)')
+  const paintIcon = () => {
+    document.querySelectorAll('img.tbicon').forEach((img) => {
+      img.src = mq.matches ? ICON_WHITE : ICON_BLACK
+    })
+  }
+  mq.addEventListener('change', paintIcon)
+  paintIcon()
+
+  post({ cmd: 'init' })
+</script>
+</body>
+</html>

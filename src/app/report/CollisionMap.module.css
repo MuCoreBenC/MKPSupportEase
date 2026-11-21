@@ -236,18 +236,43 @@
   border: 1px dashed var(--warn, #f59e0b);
 }
 
-/* 序号徽标（2026-11-19）：白底深字压在半透明红区上仍然读得清 */
-.badge circle {
-  fill: var(--surface-solid, #fff);
-  stroke: var(--text-1, #1f2328);
-  stroke-width: 1;
-  opacity: 0.96;
+/*
+ * 越界那一屏的箭头（2026-11-20）：白箭头在浅色板上根本看不见，且 3mm 的位移真长只有
+ * 两三个像素 —— 改成红填充 + 白描边，短位移按组件里的最小可见长度画。
+ * 碰撞那屏仍用 `.arrow` 那一支白箭头（2026-10-18 定的，不动）。
+ */
+.arrowHot {
+  fill: var(--danger);
+  stroke: #fff;
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
 }
 
-.badge text {
-  fill: var(--text-1, #1f2328);
+/*
+ * 序号徽标（2026-11-20）：**图容器里的绝对定位元素**，不再用 SVG `<text>` ——
+ * 放大看时数字与圆圈会分家（作者实测）。百分比坐标把位置钉在模型中心；
+ * 尺寸**跟着整张图一起放大**（不再用 --zoom-k 反算）—— 作者放大后又说「序号变小了
+ * 看不清了」：图里的箭头、网格都随缩放变大，徽标也必须一起变大才读得清。
+ */
+.badge {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  background: var(--surface-solid, #fff);
+  border: 1px solid var(--text-1, #1f2328);
+  color: var(--text-1, #1f2328);
+  font-size: 12px;
   font-weight: 600;
-  /* 字号由组件按画布宽算（与徽标半径同源），这里不写死 */
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  pointer-events: none;
 }
 
 /* 判据框：碰撞按这一块算（与塔的真实形状同一个外沿，所以画成虚线压在上面） */

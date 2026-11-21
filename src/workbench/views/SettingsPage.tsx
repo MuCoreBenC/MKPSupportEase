@@ -56,6 +56,8 @@ import type {
   PortConflict,
   PreviewPlan,
   PublishAccount,
+  PublishSnapshotStatus,
+  SnapshotApplyProgress,
 } from '../api'
 /* 主题那一档与"现在到底深还是浅"都在 `theme.ts` —— 这一页不自己再落一次 `data-theme` */
 import { setTheme, useResolvedDark, useThemePref } from '../theme'
@@ -247,6 +249,16 @@ export default function SettingsPage({ boot }: Props) {
   /* 交付进行中时，后端日志的最后一行 —— 编译要一两分钟，得有东西在动 */
   const [previewTail, setPreviewTail] = useState('')
   const [devNote, setDevNote] = useState<{ text: string; bad: boolean } | null>(null)
+  /* 「发布快照」：真编一版新版 + 安装包，测完完整还原 */
+  const [pubSnap, setPubSnap] = useState<PublishSnapshotStatus | null>(null)
+  const [snapBusy, setSnapBusy] = useState(false)
+  const [snapNote, setSnapNote] = useState<{ text: string; bad: boolean } | null>(null)
+  const [snapProgress, setSnapProgress] = useState<SnapshotApplyProgress | null>(null)
+  /*
+   * 模拟发布用哪一版：留空 = 快照基准 +1；填 `14` 这类简写或完整号就跳号。
+   * 解析与"必须比基准新"的判据全在后端，这里只负责把人打的原文送过去。
+   */
+  const [snapVersion, setSnapVersion] = useState('')
   /**
    * 现读一次状态。
    *
@@ -256,6 +268,9 @@ export default function SettingsPage({ boot }: Props) {
     try {
       const st = await wb.devSourceStatus()
       setDevSrc(st)
+      setPubSnap(await wb.publishSnapshotStatus().catch(() => null))
+      /* 编译进度也一并读：工作台重启后如果那一趟还在跑，页面得接上它的进度 */
+      setSnapProgress(await wb.publishSnapshotProgress().catch(() => null))
       /* 顺带问一次"这一版能不能交付"：按钮上的版本号与阻断原因都来自它 */
       setPreviewPlan(await wb.previewPreflight().catch(() => null))
     } catch (e) {
@@ -302,6 +317,8 @@ export default function SettingsPage({ boot }: Props) {
     try {
       const next = await wb.devSourceStop()
       setDevSrc(next)
+      /* 停服务会在后端自动还原快照 —— 把还原后的状态读回来 */
+      setPubSnap(await wb.publishSnapshotStatus().catch(() => null))
       setDevNote({ text: next.note ?? '已停止，端口已释放。', bad: false })
     } catch (e) {
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
@@ -309,6 +326,74 @@ export default function SettingsPage({ boot }: Props) {
       setDevBusy(false)
     }
   }
+
+  /** 「拍快照 / 模拟发布 / 还原 / 清理」共用的那一下 */
+  const runSnap = async (kind: 'take' | 'apply' | 'restore' | 'discard') => {
+    if (snapBusy) return
+    setSnapBusy(true)
+    setSnapNote(null)
+    /* 只有"真编确实在跑"才保持忙碌，交给下面的轮询收尾。
+       其余情况（拍快照 / 还原 / 起步就失败）一律在 finally 里立刻解锁 ——
+       少解一次，三颗按钮就会永久灰着，看起来像"点了没反应"。 */
+    let keepBusy = false
+    try {
+      const next =
+        kind === 'take'
+          ? await wb.publishSnapshotTake()
+          : kind === 'apply'
+            ? await wb.publishSnapshotApply(snapVersion.trim())
+            : kind === 'discard'
+              ? await wb.publishSnapshotDiscard()
+              : await wb.publishSnapshotRestore()
+      setPubSnap(next)
+      setSnapNote(null)
+      if (kind !== 'apply') {
+        void readDevSrc()
+        return
+      }
+      const p = await wb.publishSnapshotProgress().catch(() => null)
+      setSnapProgress(p)
+      keepBusy = p?.running === true
+      if (!keepBusy) {
+        setSnapNote({
+          text: p?.error ?? '编译进程没起来，看 target/publish-snapshot-apply.log',
+          bad: true,
+        })
+        void readDevSrc()
+      }
+    } catch (e) {
+      setSnapNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+      void wb.publishSnapshotStatus().then(setPubSnap).catch(() => undefined)
+    } finally {
+      if (!keepBusy) setSnapBusy(false)
+    }
+  }
+
+  /** 真编进行中：每秒问一次，结束那刻刷新整页状态 */
+  useEffect(() => {
+    if (snapProgress?.running !== true) return
+    const timer = window.setInterval(() => {
+      void wb
+        .publishSnapshotProgress()
+        .then((p) => {
+          setSnapProgress(p)
+          if (!p.running) {
+            window.clearInterval(timer)
+            setSnapBusy(false)
+            setSnapNote({
+              text:
+                p.finished === 'done'
+                  ? p.tail
+                  : (p.error ?? `停在 ${p.stage}`),
+              bad: p.finished !== 'done',
+            })
+            void readDevSrc()
+          }
+        })
+        .catch(() => undefined)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [snapProgress?.running, readDevSrc])
 
   /** 字节数 → 人话（文件表那一列） */
   const sizeText = (v: number | null): string => {
@@ -384,6 +469,18 @@ export default function SettingsPage({ boot }: Props) {
       await wb.openPath(dir)
     } catch (e) {
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    }
+  }
+
+  /** 「复制地址」：写剪贴板走 Rust（webview 那套要先有用户手势，await 过 IPC 就废了） */
+  const copyDevUrl = async () => {
+    const url = devSrc?.url
+    if (url === undefined || url === '') return
+    try {
+      await wb.copyText(url)
+      setDevNote({ text: `已复制 ${url}`, bad: false })
+    } catch {
+      setDevNote({ text: '剪贴板不可用，请手选复制。', bad: true })
     }
   }
 
@@ -902,6 +999,15 @@ export default function SettingsPage({ boot }: Props) {
               <button
                 type="button"
                 className={s.btn}
+                disabled={devSrc === null || devSrc.url === ''}
+                title="把这个地址填进客户端「设置 → 高级设置 → 预设数据源 → 自定义地址」"
+                onClick={() => void copyDevUrl()}
+              >
+                复制地址
+              </button>
+              <button
+                type="button"
+                className={s.btn}
                 disabled={devSrc === null}
                 onClick={() => void openDevRoot()}
               >
@@ -1014,6 +1120,89 @@ export default function SettingsPage({ boot }: Props) {
               >
                 在访达中打开安装包位置
               </button>
+            </div>
+
+            {/* ——— 发布快照：临时写一份新版 + 安装包，测完还原 ——— */}
+            <div className={s.vfield} style={{ marginTop: 10 }}>
+              <div className={s.vhead}>
+                <b>发布快照</b>
+                <span className={s.vkey}>
+                  {pubSnap === null
+                    ? '读取中……'
+                    : !pubSnap.active
+                      ? '没有快照'
+                      : pubSnap.applied
+                        ? `已模拟 ${pubSnap.simulatedVersion ?? ''}`
+                        : `已拍（${pubSnap.baseVersion ?? ''}）`}
+                </span>
+              </div>
+              <div className={s.vrow}>
+                <button
+                  type="button"
+                  className={s.btn}
+                  disabled={snapBusy || snapProgress?.running === true || pubSnap === null || pubSnap.active}
+                  onClick={() => void runSnap('take')}
+                >
+                  拍快照
+                </button>
+                <input
+                  type="text"
+                  className={s.inp}
+                  style={{ flex: '0 0 152px', width: 152 }}
+                  value={snapVersion}
+                  disabled={snapBusy || snapProgress?.running === true || pubSnap === null || !pubSnap.active}
+                  placeholder="指定号，如 14"
+                  aria-label="模拟发布版本号"
+                  title="留空 = 快照基准 +1；可填 14，或 0.0.11-preview.14 这样的完整号。必须比基准新。"
+                  onChange={(e) => setSnapVersion(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className={`${s.btn} ${s.btnPrimary}`}
+                  disabled={snapBusy || snapProgress?.running === true || pubSnap === null || !pubSnap.active}
+                  title="按指定号真编安装包，只对本地测试源生效，不打 tag"
+                  onClick={() => void runSnap('apply')}
+                >
+                  {snapBusy && snapProgress?.running === true
+                    ? '正在编译……'
+                    : '模拟发布'}
+                </button>
+                <button
+                  type="button"
+                  className={s.btn}
+                  disabled={snapBusy || snapProgress?.running === true || pubSnap === null || !pubSnap.active}
+                  onClick={() => void runSnap('restore')}
+                >
+                  还原
+                </button>
+                <button
+                  type="button"
+                  className={s.btn}
+                  disabled={snapBusy || snapProgress?.running === true || pubSnap === null || !pubSnap.active}
+                  title="丢掉快照，保留现在这一版（之后可以按当前状态重新拍一份）"
+                  onClick={() => void runSnap('discard')}
+                >
+                  清理快照
+                </button>
+                <span className={s.grow} />
+              </div>
+              {snapProgress?.running === true && (
+                <p className={`${s.vhelp} ${s.mono}`} style={{ opacity: 0.75 }}>
+                  {snapProgress.stage}：{snapProgress.tail}
+                </p>
+              )}
+              {pubSnap?.note !== undefined && pubSnap.note !== '' && (
+                <p className={s.vhelp}>{pubSnap.note}</p>
+              )}
+              {snapNote !== null && (
+                <p
+                  className={s.vhelp}
+                  style={snapNote.bad ? { color: 'var(--danger)' } : undefined}
+                >
+                  {snapNote.text}
+                </p>
+              )}
+              <p className={s.vhelp}>停服务会自动还原。</p>
             </div>
 
             {/* 诊断：只在这几处真有问题时出现，正常轮次差异不上来 */}

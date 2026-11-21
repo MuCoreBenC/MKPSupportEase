@@ -1,4 +1,7 @@
 {
+  "bundle": {
+    "targets": ["nsis"]
+  },
   "app": {
     "windows": [
       {
@@ -10,6 +13,7 @@
         "minHeight": 500,
         "resizable": true,
         "fullscreen": false,
+        "center": true,
         "transparent": false,
         "decorations": false,
         "additionalBrowserArgs": "--disable-component-update --disable-background-networking --disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection"

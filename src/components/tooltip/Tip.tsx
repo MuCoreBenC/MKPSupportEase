@@ -27,16 +27,25 @@ export interface TipProps {
   children?: ReactNode
   /** 读屏用：省略时用 text 本身 */
   ariaLabel?: string
+  /** 装饰性 `?`：不可聚焦、不进读屏，用在按钮 / 行名等已可聚焦的容器内部 */
+  decorative?: boolean
 }
 
-export default function Tip({ text, children, ariaLabel }: TipProps) {
+export default function Tip({ text, children, ariaLabel, decorative }: TipProps) {
+  const dot = children ?? (
+    <span
+      className={s.dot}
+      data-tip-dot
+      {...(decorative === true
+        ? { 'aria-hidden': true }
+        : { role: 'img', 'aria-label': ariaLabel ?? text, tabIndex: 0 })}
+    >
+      ?
+    </span>
+  )
   return (
     <span className={s.wrap} data-tip={text}>
-      {children ?? (
-        <span className={s.dot} role="img" aria-label={ariaLabel ?? text} tabIndex={0}>
-          ?
-        </span>
-      )}
+      {dot}
     </span>
   )
 }

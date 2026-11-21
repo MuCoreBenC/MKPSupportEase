@@ -295,7 +295,13 @@
  * ★ 别在这页再写定位相关的 class / 属性：绿底与时序只有一处定义（同上）。
  */
 
+/*
+ * 字段标题 + 可选 `?` 后缀。flex 居中让 `?` 与标题走和参数页 `.head` 同一套对齐
+ * （flex item 中线对齐），否则 block 下的 baseline 对齐会把圈压低一截。
+ */
 .fieldTitle {
+  display: flex;
+  align-items: center;
   font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-1);

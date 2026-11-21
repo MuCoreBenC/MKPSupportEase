@@ -15,7 +15,11 @@ import { execFileSync } from 'node:child_process'
 /* 必须通过的状态检查。名字与 .github/workflows/ci.yml 里两个 job 的 `name:` 逐字对应 ——
    写错不会报错，只会永远等一个不存在的检查。
    （建 ruleset 那一轮这里是空的：CI 还不存在，勾了第一个 PR 永远合不进去。） */
-const REQUIRED_CHECKS = ['web', 'rust', 'rust-windows']
+/* macOS 的 `rust` job 与 `rust-windows` 跑的是同一串 fmt / clippy(两档) / test(两档)，
+ * 但它排在公共 macOS runner 上，实测常常排队十几分钟、还会被 CANCELLED —— 发版等它
+ * 几次就是几个小时。必需检查只留 Windows 那份，macOS job 仍在（保留平台覆盖），
+ * 只是不再卡合并。 */
+const REQUIRED_CHECKS = ['web', 'rust-windows']
 
 const MAIN_RULESET = 'main-pr-only'
 const TAG_RULESET = 'tags-v-no-delete'

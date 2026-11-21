@@ -637,6 +637,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::apply_remote_update,
         // 软件更新（release.json）—— 与预设数据两条链：设置页「软件更新」块的两个口子
         ipc::catalog::get_app_version,
+        ipc::catalog::get_install_flavor,
         ipc::catalog::check_software_update,
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
@@ -657,6 +658,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 自动检查软件更新（设置页「软件更新」那一格；读口在 runtime::update_check）
         ipc::prefs::get_auto_check_update,
         ipc::prefs::set_auto_check_update,
+        // 更新渠道（2026-11-20）：自动检查按这一路挑清单，所以要落盘
+        ipc::prefs::get_update_channel,
+        ipc::prefs::set_update_channel,
         // 预设页偏好（2026-10-20）：「复制出来的也跟着云端更新」——
         // 落 AppState 的 presets 格；判据在身份账本与逐参数更新账那两个出口，不联网
         ipc::prefs::get_copies_follow_cloud,
@@ -853,6 +857,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::apply_remote_update,
         // 软件更新（release.json）—— 与上面那份清单一字不差
         ipc::catalog::get_app_version,
+        ipc::catalog::get_install_flavor,
         ipc::catalog::check_software_update,
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
@@ -870,6 +875,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 自动检查软件更新（设置页「软件更新」那一格；读口在 runtime::update_check）
         ipc::prefs::get_auto_check_update,
         ipc::prefs::set_auto_check_update,
+        // 更新渠道（2026-11-20）—— 与上面那份清单一字不差
+        ipc::prefs::get_update_channel,
+        ipc::prefs::set_update_channel,
         // 预设页偏好（2026-10-20）：与上面那份清单一字不差
         ipc::prefs::get_copies_follow_cloud,
         ipc::prefs::set_copies_follow_cloud,
@@ -1111,6 +1119,13 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::dev_source::wb_dev_source_clear_conflict,
         // 「打开交付目录」—— 路径由后端 DTO 给，界面不自己拼（2026-11-06）
         app::dev_source::wb_open_path,
+        // 「发布快照」：临时写一份本地新版清单 + 安装包，测完还原（只动覆盖层目录）
+        app::publish_snapshot::wb_publish_snapshot_status,
+        app::publish_snapshot::wb_publish_snapshot_take,
+        app::publish_snapshot::wb_publish_snapshot_apply,
+        app::publish_snapshot::wb_publish_snapshot_progress,
+        app::publish_snapshot::wb_publish_snapshot_restore,
+        app::publish_snapshot::wb_publish_snapshot_discard,
         // 本地预览交付事务：编译 → 清单 → 提交 → 打 tag → 滚到下一轮（不推送）
         app::preview_tx::wb_preview_preflight,
         app::preview_tx::wb_preview_deliver,

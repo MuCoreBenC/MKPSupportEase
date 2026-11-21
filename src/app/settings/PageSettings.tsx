@@ -601,6 +601,8 @@ export default function PageSettings({
   const [updateBusy, setUpdateBusy] = useState(true)
   /* 问更新读到的那份「当前版本」：即使远端问不到也要能显示它（它来自构建期，一定拿得到） */
   const [appVersion, setAppVersion] = useState('')
+  /* 哪一档：绿色版 / 安装版。版本号旁边摆出来，两档更新链不同 */
+  const [installFlavor, setInstallFlavor] = useState('')
 
   /*
    * **下载任务的状态**（2026-11-06 作者：下载完按钮还是「尝试测试版」，再点又重下一遍）。
@@ -693,6 +695,8 @@ export default function PageSettings({
   const [autoCheckUpdate, setAutoCheckUpdate] = useState<boolean | null>(null)
   const [autoCheckBusy, setAutoCheckBusy] = useState(false)
   const [autoCheckErr, setAutoCheckErr] = useState<Text | null>(null)
+  /* 「更新渠道」落盘失败时的那一句（成功不提示，选中态本身就是回执） */
+  const [channelErr, setChannelErr] = useState<Text | null>(null)
 
   /*
    * **备份与恢复**（2026-10-17 / 2026-11-09）。
@@ -767,11 +771,13 @@ export default function PageSettings({
     setUpdateBusy(true)
     setUpdateErr(null)
     try {
-      const [version, got] = await Promise.all([
+      const [version, flavor, got] = await Promise.all([
         api.getAppVersion().catch(() => ''),
+        api.getInstallFlavor().catch(() => ''),
         api.checkSoftwareUpdate(),
       ])
       setAppVersion(version || got.currentVersion)
+      setInstallFlavor(flavor)
       setUpdate(got)
       /* 顺手刷新共享快照：卡片要靠它判"已就绪的是不是这一版"，上次安装的账与
          日志路径也在这份里（`checkSoftwareUpdate` 只谈候选，这几格它不带） */
@@ -781,8 +787,12 @@ export default function PageSettings({
          如实留"没查到"，**并且把原因摆出来**（吞掉原因 = 失败和"没有新版"长一样） */
       setUpdate(null)
       setUpdateErr(errorText(e))
-      const v = await api.getAppVersion().catch(() => '')
+      const [v, flavor] = await Promise.all([
+        api.getAppVersion().catch(() => ''),
+        api.getInstallFlavor().catch(() => ''),
+      ])
       setAppVersion(v)
+      setInstallFlavor(flavor)
     } finally {
       setUpdateBusy(false)
     }
@@ -837,6 +847,37 @@ export default function PageSettings({
   useEffect(() => {
     void readAutoCheckUpdate()
   }, [readAutoCheckUpdate])
+
+  /** 更新渠道：打开这一页时读一次盘上那一格（不联网）。 */
+  const readUpdateChannel = useCallback(async () => {
+    try {
+      const got = await api.getUpdateChannel()
+      setChannelPick(got === 'preview' ? 'preview' : 'stable')
+      setChannelErr(null)
+    } catch {
+      /* 读不回来就按默认（正式版）显示，不挡整页 —— 下一次点选会重新落盘 */
+    }
+  }, [])
+
+  useEffect(() => {
+    void readUpdateChannel()
+  }, [readUpdateChannel])
+
+  /** 换渠道：先亮选中态，再落盘；写失败退回原来那一档并说明原因。 */
+  const pickChannel = async (next: 'stable' | 'preview') => {
+    const prev = channelPick
+    if (prev === next) return
+    setChannelPick(next)
+    setChannelErr(null)
+    try {
+      await api.setUpdateChannel(next)
+      /* 换路时后端把上一路的 pendingUpdate 作废了 —— 重问一次快照，胶囊不挂着旧结论 */
+      await refreshUpdate()
+    } catch (e) {
+      setChannelPick(prev)
+      setChannelErr(msg('settings.history.writeFailed', { detail: errorText(e) }))
+    }
+  }
 
   /** 在系统浏览器里打开 Release 页（**走命令**，不走 `<a>`） */
   const openReleasePage = async (url: string) => {
@@ -1003,6 +1044,8 @@ export default function PageSettings({
     track('update.autoCheck', { on: next })
     try {
       setAutoCheckUpdate(await api.setAutoCheckUpdate(next))
+      /* 后端关开关时清了 pendingUpdate —— 立刻重问快照，标题栏那枚胶囊当场消失 */
+      await refreshUpdate()
     } catch (e) {
       setAutoCheckErr(msg('settings.history.writeFailed', { detail: errorText(e) }))
     } finally {
@@ -1296,7 +1339,12 @@ export default function PageSettings({
    * 没带就退回普通那次检查的那一条（`upd`）。两种情形共用同一段版面，
    * 所以先把它们归成同一个形状 —— 下面的 JSX 里不再分叉。
    */
-  const picked = channels.find((c) => c.channel === channelPick) ?? channels[0]
+  /*
+   * 选哪一路就只画哪一路 —— **不拿另一路顶上**。
+   * 旧写法 `?? channels[0]` 会在"选了正式版、但只有测试版候选"时把测试版那张卡摆出来，
+   * 于是正式版页签下写着测试版的号。选中的那一路没有候选，就是"这一路没有新版本"。
+   */
+  const picked = channels.find((c) => c.channel === channelPick)
   const found =
     picked !== undefined
       ? {
@@ -1306,8 +1354,9 @@ export default function PageSettings({
           canInstall: picked.asset !== undefined,
           url: picked.url,
         }
-      : hasUpdate
+      : channelPick === 'stable' && hasUpdate
         ? {
+            /* 老后端 / 这次没带回候选：顶层那六个字段只按**正式版**判定，挂在正式版下 */
             channel: 'stable' as const,
             version: upd?.latestVersion ?? '—',
             notes: upd?.notes,
@@ -1315,6 +1364,8 @@ export default function PageSettings({
             url: jumpUrl,
           }
         : null
+  /** 当前选中那一路到底有没有新版（标题与版本行都按它，不按另一路） */
+  const channelHasUpdate = found !== null
   /* 这一版**已经下好了**：后端 `Ready` 里带着版本与通道，两格都对上才算 */
   const foundReady =
     found !== null &&
@@ -1494,11 +1545,12 @@ export default function PageSettings({
             <div className={s.updateHeadline}>
               {updateBusy ? (
                 <span className={s.updateIdle}>{tr('settings.update.checking')}</span>
-              ) : hasUpdate ? (
+              ) : channelHasUpdate ? (
                 <span className={s.updateFresh}>{tr('settings.update.hasNew')}</span>
               ) : upd !== null ? (
                 /* 「已是最新」是**好消息**（作者 2026-10-05：字体要绿的）；
-                   「没查到」才是灰的（不是坏消息，是不知道）。 */
+                   「没查到」才是灰的（不是坏消息，是不知道）。
+                   ★ 按**选中那一路**判：选了正式版、只有测试版候选时，这里仍是"已是最新"。 */
                 <span className={s.updateLatest}>{tr('settings.update.latest')}</span>
               ) : (
                 <span className={s.updateIdle}>{tr('settings.update.unknown')}</span>
@@ -1507,12 +1559,22 @@ export default function PageSettings({
 
             {/* 版本对照：当前 → 最新。当前版本一定拿得到（来自构建期） */}
             <p className={s.current}>
-              {hasUpdate
+              {channelHasUpdate && found !== null
                 ? tr('settings.update.versionTo', {
                     version: appVersion || '—',
-                    latest: upd.latestVersion ?? '—',
+                    latest: found.version,
                   })
                 : tr('settings.update.version', { version: appVersion || '—' })}
+              {installFlavor !== '' && (
+                <span
+                  className={s.badge}
+                  data-on={installFlavor === 'portable' ? 'true' : undefined}
+                >
+                  {installFlavor === 'portable'
+                    ? tr('settings.update.flavorPortable')
+                    : tr('settings.update.flavorInstalled')}
+                </span>
+              )}
             </p>
 
             {/* 更新说明：长文案时这块自己滚（`.notes` 封顶） */}
@@ -1597,7 +1659,11 @@ export default function PageSettings({
                 {tr('settings.update.autoCheck')}
                 <Tip text={tr('settings.update.autoCheckHint')} />
               </div>
-              <p className={s.current}>{tr('settings.update.autoCheckNote')}</p>
+              <p className={s.current}>
+                {channelPick === 'preview'
+                  ? tr('settings.update.autoCheckNotePreview')
+                  : tr('settings.update.autoCheckNote')}
+              </p>
             </div>
             <Switch
               checked={autoCheckUpdate ?? false}
@@ -1611,9 +1677,8 @@ export default function PageSettings({
           )}
 
           {/*
-           * 更新渠道（2026-11-10 第三版）：**一直都在**（作者：「那个切换不同版本，正式版
-           * 测试版的切换按钮呢」）。它是"跟着哪一路走"的偏好，不是"只有两条候选时才有"。
-           * 哪一路这趟没有候选 ⇒ 那一颗仍可点（换个渠道再检查），只是候选行会退回另一路。
+           * 更新渠道：选中态只认用户点过哪一颗。候选行仍可回退到另一路展示，
+           * 但那不能反过来改写这一格的选中状态 —— 否则只有测试版候选时，点正式版会被顶回去。
            */}
           <div className={`${s.field} ${s.fieldRow}`}>
             <div className={s.fieldText}>
@@ -1632,10 +1697,10 @@ export default function PageSettings({
                   key={c.id}
                   type="button"
                   role="radio"
-                  aria-checked={(picked?.channel ?? channelPick) === c.id}
+                  aria-checked={channelPick === c.id}
                   onClick={() => {
                     track('update.channel', { to: c.id })
-                    setChannelPick(c.id)
+                    void pickChannel(c.id)
                   }}
                 >
                   {tr(c.label)}
@@ -1643,6 +1708,9 @@ export default function PageSettings({
               ))}
             </div>
           </div>
+          {channelErr !== null && (
+            <p className={`${s.note} ${s.noteBad}`}>{say(channelErr)}</p>
+          )}
 
           {/*
            * 「上次更新没成」+ **安装日志在哪儿**：安装脚本在应用退出之后才跑，那时界面上

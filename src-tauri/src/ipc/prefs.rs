@@ -225,14 +225,72 @@ pub async fn get_auto_check_update(app: AppHandle) -> Result<bool, AppError> {
 /// 开关自动检查。落盘成功后广播一声 —— 前端那一格显示的永远是盘上真账。
 ///
 /// 关掉只影响「拉目录之后顺路查」；设置页手动点「重新检查」照旧可用。
+/// **关的同时清掉待更新账** —— 否则标题栏那枚胶囊是旧检查留下的，关了还挂着。
 #[tauri::command]
 pub async fn set_auto_check_update(app: AppHandle, enabled: bool) -> Result<bool, AppError> {
     traced("setAutoCheckUpdate", |_| {
         let root = internal_root(&app)?;
         let got = runtime::app_state::set_auto_check_update(&root, enabled)?;
+        if enabled {
+            runtime::update_check::reset_session_check();
+        } else if let Err(e) = runtime::app_state::set_pending_update(&root, None) {
+            /* 开关已经写进盘了，不能因为清账失败把它退回去 —— 如实记下，下次检查会覆盖 */
+            tracing::warn!("关自动检查时没清掉待更新账：{}", e.message);
+        }
         notify_app_state(&app);
         Ok(got)
     })
+}
+
+/* ---------- 更新渠道（2026-11-20）：设置页「更新渠道」那一格 ---------- */
+
+/// 用户选的更新渠道：`stable` / `preview`。**没选过 = `stable`**。
+///
+/// ★ 它住盘上而不是前端：自动检查（`runtime::update_check`）要按这条挑清单，
+///   只记在前端的话，重启就忘、自动检查永远只查正式版。
+#[tauri::command]
+pub async fn get_update_channel(app: AppHandle) -> Result<String, AppError> {
+    traced("getUpdateChannel", |_| {
+        let root = internal_root(&app)?;
+        Ok(channel_wire(runtime::app_state::update_channel(&root)?))
+    })
+}
+
+/// 换更新渠道：`stable` / `preview`。认不出就整次拒绝（不静默写成正式版）。
+#[tauri::command]
+pub async fn set_update_channel(app: AppHandle, channel: String) -> Result<String, AppError> {
+    traced("setUpdateChannel", |_| {
+        let root = internal_root(&app)?;
+        let parsed = channel_parse(&channel)?;
+        let got = runtime::app_state::set_update_channel(&root, parsed)?;
+        /* 胶囊是上一路的结论，换路即作废 —— 不清就会出现"切到正式版还挂着测试版的更新" */
+        if let Err(e) = runtime::app_state::set_pending_update(&root, None) {
+            tracing::warn!("换渠道时没清掉待更新账：{}", e.message);
+        }
+        /* 切完就能查：不放回名额的话，得重启客户端才可能收到另一路的通知 */
+        runtime::update_check::reset_session_check();
+        notify_app_state(&app);
+        Ok(channel_wire(got))
+    })
+}
+
+fn channel_wire(c: runtime::release_info::UpdateChannel) -> String {
+    match c {
+        runtime::release_info::UpdateChannel::Stable => "stable",
+        runtime::release_info::UpdateChannel::Preview => "preview",
+    }
+    .to_owned()
+}
+
+fn channel_parse(raw: &str) -> Result<runtime::release_info::UpdateChannel, AppError> {
+    match raw.trim() {
+        "stable" => Ok(runtime::release_info::UpdateChannel::Stable),
+        "preview" => Ok(runtime::release_info::UpdateChannel::Preview),
+        other => Err(AppError::invalid_argument(messages::text(
+            "ui.ipc.prefs.493",
+            &[("channel", other)],
+        ))),
+    }
 }
 
 /* ---------- 界面语言（2026-10-25）：设置页「界面语言」那一块 ---------- */

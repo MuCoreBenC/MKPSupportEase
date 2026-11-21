@@ -396,6 +396,12 @@ impl Git {
         if allow_main {
             cmd.env("ALLOW_PUSH_MAIN", "1");
         }
+        // 闸⑤（pre-push）只认发布事务推的 tag：`push_tag` 那条不带认证的路径已经带了
+        // `MKP_RELEASE_TX=1`，但发布事务配了发布账户时走的是这条带认证路径 ——
+        // 少了同一个标记就会被当成"手工 git tag && push"当场拒掉。两条路径同一口径。
+        if refspec.starts_with("refs/tags/") {
+            cmd.env("MKP_RELEASE_TX", "1");
+        }
         let out = cmd.output().map_err(|e| spawn_failed(&self.repo, e))?;
         if !out.status.success() {
             // ★ detail 只用 stderr，且 **redact 掉 token** —— URL 内嵌凭据会随 git 报错

@@ -1740,6 +1740,20 @@
   flex-wrap: wrap;
 }
 
+/* 越界那张图下面那几条「n 号模型：沿箭头方向移动 xx.x mm」（与说明页同一句话） */
+.boundaryList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
 .plateNote {
   flex: 1;
   min-width: 160px;

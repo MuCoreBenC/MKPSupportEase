@@ -738,6 +738,8 @@ let mockTheme: ThemePref | null = null
 let mockAutoClean = true
 /** 自动检查软件更新（2026-11-05）：出厂 = 开，与真机 app_state 同一档 */
 let mockAutoCheckUpdate = true
+/** 更新渠道（2026-11-20）：没选过 = 正式版，与真机 app_state 同一档 */
+let mockUpdateChannel = 'stable'
 
 /** 后处理偏好（2026-10-17）：内存镜像，形状就是盘上那一格 */
 let mockPostproc: PostprocPrefsWire = {}
@@ -3356,6 +3358,16 @@ export const mockApi: MkpApi = {
     return mockAutoCheckUpdate
   },
 
+  /* 更新渠道（2026-11-20）：与自动检查同一套口径 —— 内存镜像、回写进去的那一档 */
+  async getUpdateChannel() {
+    return mockUpdateChannel
+  },
+
+  async setUpdateChannel(channel) {
+    mockUpdateChannel = channel
+    return mockUpdateChannel
+  },
+
   /*
    * 「复制出来的也跟着云端更新」（2026-10-20）：与自动清理同一套口径 —— 内存镜像，
    * 回解析后的 boolean。演示里照抄真机的出厂档（关）。
@@ -3995,6 +4007,10 @@ export const mockApi: MkpApi = {
    */
   async getAppVersion() {
     return MOCK_APP_VERSION
+  },
+
+  async getInstallFlavor() {
+    return 'installed'
   },
 
   /*

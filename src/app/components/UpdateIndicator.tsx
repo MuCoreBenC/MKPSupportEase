@@ -26,8 +26,12 @@ import { msg, t, useT } from '../../i18n'
 import { dismiss, notify, update, type Notice, type NotifyAction } from '../notify/notify'
 import type { UpdateState } from '../../api/contract'
 /* 更新会话的那一份事实：设置页读的是同一个（2026-11-06 合并两处入口） */
-import { useSoftwareUpdate } from '../shared/softwareUpdate'
+import { useSoftwareUpdate, updateChipIntent } from '../shared/softwareUpdate'
+import { useStickyState } from '../../hooks/useStickyState'
+import { STORAGE } from '../../api/storageKeys'
+import { Btn } from '../ui/Controls'
 import TitlebarChip from './TitlebarChip'
+import s from './UpdateIndicator.module.css'
 
 /**
  * 下载那一枚（16×16）：**托盘不动，箭头往下走** —— "正在把东西取回来"最省话的动法。
@@ -70,6 +74,33 @@ function DownloadIcon({ active }: { active: boolean }) {
   )
 }
 
+/**
+ * 「有更新」那一枚（16×16）：**铃铛 + 右上角标**，不是往下掉的箭头、也不是转一圈的箭头。
+ *
+ * 与 [`DownloadIcon`] 分工：那个回答"正在把东西取回来"，这个回答"有一版可以装"。
+ * 用下载/刷新那种箭头去表示"有新版"，用户会以为已经在下了或者要手动刷新。
+ *
+ * ★ 角标与铃铛刻意留出缝（铃铛往左下让了 0.6、角标收到右上）：16px 下两者同色，
+ *   挨在一起会糊成一团，看起来像铃铛缺了一块。
+ */
+function UpdateGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M7.2 3.2a3.5 3.5 0 0 1 3.5 3.5v2.3l1.1 1.7H2.6l1.1-1.7V6.7A3.5 3.5 0 0 1 7.2 3.2z"
+        fill="currentColor"
+      />
+      <path
+        d="M5.5 11.8a1.6 1.6 0 0 0 3.2 0"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+      <circle cx="13" cy="2.9" r="1.6" fill="currentColor" />
+    </svg>
+  )
+}
+
 /** 字节数 → 人话（MB / GB；`total = 0` 就是"总量未知"） */
 function mb(v: number): string {
   if (v >= 1024 * 1024 * 1024) return `${(v / 1024 / 1024 / 1024).toFixed(2)} GB`
@@ -102,6 +133,8 @@ function isVisible(state: UpdateState): boolean {
 interface Props {
   /** 装好了（退出后重启的账变了） */
   onInstalled: (version: string) => void
+  /** 小面板里点「查看」：去设置页的软件更新那一块 */
+  onOpenUpdate: () => void
   /**
    * 开发台：**不用真事件也摆出某一态**（作者 2026-10-14）。
    *
@@ -188,15 +221,28 @@ function buildActions(
   }
 }
 
-export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
+export default function UpdateIndicator({
+  onInstalled,
+  onOpenUpdate,
+  devPreview,
+}: Props) {
   /* 订阅语言（2026-10-26）：下面那些 `t(...)` 是模块级取词，重渲由这一行触发 */
   const tr = useT()
   /* 状态与"有没有新版"来自**全站那一份**（设置页读到的是同一个快照），
      这里不再自己订事件、也不再自己问一次 */
   const { state, info, refresh } = useSoftwareUpdate()
+  /* 进度详情面板开没开（`open`）与「可更新」那张小面板（`detailOpen`）是两件事 */
   const [open, setOpen] = useState(false)
+  const [detailOpen, setDetailOpen] = useState(false)
+  /* 「忽略这一版」是纯前端偏好，只压胶囊与自动通知，不碰设置页的检查结果 */
+  const [ignoredVersion, setIgnoredVersion] = useStickyState<string | null>(
+    STORAGE.clientIgnoredUpdateVersion,
+    null,
+  )
+  const wrapRef = useRef<HTMLDivElement | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
 
   /* 演示态：面板默认摊开，一眼看到那一屏 */
   const demo = devPreview !== undefined
@@ -217,6 +263,32 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
   const idle: UpdateState = { state: 'idle' }
   /* 演示态优先（给了它就用它，不看真事件） */
   const shown = devPreview ?? (state.state === 'idle' ? idle : state)
+  /* 胶囊露哪一副身子——唯一判据，见 docs/SOFTWARE-UPDATE-SPEC.md */
+  const intent = updateChipIntent(shown, info?.pendingVersion, ignoredVersion)
+
+  /* 离开「可更新」那一态（开始下载 / 忽略 / 换渠道）就把小面板收掉 */
+  useEffect(() => {
+    if (intent !== 'pending') setDetailOpen(false)
+  }, [intent])
+
+  /* 面板开着时：点外面或按 Esc 收起；胶囊自己那一下由 onClick 翻 */
+  useEffect(() => {
+    if (!detailOpen) return
+    const onDown = (e: PointerEvent) => {
+      if (wrapRef.current !== null && !wrapRef.current.contains(e.target as Node)) {
+        setDetailOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDetailOpen(false)
+    }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [detailOpen])
 
   const act = useCallback(async (fn: () => Promise<void>) => {
     setBusy(true)
@@ -328,7 +400,57 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
     [],
   )
 
-  if (!isVisible(shown)) return null
+  /*
+   * 「自动检查发现一版可装的」：8 秒通知走掉之后，标题栏仍留这枚胶囊。
+   * ★ 点它**不再直接跳设置页** —— 先展开一张小面板，让人能「查看」或「忽略」。
+   *   判据在 `updateChipIntent`：不看 `hasUpdate`（关了自动检查 / 换渠道后它仍是真的），
+   *   只看这次自动检查落下的 `pendingVersion` 与用户按过的「忽略」。
+   */
+  if (intent === 'pending') {
+    const pending = info?.pendingVersion ?? ''
+    return (
+      <div className={s.wrap} ref={wrapRef}>
+        <TitlebarChip
+          testId="update-indicator"
+          icon={<UpdateGlyph />}
+          label={tr('update.chip.available')}
+          title={tr('update.chip.tip', { label: tr('update.chip.available') })}
+          ariaLabel={tr('update.aria', { label: tr('update.chip.available') })}
+          tone="accent"
+          onClick={() => setDetailOpen((v) => !v)}
+        />
+        {detailOpen && (
+          <div className={s.panel} role="dialog" aria-label={tr('update.chip.panel')}>
+            <p className={s.panelText}>{tr('update.chip.found', { version: pending })}</p>
+            <div className={s.panelActions}>
+              <Btn
+                size="sm"
+                variant="accent"
+                onClick={() => {
+                  setDetailOpen(false)
+                  onOpenUpdate()
+                }}
+              >
+                {tr('update.chip.view')}
+              </Btn>
+              <Btn
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setIgnoredVersion(pending)
+                  setDetailOpen(false)
+                }}
+              >
+                {tr('update.chip.ignore')}
+              </Btn>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (intent !== 'progress') return null
 
   return (
     <TitlebarChip

@@ -107,3 +107,11 @@ debug = "line-tables-only"
 # 它们不参与我们的断点，但每次链接都被迫搬一遍它们的 DWARF。
 [profile.dev.package."*"]
 debug = false
+
+# 发布产物去掉符号表（2026-11-20）。
+# 之前根上只有 [profile.dev]，release 走 cargo 默认 —— exe 里带着完整符号表：
+# 客户端 27.29 MB 中有相当一部分是它，安装器还得把整个 exe 压进 payload，
+# 等于每个用户都为这些符号付了带宽。strip 只作用于 release，dev 的断点不受影响；
+# 代价是用户机器上的崩溃回溯没有函数名，而项目的排障日志走 tracing，不靠符号表。
+[profile.release]
+strip = true

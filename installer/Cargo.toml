@@ -1,0 +1,79 @@
+[package]
+name = "mkp-installer"
+version = "0.1.0"
+description = "SupportEase 安装程序（Windows）"
+authors = ["MuCoreBenC"]
+license = "AGPL-3.0-only"
+edition = "2021"
+rust-version = "1.77.2"
+publish = false
+
+# ★ 空 workspace 表：这个 crate 在仓库目录里，但**不进根 workspace**。
+#   根 workspace 的 members 是显式列表（见根 Cargo.toml），不带这一份 ——
+#   它只该在 Windows 上编（CI 的 macOS job 跑 `cargo clippy --all-targets`，
+#   把 Windows 专用的安装器拖进去会让那边红）。这行让 `cargo` 不去父目录找 workspace。
+[workspace]
+
+[build-dependencies]
+# 把 icon.ico 嵌进 exe（资源管理器与任务栏看到的那颗）
+embed-resource = "3"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# payload 压缩。xz（LZMA2）比 zip 的 deflate 省约 30%（27 MB 应用 exe → 约 6.5 MB）。
+# lzma-rs 的纯 Rust 编码器实测只压到 16.5 MB（比 deflate 还差），所以这里用
+# liblzma 的绑定：lzma-sys 会把 liblzma 源码编进来，CI 的 MSVC 工具链够用。
+xz2 = "0.1"
+
+# ★ 刻意不引 tauri：它那 5 MB 是框架（命令注册 / 资源协议 / 插件体系），
+#   而安装器只需要「一个 Win32 窗口 + 一个 WebView2 控件 + 一条 JSON 消息」。
+#   webview2-com 是微软 WebView2 的官方 COM 绑定的薄封装。
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_Dwm",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  # 覆盖安装时按完整路径找目标进程（不靠 taskkill 按名字误杀工作台 dev）
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Threading",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+] }
+
+# 写「应用和功能」里那条卸载项。与客户端同一个版本（见 src-tauri/Cargo.toml）
+winreg = "0.55"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[features]
+default = []
+# 不带 payload 的卸载器：单独编一份，只有界面 + 删除逻辑（约 0.4 MB）。
+# 安装时把它从 payload 里解出来当 uninstall.exe —— 不再把带 payload 的安装器
+# 整个复制过去（那会让安装目录里平白多 7 MB）。
+uninstall-only = []
+
+[[bin]]
+name = "mkp-installer"
+path = "src/main.rs"
+
+[[bin]]
+name = "mkp-uninstaller"
+path = "src/main.rs"
+required-features = ["uninstall-only"]
+
+# 构建脚本用它把 payload.bin 压成 payload.xz（不进最终安装器）
+[[bin]]
+name = "pack"
+path = "src/bin/pack.rs"

@@ -133,6 +133,7 @@ import ExportModal from './ExportModal'
 import PostProcessModal from '../postprocess/PostProcessModal'
 import CollisionMap from './CollisionMap'
 import BoundaryPlate from './BoundaryPlate'
+import { boundaryNumbering, moveDistanceMm } from './boundaryNumbering'
 import RelocationBoards from './RelocationBoards'
 import { SETTINGS_TARGET_TOWER } from '../settings/targets'
 import type { SettingsTargetId } from '../settings/targets'
@@ -2730,6 +2731,23 @@ export default function PageReport({
                                         boundary={detail.boundary}
                                         modelMap={detail.modelMap ?? null}
                                         machineType={detail.summary.machineType}
+                                        /* 与弹窗说明页同一份编号 / 同一句位移 —— 孤零零的
+                                           「1」没有意义，旁边必须写着"1 号模型挪多少" */
+                                        numbered
+                                        caption={
+                                          <ul className={s.boundaryList}>
+                                            {boundaryNumbering(detail.boundary.pieces ?? []).map(
+                                              ({ n, piece }) => (
+                                                <li key={n}>
+                                                  {tr('postproc.boundary.item', {
+                                                    n: String(n),
+                                                    mm: moveDistanceMm(piece).toFixed(1),
+                                                  })}
+                                                </li>
+                                              ),
+                                            )}
+                                          </ul>
+                                        }
                                       />
                                     </div>
                                   )}

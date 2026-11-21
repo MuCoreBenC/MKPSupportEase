@@ -1,6 +1,10 @@
 //! **自动检查软件更新**（2026-11-05）：挂在「客户端成功拉到云端目录」之后，顺路查一次
 //! [`crate::runtime::release_info`]。
 //!
+//! **查哪一路由用户选的渠道决定**（2026-11-20，`app_state::update_channel`）：
+//! 正式版只读 `release.json`（预发布在结构上进不来）；测试版读候选集里的预览清单。
+//! 不静默下载 —— 这一层只推一条"有新版"的通知，装不装由人点。
+//!
 //! ## 三条硬规矩
 //!
 //! 1. **不进启动 / 首屏路径**（铁律 2：启动零网络）。入口只有一处：
@@ -28,6 +32,13 @@ pub const UPDATE_AVAILABLE_EVENT: &str = "software-update-available";
 
 /// 本会话是否已经查过（`true` 之前的那次不论成功失败都算一次成功的"不再打扰"）。
 static CHECKED: AtomicBool = AtomicBool::new(false);
+
+/// 换渠道之后**放回名额**：下一次拉目录立刻按新渠道再查一次。
+///
+/// 不放回的话，切到测试版要重启客户端才可能收到通知 —— 用户会以为"切了没用"。
+pub fn reset_session_check() {
+    CHECKED.store(false, Ordering::Release);
+}
 
 /// 推给前端的那点信息。**版本号以外都不带** —— 通知只负责"有新版、点我过去"，
 /// 详情（说明 / 下载地址 / 更新按钮）由设置页「软件更新」那一块自己读。
@@ -173,22 +184,43 @@ pub fn maybe_check_after_catalog(app: &AppHandle) {
     if !enabled {
         return;
     }
+    /* ② 选的是哪一路：正式版只读 release.json；测试版读候选集（含预览清单）。
+    渠道本身也住盘上（`app_state::update_channel`），重启不会退回默认。 */
+    let channel = app_state::update_channel(&root).unwrap_or_default();
 
-    /* ② 本会话去重：先抢名额再联网，两个窗口同时拉目录也只打一次 */
+    /* ③ 本会话去重：先抢名额再联网，两个窗口同时拉目录也只打一次 */
     if CHECKED.swap(true, Ordering::AcqRel) {
         return;
     }
 
-    /* ③ 查 —— **只读正式版清单**；失败静默，且把名额放回去（离线时别把机会用掉） */
-    match fetch_stable_info(&root) {
-        Ok(stable) => {
-            if let Some(payload) =
-                auto_notification(&stable, crate::runtime::structure::APP_VERSION)
-            {
-                if let Err(e) = app.emit(UPDATE_AVAILABLE_EVENT, payload) {
-                    tracing::warn!("自动检查更新：通知事件没发出去：{e}");
-                }
+    /* ④ 查；失败静默，且把名额放回去（离线时别把机会用掉） */
+    let notified = match channel {
+        release_info::UpdateChannel::Stable => match fetch_stable_info(&root) {
+            Ok(stable) => Ok(auto_notification(
+                &stable,
+                crate::runtime::structure::APP_VERSION,
+            )),
+            Err(e) => Err(e),
+        },
+        release_info::UpdateChannel::Preview => match fetch_update_candidates(&root) {
+            Ok(list) => Ok(list
+                .into_iter()
+                .find(|c| c.channel == release_info::UpdateChannel::Preview)
+                .map(|c| UpdateAvailable { version: c.version })),
+            Err(e) => Err(e),
+        },
+    };
+    match notified {
+        Ok(Some(payload)) => {
+            /* 落盘：8 秒那条通知走掉之后，标题栏那枚小胶囊还得靠它 */
+            let _ = app_state::set_pending_update(&root, Some(&payload.version));
+            if let Err(e) = app.emit(UPDATE_AVAILABLE_EVENT, payload) {
+                tracing::warn!("自动检查更新：通知事件没发出去：{e}");
             }
+        }
+        Ok(None) => {
+            /* 这一趟没查到新的：把上次留下的那枚胶囊收掉 */
+            let _ = app_state::set_pending_update(&root, None);
         }
         Err(e) => {
             tracing::debug!("自动检查更新静默跳过：{}", e.message);
@@ -240,7 +272,9 @@ mod tests {
             None,
             "预览版绝不能触发自动通知事件"
         );
-        // ③ 源码判据：自动路径不许引用预览取数口子
+        // ③ 源码判据：自动路径**按渠道**取数 —— 正式版那条只读 stable，
+        //    测试版那条才允许读候选集（含预览清单）。2026-11-21 起预览也会主动通知，
+        //    但只在用户把渠道选成测试版时；默认仍是正式版。
         let src = std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/src/runtime/update_check.rs"
@@ -249,10 +283,17 @@ mod tests {
         let start = src.find("pub fn maybe_check_after_catalog").unwrap();
         let body = &src[start..src.find("#[cfg(test)]").unwrap()];
         assert!(
-            !body.contains("release_preview_url") && !body.contains("fetch_update_candidates"),
-            "自动通知路径不许读预览清单（启动零网络 + 预览不主动通知）"
+            body.contains("update_channel"),
+            "自动通知路径必须先问用户选的渠道"
         );
-        assert!(body.contains("fetch_stable_info"));
+        assert!(
+            body.contains("fetch_stable_info"),
+            "正式版那条取数口子仍要在"
+        );
+        assert!(
+            body.contains("fetch_update_candidates"),
+            "测试版那条要能读预览清单"
+        );
 
         // ④ **当前构建一定看不到比它旧的候选**（旧正式版 0.0.6 必然被滤掉）。
         //

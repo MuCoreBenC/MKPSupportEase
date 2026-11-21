@@ -5068,6 +5068,13 @@ text_zh_tw = "認不出的介面語言：{locale}（只能是 system / zh-CN / z
 text_ja = "認識できない表示言語：{locale}（system / zh-CN / zh-TW / ja / en のみ）"
 params = ["locale"]
 
+["ui.ipc.prefs.493"]
+text = "认不出的更新渠道：{channel}（只能是 stable / preview）"
+text_en = "Unknown update channel: {channel} (must be stable / preview)"
+text_zh_tw = "認不出的更新通道：{channel}（只能是 stable / preview）"
+text_ja = "認識できない更新チャンネル：{channel}（stable / preview のみ）"
+params = ["channel"]
+
 # ---- 提问模态框的按钮（2026-10-26）----
 # 按钮上的字也是「用户读到的一句话」：原先写在 `hook.rs` 的 `QuestionChoice` 里，
 # 英文界面下整颗按钮是中文。这里给码是为了排查时能从截图里那句话找到这一条。

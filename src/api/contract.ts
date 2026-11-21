@@ -2277,6 +2277,13 @@ export interface UpdateInfo {
   lastResult?: UpdateResult | null
   /** 安装日志的绝对路径（点「重启并安装」没反应时要看的就是它） */
   installLog: string
+  /**
+   * 自动检查上次发现的那一版（`undefined` / `null` = 没有待更新）。
+   *
+   * 标题栏那枚"有更新"小胶囊读它 —— `hasUpdate` 只按正式版判定，
+   * 测试版候选进不了那一格，所以另存这一条。
+   */
+  pendingVersion?: string | null
 }
 
 /**
@@ -4177,6 +4184,17 @@ export interface MkpApi {
   setAutoCheckUpdate(enabled: boolean): Promise<boolean>
 
   /**
+   * **更新渠道**（2026-11-20）：`stable` / `preview`。**没选过 = `stable`**。
+   *
+   * 落 `run/app-state.json` 的 `updateChannel` 格 —— 自动检查要按它挑清单，
+   * 只记在前端的话重启就忘、自动检查永远只查正式版。
+   */
+  getUpdateChannel(): Promise<string>
+
+  /** 换更新渠道：立即生效并落盘（认不出的值整次拒绝，不静默写成正式版）。 */
+  setUpdateChannel(channel: string): Promise<string>
+
+  /**
    * **复制出来的那一份跟不跟云端**（2026-10-20；出厂 = 关）。
    *
    * 回的是**解析后的 `boolean`**：盘上那一格"没选过"是 `null`，"没选过怎么解释"
@@ -4540,6 +4558,12 @@ export interface MkpApi {
    * 设置页「软件更新」块要显示"当前版本 → 最新版本"，这是它拿"当前版本"的唯一口子。
    */
   getAppVersion(): Promise<string>
+
+  /**
+   * 当前安装形态：`portable`（绿色版，exe 旁边有 `app-data`）/ `installed`。
+   * 设置页把它摆在版本号旁边 —— 两档更新链不同，用户得知道自己跑的是哪一档。
+   */
+  getInstallFlavor(): Promise<string>
 
   /**
    * 检查**软件**更新（`release.json`）—— 与预设数据链**完全分开**。

@@ -9,8 +9,16 @@
   align-items: center;
 }
 
-/* `?` 圆圈：与标题同一行的字号，13px、细边；悬停/聚焦时转成强调色 */
+/*
+ * `?` 圆圈：与标题同一行的字号，13px、细边；悬停/聚焦时转成强调色。
+ *
+ * ★ 定位全站一处：圈相对自己的行盒下移 1px，让圈的几何中心压在 CJK 字形的视觉中线
+ *   （`line-height: 1` 下字形偏上，不补这一像素会看着偏高）。所有 `?` 共用这一颗，
+ *   参数页与设置页不再各调各的 top。
+ */
 .dot {
+  position: relative;
+  top: 1px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -25,6 +33,8 @@
   font-weight: 600;
   line-height: 1;
   cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .dot:hover,

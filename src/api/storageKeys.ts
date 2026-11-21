@@ -123,6 +123,13 @@ export const STORAGE = {
   clientShowGuides: 'mkp.A40.guide.show',
 
   /**
+   * 用户点过「忽略」的那一版软件更新（版本号字符串，JSON）。纯前端偏好，不是底账：
+   * 它只压标题栏那枚「可更新」胶囊和那条自动通知，不影响设置页的检查结果，
+   * 也不拦手动下载。云端发了新版（版本号不同）就自动恢复提示。
+   */
+  clientIgnoredUpdateVersion: 'mkp.A40.update.ignoredVersion',
+
+  /**
    * 后处理进度的**每步节奏**缓存（`{ [stepId]: msPerMB }`，JSON）——
    * `useSmoothPercent` 拿它当"这一步通常多久"的先验（跨运行学习，2026-10-14 作者批）。
    *

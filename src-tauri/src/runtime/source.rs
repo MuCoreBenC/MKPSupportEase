@@ -527,6 +527,9 @@ fn web_url_to_raw_base(url: &str) -> String {
 ///   `delivery.rs` 认得的是同一份交付面。
 const REPO_DELIVERY_DIR: &str = "presets/delivery";
 
+/// 交付目录**本身**的名字。填站点根 / 预设根时，`source.json` 在它下面那一层。
+const DELIVERY_DIR_NAME: &str = "delivery";
+
 /// `Repo` 形状要读的那一份 `source.json`（纯计算）。
 ///
 /// ★ **探与读共用它**：探的时候按约定找到路、读的时候按同一份约定再算一遍 ——
@@ -564,6 +567,15 @@ fn bootstrap_candidates(url: &str) -> Vec<(String, CustomShape)> {
     }
     if trimmed.ends_with(SOURCE_FILE_NAME) {
         out.push((trimmed.to_owned(), CustomShape::Bootstrap));
+    }
+    /* 交付目录在底下还有一层 `delivery/`：用户填的是**站点根或预设根**时
+    （`http://127.0.0.1:8787` 这种），`source.json` 在 `/delivery/` 里。
+    先试这一条，再退到"根上就有 source.json"的那种布局。 */
+    if !trimmed.ends_with(DELIVERY_DIR_NAME) && !trimmed.ends_with(SOURCE_FILE_NAME) {
+        let nested = format!("{base}/{DELIVERY_DIR_NAME}/{SOURCE_FILE_NAME}");
+        if !out.iter().any(|(u, _)| *u == nested) {
+            out.push((nested, CustomShape::Root));
+        }
     }
     let appended = format!("{base}/{SOURCE_FILE_NAME}");
     if !out.iter().any(|(u, _)| *u == appended) {
@@ -928,6 +940,32 @@ mod two_source_tests {
         assert!(
             !deep.iter().any(|(_, s)| *s == CustomShape::Repo),
             "指到交付目录本身就不该再猜：{deep:?}"
+        );
+    }
+
+    /// **只填站点根也能用**（作者 2026-11-20）：`http://127.0.0.1:8787` 该先试
+    /// `<根>/delivery/source.json`，别逼用户记住后面那一截。
+    /// 已经带了 `/delivery` 或已经指到 `source.json` 时不许再套一层。
+    #[test]
+    fn a_bare_host_tries_the_delivery_subdir_first() {
+        let c = bootstrap_candidates("http://127.0.0.1:8787");
+        assert_eq!(
+            c.first().map(|(u, _)| u.as_str()),
+            Some("http://127.0.0.1:8787/delivery/source.json"),
+            "裸地址该先找交付目录：{c:?}"
+        );
+        assert!(
+            c.iter()
+                .any(|(u, _)| u == "http://127.0.0.1:8787/source.json"),
+            "根上就有 source.json 的布局仍要兜着：{c:?}"
+        );
+
+        let with_dir = bootstrap_candidates("http://127.0.0.1:8787/delivery");
+        assert!(
+            !with_dir
+                .iter()
+                .any(|(u, _)| u == "http://127.0.0.1:8787/delivery/delivery/source.json"),
+            "已经指到交付目录就不该再钻一层：{with_dir:?}"
         );
     }
 

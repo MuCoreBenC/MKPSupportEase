@@ -322,16 +322,11 @@ export default function ParamRow({
                * 悬停说的是**这一项是什么**（注册表的 desc），不是「点它展开」——
                * 作者点名要的就是那句说明。说明为空时退回一句「点这一行看详情」，不摆空泡。
                *
-               * ★ 2026-10-30：作者要的是"系统性的自绘 tooltip"（原生 `title` 在 Windows
-               *   上是另一副样子）。气泡定稿后作者点头「没问题，可以去替换」——
-               *   这一处换成共用件，`?` 圈的样式（`s.info`）一个像素没动，
-               *   只是把"说这句什么话"交给 `<Tip>`（气泡由根上的 `<TipLayer>` 画）。
+               * `?` 圈与设置页共用同一颗（components/tooltip 的 `.dot`）：位置、字号、
+               * 垂直对齐只在那里定一处。这里 `decorative` = 不可聚焦、不进读屏 ——
+               * 行本身已是 button，圈只是它的说明记号，不该多一个焦点停靠点。
                */}
-              <Tip text={def.desc === '' ? t('params.rowTitle') : def.desc}>
-                <span className={s.info} aria-hidden>
-                  ?
-                </span>
-              </Tip>
+              <Tip text={def.desc === '' ? t('params.rowTitle') : def.desc} decorative />
             </span>
             {/*
              * 那句橙字只给「换个条件就能用」的行。弃用的行说它就是假话 —— 它正在退场，

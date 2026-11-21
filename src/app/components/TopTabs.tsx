@@ -35,6 +35,8 @@ interface TopTabsProps {
    *   不占内容流 —— 这一格由外壳（`App.tsx`）喂进来，标题栏自己不去读那一趟。
    */
   postProcess?: PostProcessRunView
+  /** 「有更新」那枚小胶囊被点：外壳负责翻到设置页的软件更新那一块 */
+  onOpenUpdate: () => void
 }
 
 
@@ -83,6 +85,7 @@ export default function TopTabs({
   fluid,
   title,
   postProcess,
+  onOpenUpdate,
 }: TopTabsProps) {
 
   /* 页签 / 按钮的无障碍名都走字典（2026-10-25）：语言一换，这里同帧换字 */
@@ -254,6 +257,7 @@ export default function TopTabs({
       */}
       <UpdateIndicator
         onInstalled={() => window.location.reload()}
+        onOpenUpdate={onOpenUpdate}
         /* 开发台：点「软件更新提示」时摆出"正在下载"那一态（正式构建里恒 undefined） */
         devPreview={devUpdate ? { state: 'downloading', received: 41_943_040, total: 67_108_864 } : undefined}
       />

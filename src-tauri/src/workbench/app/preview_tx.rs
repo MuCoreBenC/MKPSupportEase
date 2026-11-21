@@ -290,8 +290,21 @@ fn run_logged_env(
             .join(" "),
         argv.join(" ")
     ));
-    let mut cmd = Command::new(argv[0]);
-    cmd.args(&argv[1..]).current_dir(repo);
+    /* Windows 上 npm 是 npm.cmd，CreateProcess 不会替你补后缀（会报"起不来 npm"）；
+    和 release_tx 的 npm_build 走同一条 cmd /C。 */
+    let mut cmd = if cfg!(windows) && argv[0] == "npm" {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg("npm");
+        c
+    } else {
+        Command::new(argv[0])
+    };
+    cmd.args(&argv[1..])
+        .current_dir(repo)
+        /* 工作台由 `tauri dev --config tauri.workbench.conf.json` 起，CLI 会把合并后的
+        配置放进 `TAURI_CONFIG`。不清掉的话，从工作台派生的客户端构建会读到工作台配置
+        （空窗口清单 + `SupportEase-Workbench` 标识），编出一颗装上没窗的二进制。 */
+        .env_remove("TAURI_CONFIG");
     for (k, v) in env {
         cmd.env(k, v);
     }
@@ -383,6 +396,127 @@ fn append_ledger(repo: &Path, report: &PreviewReport) -> Result<(), AppError> {
         .map_err(|e| AppError::io("写不进账本").with_detail(e.message))
 }
 
+/// 摆好本地覆盖层清单。Windows 用自研安装包，macOS 走 `local-release.mjs`。
+/// 两个分支必须用 `#[cfg]` 而非 `cfg!()`：函数调用只在目标平台存在。
+#[cfg(target_os = "windows")]
+fn write_preview_manifest(repo: &Path, version: &str, _log: &mut LogBuf) -> Result<(), AppError> {
+    write_windows_preview_manifest(repo, version)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn write_preview_manifest(repo: &Path, _version: &str, log: &mut LogBuf) -> Result<(), AppError> {
+    run_logged(repo, log, &["node", "scripts/local-release.mjs"])
+}
+
+/// Windows 的本地覆盖层清单：`local-release.mjs` 只认 macOS 的 .app/.dmg，
+/// 这里按自研安装包（nsis）写同一份 `release-preview.json`，字段与真实清单一致。
+#[cfg(target_os = "windows")]
+fn write_windows_preview_manifest(repo: &Path, version: &str) -> Result<(), AppError> {
+    use sha2::{Digest, Sha256};
+
+    let bundle = repo.join("target/release/bundle/nsis");
+    let setup = std::fs::read_dir(&bundle)
+        .ok()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && p.extension().and_then(|s| s.to_str()) == Some("exe")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("SupportEase"))
+        })
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.contains(version))
+        })
+        .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+        .ok_or_else(|| AppError::io(format!("bundle/nsis 下没有 {version} 的安装包")))?;
+    let name = setup
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| AppError::io("安装包名字读不出来"))?
+        .to_owned();
+    let live = repo.join("target/local-release");
+    std::fs::create_dir_all(&live)
+        .map_err(|e| AppError::io("建不了本地发布目录").with_detail(e.to_string()))?;
+    let dest = live.join(&name);
+    std::fs::copy(&setup, &dest)
+        .map_err(|e| AppError::io("拷不了安装包").with_detail(e.to_string()))?;
+    let bytes = std::fs::read(&dest)
+        .map_err(|e| AppError::io("读不了安装包").with_detail(e.to_string()))?;
+    let port = std::env::var("PRESET_TEST_PORT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .filter(|p| *p > 0)
+        .unwrap_or(8787);
+    let origin = format!("http://127.0.0.1:{port}");
+    let manifest = serde_json::json!({
+        "releaseSchema": 1,
+        "version": version,
+        "notes": format!("本地预览交付 {version}"),
+        "url": format!("{origin}/delivery/release-preview.json"),
+        "asset": {
+            "name": name,
+            "url": format!("{origin}/delivery/{name}"),
+            "size": bytes.len(),
+            "sha256": format!("{:x}", Sha256::digest(&bytes)),
+            "platform": "windows",
+            "kind": "nsis",
+        },
+    });
+    let text = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| AppError::io("清单写不出来").with_detail(e.to_string()))?;
+    crate::fsx::atomic::atomic_write(
+        &live.join("release-preview.json"),
+        format!("{text}\n").as_bytes(),
+    )
+    .map_err(|e| AppError::io("写不进本地清单").with_detail(e.message))?;
+    let history = live.join("history");
+    std::fs::create_dir_all(&history)
+        .map_err(|e| AppError::io("建不了清单历史目录").with_detail(e.to_string()))?;
+    crate::fsx::atomic::atomic_write(
+        &history.join(format!("{version}.json")),
+        format!("{text}\n").as_bytes(),
+    )
+    .map_err(|e| AppError::io("写不进历史清单").with_detail(e.message))
+}
+
+/// 把 worktree 里的 bundle 整棵搬到主仓 target（Windows 没有 rsync）。
+fn copy_bundle(from: &Path, to: &Path) -> Result<(), AppError> {
+    if !from.is_dir() {
+        return Ok(());
+    }
+    if to.exists() {
+        std::fs::remove_dir_all(to)
+            .map_err(|e| AppError::io("清不了旧 bundle").with_detail(e.to_string()))?;
+    }
+    fn walk(src: &Path, dst: &Path) -> Result<(), AppError> {
+        std::fs::create_dir_all(dst)
+            .map_err(|e| AppError::io("建不了 bundle 目录").with_detail(e.to_string()))?;
+        for entry in std::fs::read_dir(src)
+            .map_err(|e| AppError::io("读不了 bundle 目录").with_detail(e.to_string()))?
+        {
+            let entry =
+                entry.map_err(|e| AppError::io("读不了 bundle 条目").with_detail(e.to_string()))?;
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+            if src_path.is_dir() {
+                walk(&src_path, &dst_path)?;
+            } else {
+                std::fs::copy(&src_path, &dst_path)
+                    .map(|_| ())
+                    .map_err(|e| AppError::io("拷不了 bundle 文件").with_detail(e.to_string()))?;
+            }
+        }
+        Ok(())
+    }
+    walk(from, to)
+}
+
 /// 从**确定的 commit** 构建：在 `target/` 下开一个 detach 的 worktree，用完删掉。
 ///
 /// `CARGO_TARGET_DIR` 仍指向主仓库 `target/`（复用编译缓存，避免整套重编）；
@@ -399,30 +533,21 @@ fn build_from_snapshot(repo: &Path, commit: &str, log: &mut LogBuf) -> Result<()
 
     let target = repo.join("target");
     let target_arg = target.to_string_lossy().into_owned();
-    let built = run_logged_env(
-        &wt,
-        log,
-        &["npm", "run", "tauri", "--", "build"],
-        &[("CARGO_TARGET_DIR", &target_arg)],
-    );
+    /* Windows 必须用自研安装器的双内核包；tauri build 的单内核 NSIS 会让绿色版自更新
+    再次变成安装版。macOS 仍是 tauri build（dmg）。 */
+    let build_args: &[&str] = if cfg!(windows) {
+        &["npm", "run", "build:installer"]
+    } else {
+        &["npm", "run", "tauri", "--", "build"]
+    };
+    let built = run_logged_env(&wt, log, build_args, &[("CARGO_TARGET_DIR", &target_arg)]);
 
-    /* 产物从 worktree 的 bundle 搬回主仓 target —— 后两步（清单/校验）都在主仓看它 */
+    /* 产物从 worktree 的 bundle 搬回主仓 target —— 后两步（清单/校验）都在主仓看它。
+    rsync 不是 Windows 标配，这里用同一份 Rust 递归拷贝，两平台一致。 */
     if built.is_ok() {
         let from = wt.join("target/release/bundle");
         let to = repo.join("target/release/bundle");
-        if from.is_dir() {
-            let _ = run_logged(
-                repo,
-                log,
-                &[
-                    "rsync",
-                    "-a",
-                    "--delete",
-                    &format!("{}/", from.display()),
-                    &format!("{}/", to.display()),
-                ],
-            );
-        }
+        copy_bundle(&from, &to)?;
     }
     let _ = Command::new("git")
         .args(["worktree", "remove", "--force", &wt_arg])
@@ -531,7 +656,8 @@ pub fn deliver(confirm: bool) -> Result<PreviewReport, AppError> {
     write_journal(&repo, &report);
 
     /* ③ 摆好清单（它自己校验"清单号 = 包内号"） */
-    if let Err(e) = run_logged(&repo, &mut log, &["node", "scripts/local-release.mjs"]) {
+    let manifest_result = write_preview_manifest(&repo, &plan.version, &mut log);
+    if let Err(e) = manifest_result {
         report.stage = "failed".to_owned();
         report.message = format!("写清单失败，这一版没有冻结：{}", e.message);
         write_journal(&repo, &report);

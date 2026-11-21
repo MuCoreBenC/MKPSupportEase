@@ -141,6 +141,24 @@ const uninstallCmd = [
 ].join('\r\n')
 writeFileSync(join(stage, '卸载 SupportEase.cmd'), uninstallCmd, 'utf8')
 
+/*
+ * **图形卸载器**（同一个 361 KB 的小 exe，不带 payload）：
+ * 与上面的 CMD 并存、互不替代 —— 两者都放在 zip 根，用户双击哪个用哪个。
+ * 它按目录里的 exe 文件名区分布局：看到 SupportEase.exe（而不是安装版的
+ * mkp-support-ease.exe）就走绿色版逻辑 —— 只删自己所在文件夹，不碰注册表
+ * 卸载项、快捷方式或 %APPDATA%SupportEase；删之前用 takeown/icacls 处理
+ * app-data/EBWebView 的 DENY 权限（与 CMD 那两句同一个理由）。
+ * 产物来自 `npm run build:installer` 里的 mkp-uninstaller；没编过就跳过图形卸载器，
+ * CMD 仍然可用 —— 不让绿色版构建因为安装器产物缺失而失败。
+ */
+const guiUninstaller = join(ROOT, 'target-installer', 'release', 'mkp-uninstaller.exe')
+if (existsSync(guiUninstaller)) {
+  copyFileSync(guiUninstaller, join(stage, '卸载 SupportEase.exe'))
+  console.log(`  图形卸载器：${(statSync(guiUninstaller).size / 1024).toFixed(0)} KB`)
+} else {
+  console.log('  未找到图形卸载器产物（先跑 npm run build:installer），绿色版仍带 CMD 卸载')
+}
+
 /* ---------- 3. 压成 zip ---------- */
 const zipped = spawnSync(
   'powershell',

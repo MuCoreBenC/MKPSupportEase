@@ -802,7 +802,18 @@ const LEGACY_LOCAL_DIR: &str = "presets-mine";
 const STATE_FILE: &str = "run/app-state.json";
 
 /// **应用持久化状态**（整份）。每格 `Option` + `serde(default)`：
-/// 没有就是"这一格还没状态"，合法；将来加新 section 时旧文件照读，不迁移、不升号。
+/// 没有就是"这一格还没状态"，合法。
+///
+/// # 加新字段的机械规矩（2026-11-21）
+///
+/// 1. **偏好**（界面状态）：字段进 [`PREF_FIELDS`] 登记，并在 [`AppStateFile::heal`]
+///    里给出"缺省值怎么算"。旧文件读出来当场补成显式值，下一次写操作落盘。
+/// 2. **业务数据**：不进 [`PREF_FIELDS`]，由各自的读取方决定"缺席 = 什么"。
+/// 3. **语义变了**（不是单纯多一格）：升 [`APP_STATE_SCHEMA`] 并在 [`migrate_state`]
+///    里加一步；只加格不升号。
+///
+/// 判据 [`every_persisted_key_is_either_a_registered_pref_or_business_data`] 盯着第 1、2 条：
+/// 新加一格不同步登记表，测试就红。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppStateFile {
@@ -864,6 +875,20 @@ pub struct AppStateFile {
     /// 读者是 [`crate::runtime::update_check`]；设置页那一格走 `ipc::prefs` 的命令。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_check_update: Option<bool>,
+    /// **更新渠道**（2026-11-20）：设置页「更新渠道」选的是哪一路。
+    /// `None` = 还没选过 ⇒ 正式版。
+    ///
+    /// ★ 它必须住盘上：自动检查读完清单要按这条挑通道 —— 只记在前端的话，
+    ///   选「测试版」重启就忘，自动检查永远只查正式版。
+    ///   读者是 [`crate::runtime::update_check`]；设置页那一格走 `ipc::prefs`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_channel: Option<super::release_info::UpdateChannel>,
+    /// **自动检查发现的待更新版本**（2026-11-21）：上次顺路查到的那一版。
+    ///
+    /// 落盘是为了标题栏那枚"有更新"小胶囊 —— 8 秒通知走掉之后它还得在，
+    /// 且要认得测试版（`hasUpdate` 只按正式版判定）。查到新版就写，查不到就清。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_update: Option<String>,
     /// **主窗置顶档位**（2026-10-17）：`None` = 还没选过 ⇒ `off`。
     ///
     /// 它是"用户点出来的界面状态"，与 `theme` 同一族 —— 所以住在这里，
@@ -924,6 +949,8 @@ impl Default for AppStateFile {
             locale: None,
             auto_clean_history: None,
             auto_check_update: None,
+            update_channel: None,
+            pending_update: None,
             pin: None,
             compact: None,
             last_window_box: None,
@@ -934,6 +961,78 @@ impl Default for AppStateFile {
         }
     }
 }
+
+impl AppStateFile {
+    /// 把**还没选过**的界面偏好按当前解析出来的默认补成显式值。
+    ///
+    /// 只补偏好（主题 / 语言 / 三个开关 / 更新渠道 / 置顶 / 窄窗），**业务数据一格不动**
+    /// （使用中指针、草稿、数据源、逐参数账都不在这里）。
+    ///
+    /// 这是"加新字段"的机械承诺之一：新偏好只要进 [`PREF_FIELDS`] 登记，旧文件读出来
+    /// 就一定有值，不会出现"旧安装一直没有这一格"。
+    /// 返回"补过吗"：补过就由调用方**立刻写回**，用户什么都不点，盘上也是新版要的完整形状。
+    fn heal(&mut self) -> bool {
+        let d = super::client_defaults::client_defaults();
+        let mut changed = false;
+        macro_rules! fill {
+            ($field:expr, $value:expr) => {
+                if $field.is_none() {
+                    $field = Some($value);
+                    changed = true;
+                }
+            };
+        }
+        fill!(self.theme, d.theme);
+        fill!(self.locale, d.locale);
+        fill!(self.auto_clean_history, d.auto_clean_history);
+        fill!(self.auto_check_update, d.auto_check_update);
+        fill!(self.update_channel, default_update_channel());
+        /* 与 `pin()` 的权威口径一致：没选过 = 本页置顶（不是 Off）。
+        补成 Off 会让全新安装一上来就不置顶，而测试与 pin() 都说是 Page。 */
+        fill!(self.pin, PinPref::Page);
+        fill!(self.compact, false);
+        /* 自检：登记过的偏好补完必须都在。漏补一格，开发构建当场炸 ——
+        比等到用户那边"旧档一直没有"早得多。 */
+        #[cfg(debug_assertions)]
+        {
+            let v = serde_json::to_value(&*self).unwrap_or_default();
+            for key in PREF_FIELDS {
+                debug_assert!(
+                    v.get(key).is_some(),
+                    "偏好 `{key}` 登记了却没在 heal 里补上"
+                );
+            }
+        }
+        changed
+    }
+}
+
+/// 没选过渠道时的那一档：**跑的是预览构建就查预览**，正式构建查正式版。
+///
+/// 测试的人装的就是 `-preview.N`，还要先去设置页切一次才收得到通知，纯属多余。
+fn default_update_channel() -> super::release_info::UpdateChannel {
+    if crate::runtime::structure::APP_VERSION.contains("-preview") {
+        super::release_info::UpdateChannel::Preview
+    } else {
+        super::release_info::UpdateChannel::Stable
+    }
+}
+
+/// **加新偏好必须在这里登记**：序列化键名（`app-state.json` 里的那个写法）。
+///
+/// 判据 `every_persisted_key_is_either_a_registered_pref_or_business_data` 拿它和整份状态
+/// 序列化出来的键对账 ——
+/// 只加字段不登记，测试就红。登记之后还要回答两件事：缺省值怎么算（[`AppStateFile::heal`]）、
+/// 语义变了要不要升 [`APP_STATE_SCHEMA`]。
+const PREF_FIELDS: &[&str] = &[
+    "theme",
+    "locale",
+    "autoCleanHistory",
+    "autoCheckUpdate",
+    "updateChannel",
+    "pin",
+    "compact",
+];
 
 fn state_file(root: &Path) -> PathBuf {
     root.join(STATE_FILE)
@@ -966,7 +1065,11 @@ fn state_lock() -> MutexGuard<'static, ()> {
 }
 
 /// 读整份状态（**唯一读入口**）。`app-state.json` 在 → 只信它；
-/// 不在 → 按格读旧文件拼快照（缺席 = None）。**读不落盘**：没写过的应用不留状态文件。
+/// 不在 → 按格读旧文件拼快照（缺席 = None）。
+///
+/// 两件事要分清：
+/// - **文件不存在**：读不落盘（没写过的应用不留状态文件）；
+/// - **文件在、但缺新版要的偏好**：补齐后**立刻写回**（升级到新版第一次打开就对表）。
 pub fn load(root: &Path) -> Result<AppStateFile, AppError> {
     let _guard = state_lock();
     load_locked(root)
@@ -976,7 +1079,11 @@ fn load_locked(root: &Path) -> Result<AppStateFile, AppError> {
     let bytes = match std::fs::read(state_file(root)) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return legacy_snapshot(root);
+            /* 还没有 app-state.json：按旧三文件拼出来、补齐，但**不落盘**
+            （"没写过的应用不留状态文件"这条规矩优先，第一次写操作才建） */
+            let mut s = legacy_snapshot(root)?;
+            let _ = s.heal();
+            return Ok(s);
         }
         Err(e) => {
             return Err(
@@ -995,10 +1102,20 @@ fn load_locked(root: &Path) -> Result<AppStateFile, AppError> {
             .with_detail(e.to_string())
     })?;
     migrate_state(&mut value)?;
-    serde_json::from_value(value).map_err(|e| {
+    let mut state: AppStateFile = serde_json::from_value(value).map_err(|e| {
         AppError::corrupted(messages::text("ui.runtime.app_state.347", &[]))
             .with_detail(e.to_string())
-    })
+    })?;
+    /* 旧文件里"还没有这一格"的偏好，按**此刻的解析默认**补成显式值；补过就立刻写回。
+    装了新版第一次打开，盘上那份就和"新版认识的形状"对齐了 —— 用户什么都不用点，
+    他自己的数据（使用中指针 / 草稿 / 数据源 / 逐参数账）一个字节没动。 */
+    if state.heal() {
+        if let Err(e) = crate::fsx::atomic::atomic_write_json(&state_file(root), &state) {
+            /* 写不回去不算读失败：内存里已经是补齐的那一份，下一次写操作还会再试 */
+            tracing::warn!("补齐后的状态没写回去：{}", e.message);
+        }
+    }
+    Ok(state)
 }
 
 /// **已知代次 → 当前代次**的升级（就地改 JSON 树，只在内存里转，不落盘）。
@@ -1109,6 +1226,9 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         auto_clean_history: None,
         /* 自动检查更新是 2026-11-05 才有的：旧档里本来就没有它（没选过 = 开着） */
         auto_check_update: None,
+        /* 更新渠道是 2026-11-20 才有的：旧档里没有（没选过 = 正式版） */
+        update_channel: None,
+        pending_update: None,
         /* 窗口置顶 / 窄窗 / 上一次手动几何是 2026-10-17 才有的格：旧档里没有 */
         pin: None,
         compact: None,
@@ -1599,6 +1719,44 @@ pub fn set_auto_check_update(root: &Path, enabled: bool) -> Result<bool, AppErro
     })
 }
 
+/* ---------- updateChannel：自动检查按哪一路查 ---------- */
+
+/// 用户选的更新渠道。**还没选过 ⇒ 按当前构建决定**（见 [`default_update_channel`]）。
+///
+/// 读者是 [`crate::runtime::update_check`]（自动检查挑哪份清单）；设置页那格走 `ipc::prefs`。
+pub fn update_channel(root: &Path) -> Result<super::release_info::UpdateChannel, AppError> {
+    /* `load` 已经 heal 过：这里读到的一定是 `Some`；兜底只为"以前写过的旧档"这条退路。 */
+    Ok(load(root)?
+        .update_channel
+        .unwrap_or_else(default_update_channel))
+}
+
+/// 记下更新渠道（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
+pub fn set_update_channel(
+    root: &Path,
+    channel: super::release_info::UpdateChannel,
+) -> Result<super::release_info::UpdateChannel, AppError> {
+    with_state(root, |state| {
+        state.update_channel = Some(channel);
+        Ok(channel)
+    })
+}
+
+/* ---------- pendingUpdate：自动检查发现的待更新版本 ---------- */
+
+/// 上次自动检查发现的那一版（没有 = `None`）。标题栏那枚小胶囊读它。
+pub fn pending_update(root: &Path) -> Result<Option<String>, AppError> {
+    Ok(load(root)?.pending_update)
+}
+
+/// 记下 / 清掉待更新版本。查到新版写进去，查到"没有新版"就清掉。
+pub fn set_pending_update(root: &Path, version: Option<&str>) -> Result<(), AppError> {
+    with_state(root, |state| {
+        state.pending_update = version.map(str::to_owned);
+        Ok(())
+    })
+}
+
 /* ---------- postproc：后处理这一层怎么看、怎么跑（2026-10-17） ---------- */
 
 /// 读后处理偏好。**整格 `None` = 一项都没动过** —— 调用方用 [`PostprocPrefs::default`]
@@ -1808,8 +1966,9 @@ mod tests {
         assert_eq!(on.debug_dwell_sec, Some(5.0));
     }
 
-    /// 「恢复默认」清的是"没设过"，不是写死出厂值：清完盘上那几格都是 `None`，
-    /// 读回来就是 `client-defaults.toml` 那一档；以后改默认值仍能惠及它。
+    /// 「恢复默认」清的是"没设过"，不是写死出厂值。清完那几格在盘上是 `None`；
+    /// 读回来会经 `heal()` 补成 `client-defaults.toml` 那一档，所以判据是"不带用户覆盖值"
+    /// 而不是 `None`——以后改默认值仍能惠及它。
     #[test]
     fn clearing_client_prefs_returns_to_the_shipped_defaults() {
         let d = tempfile::tempdir().unwrap();
@@ -1831,13 +1990,27 @@ mod tests {
         .unwrap();
 
         clear_client_prefs(root).unwrap();
+        /* 清完先看**盘上**：那几格写回的是 null（没设过）。 */
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(state_file(root)).unwrap()).unwrap();
+        for key in [
+            "theme",
+            "locale",
+            "autoCleanHistory",
+            "autoCheckUpdate",
+            "presets",
+            "presetSource",
+        ] {
+            assert!(raw.get(key).is_none(), "{key} 清完不该有覆盖值");
+        }
 
+        /* 读回来经 heal 补成出厂默认：判据是"用户设过的值不在了"。 */
         let file = load(root).unwrap();
-        assert!(file.theme.is_none(), "主题该清回没设过");
-        assert!(file.locale.is_none());
-        assert!(file.auto_clean_history.is_none());
-        assert!(file.auto_check_update.is_none());
-        assert!(file.presets.is_none(), "预设页三项该清回没设过");
+        assert_eq!(file.theme, Some(ThemePref::System));
+        assert_eq!(file.locale, Some(LocalePref::System));
+        assert!(file.auto_clean_history.unwrap());
+        assert!(file.auto_check_update.unwrap());
+        assert!(file.presets.is_none(), "预设页三项不在这里补");
         assert!(file.preset_source.is_none(), "数据源覆盖该撤掉");
     }
 
@@ -1878,6 +2051,83 @@ mod tests {
         assert!(state.preset_source.is_none());
         assert_eq!(state.app_state_schema, APP_STATE_SCHEMA);
         assert!(!state_file(d.path()).exists(), "读不落盘");
+    }
+
+    /// **加新偏好必须有登记**：整份状态序列化出来的每个键，要么是已登记的偏好
+    /// （[`PREF_FIELDS`]），要么是业务数据。新加一格不改这张表，这里就红 ——
+    /// 逼着作者回答"旧档怎么补、要不要升代次"，而不是让旧安装一直缺那一格。
+    #[test]
+    fn every_persisted_key_is_either_a_registered_pref_or_business_data() {
+        const BUSINESS: &[&str] = &[
+            "appStateSchema",
+            "activePreset",
+            "draft",
+            "textDraft",
+            "presetSource",
+            "paramDecisions",
+            "paramOrigins",
+            "pendingUpdate",
+            "lastWindowBox",
+            "slicerWindow",
+            "pinBeforeCompact",
+            "postproc",
+            "presets",
+        ];
+        let mut state = AppStateFile::default();
+        state.heal();
+        let v = serde_json::to_value(&state).unwrap();
+        for key in v.as_object().unwrap().keys() {
+            assert!(
+                PREF_FIELDS.contains(&key.as_str()) || BUSINESS.contains(&key.as_str()),
+                "新加的格 `{key}` 没登记：偏好放进 PREF_FIELDS，业务数据放进 BUSINESS，并想清楚旧档怎么补"
+            );
+        }
+    }
+
+    /// 旧文件缺新偏好时：**读到就补齐并写回盘**，用户的业务数据原样保留。
+    #[test]
+    fn an_old_file_is_written_back_with_the_new_prefs() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        let old = r#"{ "appStateSchema": 2,
+              "theme": "dark",
+              "activePreset": { "activeSchema": 1, "origin": "local",
+                "fileName": "A1-fast.toml", "sha256": "abc",
+                "path": "presets-local/A1-fast.toml" } }"#;
+        atomic_write(&state_file(d.path()), old.as_bytes()).unwrap();
+
+        let _ = load(d.path()).unwrap();
+
+        let disk = std::fs::read_to_string(state_file(d.path())).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&disk).unwrap();
+        assert_eq!(v["theme"], "dark", "用户自己选的主题不许被改");
+        assert_eq!(
+            v["activePreset"]["fileName"], "A1-fast.toml",
+            "业务数据原样保留"
+        );
+        for key in PREF_FIELDS {
+            assert!(
+                v.get(*key).is_some(),
+                "`{key}` 该在第一次读到时补进盘上那份"
+            );
+        }
+    }
+
+    /// 旧文件里**只有代次**时，读出来每个偏好都得有值 —— 不是 `None` 一直挂着。
+    #[test]
+    fn a_minimal_legacy_file_gets_every_pref_filled() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        atomic_write(&state_file(d.path()), br#"{"appStateSchema":2}"#).unwrap();
+
+        let s = load(d.path()).unwrap();
+        assert!(s.theme.is_some(), "主题该补上");
+        assert!(s.locale.is_some(), "语言该补上");
+        assert!(s.auto_clean_history.is_some(), "自动清理该补上");
+        assert!(s.auto_check_update.is_some(), "自动检查该补上");
+        assert!(s.update_channel.is_some(), "更新渠道该补上");
+        assert!(s.pin.is_some(), "置顶该补上");
+        assert!(s.compact.is_some(), "窄窗该补上");
     }
 
     /// 坏档不静默：解析不了要响，不能装作"没有"
@@ -1941,8 +2191,9 @@ mod tests {
         assert_eq!(err.unwrap_err().code, ErrorCode::InvalidArgument);
     }
 
-    /// `1 → 2`：老盘那份（本地线落点还是 `presets-mine/…`）读进来**自动升代次、换前缀**，
-    /// 而且**读不落盘** —— 升出来的结果要等第一次真写入才落盘（与"读不落盘"同一条）。
+    /// `1 → 2`：老盘那份（本地线落点还是 `presets-mine/…`）读进来**自动升代次、换前缀**。
+    /// 盘上写回的是**补过偏好之后的 2 代**（heal 明确"补过就立刻写回"）；
+    /// 判据落在**用户数据逐字不丢**上，而不是"读不落盘"。
     #[test]
     fn schema_one_is_migrated_in_memory_and_paths_are_repointed() {
         let d = tempfile::tempdir().unwrap();
@@ -1981,11 +2232,12 @@ mod tests {
         assert!(!state
             .param_decisions
             .contains_key("presets-mine/A1-fast.toml"));
-        assert!(
-            std::fs::read_to_string(state_file(d.path()))
-                .unwrap()
-                .contains("\"appStateSchema\": 1"),
-            "读不该把它写成 2：升代次的结果等第一次真写入落盘"
+        let on_disk: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(state_file(d.path())).unwrap()).unwrap();
+        assert_eq!(
+            on_disk.get("appStateSchema").and_then(|v| v.as_u64()),
+            Some(u64::from(APP_STATE_SCHEMA)),
+            "heal 补过偏好就立刻写回，盘上该是 2 代"
         );
     }
 
@@ -2487,6 +2739,23 @@ mod tests {
 
         assert!(set_auto_check_update(d.path(), true).unwrap());
         assert!(auto_check_update(d.path()).unwrap());
+    }
+
+    /// 待更新账能写能清（docs/SOFTWARE-UPDATE-SPEC.md S3 / S4 的落盘那一半）：
+    /// 关自动检查 / 换渠道时命令层调 `set_pending_update(None)`，清完标题栏胶囊就没了依据。
+    #[test]
+    fn pending_update_roundtrips_and_can_be_cleared() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(pending_update(d.path()).unwrap().is_none());
+
+        set_pending_update(d.path(), Some("0.0.12-preview.1")).unwrap();
+        assert_eq!(
+            pending_update(d.path()).unwrap().as_deref(),
+            Some("0.0.12-preview.1")
+        );
+
+        set_pending_update(d.path(), None).unwrap();
+        assert!(pending_update(d.path()).unwrap().is_none());
     }
 
     /// **认字符串是契约**：只认三个字面量（盘上 / 界面 / 前端都认它），

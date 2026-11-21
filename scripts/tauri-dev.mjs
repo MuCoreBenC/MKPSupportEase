@@ -74,6 +74,11 @@ const VERSION_DERIVED = [
 ]
 const CLIENT_BIN = join(TARGET_DIR, 'release', `mkp-support-ease${exe}`)
 
+/* 工作台「发布快照」的本地演练：源码本来就在工作区里改着，编出来的包只在本地测。
+   只松工作区那一道闸；工作台标记那道仍查（它挡的是"装上去没有窗"的真事故）。
+   发版脚本不设这个变量，正式发布那道闸原样。 */
+const LOCAL_SNAPSHOT = process.env.MKPSE_LOCAL_SNAPSHOT === '1'
+
 /** 这一趟不该开工的理由；能开工就是 `null`。 */
 function refusalToBuild() {
   try {
@@ -87,6 +92,8 @@ function refusalToBuild() {
   } catch {
     /* 还没编过：没有可复用的东西 */
   }
+
+  if (LOCAL_SNAPSHOT) return null
 
   let status
   try {
