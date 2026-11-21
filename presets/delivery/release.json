@@ -1,31 +1,31 @@
 {
   "releaseSchema": 1,
-  "version": "0.0.13",
-  "notes": "Windows 更新按所选源下载双平台资产；回执补绿色版产物",
-  "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.13",
+  "version": "0.0.14",
+  "notes": "两源产物一致；更新说明只占一行",
+  "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.14",
   "assets": [
     {
-      "name": "SupportEase_0.0.13_x64-setup.exe",
-      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.13/SupportEase_0.0.13_x64-setup.exe",
-      "size": 9367552,
-      "sha256": "b15fa9590ac1db846fe1f7130109d55c6adc301e359b345f9392d92d86a85092",
+      "name": "SupportEase_0.0.14_x64-setup.exe",
+      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.14/SupportEase_0.0.14_x64-setup.exe",
+      "size": 9369088,
+      "sha256": "42e43580cb923b1a2cab69b5d53bed1b12da62fd2375212f17b3d3c8bbc22e76",
       "platform": "windows",
       "kind": "nsis",
       "sources": {
-        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.13/SupportEase_0.0.13_x64-setup.exe",
-        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.13/SupportEase_0.0.13_x64-setup.exe"
+        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.14/SupportEase_0.0.14_x64-setup.exe",
+        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.14/SupportEase_0.0.14_x64-setup.exe"
       }
     },
     {
-      "name": "SupportEase_0.0.13_x64-portable.zip",
-      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.13/SupportEase_0.0.13_x64-portable.zip",
-      "size": 10318263,
-      "sha256": "de3c99960919f446cc19d75f76508fa4179e5281be66e129ccbf503ef82ddf74",
+      "name": "SupportEase_0.0.14_x64-portable.zip",
+      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.14/SupportEase_0.0.14_x64-portable.zip",
+      "size": 10318089,
+      "sha256": "487b62bafcd2b8c1d159bb4f15ea36a00d62ee2539d21b6e6ede482c930a5146",
       "platform": "windows",
       "kind": "portable",
       "sources": {
-        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.13/SupportEase_0.0.13_x64-portable.zip",
-        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.13/SupportEase_0.0.13_x64-portable.zip"
+        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.14/SupportEase_0.0.14_x64-portable.zip",
+        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.14/SupportEase_0.0.14_x64-portable.zip"
       }
     }
   ]
