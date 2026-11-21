@@ -493,27 +493,6 @@
 }
 
 /*
- * 更新说明（changelog）—— 长文案时的**封顶可滚**：
- * 一次发版说明写几十行是常事，不封顶的话整张卡被撑成一整屏，下面那排按钮
- * 与状态大字一起被推出视野（作者 2026-10-13：「显示一大堆的时候效果是怎么样的呢？」）。
- * 封顶之后：说明自己在块内滚，状态与按钮位置不动。
- *
- * 这里刻意用**普通块**（不是 flex 列）：块内只有一个文本节点，没有会被 flex
- * 压扁的子项，所以那条"封顶可滚的 flex 列里子项要 flex-shrink: 0"的约定不适用。
- */
-.notes {
-  margin: 0;
-  max-height: 180px;
-  overflow-y: auto;
-  padding-right: 6px;
-  font-size: var(--fs-label);
-  color: var(--text-2);
-  /* changelog 的换行照原样（一行一行念得下去），长行仍折 */
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/*
  * 更新卡：**状态在左、动作在右上**（顶对齐）—— a07 第二版定稿的摆法。
  * 作者先要过"居中"、又画了支箭头指右缘，最后说：「他应该放到上面呀，
  * 而且你不觉得它这个位置很奇怪吗？我就觉得他这个位置放在这不舒服」——
@@ -1580,13 +1559,20 @@
   color: var(--text-1);
 }
 
+/*
+ * 更新说明：**一行封顶**（作者：「你有保证它每次就只显示一行吗」）。
+ * changelog 可能几十行，这里只占一行、末尾省略号，省略号挂着的那句全文由
+ * TipLayer 在**确实被截断时**弹出来（`data-tip`；没截断就不弹）。
+ * 因此卡片高度只跟"有没有这一行"有关，与说明写了多少字无关。
+ */
 .foundNote {
   margin: 0;
   font-size: var(--fs-label);
   line-height: 1.5;
   color: var(--text-2);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .foundAction {

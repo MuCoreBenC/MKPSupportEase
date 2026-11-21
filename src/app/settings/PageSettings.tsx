@@ -1296,7 +1296,6 @@ export default function PageSettings({
   /* 这一屏真正要画的那几格：**只有真账**（四态由真检查给，不点播） */
   const upd = update
   const hasUpdate = upd?.hasUpdate === true
-  const notes = hasUpdate ? upd?.notes : undefined
   const releaseUrl = hasUpdate ? upd?.url : undefined
   /**
    * 双通道候选（2026-11-05）：**只有用户主动点「重新检查」才拿得到**。
@@ -1577,8 +1576,7 @@ export default function PageSettings({
               )}
             </p>
 
-            {/* 更新说明：长文案时这块自己滚（`.notes` 封顶） */}
-            {notes !== undefined && <p className={s.notes}>{notes}</p>}
+            {/* 更新说明只画在下面的「发现新版本」卡里（紧挨「立即更新」），这里不再重复 */}
 
             {upd === null && !updateBusy && (
               <p className={s.fieldNote}>
@@ -1607,7 +1605,10 @@ export default function PageSettings({
                   {tr('settings.update.found', { version: found.version })}
                 </div>
                 {found.notes !== undefined && found.notes !== '' && (
-                  <p className={s.foundNote}>{found.notes}</p>
+                  /* 一行封顶：说明再长也不动卡片高度；被省略号截断时悬停看全文 */
+                  <p className={s.foundNote} data-tip={found.notes}>
+                    {found.notes}
+                  </p>
                 )}
                 {found.channel === 'preview' && (
                   <p className={s.foundNote}>{tr('settings.update.previewNote')}</p>
