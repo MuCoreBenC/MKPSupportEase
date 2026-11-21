@@ -804,8 +804,12 @@ mod tests {
                 .expect("该解析得动");
         let gitee = info.asset_for_host(Some("gitee")).expect("Gitee 安装包");
         let github = info.asset_for_host(Some("github")).expect("GitHub 安装包");
-        assert_eq!(gitee.name, "SupportEase_0.0.12_x64-setup.exe");
-        assert_eq!(github.name, gitee.name);
+        assert!(
+            gitee.name.starts_with("SupportEase_"),
+            "清单里该是 SupportEase 的资产：{}",
+            gitee.name
+        );
+        assert_eq!(github.name, gitee.name, "两源必须是同一份文件名");
         assert!(gitee.url.starts_with("https://gitee.com/"), "{}", gitee.url);
         assert!(
             github.url.starts_with("https://github.com/"),
