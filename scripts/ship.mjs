@@ -143,8 +143,9 @@ function versionNow() {
  * 三件可核对的事实：远端有没有 tag、有没有 Release、**main 上的清单是不是这一版**。
  *
  * 最后那条才是「别人看不看得到」的开关 —— 2026-11-12 之前一直漏在这。
+ * 给了 `assets` 就再加一格：清单里每个资产的**每个下载源**都得真的下得到。
  */
-export function verdict({ tag, release, manifestVersion, wantVersion, channel }) {
+export function verdict({ tag, release, manifestVersion, wantVersion, channel, assets }) {
   const lines = []
   let effective = true
 
@@ -162,7 +163,109 @@ export function verdict({ tag, release, manifestVersion, wantVersion, channel })
   )
   if (!same) effective = false
 
+  /* 资产那一格：清单写着「这个地址能下载」，就逐份去确认一遍（HEAD）。
+     没核的数字不出现 —— `shaChecked` 只在真比过 GitHub 摘要时才计数。 */
+  if (assets) {
+    if (assets.problems.length > 0) {
+      lines.push(['✗', `资产核对：${assets.problems.length} 处对不上`])
+      for (const p of assets.problems) lines.push(['✗', p])
+      effective = false
+    } else {
+      lines.push(['✓', `资产两源核对通过（${assets.checked} 份地址可达、大小与清单一致）`])
+      if (assets.shaChecked > 0) {
+        lines.push(['✓', `GitHub SHA 与清单一致（${assets.shaChecked} 份）`])
+      }
+    }
+  }
+
   return { effective, lines, channel }
+}
+
+/**
+ * HEAD 一下远端文件，返回字节数；下不到 / 没给长度 = `null`（调用方如实报）。
+ *
+ * 用 HEAD 不用 GET：一个包十几 MB，核对不该先把它下完。Gitee 会 302 到文件存储，
+ * `fetch` 默认跟随重定向，最终那一段的 `content-length` 就是文件本身的大小。
+ */
+async function headSize(url) {
+  try {
+    const res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(15000) })
+    if (!res.ok) return null
+    const len = Number(res.headers.get('content-length'))
+    return Number.isFinite(len) && len > 0 ? len : null
+  } catch {
+    return null
+  }
+}
+
+/** GitHub 上这一版每个附件（`{name, size, digest}`）；没有 gh / 没登录 = `null`（那就是没核）。 */
+function githubAssets(tag) {
+  const out = tryRun('gh', ['release', 'view', tag, '--json', 'assets'])
+  if (!out) return null
+  try {
+    const map = new Map()
+    for (const a of JSON.parse(out).assets ?? []) map.set(a.name, a)
+    return map
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 清单里的资产 × 它写的每个下载源，逐份核：
+ *
+ *   · 两源都要**真的下得到**（HEAD 200），大小与清单一致；
+ *   · GitHub 额外核 SHA（`gh` 给 `digest: sha256:…`）；
+ *   · Gitee 的 API 不给摘要 —— **只核大小，不假装核过 SHA**。
+ *
+ * 清单没写 `sources.github` 时就只有 Gitee 一份，不替它补一个「应该有 GitHub」。
+ */
+export async function checkAssets(info, version) {
+  const list =
+    Array.isArray(info.assets) && info.assets.length > 0
+      ? info.assets
+      : info.asset
+        ? [info.asset]
+        : []
+  const gh = githubAssets(`v${version}`)
+  const problems = []
+  let checked = 0
+  let shaChecked = 0
+  for (const a of list) {
+    const sources = a.sources && Object.keys(a.sources).length > 0 ? a.sources : { gitee: a.url }
+    for (const [src, url] of Object.entries(sources)) {
+      if (typeof url !== 'string' || !/^https?:\/\//.test(url)) {
+        problems.push(`${a.name} 的 ${src} 地址不是一个 http(s) 链接`)
+        continue
+      }
+      const size = await headSize(url)
+      if (size === null) {
+        problems.push(`${a.name} 在 ${src} 上下不到 —— ${url}`)
+        continue
+      }
+      if (typeof a.size === 'number' && a.size > 0 && size !== a.size) {
+        problems.push(`${a.name} 在 ${src} 上是 ${size} 字节，清单写 ${a.size}`)
+        continue
+      }
+      checked++
+      if (src === 'github' && typeof a.sha256 === 'string' && a.sha256 && gh) {
+        const got = gh.get(a.name)
+        const want = `sha256:${a.sha256.toLowerCase()}`
+        if (!got) {
+          problems.push(`${a.name} 不在 GitHub Release 的资产列表里`)
+        } else if (typeof got.digest === 'string' && got.digest) {
+          if (got.digest.toLowerCase() !== want) {
+            problems.push(`${a.name} 在 GitHub 上的 SHA 是 ${got.digest}，清单写 ${want}`)
+          } else {
+            shaChecked++
+          }
+        } else {
+          problems.push(`${a.name} 在 GitHub 上没有摘要可核`)
+        }
+      }
+    }
+  }
+  return { checked, shaChecked, problems }
 }
 
 /**
@@ -190,29 +293,32 @@ async function releaseExists(version, manifestText) {
 
 async function checkEffective(choice, version) {
   if (!choice.tag) return null
-  info('核对：远端 tag / Release / main 上的清单')
+  info('核对：远端 tag / Release / main 上的清单 / 两源资产')
 
   const tag = tryRun('git', ['ls-remote', '--tags', 'origin', `refs/tags/v${version}`])
 
   const rel = choice.key === 'stable' ? 'presets/delivery/release.json' : 'presets/delivery/release-preview.json'
   tryRun('git', ['fetch', 'origin', 'main', '--quiet'])
   const manifestText = tryRun('git', ['show', `origin/main:${rel}`])
-  let manifestVersion = null
+  let manifest = null
   if (manifestText) {
     try {
-      manifestVersion = JSON.parse(manifestText).version ?? null
+      manifest = JSON.parse(manifestText)
     } catch {
-      manifestVersion = null
+      manifest = null
     }
   }
   const release = manifestText ? await releaseExists(version, manifestText) : false
+  /* 清单读得懂才核资产：读不懂时上面那一格已经报红，这里不添一条假结论。 */
+  const assets = manifest ? await checkAssets(manifest, version) : undefined
 
   return verdict({
     tag: Boolean(tag),
     release: Boolean(release),
-    manifestVersion,
+    manifestVersion: manifest?.version ?? null,
     wantVersion: version,
     channel: choice.key,
+    assets,
   })
 }
 
@@ -384,7 +490,11 @@ function choiceFromKey(key) {
   return SHIPS.find((s) => s.key === String(key).trim()) ?? null
 }
 
-main().catch((e) => {
-  console.error(`\n\x1b[31m✗ ${e?.message ?? e}\x1b[0m\n`)
-  exit(1)
-})
+/* 直接 `node scripts/ship.mjs` 才跑主流程：被 import（判据 / 自检）时只拿函数，不执行。 */
+const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+if (invokedDirectly) {
+  main().catch((e) => {
+    console.error(`\n\x1b[31m✗ ${e?.message ?? e}\x1b[0m\n`)
+    exit(1)
+  })
+}
