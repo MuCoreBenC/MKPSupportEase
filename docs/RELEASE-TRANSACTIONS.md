@@ -512,8 +512,13 @@ curl -sL https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/r
 
 ### 10.9 双平台下载：Gitee 收货、GitHub 镜像（2026-11-06）
 
-作者口径：**GitHub 是主仓库**（PR、合并、tag 都从这里出发），**Gitee 是国内下载源**，
-清单里的下载地址**继续只指 Gitee**（§5-M6 不动）。两边同一个版本、同一个 tag、同一组安装包。
+作者口径：**GitHub 是主仓库**（PR、合并、tag 都从这里出发），**Gitee 是国内下载源**；
+两边同一个版本、同一个 tag、同一组安装包。
+
+**2026-11-21 改判（0.0.12）**：清单不再只指 Gitee。每份资产的主地址仍是 Gitee，
+另加 `sources.gitee` / `sources.github` 两条**同字节**地址；客户端按用户当前选的源取。
+选 GitHub 就下 GitHub 的包，选 Gitee 就下 Gitee 的包，都走同一套大小 / SHA 校验与静默安装。
+这修的是“Windows 只有一个源能直接下载”的缺口，不是取消 Gitee 主地址。
 
 **方向为什么是 Gitee → GitHub，而不是反过来**
 

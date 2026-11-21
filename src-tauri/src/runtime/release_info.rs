@@ -32,9 +32,21 @@
 //!     "url":   "https://…/releases/download/v0.0.4/SupportEase_0.0.4_aarch64.app.zip",
 //!     "size":  12345678,
 //!     "sha256": "…"                  // 有就校验，没有就只验大小
-//!   }
+//!   },
+//!   "assets": [{                     // ← 可选：按平台 + 下载源挑
+//!     "name": "SupportEase_0.0.12_x64-setup.exe",
+//!     "url":  "https://gitee.com/…/v0.0.12/…setup.exe",   // 主地址
+//!     "platform": "windows", "kind": "nsis",
+//!     "sources": {                    // 同一份资产在各源上的地址
+//!       "gitee":  "https://gitee.com/…",
+//!       "github": "https://github.com/…"
+//!     }
+//!   }]
 //! }
 //! ```
+//!
+//! ★ `sources` 是 0.0.12 补的：用户选 GitHub 就下 GitHub 的包，选 Gitee 就下 Gitee 的；
+//!   缺这一格时退回主 `url`（老发布物 / 自定义源）。
 //!
 //! ★ **`asset` 是可选的，加它不升代次**（纪律：加字段不升号）。**没有它就退回
 //!   "打开下载页"** —— 那是 0.0.2 / 0.0.3 的行为，仍然成立、仍然能用。
@@ -43,6 +55,8 @@
 //! 版本号**与 `Cargo.toml` 同源**（发布侧写它时取 `CARGO_PKG_VERSION`）——
 //! "软件版本"全局只有一处真值。将来换成 GitHub Releases，只换**消费层**取这份数据的方式
 //! （[`super::net`] 里换一个取法），不动预设发布架构（作者定死的演进路线）。
+
+use std::collections::BTreeMap;
 
 use postprocess::diag::messages;
 
@@ -143,27 +157,54 @@ pub struct ReleaseAsset {
     /// 资产种类：`appZip`（macOS 解包替换）/ `nsis`（Windows 静默安装）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+    /// **同一份资产在各下载源上的地址**（`gitee` / `github`）。
+    ///
+    /// `url` 仍是主地址（向后兼容）；用户选了哪个源，客户端就取这一格里的对应 URL。
+    /// 缺这一格 = 只有主地址，退回 `url`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sources: Option<BTreeMap<String, String>>,
 }
 
 impl ReleaseInfo {
-    /// 挑**当前平台**能用的安装包。
+    /// 挑**当前平台**能用的安装包，并按**用户当前下载源**换地址。
     ///
-    /// 优先在 `assets[]` 里按 `platform` 找；没给 `assets` 就退回老的单 `asset`
-    /// （macOS `.app.zip` 那条路，0.0.2 起一直成立）。`platform` 缺省的资产
-    /// 视为「不挑平台」，也能被选中。找不到就 `None` —— 界面退回「打开下载页」。
-    pub fn asset_for_host(&self) -> Option<ReleaseAsset> {
-        if let Some(list) = &self.assets {
-            let here = host_platform();
-            let picked = list
-                .iter()
-                .find(|a| a.platform.as_deref() == Some(here))
-                .or_else(|| list.iter().find(|a| a.platform.is_none()))
-                .cloned();
-            if picked.is_some() {
-                return picked.filter(|a| a.is_downloadable());
-            }
-        }
-        self.asset.clone().filter(|a| a.is_downloadable())
+    /// 优先在 `assets[]` 里按 `platform` + `kind` 找（Windows 要 `nsis`，macOS 要
+    /// `appZip`）；没给 `assets` 就退回老的单 `asset`（macOS `.app.zip` 那条路）。
+    /// `source` 是 `gitee` / `github`；资产带 `sources[source]` 就用它，否则用主 `url`。
+    /// 找不到可下载的资产就 `None` —— 界面退回「打开下载页」。
+    pub fn asset_for_host(&self, source: Option<&str>) -> Option<ReleaseAsset> {
+        let here = host_platform();
+        let pick_kind = |a: &&ReleaseAsset| {
+            a.platform.as_deref() == Some(here) && kind_matches_host(a.kind.as_deref())
+        };
+        let list = self.assets.as_deref().unwrap_or_default();
+        let picked = list
+            .iter()
+            .find(pick_kind)
+            .or_else(|| list.iter().find(|a| a.platform.as_deref() == Some(here)))
+            .or_else(|| list.iter().find(|a| a.platform.is_none()))
+            .cloned()
+            .or_else(|| self.asset.clone());
+        picked
+            .map(|mut a| {
+                if let Some(url) = source.and_then(|s| a.sources.as_ref()?.get(s)).cloned() {
+                    a.url = url;
+                }
+                a
+            })
+            .filter(|a| a.is_downloadable())
+    }
+}
+
+/// 这一份资产的 `kind` 是不是当前平台该选的那种。
+///
+/// 同一个 Windows Release 既有安装版（`nsis`）又有绿色版（`portable`）；
+/// 应用内更新必须选安装版，不能把绿色版 zip 当 setup 去静默安装。
+fn kind_matches_host(kind: Option<&str>) -> bool {
+    match host_platform() {
+        "windows" => kind == Some("nsis"),
+        "macos" => kind == Some("appZip"),
+        _ => false,
     }
 }
 
@@ -379,12 +420,21 @@ pub struct UpdateCandidate {
 
 impl UpdateCandidate {
     pub fn from_info(channel: UpdateChannel, info: &ReleaseInfo) -> Self {
+        Self::from_info_with_source(channel, info, None)
+    }
+
+    /// 按用户当前下载源（`gitee` / `github`）挑资产地址。
+    pub fn from_info_with_source(
+        channel: UpdateChannel,
+        info: &ReleaseInfo,
+        source: Option<&str>,
+    ) -> Self {
         Self {
             channel,
             version: info.version.clone(),
             notes: non_empty(&info.notes),
             url: non_empty(&info.url),
-            asset: info.asset_for_host(),
+            asset: info.asset_for_host(source),
         }
     }
 }
@@ -407,13 +457,22 @@ pub fn host_platform() -> &'static str {
 
 /// 由一份发布信息得出给界面的更新状态（`current` 可注入，判据用）。
 pub fn to_update_for(info: &ReleaseInfo, current: &str) -> SoftwareUpdate {
+    to_update_for_source(info, current, None)
+}
+
+/// 同上，但按用户当前下载源（`gitee` / `github`）选资产地址。
+pub fn to_update_for_source(
+    info: &ReleaseInfo,
+    current: &str,
+    source: Option<&str>,
+) -> SoftwareUpdate {
     SoftwareUpdate {
         has_update: compare(&info.version, current),
         current_version: current.to_owned(),
         latest_version: info.version.clone(),
         notes: non_empty(&info.notes),
         url: non_empty(&info.url),
-        asset: info.asset_for_host(),
+        asset: info.asset_for_host(source),
     }
 }
 
@@ -454,6 +513,47 @@ mod tests {
         assert_eq!(info.asset, None);
         let u = to_update(&info);
         assert_eq!(u.asset, None, "没有资产 ⇒ 界面只摆「查看更新」");
+    }
+
+    /// **同一份 Windows 安装包在 GitHub / Gitee 各有一条地址**：
+    /// 用户选哪个源就下哪个，不能写死 Gitee；绿色版 zip 与安装版同时在 `assets[]` 时，
+    /// 必须挑安装版（`kind=nsis`），不能拿 zip 去静默安装。
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_asset_follows_the_selected_source() {
+        let v = br#"{
+          "releaseSchema":1, "version":"0.0.12",
+          "url":"https://gitee.com/o/r/releases/tag/v0.0.12",
+          "assets":[
+            {"name":"setup.exe","url":"https://gitee.com/o/r/releases/download/v0.0.12/setup.exe",
+             "size":10,"sha256":"aa","platform":"windows","kind":"nsis",
+             "sources":{"gitee":"https://gitee.com/o/r/releases/download/v0.0.12/setup.exe",
+                        "github":"https://github.com/o/r/releases/download/v0.0.12/setup.exe"}},
+            {"name":"portable.zip","url":"https://gitee.com/o/r/releases/download/v0.0.12/portable.zip",
+             "size":20,"sha256":"bb","platform":"windows","kind":"portable",
+             "sources":{"gitee":"https://gitee.com/o/r/releases/download/v0.0.12/portable.zip",
+                        "github":"https://github.com/o/r/releases/download/v0.0.12/portable.zip"}}
+          ]}"#;
+        let info = parse(v).expect("该解析得动");
+        let gitee = info
+            .asset_for_host(Some("gitee"))
+            .expect("Gitee 该有安装包");
+        assert_eq!(gitee.name, "setup.exe", "不能挑成绿色版 zip");
+        assert!(gitee.url.starts_with("https://gitee.com/"), "{}", gitee.url);
+        let github = info
+            .asset_for_host(Some("github"))
+            .expect("GitHub 该有安装包");
+        assert_eq!(github.name, "setup.exe");
+        assert!(
+            github.url.starts_with("https://github.com/"),
+            "选 GitHub 必须下 GitHub 的包，不能写死 Gitee：{}",
+            github.url
+        );
+        assert_eq!(
+            info.asset_for_host(Some("custom")).map(|a| a.url),
+            Some(gitee.url),
+            "自定义源没有镜像地址时退回主 URL"
+        );
     }
 
     /// 有 `asset` 且地址合法 → 客户端拿它做应用内下载
@@ -689,6 +789,30 @@ mod tests {
             url.ends_with("/presets/delivery/release.json"),
             "客户端会去 {url} —— 它该是 delivery/release.json"
         );
+    }
+
+    /// **仓库里这份 0.0.12 清单本身**必须给 Windows 两条真实地址：
+    /// 选 GitHub 下 GitHub，选 Gitee 下 Gitee；不能用测试里造的 JSON 代替。
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn the_shipped_windows_manifest_has_both_source_urls() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("src-tauri 上面就是仓库根");
+        let info =
+            parse(&std::fs::read(root.join("presets/delivery/release.json")).expect("该有清单"))
+                .expect("该解析得动");
+        let gitee = info.asset_for_host(Some("gitee")).expect("Gitee 安装包");
+        let github = info.asset_for_host(Some("github")).expect("GitHub 安装包");
+        assert_eq!(gitee.name, "SupportEase_0.0.12_x64-setup.exe");
+        assert_eq!(github.name, gitee.name);
+        assert!(gitee.url.starts_with("https://gitee.com/"), "{}", gitee.url);
+        assert!(
+            github.url.starts_with("https://github.com/"),
+            "{}",
+            github.url
+        );
+        assert!(!gitee.sha256.trim().is_empty(), "安装包要带 SHA");
     }
 
     #[test]

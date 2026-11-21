@@ -62,18 +62,43 @@ for (const [label, path] of FILES) {
     continue;
   }
 
+  /* 主地址（url / asset.url / assets[].url）仍必须是 Gitee；
+     `sources.github` 是**镜像地址**，允许 GitHub —— 客户端按用户选的源取它。
+     这是 0.0.12 起“双源都能直接下载”的口径，不是把断代线取消。 */
   const urls = [
     ['release 页', info.url],
     ...(info.asset ? [['安装包', info.asset.url]] : []),
     ...(Array.isArray(info.assets) ? info.assets.map((a, i) => [`assets[${i}]`, a.url]) : []),
   ];
   const bad = urls.filter(([, u]) => typeof u === 'string' && u.includes('github.com'));
-  if (bad.length > 0) {
-    console.error(`::error::${label} ${version} 的下载地址必须是 Gitee（总纲 §5-M6 断代）—— 还指着 GitHub：`);
-    for (const [what, u] of bad) console.error(`  ${what}: ${u}`);
+  const mirrors = [];
+  const collect = (what, asset) => {
+    if (!asset || typeof asset !== 'object') return;
+    for (const [source, u] of Object.entries(asset.sources ?? {})) {
+      if (typeof u !== 'string') continue;
+      mirrors.push([`${what}.sources.${source}`, u]);
+    }
+  };
+  collect('asset', info.asset);
+  if (Array.isArray(info.assets)) info.assets.forEach((a, i) => collect(`assets[${i}]`, a));
+
+  const badMirrors = mirrors.filter(([what, u]) => {
+    if (what.endsWith('.sources.gitee')) return !u.includes('gitee.com');
+    if (what.endsWith('.sources.github')) return !u.includes('github.com');
+    return u.includes('github.com') || u.includes('gitee.com') ? false : true;
+  });
+  if (bad.length > 0 || badMirrors.length > 0) {
+    if (bad.length > 0) {
+      console.error(`::error::${label} ${version} 的主下载地址必须是 Gitee（总纲 §5-M6 断代）—— 还指着 GitHub：`);
+      for (const [what, u] of bad) console.error(`  ${what}: ${u}`);
+    }
+    if (badMirrors.length > 0) {
+      console.error(`::error::${label} ${version} 的镜像地址宿主不对：`);
+      for (const [what, u] of badMirrors) console.error(`  ${what}: ${u}`);
+    }
     failed = true;
   } else {
-    console.log(`${label} ${version}：下载地址来自 Gitee ✓`);
+    console.log(`${label} ${version}：主地址 Gitee，镜像地址 ${mirrors.length} 条 ✓`);
   }
 }
 if (failed) process.exit(1);

@@ -270,9 +270,17 @@ pub enum SourceEntry {
 #[derive(Debug, Clone)]
 pub struct ResolvedSource {
     pub resolver: SourceResolver,
+    /// 当前用户选的是哪条源（`gitee` / `github` / `custom`）。
+    /// 软件更新按它挑同一份资产的地址；`custom` 没有镜像地址，退回主 URL。
+    mode: SourceMode,
 }
 
 impl ResolvedSource {
+    /// 当前源（`gitee` / `github` / `custom`）。
+    pub fn mode(&self) -> SourceMode {
+        self.mode
+    }
+
     /// catalog 的完整 URL（检查 / 应用更新取它）
     pub fn catalog_url(&self) -> Result<String, AppError> {
         self.resolver
@@ -748,7 +756,8 @@ pub fn resolve_entry(entry: SourceEntry) -> Result<ResolvedSource, AppError> {
 pub fn resolve_source(root: &Path) -> Result<ResolvedSource, AppError> {
     let entry = current_entry(root)?
         .ok_or_else(|| AppError::not_implemented(messages::text("ui.runtime.source.452", &[])))?;
-    let resolved = resolve_entry(entry)?;
+    let mode = current_mode(root)?;
+    let resolved = resolve_entry(entry)?.with_mode(mode);
     Ok(resolved.with_internal_root(root))
 }
 
@@ -790,7 +799,12 @@ fn parse_source_json_with(fetch: FetchBytes<'_>, url: &str) -> Result<ResolvedSo
 /// 这是唯一无歧义的事实，Manifest 里的相对引用都以它为基准（客户端不猜别的锚）。
 pub fn parse_manifest_at(url: &str, bytes: &[u8]) -> Result<ResolvedSource, AppError> {
     let resolver = SourceResolver::from_bootstrap(directory_of(url)?, bytes)?;
-    Ok(ResolvedSource { resolver })
+    Ok(ResolvedSource {
+        resolver,
+        /* 直接解析一份 Manifest 时没有"用户选了哪条源"的上下文；调用方要用
+        [`ResolvedSource::with_mode`] 补上。默认 Gitee 只是历史口径，不参与地址拼接。 */
+        mode: SourceMode::Gitee,
+    })
 }
 
 /// Bootstrap 地址 → 它声明的交付根（= source.json 所在目录）。
@@ -845,6 +859,12 @@ pub fn normalize_base_url(raw: &str) -> Result<String, AppError> {
 }
 
 impl ResolvedSource {
+    /// 补上"用户当前选的是哪条源"。
+    fn with_mode(mut self, mode: SourceMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
     /// 给 Resolver 本地落点根（客户端 = appDataDir）。
     fn with_internal_root(mut self, root: &Path) -> Self {
         self.resolver = self.resolver.with_internal_root(root.to_path_buf());

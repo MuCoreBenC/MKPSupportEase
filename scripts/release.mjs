@@ -526,6 +526,27 @@ try {
 }
 ok(`阶段 ${second.stage}：${second.summary}`)
 
+/* 发布面主地址在 Gitee；GitHub 做同版本镜像，客户端选 GitHub 时才下得到。
+   这一步在清单 PR 合并之前跑 —— 镜像失败就停，清单不生效。 */
+if (second.artifact || second.portable) {
+  step('GitHub Release 镜像（同一 tag、同一份产物）')
+  const tag = second.tag ?? `v${version}`
+  const files = [second.artifact?.path, second.portable?.path].filter(Boolean)
+  const has = tryRun('gh', ['release', 'view', tag, '--json', 'tagName'])
+  if (!has) {
+    run('gh', [
+      'release', 'create', tag, '--verify-tag',
+      '--title', `SupportEase ${tag}`,
+      '--notes', summary,
+      ...files,
+    ])
+    ok(`GitHub Release ${tag} 已建并上传 ${files.length} 个资产`)
+  } else {
+    run('gh', ['release', 'upload', tag, ...files, '--clobber'])
+    ok(`GitHub Release ${tag} 已补/覆盖 ${files.length} 个资产`)
+  }
+}
+
 console.log(`
 \u001b[32m发完了：v${version}（${channel === 'preview' ? '预览通道' : '正式通道'}）\u001b[0m
 

@@ -145,7 +145,9 @@ flowchart TD
 2. 创建并推送 tag `v<版本>`。
 3. 创建 Release。
 4. 上传安装版与绿色版。
-5. 根据**已上传**的产物生成 `release.json`，写入版本号、下载地址、SHA。
+5. 根据**已上传**的产物生成 `release.json`，写入版本号、下载地址、SHA；
+   Windows 资产同时写 `sources.gitee` 与 `sources.github`（同一份文件、同一 SHA），
+   客户端按用户当前源取地址。
 6. 核对 GitHub tag / Gitee Release / 远端 tag / main 清单四者一致。
 
 ### 状态图

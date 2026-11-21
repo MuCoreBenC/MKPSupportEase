@@ -2,5 +2,31 @@
   "releaseSchema": 1,
   "version": "0.0.12",
   "notes": "修更新胶囊与两档包串味，绿色版安装版内核解耦",
-  "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.12"
+  "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.12",
+  "assets": [
+    {
+      "name": "SupportEase_0.0.12_x64-setup.exe",
+      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.12/SupportEase_0.0.12_x64-setup.exe",
+      "size": 9489920,
+      "sha256": "06ab35863fb9386d713811e02d3b68da80fc2d450bdbf5dd1ec304331d02848b",
+      "platform": "windows",
+      "kind": "nsis",
+      "sources": {
+        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.12/SupportEase_0.0.12_x64-setup.exe",
+        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.12/SupportEase_0.0.12_x64-setup.exe"
+      }
+    },
+    {
+      "name": "SupportEase_0.0.12_x64-portable.zip",
+      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.12/SupportEase_0.0.12_x64-portable.zip",
+      "size": 10334771,
+      "sha256": "81f707f408b26d77162c3730b95b89a035a99cef15ed4ce8118412e28f2bdc4c",
+      "platform": "windows",
+      "kind": "portable",
+      "sources": {
+        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.12/SupportEase_0.0.12_x64-portable.zip",
+        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.12/SupportEase_0.0.12_x64-portable.zip"
+      }
+    }
+  ]
 }
