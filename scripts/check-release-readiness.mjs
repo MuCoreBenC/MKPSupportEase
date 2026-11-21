@@ -11,7 +11,7 @@
  *   node scripts/check-release-readiness.mjs --static   静态部分（挂在每个 PR 的 lint 上）
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -100,6 +100,30 @@ check('分支与工作区', () => {
   const dirty = tryRun('git', ['status', '--porcelain'])
   if (dirty) fail(`工作区不干净：\n${dirty.split('\n').slice(0, 6).join('\n')}`)
   return branch
+})
+
+/* 旧产物残留必须在构建前拦住，而不是编了十几分钟才发现 bundle 里有多份。 */
+check('构建目录没有旧版本产物残留', () => {
+  const dirs = [
+    'target/release/bundle/nsis',
+    'target/release/bundle/dmg',
+    'target/release/bundle/macos',
+    'dist-portable',
+  ]
+  const stale = []
+  for (const rel of dirs) {
+    const dir = join(REPO, rel)
+    if (!existsSync(dir)) continue
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      if (!ent.isFile()) continue
+      if (!/\.(exe|dmg|zip)$/i.test(ent.name)) continue
+      if (!ent.name.includes(version)) stale.push(`${rel}/${ent.name}`)
+    }
+  }
+  if (stale.length > 0) {
+    fail(`有旧版本产物，先移出构建目录：\n      ${stale.join('\n      ')}`)
+  }
+  return '没有旧版本'
 })
 
 const tag = `v${version}`
