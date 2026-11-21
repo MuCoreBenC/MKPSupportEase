@@ -1,7 +1,7 @@
 {
   "releaseSchema": 1,
   "version": "0.0.13",
-  "notes": "Windows",
+  "notes": "Windows 更新按所选源下载双平台资产；回执补绿色版产物",
   "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.13",
   "assets": [
     {
