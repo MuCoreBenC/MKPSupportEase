@@ -238,6 +238,34 @@ export async function checkAssets(info, version) {
         problems.push(`${a.name} 的 ${src} 地址不是一个 http(s) 链接`)
         continue
       }
+      /* GitHub 这一侧**问 gh 的资产表**，不去 HEAD 下载地址：
+         ① 本机走代理时 Node 的 fetch 不认系统代理（直连 GitHub 会超时），`gh` 认；
+         ② 一次就把「在不在、多大、SHA」拿齐，不用下载。 */
+      if (src === 'github' && gh) {
+        const got = gh.get(a.name)
+        if (!got) {
+          problems.push(`${a.name} 不在 GitHub Release 的资产列表里`)
+          continue
+        }
+        if (typeof a.size === 'number' && a.size > 0 && got.size !== a.size) {
+          problems.push(`${a.name} 在 github 上是 ${got.size} 字节，清单写 ${a.size}`)
+          continue
+        }
+        if (typeof a.sha256 === 'string' && a.sha256) {
+          const want = `sha256:${a.sha256.toLowerCase()}`
+          if (typeof got.digest !== 'string' || !got.digest) {
+            problems.push(`${a.name} 在 GitHub 上没有摘要可核`)
+            continue
+          }
+          if (got.digest.toLowerCase() !== want) {
+            problems.push(`${a.name} 在 GitHub 上的 SHA 是 ${got.digest}，清单写 ${want}`)
+            continue
+          }
+          shaChecked++
+        }
+        checked++
+        continue
+      }
       const size = await headSize(url)
       if (size === null) {
         problems.push(`${a.name} 在 ${src} 上下不到 —— ${url}`)
@@ -248,21 +276,6 @@ export async function checkAssets(info, version) {
         continue
       }
       checked++
-      if (src === 'github' && typeof a.sha256 === 'string' && a.sha256 && gh) {
-        const got = gh.get(a.name)
-        const want = `sha256:${a.sha256.toLowerCase()}`
-        if (!got) {
-          problems.push(`${a.name} 不在 GitHub Release 的资产列表里`)
-        } else if (typeof got.digest === 'string' && got.digest) {
-          if (got.digest.toLowerCase() !== want) {
-            problems.push(`${a.name} 在 GitHub 上的 SHA 是 ${got.digest}，清单写 ${want}`)
-          } else {
-            shaChecked++
-          }
-        } else {
-          problems.push(`${a.name} 在 GitHub 上没有摘要可核`)
-        }
-      }
     }
   }
   return { checked, shaChecked, problems }
