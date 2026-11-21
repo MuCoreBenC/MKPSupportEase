@@ -1328,6 +1328,15 @@ struct BuiltArtifact {
     path: PathBuf,
 }
 
+/// 资产名取**磁盘上的真名**；取不到才退回模板。Windows 安装器是 `…-setup.exe`，
+/// 按模板拼会变成 `…_x64.exe`，清单与附件就对不上。
+fn artifact_name(path: &Path, fallback: impl FnOnce() -> String) -> String {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(str::to_owned)
+        .unwrap_or_else(fallback)
+}
+
 /// **构建本平台的安装包**。
 ///
 /// macOS 走 `npm run tauri -- build`；Windows 走 `npm run build:installer` —— 自研安装器
@@ -1506,13 +1515,13 @@ fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
                 }
             }
             let size = std::fs::metadata(one).map(|m| m.len()).unwrap_or(0);
+            /* 资产名必须用**磁盘上的真名**：Windows 自研安装器是 `…-setup.exe`，
+            按 `asset_name()` 模板拼会得到 `…_x64.exe`，清单与实际附件就对不上。 */
+            let name = artifact_name(one, || {
+                super::platform::asset_name(PRODUCT, &version_of(repo_root), arch_name(), plan.ext)
+            });
             Ok(BuiltArtifact {
-                name: super::platform::asset_name(
-                    PRODUCT,
-                    &version_of(repo_root),
-                    arch_name(),
-                    plan.ext,
-                ),
+                name,
                 size,
                 path: one.clone(),
             })
@@ -3311,6 +3320,16 @@ mod tests {
         // 没有发布通道 = **问不到**：如实报错，不猜"还没发过"
         let err = release_slot(&git, "v0.0.2", None).unwrap_err();
         assert!(err.message.contains("发布通道"), "{}", err.message);
+    }
+
+    /// 资产名必须取磁盘真名：Windows 安装器是 `…-setup.exe`，模板拼出来的是 `…_x64.exe`。
+    #[test]
+    fn artifact_name_uses_the_real_file_name() {
+        let p = Path::new("bundle/nsis/SupportEase_0.0.13_x64-setup.exe");
+        assert_eq!(
+            artifact_name(p, || "SupportEase_0.0.13_x64.exe".to_owned()),
+            "SupportEase_0.0.13_x64-setup.exe"
+        );
     }
 
     /// 清单写入必须把 Windows 双源资产完整带上：客户端选 GitHub 时读的那一条不能丢。
