@@ -447,16 +447,6 @@ fn tag_of(version: &str) -> String {
     format!("{TAG_PREFIX}{version}")
 }
 
-/// `github.com/{owner}/{repo}`（从 `origin` 读；发布面仍是 Gitee，GitHub 只做镜像）。
-fn github_owner_repo(git: &Git) -> Option<(String, String)> {
-    let remote = git.remote_url().ok()?;
-    let s = remote.trim().trim_end_matches(".git");
-    let i = s.find("github.com")?;
-    let rest = s[i + "github.com".len()..].trim_start_matches(['/', ':']);
-    let mut parts = rest.split('/').filter(|p| !p.is_empty());
-    Some((parts.next()?.to_owned(), parts.next()?.to_owned()))
-}
-
 /// 一份 Release 资产在两边的下载地址。`url` 是 Gitee 主地址，`sources` 带 GitHub 镜像。
 fn mirrored_asset(
     name: &str,
@@ -481,6 +471,96 @@ fn mirrored_asset(
         kind: Some(kind.to_owned()),
         sources: Some(sources),
     }
+}
+
+/// 把这一趟的产物**同一份字节**镜像到 GitHub（代码仓库的 Release）。
+///
+/// 只在调用方给了 GitHub 通道（`hosting.kind() == "github"`）时调用：没有通道就不镜像，
+/// 清单也就不写 `sources.github` —— 写了就是一个下不到的地址。
+///
+/// 返回**真的在 GitHub 上**的那些：`.app.zip` 传不上去只剔掉它（这一版退回「打开下载页」），
+/// 其余产物传不上去是硬错（清单不许宣告一个下不到的地址）。
+///
+/// ★ 与 `gh release upload --clobber` 同一个语义：同名资产先清掉再传。不清的话重编同一版
+///   时 GitHub 会拒（422），而"跳过"会留下旧字节 —— 清单里的 SHA 与远端就对不上。
+fn mirror_artifacts<'a>(
+    hosting: &dyn Hosting,
+    target: &PublishTarget,
+    tag: &str,
+    notes: &str,
+    channel: release_info::UpdateChannel,
+    artifacts: &[&'a BuiltArtifact],
+    summary: &mut String,
+) -> Result<Vec<&'a BuiltArtifact>, AppError> {
+    let release = hosting.create_release(&super::platform::ReleaseSpec {
+        owner: target.owner.clone(),
+        repo: target.repo.clone(),
+        tag_name: tag.to_owned(),
+        name: format!("{PRODUCT} {tag}"),
+        body: release_body(notes, channel),
+        prerelease: channel == release_info::UpdateChannel::Preview,
+    })?;
+    summary.push_str(&format!("GitHub Release {tag} 已就绪。"));
+    let mut done: Vec<&BuiltArtifact> = Vec::new();
+    for a in artifacts {
+        let put = hosting.upload_asset(&super::platform::AssetUpload {
+            owner: target.owner.clone(),
+            repo: target.repo.clone(),
+            release_id: release.id,
+            name: a.name.clone(),
+            content_type: super::platform::content_type_for(&a.name).to_owned(),
+            path: a.path.clone(),
+        });
+        match put {
+            Ok(p) => {
+                if p.size != a.size {
+                    return Err(AppError::invalid_argument(format!(
+                        "GitHub 回执 {} 字节，本地 {} 字节（{}）—— 传上去的不是这一份",
+                        p.size, a.size, a.name
+                    )));
+                }
+                summary.push_str(&format!("已镜像到 GitHub：{}。", p.name));
+                done.push(a);
+            }
+            Err(e) if a.kind == "appZip" => summary.push_str(&format!(
+                "应用内更新的 zip 传不上 GitHub（{e}）—— 这一版退回「打开下载页」。"
+            )),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(done)
+}
+
+/// 补平台那一趟：本平台的资产整组替换，**别的平台的原样留住**。
+///
+/// 不合并的话，Windows 补包会把 macOS 的 dmg / `.app.zip` 从 `assets[]` 里抹掉 ——
+/// 客户端那边就是"新版本忽然不能应用内更新了"，而清单里看不出少过什么。
+fn merge_assets_by_platform(
+    fresh: Vec<crate::runtime::release_info::ReleaseAsset>,
+    previous: Option<&release_info::ReleaseInfo>,
+    version: &str,
+) -> Vec<crate::runtime::release_info::ReleaseAsset> {
+    let Some(prev) = previous.filter(|p| p.version.trim() == version.trim()) else {
+        return fresh;
+    };
+    /* 判据是**平台整组**：本平台的资产全部由 fresh 决定（同平台可能有两份：
+    安装包 + 应用内更新包），别的平台的整组原样搬过来。 */
+    let fresh_platforms: Vec<Option<String>> = {
+        let mut seen: Vec<Option<String>> = Vec::new();
+        for a in &fresh {
+            if !seen.contains(&a.platform) {
+                seen.push(a.platform.clone());
+            }
+        }
+        seen
+    };
+    let mut out = fresh;
+    for a in prev.assets.as_deref().unwrap_or(&[]) {
+        if !fresh_platforms.contains(&a.platform) {
+            out.push(a.clone());
+        }
+    }
+    out
 }
 
 /// 把**这一趟真的在 Release 上**的产物摊成清单资产（纯函数）。
@@ -1128,6 +1208,27 @@ fn run_inner(
         }
     }
 
+    /* ---------- ⑩之二 同一份产物镜像到 GitHub（代码仓库） ----------
+     *
+     * 镜像**由这一趟发布事务自己做**，不再依赖 `release.mjs` 在外层补一次：
+     * 那条路只有 CLI 走得到，工作台发的版 GitHub 上永远没有资产，而清单照样写着
+     * `sources.github` —— 承诺了一个下不到的地址。
+     *
+     * 只在调用方给了 GitHub 通道时做（`hosting.kind() == "github"`）：没有通道 = 这张
+     * 清单就**不写** GitHub 源，而不是写一个没人传上去的地址。 */
+    let mirror = (!info_only && hosting.kind() == "github").then_some((t, hosting));
+    if let Some((t, h)) = mirror {
+        on_release = mirror_artifacts(
+            h,
+            t,
+            &tag,
+            &opts.notes,
+            opts.channel,
+            &on_release,
+            &mut report.summary,
+        )?;
+    }
+
     /* ---------- ⑨ 写清单（`release.json` / `release-preview.json`）→ 它自己的分支与 PR
      *          （**合并留给人**） ---------- */
 
@@ -1153,15 +1254,19 @@ fn run_inner(
     /* 双平台 / 双源资产：**从同一份产物列表摊开** —— 平台与类型读产物自己带的那两个词，
     不在这一层再判一次（从前这里写死 `windows/nsis`，macOS 的 dmg 就被标成 Windows）。
     主地址 Gitee，`sources.github` 给选了 GitHub 的客户端。 */
-    let gh = github_owner_repo(&git);
-    let mut platform_assets = manifest_assets(&on_release, &g.owner, &g.repo, &tag, gh.as_ref());
-    /* 只补清单（tag/产物都在）时没有新构建：保留上一份的 assets，一个字节都不改。 */
-    if platform_assets.is_empty() {
-        platform_assets = previous
+    /* `sources.github` 只在**真的镜像过**时写：镜像通道与上传目标是同一对 owner/repo。 */
+    let gh = mirror.map(|(t, _)| (t.owner.clone(), t.repo.clone()));
+    let platform_assets = manifest_assets(&on_release, &g.owner, &g.repo, &tag, gh.as_ref());
+    /* 只补清单（tag/产物都在）时没有新构建：保留上一份的 assets，一个字节都不改。
+    补平台时本平台整组替换、**别的平台原样留住**（不合并就会把另一平台的包抹掉）。 */
+    let platform_assets = if platform_assets.is_empty() {
+        previous
             .as_ref()
             .and_then(|p| p.assets.clone())
-            .unwrap_or_default();
-    }
+            .unwrap_or_default()
+    } else {
+        merge_assets_by_platform(platform_assets, previous.as_ref(), &version)
+    };
     /* 老客户端的单资产入口（`asset` 格）就是 macOS 的应用内更新包 —— 从同一份列表里取。 */
     report.zip = platform_assets
         .iter()
@@ -3264,18 +3369,33 @@ mod tests {
     }
 
     /// 假平台：记录调用、返回平台无关的形状。**判据用它跑全流程，不真发一个字节**。
-    #[derive(Default)]
     struct FakeHosting {
+        /// 平台名：`"github"` 让事务走镜像那一支，其余值不走
+        kind: &'static str,
         releases: std::cell::RefCell<Vec<super::super::platform::ReleaseSpec>>,
         /// 发布仓库上这一版的附件名（判据按它造「补平台 / 发过了」两种局面）
         assets: std::cell::RefCell<Vec<String>>,
         /// 这一趟真的被上传的文件名（按调用顺序）
         uploads: std::cell::RefCell<Vec<String>>,
+        /// 这些名字一上传就失败（造"某一类产物传不上去"的局面）
+        fail: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl Default for FakeHosting {
+        fn default() -> Self {
+            Self {
+                kind: "fake",
+                releases: Default::default(),
+                assets: Default::default(),
+                uploads: Default::default(),
+                fail: Default::default(),
+            }
+        }
     }
 
     impl super::super::platform::Hosting for FakeHosting {
         fn kind(&self) -> &'static str {
-            "fake"
+            self.kind
         }
         fn create_review(
             &self,
@@ -3347,6 +3467,9 @@ mod tests {
             &self,
             up: &super::super::platform::AssetUpload,
         ) -> Result<super::super::platform::UploadedAsset, AppError> {
+            if self.fail.borrow().iter().any(|n| n == &up.name) {
+                return Err(AppError::io(format!("假上传失败：{}", up.name)));
+            }
             self.uploads.borrow_mut().push(up.name.clone());
             /* 回执大小照磁盘给：内核会拿它跟本地产物核对，写死一个数会让判据失真 */
             let size = std::fs::metadata(&up.path).map(|m| m.len()).unwrap_or(0);
@@ -3579,6 +3702,138 @@ mod tests {
         };
         assert_eq!(plan.platform, crate::runtime::release_info::host_platform());
         assert_eq!(plan.kind, if plan.ext == "dmg" { "dmg" } else { "nsis" });
+    }
+
+    fn github_target() -> PublishTarget {
+        PublishTarget {
+            platform: "github".to_owned(),
+            repository_url: "https://github.com/o/r".to_owned(),
+            username: "u".to_owned(),
+            token: "t".to_owned(),
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
+        }
+    }
+
+    /// 镜像把**整份产物列表**传上去（含 macOS 的 `.app.zip`）—— 不再由脚本自己挑文件。
+    #[test]
+    fn mirror_uploads_every_artifact_in_the_list() {
+        let d = tempfile::tempdir().unwrap();
+        let dmg = d.path().join("SupportEase_0.0.13_aarch64.dmg");
+        let app_zip = d.path().join("SupportEase_0.0.13_aarch64.app.zip");
+        crate::fsx::atomic::atomic_write(&dmg, b"dmg").unwrap();
+        crate::fsx::atomic::atomic_write(&app_zip, b"zip").unwrap();
+        let a = BuiltArtifact::new(
+            dmg,
+            "SupportEase_0.0.13_aarch64.dmg".to_owned(),
+            "macos",
+            "dmg",
+        )
+        .unwrap();
+        let b = BuiltArtifact::new(
+            app_zip,
+            "SupportEase_0.0.13_aarch64.app.zip".to_owned(),
+            "macos",
+            "appZip",
+        )
+        .unwrap();
+        let fake = FakeHosting {
+            kind: "github",
+            ..Default::default()
+        };
+        let mut summary = String::new();
+        let done = mirror_artifacts(
+            &fake,
+            &github_target(),
+            "v0.0.13",
+            "说明",
+            release_info::UpdateChannel::Stable,
+            &[&a, &b],
+            &mut summary,
+        )
+        .unwrap();
+        assert_eq!(done.len(), 2, "两份都要在 GitHub 上");
+        assert_eq!(
+            *fake.uploads.borrow(),
+            vec![a.name.clone(), b.name.clone()],
+            "上传顺序就是产物列表的顺序"
+        );
+        assert_eq!(fake.releases.borrow().len(), 1, "Release 只建一次");
+    }
+
+    /// `.app.zip` 传不上去只剔掉它：这一版退回「打开下载页」，不发版失败。
+    #[test]
+    fn a_failed_app_zip_is_dropped_but_the_rest_still_mirror() {
+        let d = tempfile::tempdir().unwrap();
+        let dmg = d.path().join("SupportEase_0.0.13_aarch64.dmg");
+        let app_zip = d.path().join("SupportEase_0.0.13_aarch64.app.zip");
+        crate::fsx::atomic::atomic_write(&dmg, b"dmg").unwrap();
+        crate::fsx::atomic::atomic_write(&app_zip, b"zip").unwrap();
+        let a = BuiltArtifact::new(
+            dmg,
+            "SupportEase_0.0.13_aarch64.dmg".to_owned(),
+            "macos",
+            "dmg",
+        )
+        .unwrap();
+        let b = BuiltArtifact::new(
+            app_zip,
+            "SupportEase_0.0.13_aarch64.app.zip".to_owned(),
+            "macos",
+            "appZip",
+        )
+        .unwrap();
+        let fake = FakeHosting {
+            kind: "github",
+            fail: std::cell::RefCell::new(vec![b.name.clone()]),
+            ..Default::default()
+        };
+        let mut summary = String::new();
+        let done = mirror_artifacts(
+            &fake,
+            &github_target(),
+            "v0.0.13",
+            "说明",
+            release_info::UpdateChannel::Stable,
+            &[&a, &b],
+            &mut summary,
+        )
+        .unwrap();
+        assert_eq!(done.len(), 1, "只有 dmg 上去了");
+        assert_eq!(done[0].kind, "dmg");
+        assert!(summary.contains("打开下载页"), "{summary}");
+    }
+
+    /// 补平台时另一平台的资产整组留住：不然 Windows 补包会把 macOS 那两份从清单里抹掉。
+    #[test]
+    fn appending_a_platform_keeps_the_other_platforms_assets() {
+        let previous = release_info::parse(
+            br#"{"releaseSchema":1,"version":"0.0.13",
+                 "url":"https://gitee.com/o/r/releases/tag/v0.0.13",
+                 "assets":[
+                   {"name":"old.dmg","url":"https://gitee.com/old.dmg","size":1,
+                    "sha256":"aa","platform":"macos","kind":"dmg"},
+                   {"name":"old.app.zip","url":"https://gitee.com/old.zip","size":2,
+                    "sha256":"bb","platform":"macos","kind":"appZip"}
+                 ]}"#,
+        )
+        .unwrap();
+        let fresh = vec![release_info::ReleaseAsset {
+            name: "new.exe".to_owned(),
+            url: "https://gitee.com/new.exe".to_owned(),
+            size: 3,
+            sha256: "cc".to_owned(),
+            platform: Some("windows".to_owned()),
+            kind: Some("nsis".to_owned()),
+            sources: None,
+        }];
+        let merged = merge_assets_by_platform(fresh, Some(&previous), "0.0.13");
+        assert_eq!(merged.len(), 3, "本平台 1 份 + 另一平台 2 份");
+        assert!(merged.iter().any(|a| a.name == "new.exe"));
+        assert!(
+            merged.iter().any(|a| a.name == "old.app.zip"),
+            "macOS 的应用内更新入口不许被补包抹掉"
+        );
     }
 
     /// 清单写入必须把 Windows 双源资产完整带上：客户端选 GitHub 时读的那一条不能丢。

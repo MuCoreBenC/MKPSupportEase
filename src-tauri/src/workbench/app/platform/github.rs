@@ -195,11 +195,21 @@ impl Hosting for GitHub {
             // 但同一套 spec 喂进来时语义必须一致。
             "prerelease": spec.prerelease,
         });
-        let v = self.post(
+        match self.post(
             &format!("/repos/{}/{}/releases", spec.owner, spec.repo),
             body,
-        )?;
-        release_from_json(&v)
+        ) {
+            Ok(v) => release_from_json(&v),
+            /* **幂等回读**（与 Gitee 同一写法）：镜像可能重跑（上一趟死在传附件），
+            按 tag 找回那一份接着传，别让"已存在"挡住发版。 */
+            Err(e) => match self.get(&format!(
+                "/repos/{}/{}/releases/tags/{}",
+                spec.owner, spec.repo, spec.tag_name
+            )) {
+                Ok(v) => release_from_json(&v),
+                Err(_) => Err(e),
+            },
+        }
     }
 
     /// 这个 tag 的 Release 上挂了哪些附件（`assets[].name`）。
@@ -231,6 +241,9 @@ impl Hosting for GitHub {
     }
 
     fn upload_asset(&self, up: &AssetUpload) -> Result<UploadedAsset, AppError> {
+        /* 同名先清（等价 `gh release upload --clobber`）：重编同一版时 GitHub 会拒同名，
+        而"跳过"会留下旧字节 —— 清单里的 SHA 与远端就对不上。 */
+        self.clear_same_name(up)?;
         // `POST https://uploads.github.com/repos/{o}/{r}/releases/{id}/assets?name=<name>`
         // —— 文件名在**查询串**里，body 是裸字节。与 JSON 出口不是一回事：
         // 这里不 `send(json)`，也不 `read_json`（响应仍是 JSON，但要单独读）。
@@ -317,6 +330,41 @@ fn release_from_json(v: &Value) -> Result<RemoteRelease, AppError> {
 }
 
 impl GitHub {
+    /// 把这个 Release 上**同名的**旧资产删掉（没有就是 no-op）。
+    ///
+    /// 这是"同一份字节再传一次"能成立的前提：GitHub 不收同名附件，而跳过会留下旧文件。
+    fn clear_same_name(&self, up: &AssetUpload) -> Result<(), AppError> {
+        let v = self.get(&format!(
+            "/repos/{}/{}/releases/{}/assets",
+            up.owner, up.repo, up.release_id
+        ))?;
+        let Some(id) = v
+            .as_array()
+            .and_then(|list| {
+                list.iter()
+                    .find(|a| a.get("name").and_then(Value::as_str) == Some(up.name.as_str()))
+            })
+            .and_then(|a| a.get("id").and_then(Value::as_u64))
+        else {
+            return Ok(());
+        };
+        let url = format!(
+            "{}/repos/{}/{}/releases/assets/{id}",
+            api_base(),
+            up.owner,
+            up.repo
+        );
+        // 成功是 204（没有 body），所以这里只 `.call()`，不 `read_json`。
+        super::agent()
+            .delete(&url)
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "SupportEase")
+            .call()
+            .map_err(transport)?;
+        Ok(())
+    }
+
     /// 取 PR 的 head sha（`GET /pulls/{n}` 的 head.sha）。
     fn pr_head_sha(&self, id: &ReviewId) -> Result<Option<String>, AppError> {
         let v = self.get(&format!(
