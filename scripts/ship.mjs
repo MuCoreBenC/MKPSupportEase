@@ -353,7 +353,7 @@ async function main() {
   info('发版深度预检（版本 / tag 闸 / 分支 / 凭据 / 空 PR）')
   sh('node', ['scripts/check-release-readiness.mjs', `--channel=${choice.key}`])
   const summary = (note ?? '').trim() || `发 ${choice.label} ${version}`
-  info(`调用：npm run release -- ${version} "${summary}" --channel ${choice.key} --confirm`)
+  info(`调用：node scripts/release.mjs ${version} "${summary}" --channel ${choice.key} --confirm`)
   /*
    * `MKP_SHIP=1` 是「这一趟是 ship 发起的」的凭据 —— `release.mjs` 见到它才肯真发版。
    * 反过来，直接 `npm run release` 会被它当场拒掉：2026-11-18 就是这么出的错，
@@ -361,8 +361,10 @@ async function main() {
    */
   process.env.MKP_SHIP = '1'
   try {
-    sh('npm', [
-      'run', 'release', '--',
+    /* 直接调 node，不经 npm/cmd：说明带空格，Windows 的 cmd /c 会把它拆成多个位置参数，
+       Release 正文只剩第一个词（0.0.13 真机踩过）。 */
+    sh(process.execPath, [
+      'scripts/release.mjs',
       version,
       summary,
       `--channel=${choice.key}`,
