@@ -396,6 +396,18 @@ fn append_ledger(repo: &Path, report: &PreviewReport) -> Result<(), AppError> {
         .map_err(|e| AppError::io("写不进账本").with_detail(e.message))
 }
 
+/// 摆好本地覆盖层清单。Windows 用自研安装包，macOS 走 `local-release.mjs`。
+/// 两个分支必须用 `#[cfg]` 而非 `cfg!()`：函数调用只在目标平台存在。
+#[cfg(target_os = "windows")]
+fn write_preview_manifest(repo: &Path, version: &str, _log: &mut LogBuf) -> Result<(), AppError> {
+    write_windows_preview_manifest(repo, version)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn write_preview_manifest(repo: &Path, _version: &str, log: &mut LogBuf) -> Result<(), AppError> {
+    run_logged(repo, log, &["node", "scripts/local-release.mjs"])
+}
+
 /// Windows 的本地覆盖层清单：`local-release.mjs` 只认 macOS 的 .app/.dmg，
 /// 这里按自研安装包（nsis）写同一份 `release-preview.json`，字段与真实清单一致。
 #[cfg(target_os = "windows")]
@@ -644,11 +656,7 @@ pub fn deliver(confirm: bool) -> Result<PreviewReport, AppError> {
     write_journal(&repo, &report);
 
     /* ③ 摆好清单（它自己校验"清单号 = 包内号"） */
-    let manifest_result = if cfg!(target_os = "windows") {
-        write_windows_preview_manifest(&repo, &plan.version)
-    } else {
-        run_logged(&repo, &mut log, &["node", "scripts/local-release.mjs"])
-    };
+    let manifest_result = write_preview_manifest(&repo, &plan.version, &mut log);
     if let Err(e) = manifest_result {
         report.stage = "failed".to_owned();
         report.message = format!("写清单失败，这一版没有冻结：{}", e.message);

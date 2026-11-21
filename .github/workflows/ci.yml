@@ -307,4 +307,6 @@ jobs:
         env:
           MKP_APP_VERSION: 0.0.0
           CARGO_TARGET_DIR: target-installer
-        run: cargo check --manifest-path installer/Cargo.toml --bin mkp-installer --bin mkp-uninstaller
+        run: |
+          cargo check --manifest-path installer/Cargo.toml --bin mkp-installer
+          cargo check --manifest-path installer/Cargo.toml --bin mkp-uninstaller --features uninstall-only

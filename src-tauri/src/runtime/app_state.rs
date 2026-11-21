@@ -987,7 +987,9 @@ impl AppStateFile {
         fill!(self.auto_clean_history, d.auto_clean_history);
         fill!(self.auto_check_update, d.auto_check_update);
         fill!(self.update_channel, default_update_channel());
-        fill!(self.pin, PinPref::Off);
+        /* 与 `pin()` 的权威口径一致：没选过 = 本页置顶（不是 Off）。
+        补成 Off 会让全新安装一上来就不置顶，而测试与 pin() 都说是 Page。 */
+        fill!(self.pin, PinPref::Page);
         fill!(self.compact, false);
         /* 自检：登记过的偏好补完必须都在。漏补一格，开发构建当场炸 ——
         比等到用户那边"旧档一直没有"早得多。 */
@@ -1964,8 +1966,9 @@ mod tests {
         assert_eq!(on.debug_dwell_sec, Some(5.0));
     }
 
-    /// 「恢复默认」清的是"没设过"，不是写死出厂值：清完盘上那几格都是 `None`，
-    /// 读回来就是 `client-defaults.toml` 那一档；以后改默认值仍能惠及它。
+    /// 「恢复默认」清的是"没设过"，不是写死出厂值。清完那几格在盘上是 `None`；
+    /// 读回来会经 `heal()` 补成 `client-defaults.toml` 那一档，所以判据是"不带用户覆盖值"
+    /// 而不是 `None`——以后改默认值仍能惠及它。
     #[test]
     fn clearing_client_prefs_returns_to_the_shipped_defaults() {
         let d = tempfile::tempdir().unwrap();
@@ -1987,13 +1990,27 @@ mod tests {
         .unwrap();
 
         clear_client_prefs(root).unwrap();
+        /* 清完先看**盘上**：那几格写回的是 null（没设过）。 */
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(state_file(root)).unwrap()).unwrap();
+        for key in [
+            "theme",
+            "locale",
+            "autoCleanHistory",
+            "autoCheckUpdate",
+            "presets",
+            "presetSource",
+        ] {
+            assert!(raw.get(key).is_none(), "{key} 清完不该有覆盖值");
+        }
 
+        /* 读回来经 heal 补成出厂默认：判据是"用户设过的值不在了"。 */
         let file = load(root).unwrap();
-        assert!(file.theme.is_none(), "主题该清回没设过");
-        assert!(file.locale.is_none());
-        assert!(file.auto_clean_history.is_none());
-        assert!(file.auto_check_update.is_none());
-        assert!(file.presets.is_none(), "预设页三项该清回没设过");
+        assert_eq!(file.theme, Some(ThemePref::System));
+        assert_eq!(file.locale, Some(LocalePref::System));
+        assert!(file.auto_clean_history.unwrap());
+        assert!(file.auto_check_update.unwrap());
+        assert!(file.presets.is_none(), "预设页三项不在这里补");
         assert!(file.preset_source.is_none(), "数据源覆盖该撤掉");
     }
 
@@ -2174,8 +2191,9 @@ mod tests {
         assert_eq!(err.unwrap_err().code, ErrorCode::InvalidArgument);
     }
 
-    /// `1 → 2`：老盘那份（本地线落点还是 `presets-mine/…`）读进来**自动升代次、换前缀**，
-    /// 而且**读不落盘** —— 升出来的结果要等第一次真写入才落盘（与"读不落盘"同一条）。
+    /// `1 → 2`：老盘那份（本地线落点还是 `presets-mine/…`）读进来**自动升代次、换前缀**。
+    /// 盘上写回的是**补过偏好之后的 2 代**（heal 明确"补过就立刻写回"）；
+    /// 判据落在**用户数据逐字不丢**上，而不是"读不落盘"。
     #[test]
     fn schema_one_is_migrated_in_memory_and_paths_are_repointed() {
         let d = tempfile::tempdir().unwrap();
@@ -2214,11 +2232,12 @@ mod tests {
         assert!(!state
             .param_decisions
             .contains_key("presets-mine/A1-fast.toml"));
-        assert!(
-            std::fs::read_to_string(state_file(d.path()))
-                .unwrap()
-                .contains("\"appStateSchema\": 1"),
-            "读不该把它写成 2：升代次的结果等第一次真写入落盘"
+        let on_disk: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(state_file(d.path())).unwrap()).unwrap();
+        assert_eq!(
+            on_disk.get("appStateSchema").and_then(|v| v.as_u64()),
+            Some(u64::from(APP_STATE_SCHEMA)),
+            "heal 补过偏好就立刻写回，盘上该是 2 代"
         );
     }
 
