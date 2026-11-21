@@ -607,7 +607,8 @@ fn run_inner(
             ));
         }
     }
-    let append = slot == ReleaseSlot::Append;
+    let append = matches!(slot, ReleaseSlot::Append | ReleaseSlot::InfoOnly);
+    let info_only = slot == ReleaseSlot::InfoOnly;
     // 版本派生不一致 = 有人手改了别处。给了新版本号的话 `bump` 会把它推平，
     // 所以只在"沿用当前真值"时它才是问题。
     if opts.version.is_none() {
@@ -791,14 +792,74 @@ fn run_inner(
         )));
     }
 
-    if !git.tag_exists(&tag)? {
+    /* 阶段 B：先把主线同步到构建基线；**tag 还没打**。
+    tag 是阶段 C 的动作，必须等构建与产物校验全部通过。 */
+    let build_head = if !git.tag_exists(&tag)? {
         // ★ 这一动会**切换开发者本机的当前分支** —— 界面与 CLI 都要在闸里明说（作者定死的
         // "破坏性命令要讲明白"）。squash 重写过提交，分支上打的 tag 指向不在 main 历史里的提交。
         git.switch(base)?;
         git.pull_ff("origin", base)?;
+        git.rev_parse("HEAD")?
+    } else {
+        /* 补包趟（tag 已存在）：只能补完 tag 指向的那一版，构建基线就是它。 */
+        if let Some((at_tag, at_head)) = frozen_elsewhere(&git, &tag) {
+            return Err(AppError::invalid_argument(format!(
+                "{tag} 指向 {}，当前 HEAD 是 {} —— 补包不能拿别的提交构建",
+                short_sha(&at_tag),
+                short_sha(&at_head),
+            )));
+        }
+        git.rev_parse("HEAD")?
+    };
+    report
+        .summary
+        .push_str(&format!("构建基线 {}。", short_sha(&build_head)));
+
+    /* ---------- ⑦ 构建 + 产物自报版本核对（**tag 仍未创建**） ---------- */
+
+    let (built, portable) = if opts.build && !info_only {
+        let built = build_installer(repo_root)?;
+        /* ★ **构建完先问一遍产物自己是谁**（2026-11-06 作者：「你这都是 0.0.4 了，
+        里面还显示 0.0.3，那不是很不合理吗？」）。核对不过就停在 Built 之前 ——
+        不建 tag、不建 Release、不上传、不写清单：宁可这一趟失败，也不发一个"名不副实"的包。 */
+        assert_artifact_speaks_version(repo_root, &version)?;
+        let portable = if cfg!(target_os = "windows") {
+            Some(build_portable(repo_root, &version)?)
+        } else {
+            None
+        };
+        /* 构建期间 HEAD 被切走 ⇒ 这个包不是构建基线那一笔的产物，不许往上挂 */
+        let now = git.rev_parse("HEAD")?;
+        if now != build_head {
+            return Err(AppError::invalid_argument(format!(
+                "构建期间 HEAD 从 {} 变成了 {} —— 这个安装包不是构建基线的产物，不往上挂",
+                short_sha(&build_head),
+                short_sha(&now),
+            )));
+        }
+        (Some(built), portable)
+    } else {
+        report.summary.push_str("（本次不构建安装包）");
+        (None, None)
+    };
+    if let Some(built) = &built {
+        report.artifact = Some(ArtifactInfo {
+            name: built.name.clone(),
+            size: built.size,
+            path: built.path.display().to_string(),
+        });
+        report.stage = ReleaseStage::Built;
+        report.summary.push_str(&format!("已构建 {}。", built.name));
+    }
+
+    /* ---------- ⑧ 构建与产物校验都过了，才创建并推送 tag ---------- */
+
+    if !git.tag_exists(&tag)? {
         git.tag(&tag, &format!("{tag} {}", opts.notes.trim()))?;
-        match target {
-            Some(t) => {
+        /* origin（代码主线）与发布仓库都要有这个 tag。 */
+        git.push_tag(&tag)?;
+        if let Some(t) = target {
+            if !git.remote_matches(&t.repository_url)? {
                 git.push_ref_to_authenticated(
                     &t.repository_url,
                     &format!("refs/tags/{tag}"),
@@ -806,47 +867,17 @@ fn run_inner(
                     &t.token,
                 )?;
             }
-            None => {
-                git.push_tag(&tag)?;
-            }
         }
-        report
-            .summary
-            .push_str(&format!("已切到 {base} 并在 tip 上打 {tag}、推送。"));
-
-        // ★★ **主线也推一份到目标仓库**（2026-10-05，作者定"后续走 Gitee"）：
-        //   客户端的**数据源**读的就是仓库里的 `presets/delivery/`（release.json 也在里面，按 Manifest 声明取）
-        //   （`raw/<branch>/…`）。只推 tag 的话，tag 在、main 上的数据源没过去 ——
-        //   国内客户端连上 Gitee 之后看到的仍是上一版目录。
-        //   这一步是**幂等**的：同一笔 main 推两次，第二次是 no-op。
-        //
-        // ★ 但**目标仓库就是本机 origin 时跳过**（2026-10-07）：合并本来就发生在 origin 上，
-        //   `origin/{base}` 已经是刚合出来的那一笔 —— 对着自己推一次 no-op，会被本地
-        //   pre-push 闸②（PR-only，见 main 就拦）挡下，白报一次"git push 失败了"。
-        //   只有目标**不是** origin（真镜像）时这一推才有内容。
-        if let Some(t) = target {
-            if git.remote_matches(&t.repository_url)? {
-                report.summary.push_str(&format!(
-                    "{base} 由平台上的 PR 合并推进，目标仓库就是本机 origin —— 主线不必再推一次。"
-                ));
-            } else {
-                git.push_ref_to_authenticated(
-                    &t.repository_url,
-                    &format!("{remote_base}:refs/heads/{base}"),
-                    &t.username,
-                    &t.token,
-                )?;
-                report.summary.push_str(&format!(
-                    "已把 {base} 推到发布仓库（数据源与 release.json 随之过去）。"
-                ));
-            }
-        }
+        report.summary.push_str(&format!(
+            "构建与产物校验通过，最后在 {} 的 tip 上打 {tag}、推送。",
+            short_sha(&build_head)
+        ));
     } else {
-        report.summary.push_str("tag 已存在，沿用。");
+        report.summary.push_str("tag 已存在（补包趟），沿用。");
     }
     report.stage = ReleaseStage::Tagged;
 
-    /* ---------- ⑥½ 发布面同步（M6）：tag 与 main 推到 Gitee（幂等） ----------
+    /* ---------- ⑨ 发布面同步（M6）：tag 与 main 推到 Gitee（幂等） ----------
      *
      * Release 挂在 tag 上，所以 **tag 必须在 Gitee 真实存在**；main 同步过去是
      * "数据源主线跟随发布仓库"（作者 2026-10-05 定）—— 客户端的数据源读的就是
@@ -900,54 +931,13 @@ fn run_inner(
         ));
     }
 
-    /* ---------- ⑦ 构建本平台的安装包（macOS → dmg / Windows → NSIS；都不签名） ---------- */
-
+    /* 不构建的趟（只验编排 / 只打 tag）到此为止：没有产物可建 Release。 */
     if !opts.build {
-        report.summary.push_str("（本次不构建安装包）");
+        report.summary.push_str("（本次不构建安装包，到 tag 为止）");
         return Ok(report);
     }
-    /* **续跑只能补完已经冻结的那一版**：tag 在 ⇒ 它指向的提交就是这一版的代码，
-    而构建用的是当前工作区。预检里已经拦过一次，这里再核一次 ——
-    预检与构建之间工作区可能被动过。 */
-    let frozen_commit = match frozen_elsewhere(&git, &tag) {
-        Some((at_tag, at_head)) => {
-            return Err(AppError::invalid_argument(format!(
-                "{tag} 指向 {}，当前 HEAD 是 {} —— 这一版冻结在另一笔提交上，\
-                 不能拿现在的代码去补它的安装包；切回那笔提交续跑，或换一个版本号",
-                short_sha(&at_tag),
-                short_sha(&at_head),
-            )))
-        }
-        None => git
-            .tag_exists(&tag)?
-            .then(|| git.rev_parse(&format!("refs/tags/{tag}^{{commit}}")))
-            .transpose()?,
-    };
-    let built = build_installer(repo_root)?;
-    /* ★ **构建完先问一遍产物自己是谁**（2026-11-06 作者：「你这都是 0.0.4 了，
-    里面还显示 0.0.3，那不是很不合理吗？」）。核对不过就停在 Built 之前 ——
-    不建 Release、不上传、不写清单：宁可这一趟失败，也不发一个"名不副实"的包。 */
-    assert_artifact_speaks_version(repo_root, &version)?;
-    /* 构建期间 HEAD 被切走 ⇒ 这个包已经不是冻结提交的产物了，不往上挂 */
-    if let Some(frozen) = &frozen_commit {
-        let now = git.rev_parse("HEAD")?;
-        if &now != frozen {
-            return Err(AppError::invalid_argument(format!(
-                "构建期间 HEAD 从 {} 变成了 {} —— 这个安装包不是冻结提交的产物，不往上挂",
-                short_sha(frozen),
-                short_sha(&now),
-            )));
-        }
-    }
-    report.artifact = Some(ArtifactInfo {
-        name: built.name.clone(),
-        size: built.size,
-        path: built.path.display().to_string(),
-    });
-    report.stage = ReleaseStage::Built;
-    report.summary.push_str(&format!("已构建 {}。", built.name));
 
-    /* ---------- ⑧ 建 Release + 上传安装包（M6：走 Gitee 发布通道） ---------- */
+    /* ---------- ⑩ 建 Release + 上传安装包（M6：走 Gitee 发布通道） ---------- */
 
     // ★ **架构规则**（总纲 §5-M6）：软件版本的 Release 与附件**只发 Gitee**。
     //   没有发布通道 = preflight 就该拦下（这里兜底，话说清楚）。
@@ -971,19 +961,43 @@ fn run_inner(
     report.stage = ReleaseStage::ReleaseCreated;
     report.summary.push_str("已建 Release。");
 
-    let uploaded = ch.hosting.upload_asset(&super::platform::AssetUpload {
-        owner: g.owner.clone(),
-        repo: g.repo.clone(),
-        release_id: release.id,
-        name: built.name.clone(),
-        content_type: super::platform::content_type_for(&built.name).to_owned(),
-        path: built.path.clone(),
-    })?;
-    report.stage = ReleaseStage::AssetUploaded;
-    report.summary.push_str(&format!(
-        "已上传 {}（{} 字节）。",
-        uploaded.name, uploaded.size
-    ));
+    if info_only {
+        report
+            .summary
+            .push_str("产物已在 Release 上，这一趟只补 release.json，不重传。");
+    } else {
+        let Some(built) = built.as_ref() else {
+            return Err(AppError::invalid_argument(
+                "这一趟没有构建产物，不能建 Release / 上传；先构建再发",
+            ));
+        };
+        let uploaded = ch.hosting.upload_asset(&super::platform::AssetUpload {
+            owner: g.owner.clone(),
+            repo: g.repo.clone(),
+            release_id: release.id,
+            name: built.name.clone(),
+            content_type: super::platform::content_type_for(&built.name).to_owned(),
+            path: built.path.clone(),
+        })?;
+        report.stage = ReleaseStage::AssetUploaded;
+        report.summary.push_str(&format!(
+            "已上传 {}（{} 字节）。",
+            uploaded.name, uploaded.size
+        ));
+        if let Some(p) = portable.as_ref() {
+            let put = ch.hosting.upload_asset(&super::platform::AssetUpload {
+                owner: g.owner.clone(),
+                repo: g.repo.clone(),
+                release_id: release.id,
+                name: p.name.clone(),
+                content_type: "application/zip".to_owned(),
+                path: p.path.clone(),
+            })?;
+            report
+                .summary
+                .push_str(&format!("已上传绿色版 {}（{} 字节）。", put.name, put.size));
+        }
+    }
 
     /* ---------- ⑧之二  应用内更新用的 `.app.zip`（第五刀；**只有 macOS 有这条路**） ---------- */
     //
@@ -1399,9 +1413,58 @@ fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
 /// 构建本平台安装包：macOS `npm run tauri -- build`，Windows `npm run build:installer`。
 ///
 /// ★ **Windows 上必须过一层 `cmd /C`**：那边 `npm` 是 `npm.cmd`，而 `Command::new("npm")`
+/// Windows 绿色版：`npm run build:portable`，产物是 `dist-portable/` 下带版本号的 zip。
+///
+/// 它必须和安装版一起进 Release：客户端的"绿色版自更新"下载的是安装包载体，
+/// 但 Release 上仍要给愿意手动解压的人一份完整的绿色版。
+fn build_portable(repo_root: &Path, version: &str) -> Result<BuiltArtifact, AppError> {
+    let out = npm_script(repo_root, "build:portable")?;
+    if !out.status.success() {
+        return Err(AppError::io("构建绿色版失败")
+            .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
+    }
+    let dir = repo_root.join("dist-portable");
+    let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
+        .map_err(|e| AppError::io("读不了绿色版产物目录").with_detail(e.to_string()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.is_file()
+                && p.extension().and_then(|s| s.to_str()) == Some("zip")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.contains(version))
+        })
+        .collect();
+    found.sort();
+    let [one] = found.as_slice() else {
+        return Err(AppError::io(format!(
+            "dist-portable 下没有 {version} 的绿色版 zip"
+        )));
+    };
+    let size = std::fs::metadata(one).map(|m| m.len()).unwrap_or(0);
+    Ok(BuiltArtifact {
+        name: one
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_owned(),
+        size,
+        path: one.clone(),
+    })
+}
+
 /// 走的是 `CreateProcess`，它**不会**替你补 `.cmd` 后缀 —— 直接起会报"程序找不到"。
 /// 这不是优化，是"在 Windows 上这条命令根本跑不起来"。
 fn npm_build(repo_root: &Path) -> Result<std::process::Output, AppError> {
+    if cfg!(target_os = "windows") {
+        npm_script(repo_root, "build:installer")
+    } else {
+        npm_script(repo_root, "tauri")
+    }
+}
+
+/// 跑一个 npm script；Windows 上 `npm` 必须过一层 `cmd /C`。
+fn npm_script(repo_root: &Path, script: &str) -> Result<std::process::Output, AppError> {
     let mut cmd = if cfg!(target_os = "windows") {
         let mut c = std::process::Command::new("cmd");
         c.arg("/C").arg("npm");
@@ -1410,9 +1473,11 @@ fn npm_build(repo_root: &Path) -> Result<std::process::Output, AppError> {
         std::process::Command::new("npm")
     };
     if cfg!(target_os = "windows") {
-        cmd.args(["run", "build:installer"]);
-    } else {
+        cmd.args(["run", script]);
+    } else if script == "tauri" {
         cmd.args(["run", "tauri", "--", "build"]);
+    } else {
+        cmd.args(["run", script]);
     }
     cmd.current_dir(repo_root)
         /* 工作台带着 `TAURI_CONFIG`（`tauri dev --config …` 注入的合并配置）；
@@ -1691,6 +1756,8 @@ enum ReleaseSlot {
     Fresh,
     /// tag 打了、**本平台**还没有：只补本平台的包（不重打 tag、不开 PR、不动版本号）
     Append,
+    /// tag 与产物都在，只差 `release.json`：只补清单（不重构建、不重上传、不动 tag）
+    InfoOnly,
     /// **本平台**那一份已经在 Release 上了：换一个版本号（同一个平台不重发）
     Taken,
 }
@@ -1721,8 +1788,25 @@ fn release_slot(
     let names = ch
         .hosting
         .release_assets(&ch.target.owner, &ch.target.repo, tag)?;
-    if super::platform::platform_asset_uploaded(&names, plan.ext) {
-        Ok(ReleaseSlot::Taken)
+    let has_portable = !cfg!(target_os = "windows")
+        || names
+            .iter()
+            .any(|n| n.to_ascii_lowercase().ends_with(".zip"));
+    if super::platform::platform_asset_uploaded(&names, plan.ext) && has_portable {
+        /* 产物已上传，但清单还没写成这一版 ⇒ 只补清单，不重跑构建与上传。 */
+        let channel = if tag.contains("-preview.") {
+            release_info::UpdateChannel::Preview
+        } else {
+            release_info::UpdateChannel::Stable
+        };
+        let want = tag.strip_prefix('v').unwrap_or(tag);
+        let manifest_ok = previous_release_info(git.repo(), info_rel_for(channel))
+            .is_some_and(|info| info.version == want);
+        if manifest_ok {
+            Ok(ReleaseSlot::Taken)
+        } else {
+            Ok(ReleaseSlot::InfoOnly)
+        }
     } else {
         Ok(ReleaseSlot::Append)
     }
@@ -1880,6 +1964,8 @@ enum PromptMode {
     Fresh,
     /// `{tag}` 已发过、本平台缺包：只补安装包（不重打 tag / 不开新 PR / 不动版本号）
     Append,
+    /// tag 与产物都在、只差清单：只补 `release.json`（不重构建 / 不重传 / 不动 tag）
+    InfoOnly,
     /// 本平台那一份已经在 Release 上了：没什么可发
     Taken,
     /// 问不出来（发布通道没配 / 网络不通）：照实说，让 AI 以预检结论为准
@@ -1923,6 +2009,11 @@ fn release_prompt_text(f: &PromptFacts) -> String {
              缺的只是本平台的安装包 —— 版本号、tag、PR 都不动\n",
             tag = f.tag
         ),
+        PromptMode::InfoOnly => format!(
+            "- 这一趟**只补清单**：`{tag}` 的 tag 与安装包都在，缺的只是 `release.json`；\
+             不重构建、不重传、不动 tag、不开版本 PR\n",
+            tag = f.tag
+        ),
         PromptMode::Taken => format!(
             "- ⚠ `{tag}` 本平台的安装包**已经在发布仓库上了** —— 这一趟没什么可发；\
              要发新版就换一个版本号\n",
@@ -1952,16 +2043,28 @@ fn release_prompt_text(f: &PromptFacts) -> String {
             release_info = RELEASE_INFO_REL,
             version = f.version,
         ),
+        PromptMode::InfoOnly => format!(
+            r#"## 这条命令会按顺序做（**只补清单** —— 照它核对进度）
+1. 预检：认出版本 `{tag}` 的 tag 与安装包都在，只差 `release.json`
+2. 不重构建、不重传、不动 tag、不动版本号
+3. 写 `{release_info}`，开 PR「发布信息：{tag}」（新分支 `chore/release-{tag}`，base={base}）
+4. **仍要人合并那个 PR**，合并后 `npm run ship -- --check` 才算生效
+"#,
+            tag = f.tag,
+            base = f.base,
+            release_info = RELEASE_INFO_REL,
+        ),
         _ => format!(
             r#"## 这条命令会按顺序做（照它核对进度）
 1. 预检：分支 / 工作区干净 / 四处版本号一致 / 这一版这一平台还没发过 / 本机能打这个包
 2. 版本号四处一起推进到 {version} → 提交 `chore: {tag}` → 推当前分支
 3. 开 PR「发版 {tag}」（base={base}）→ 等 CI → squash 合并
-4. 切回 {base}，在 {base} 的 **tip** 上打 annotated tag `{tag}` 并推送
-5. 把 tag 与 {base} 推到发布仓库（客户端的数据源读的就是那边的 presets/delivery/）
-6. 构建本平台安装包：`{asset}`
-7. 在发布仓库建 Release「{product} {tag}」，上传安装包
-8. 写 {release_info}，开 PR「发布信息：{tag}」（新分支 `chore/release-{tag}`，base={base}）
+4. 切回 {base} 并同步，记录构建基线
+5. 构建本平台安装包：`{asset}`，并核对包里自报的版本
+6. **构建与产物校验都通过之后**，才在 {base} 的 tip 上打 annotated tag `{tag}` 并推送
+7. 把 tag 与 {base} 推到发布仓库（客户端的数据源读的就是那边的 presets/delivery/）
+8. 在发布仓库建 Release「{product} {tag}」，上传安装包
+9. 写 {release_info}，开 PR「发布信息：{tag}」（新分支 `chore/release-{tag}`，base={base}）
 "#,
             version = f.version,
             tag = f.tag,
@@ -2080,6 +2183,7 @@ pub fn wb_release_prompt(
         let mode = match release_slot(&git, &tag, rel_channel.as_ref()) {
             Ok(ReleaseSlot::Fresh) => PromptMode::Fresh,
             Ok(ReleaseSlot::Append) => PromptMode::Append,
+            Ok(ReleaseSlot::InfoOnly) => PromptMode::InfoOnly,
             Ok(ReleaseSlot::Taken) => PromptMode::Taken,
             Err(_) => PromptMode::Unsure,
         };
@@ -2203,6 +2307,13 @@ pub fn wb_release_preflight(
                     "`{tag}` 已经发过 —— 这一趟只往它上面补一个{label}\
                      （不重打 tag、不开 PR、不动版本号）"
                 ),
+            ),
+            Ok(ReleaseSlot::InfoOnly) => push(
+                &mut items,
+                "tag",
+                "版本 · 平台",
+                true,
+                format!("`{tag}` 的{label}已在发布仓库，只差 `release.json` —— 这一趟只补清单"),
             ),
             Ok(ReleaseSlot::Taken) => push(
                 &mut items,
@@ -2854,6 +2965,57 @@ mod tests {
         assert!(fake.releases.borrow().is_empty(), "没构建就不该建 Release");
     }
 
+    /// **构建失败不许留下 tag**：tag 现在排在构建与产物校验之后。
+    #[test]
+    fn a_failed_build_leaves_no_tag() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let bare = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "-q", "--bare"])
+            .current_dir(bare.path())
+            .status()
+            .unwrap();
+        let git = init_repo(root, "main");
+        std::process::Command::new("git")
+            .args(["remote", "add", "origin", &bare.path().to_string_lossy()])
+            .current_dir(root)
+            .status()
+            .unwrap();
+        git.push("main").expect("推 main");
+        std::process::Command::new("git")
+            .args(["checkout", "-q", "-b", "feat/demo"])
+            .current_dir(root)
+            .status()
+            .unwrap();
+
+        let target = PublishTarget {
+            platform: "fake".to_owned(),
+            repository_url: bare.path().to_string_lossy().to_string(),
+            username: "t".to_owned(),
+            token: "fake-token".to_owned(),
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
+        };
+        let fake = FakeHosting::default();
+        let opts = ReleaseOptions {
+            version: Some("0.0.2".to_owned()),
+            notes: "构建失败判据".to_owned(),
+            merge: true,
+            /* 临时仓库没有 package.json，构建会立刻失败；这一条验的是"失败后没有 tag"。 */
+            build: true,
+            confirmed: true,
+            ..ReleaseOptions::default()
+        };
+        let err = run(root, &opts, Some(&target), Some(&fake), None).expect_err("构建必须失败");
+        assert!(!err.message.is_empty(), "失败要说清原因：{:?}", err);
+        assert!(
+            !Git::open(root).tag_exists("v0.0.2").unwrap(),
+            "构建失败不许留下 tag"
+        );
+        assert!(fake.releases.borrow().is_empty(), "构建失败不许建 Release");
+    }
+
     /// 假平台：记录调用、返回平台无关的形状。**判据用它跑全流程，不真发一个字节**。
     #[derive(Default)]
     struct FakeHosting {
@@ -2999,8 +3161,23 @@ mod tests {
             "只有别的平台的包时，本平台还没发过"
         );
 
-        // 本平台那一份在 ⇒ 这一版这一平台发过了，换版本号
-        *fake.assets.borrow_mut() = vec![format!("SupportEase_0.0.2_x86_64.{ext}")];
+        // 本平台包与绿色版都在、但清单还没写成这一版 ⇒ 只补清单，不重传
+        *fake.assets.borrow_mut() = vec![
+            format!("SupportEase_0.0.2_x86_64.{ext}"),
+            "SupportEase_0.0.2_x64-portable.zip".to_owned(),
+        ];
+        assert_eq!(
+            release_slot(&git, "v0.0.2", Some(&channel)).unwrap(),
+            ReleaseSlot::InfoOnly
+        );
+
+        // 清单也写成这一版 ⇒ 这一版这一平台发完了，换版本号
+        std::fs::create_dir_all(root.join("presets/delivery")).unwrap();
+        crate::fsx::atomic::atomic_write(
+            &root.join("presets/delivery/release.json"),
+            br#"{"releaseSchema":1,"version":"0.0.2","notes":"","url":"https://fake/tag/v0.0.2"}"#,
+        )
+        .unwrap();
         assert_eq!(
             release_slot(&git, "v0.0.2", Some(&channel)).unwrap(),
             ReleaseSlot::Taken

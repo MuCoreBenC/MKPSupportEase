@@ -34,6 +34,7 @@
 | [`docs/GIT-WORKFLOW.md`](GIT-WORKFLOW.md) | git 纪律：本地八道闸 + 服务端 ruleset + 发版 | 现行（其中的合并动作由作者执行，AI 只提交+推送） |
 | [`docs/PUBLISH-ARCHITECTURE.md`](PUBLISH-ARCHITECTURE.md) | **发布链根规则**：唯一源 → 发布根 → 客户端消费 | 现行（其替代的旧件 `PRESET-DELIVERY-CONTRACT` 已于 2026-10-11 删除） |
 | [`docs/RELEASE-TRANSACTIONS.md`](RELEASE-TRANSACTIONS.md) | 发布事务合同：发布预设 ≠ 发布软件版本 | 现行（自标：改它要作者点头） |
+| [`docs/RELEASE-RUNBOOK.md`](RELEASE-RUNBOOK.md) | **PR 与软件版本发布的机械协议**：阶段 A/B/C、PR 生命周期图、发布状态图、tag 前硬门禁、阶段恢复、十种故障验收场景 | 现行（2026-11-21 新建；脚本改造完成前文中逐节标注现状差距） |
 | [`docs/APP-STATE.md`](APP-STATE.md) | 持久化状态地基：一个应用一个 AppState | 现行（10-08 盘点定案已并回本文 §5 / §10） |
 | [`docs/DESIGN-SPACING.md`](DESIGN-SPACING.md) | 间距与动画原则（试验场搬来） | 现行 |
 | [`docs/COPY-STYLE.md`](COPY-STYLE.md) | **界面文字规范**：判据、字数硬指标、禁用写法、术语白话表、状态句与确认框模板。**只管文字，不管间距与组件** | 现行 |
