@@ -108,7 +108,7 @@
 
 | # | 在哪 | 干什么 | 裁决 |
 | --- | --- | --- | --- |
-| T1 | `scripts/release.mjs` | 发版流程（校验→PR→tag），不碰数据 | **保留**（① 工具） |
+| T1 | `scripts/ship.mjs` + `release::run` | 发版流程（冻结→构建→暂存→清单→封版），不碰预设数据 | **保留**（① 工具） |
 | T2 | `vite.config.ts` | workbench 开关 + 随包资产流水线（`mkpAssets`）；public/ 原样进包 | **保留**；F10 收口后这里加"产物即包内容"的管线（`bbsFs` 那条挂载 2026-10-13 随 C8 摘掉） |
 | T3 | `tauri.conf.json` | 无 `resources` 字段——安装包 = 二进制 + vite 产物 | **收口**时在这里定 catalog 与内置资源的进包方式 |
 | T4 | `clippy.toml` 写盘禁列 | 唯一写盘出口的守门人 | **保留** |

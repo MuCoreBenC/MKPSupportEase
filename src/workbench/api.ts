@@ -1542,22 +1542,75 @@ export interface PublishHistory {
 
 /* ---------- 第四刀：发布**软件版本**（与「交付预设」两条链，各有各的类型） ---------- */
 
-/** `release_tx::ReleaseStage` 的线上名（camelCase，与后端 `wire_name()` 逐字一致） */
-export type ReleaseStage =
-  | 'blockedPreflight'
-  | 'ready'
-  | 'versionBumped'
-  | 'committed'
-  | 'pushed'
-  | 'reviewOpened'
-  | 'merged'
-  | 'tagged'
-  | 'built'
-  | 'releaseCreated'
-  | 'assetUploaded'
-  | 'infoCommitted'
-  | 'infoPushed'
-  | 'infoReviewOpened'
+/**
+ * `release::state::Phase` 的线上名 —— 发布内核 2.0 的阶段。
+ *
+ * 与旧内核那 14 个动作名（versionBumped / infoReviewOpened…）是两套：阶段的推进单位是
+ * 「冻结 → 构建 → 暂存 → 清单 → 核验 → 封版」，不再是一条条动作。
+ * 老回执里仍会有旧名字（历史不重写），所以 labels.ts 两张表都留着。
+ */
+export type ReleasePhase =
+  | 'preparing'
+  | 'frozen'
+  | 'building'
+  | 'staged'
+  | 'manifestMerged'
+  | 'verified'
+  | 'sealed'
+
+/** 单个平台走到哪（`release::state::PlatformStage`）。 */
+export type PlatformStage = 'missing' | 'partial' | 'staged' | 'published'
+
+/** `platform::RemoteAsset` —— 远端一份资产的身份（只读展示用） */
+export interface RemoteAssetRef {
+  name: string
+  size?: number
+  sha256?: string
+  url: string
+}
+
+export interface ReleaseArtifactState {
+  name: string
+  kind: string
+  giteeStaged: RemoteAssetRef | null
+  githubStaged: RemoteAssetRef | null
+  giteePublished: RemoteAssetRef | null
+  githubPublished: RemoteAssetRef | null
+}
+
+/** 一个平台的「平台 × 源」那一行 */
+export interface ReleasePlatformState {
+  id: string
+  label: string
+  builtBy: string
+  stage: PlatformStage
+  giteeDone: boolean
+  githubDone: boolean
+  artifacts: ReleaseArtifactState[]
+}
+
+export interface ReleaseManifestState {
+  present: boolean
+  version: string | null
+  sameVersion: boolean
+  missing: string[]
+  complete: boolean
+}
+
+/** `release::state::ReleaseState` —— 这一代发布到哪一步（只读，从远端现读） */
+export interface ReleaseStateView {
+  version: string
+  channel: 'stable' | 'preview'
+  tag: string
+  stagingTag: string
+  sourceCommit: string | null
+  phase: ReleasePhase
+  platforms: ReleasePlatformState[]
+  manifest: ReleaseManifestState
+  conflicts: string[]
+  sealBlockers: string[]
+  next: string
+}
 
 /** `platform::RemoteRelease` —— 建好的 Release（网页地址是用户点开的那一页） */
 export interface RemoteRelease {
@@ -1567,33 +1620,14 @@ export interface RemoteRelease {
   url: string
 }
 
-/** `release_tx::ArtifactInfo` —— 构建出来的安装包 */
+/** `release::build::ArtifactInfo` —— 回执里的安装包 */
 export interface ArtifactInfo {
   name: string
   size: number
   path: string
 }
 
-/** `release_tx::ReleaseOptions` —— 发布软件版本的开关 */
-export interface ReleaseOptions {
-  /** 目标版本号（`x.y.z`，不带 v）；不填 = 沿用当前真值 */
-  version?: string | null
-  /** 一句话说明（进 Release 正文与 `release.json` 的 notes） */
-  notes?: string
-  /** PR 的 base；空 = main */
-  base?: string
-  /** 只预检，不动一个字节 */
-  dryRun?: boolean
-  /** 建了 PR 之后接着合并（人在界面上点过「确认发布」才有） */
-  merge?: boolean
-  /** 构建**本平台**的安装包（macOS → dmg / Windows → NSIS；默认开） */
-  build?: boolean
-  openReview?: boolean
-  /** **人类确认位**（2026-11-05）：真发版必须显式给 `true`（打 tag / 写 release.json 那一趟） */
-  confirmed?: boolean
-}
-
-/** `release_tx::PreflightItem` —— 闸里的一格 */
+/** `release::PreflightItem` —— 工作台那一栏的一格 */
 export interface PreflightItem {
   id: string
   label: string
@@ -1602,7 +1636,7 @@ export interface PreflightItem {
   detail: string
 }
 
-/** `release_tx::ReleasePreflight` —— 发布软件版本的闸（**只读**，点几次都没副作用） */
+/** `release::ReleasePreflight` —— 只读：能不能在**工作台**发（2.0 起恒为 false） */
 export interface ReleasePreflight {
   items: PreflightItem[]
   canRelease: boolean
@@ -1610,36 +1644,7 @@ export interface ReleasePreflight {
   tag: string
   branch: string
   hasAccount: boolean
-  /** run-env 拦下时给出的 dev 监视器 PID（「杀掉 dev 监视进程」按钮只认它）；null = 没有 */
   devWatcherPid: number | null
-}
-
-/** `release_tx::ReleaseTxReport` —— 一轮「发布软件版本」的结果（阶段快照） */
-export interface ReleaseTxReport {
-  stage: ReleaseStage
-  /**
-   * 这一趟走的是哪条通道（`stable` / `preview`）。
-   *
-   * 回执里必须能看出来：只有它能回答"我这一趟到底动没动正式版那份 release.json"。
-   */
-  channel: 'stable' | 'preview'
-  version: string
-  tag: string
-  branch: string | null
-  commit: string | null
-  review: RemoteReview | null
-  release: RemoteRelease | null
-  artifact: ArtifactInfo | null
-  /** Windows 绿色版 zip（与安装版一起进 Release；非 Windows 为 null） */
-  portable: ArtifactInfo | null
-  /** ② `release.json` 那一笔所在的分支 */
-  infoBranch: string | null
-  /** ② 的 PR —— **它由人合并**，合并完客户端才看得到新版本 */
-  infoReview: RemoteReview | null
-  committedPaths: string[]
-  infoCommittedPaths: string[]
-  blockedReasons: string[]
-  summary: string
 }
 
 /** `release_history::ReleaseRecord` —— 一条软件版本发布回执 */
@@ -3521,38 +3526,18 @@ export const wb = {
    */
   releasePreflight: (version?: string | null) =>
     invoke<ReleasePreflight>('wb_release_preflight', { version: version ?? null }),
-  /**
-   * **发布软件版本**（一次手势）—— 与 CLI（`src-tauri/src/bin/release.rs`）**同一个内核**。
-   *
-   * ★ 这一趟会**构建安装包并上传**（以分钟计），所以按钮要显示"发布中"，不是转圈就算了。
-   */
-  releaseSoftware: (opts: ReleaseOptions) =>
-    invoke<ReleaseTxReport>('wb_release_software', { opts }),
+  /** 这一代发布到哪一步（只读；发布只在命令行那一条路上） */
+  releaseState: (version?: string | null) =>
+    invoke<ReleaseStateView>('wb_release_state', { version: version ?? null }),
   /** 软件版本发布历史（**与 `publishHistory` 不是同一本账** —— 两条链分开记） */
   releaseHistory: () => invoke<ReleaseHistory>('wb_release_history'),
   /** 本分支最近提交（发布历史第三栏；只读、不联网，`limit` 后端夹到 1..=20） */
   recentCommits: (limit?: number) =>
     invoke<CommitRow[]>('wb_recent_commits', limit === undefined ? {} : { limit }),
   /**
-   * **杀掉 dev 监视进程**（run-env 拦下时的一键解法）—— 后端先验明正身（命令行
-   * 得像 tauri dev）再动手；只杀 CLI 本尊，应用窗口与 vite 都活着。
-   * 返回 true = 杀了；false = 进程已经不在（等价于杀过，重跑闸即可）。
+   * **发布提示词**（只读）：一句话说清走哪条命令、它会自己判断什么。
    */
-  killDevWatcher: (pid: number) => invoke<boolean>('wb_release_kill_dev_watcher', { pid }),
-  /**
-   * **发布提示词**（只读）：把"这一版要怎么发"整成一段能直接贴给 AI 的任务书 ——
-   * 版本号、更新说明、发版纪律、产物名、`release.json` 落点全在里面，
-   * 由 AI 照仓库自己的发版路径去发。文本生成在 Rust（事实只有一处）。
-   */
-  releasePrompt: (version?: string | null, notes?: string) =>
-    invoke<string>('wb_release_prompt', { version: version ?? null, notes: notes ?? null }),
-  /**
-   * **打开安装包目录**（发布对话框的「打开安装包目录」按钮）：在系统文件管理器里
-   * 打开本平台的安装包目录 —— 不管这一趟发没发出去都能点，先去看一眼产物在哪。
-   *
-   * ★ 只读、只开系统程序；目录还没建出来时后端**如实拒绝**（错误详情里附候选路径）。
-   */
-  releaseOpenBundle: () => invoke<void>('wb_release_open_bundle'),
+  releasePrompt: () => invoke<string>('wb_release_prompt'),
 
   /**
    * **本地测试源（开发）** —— 起 / 停 / 查那颗按钮背后的 `npm run preset-source:dev`。

@@ -93,7 +93,9 @@ presets/…（源）→ crates/preset/assets/presets/*（include_str! 进客户�
   收敛到"下一个待交付的预览号"，发布后自动进下一版。
 - **包里自报的号必须等于要发的号**。`APP_VERSION` 是编译期常量，改了号不重编包里还是旧号；
   发版内核构建后核对 `Info.plist`（`assert_artifact_speaks_version`），不等就停在"已构建"之前。
-- 发版：`npm run release -- <号> "说明" --channel preview|stable --confirm`。已存在的 tag 拒绝。
+- 发版：`npm run ship -- --what preview|stable --confirm`。**只有一个入口**，
+  它自己读远端状态（冻结源码 / 各平台暂存 / main 清单 / 正式 tag）决定下一步做什么，
+  不需要人指定「首发还是补平台、从哪个 tag、读哪份清单」。
 
 ## 4.6 客户端与工作台不同名、不同兜
 
@@ -119,18 +121,19 @@ presets/…（源）→ crates/preset/assets/presets/*（include_str! 进客户�
 | | 做什么 | tag | 安装包 | 写 `release.json` |
 |---|---|---|---|---|
 | **数据发布** `presets publish` | 预设目录换代、序号 +1 | 否 | 否 | 否 |
-| **软件发版** `npm run release` | 改号 → tag → 构建 → Release → 写清单 | 是 | 是 | 是 |
+| **软件发版** `npm run ship` | 冻结源码 → 多平台构建 → 暂存 → 清单 PR → **最后封版打 tag** | 是（封版时） | 是 | 是 |
 
 - 代码里的确认位：`TxOptions.confirmed` / `ReleaseOptions.confirmed` 默认 `false`，
-  缺它内核零副作用拒绝；CLI 必须 `--confirm`；工作台那颗按钮 = 人当次点的确认。
-- 打了 tag 就得让 `release.json` 同代（`assert_release_info_matches_tag`）。
-- 想看会做什么用 `--dry-run`（零写入，不用问）。
+  缺它内核零副作用拒绝；CLI 必须 `--confirm`；工作台**不再有发布入口**（只读状态）。
+- **正式 tag 是最后一步**：清单 PR 合并、六条判据全过之后才创建。它指向**冻结源码**
+  （main 的祖先），不是 main 的 tip。
+- 想看会做什么用 `--dry-run`（零写入，不用问）；看状态用 `--check`。
 - **发哪一档由人指定**：只跑 `npm run ship -- --what local|preview|stable|presets`，
-  `--what` 取自人当次那句话，AI 不许自己判断。跑完把 `ship` 的核对结果贴出来 ——
-  它核远端 tag / Release / **main 上的清单**；最后一格不等就是「以为发了其实没发」，
-  缺的那一步永远是清单 PR。
-- **tag 已存在 = 只读诊断 + 阶段恢复**（见 `docs/RELEASE-RUNBOOK.md` §3）：
-  禁止重跑完整 `ship`、禁止删 / 移 / 覆盖已推 tag；只从没做完的那一段接着做。
+  `--what` 取自人当次那句话，AI 不许自己判断。
+- **状态从远端现读**：Gitee 暂存/正式资产、GitHub 草稿/正式资产、main 上的清单、正式 tag。
+  本地 journal 只记过程，不是判据。换一台机器、上一趟被打断，都是「再跑一次同一条命令」。
+- **同一版本多平台不再是特殊流程**：平台表里谁没齐就补谁；不再有 Append / InfoOnly /
+  Taken 三个分支，也没有「打过的 tag 只能只读诊断」那条规矩（正式 tag 只有封版一次）。
 
 ### 5.6 建 PR 只走 `npm run pr`
 

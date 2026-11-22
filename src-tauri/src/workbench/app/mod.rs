@@ -106,15 +106,15 @@ pub mod publish_tx;
 /// **生成事务回执**（2026-11-01）：一次生成留下的一份结构化结果 ——
 /// 工作台模态框 / CLI JSON / AI 报告读的是同一份，不是三套说法。
 pub mod receipt;
+/// **发布软件版本事务**（第四刀）：确认主线 → 版本号 → tag → 构建安装包 →
+/// Release → 上传 → 写 `release.json`。**锁无关内核**（不碰 `Presets`，因此不进 `with_ctx`），
+/// 工作台与 CLI 两个入口共用它
+pub mod release;
 pub mod release_history;
 /// **软件版本发布历史**（第四刀）：`<appDataDir>/release-history.json`。
 /// ★ **与交付预设那本分开** —— 两条链不混
 /// **发布对账**（git tag × 回执 × 开发号）—— 只读
 pub mod release_ledger;
-/// **发布软件版本事务**（第四刀）：确认主线 → 版本号 → tag → 构建安装包 →
-/// Release → 上传 → 写 `release.json`。**锁无关内核**（不碰 `Presets`，因此不进 `with_ctx`），
-/// 工作台与 CLI 两个入口共用它
-pub mod release_tx;
 /// **成品图渲染**（2026-10-16，方案 A）：把标注**烧进图片**，产出交付给客户端的
 /// `<图干>.rendered.webp`（无损 webp，纯 Rust 编码）—— 客户端 `<img>` 直接显示，
 /// 不再"读原图 + 前端现画框"。原图与源稿照旧留存（像 PSD）可再编辑

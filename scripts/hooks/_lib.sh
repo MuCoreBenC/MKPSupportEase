@@ -9,7 +9,7 @@ RELEASE_FLAG="$GIT_DIR_ABS/RELEASE_IN_PROGRESS"
 BYPASS_LOG="$GIT_DIR_ABS/bypass.log"
 
 # 用了逃生开关就往 .git/bypass.log 记一行。
-# .git/ 不入库，所以这是本机痕迹；让它真的有用的是 npm run release 的前置检查 ——
+# .git/ 不入库，所以这是本机痕迹；让它真的有用的是 npm run ship 的前置检查 ——
 # 发版时会把上次 tag 之后的绕过记录当着你的面复述一遍。
 log_bypass() {
   [ -z "$GIT_DIR_ABS" ] && return 0
@@ -19,7 +19,7 @@ log_bypass() {
     "$(git symbolic-ref --short HEAD 2>/dev/null || echo '(detached)')" \
     "$(git rev-parse --short HEAD 2>/dev/null || echo '(none)')" \
     >>"$BYPASS_LOG" 2>/dev/null
-  echo "  （已记入 .git/bypass.log，下次 npm run release 会复述）" >&2
+  echo "  （已记入 .git/bypass.log，下次 npm run ship 会复述）" >&2
 }
 
 # 发版流程中 release.mjs 会写这个标记，让闸①/①b 放行 main 上的提交与合并。

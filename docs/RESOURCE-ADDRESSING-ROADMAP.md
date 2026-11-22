@@ -25,7 +25,7 @@ presets/          ← 【仓库】我们自己拥有的东西（人手维护的�
 
 | 角色 | 一句话职责 | 绝对不碰的事 |
 | --- | --- | --- |
-| **生成器**（wb_publish / gen-catalog / release_tx） | 生产什么、放哪里 —— 唯一出口 = `presets/delivery/` | 不知道客户端怎么找 |
+| **生成器**（wb_publish / gen-catalog / release） | 生产什么、放哪里 —— 唯一出口 = `presets/delivery/` | 不知道客户端怎么找 |
 | **SourceResolver** | 客户端拿到 source.json 之后，每个东西到底在哪 | 不生产、不下载、不校验 |
 | **业务层**（下载管道 / 预设页 / 更新 / 工作台） | 只说"我要 Catalog / Release / 这个 Entry" | **永不出现 base + path、join、format 拼 URL** |
 
@@ -180,7 +180,7 @@ Resolver 管"source.json 声明的资源在哪"；Release Asset 是另一条链�
 
 施工前先查清四件事：
 
-1. 现在 `release.json` 是谁生成的（`release_tx` / `release_info` 写入点）；
+1. 现在 `release.json` 是谁生成的（`release` / `release_info` 写入点）；
 2. 谁负责创建 GitHub Release（平台层 `workbench::platform`）；
 3. 谁上传安装包、上传到哪；
 4. `asset.url` 最终在哪一笔写入、以什么值。

@@ -1,28 +1,31 @@
-# Windows 安装包（NSIS）—— **本机是 macOS 时唯一能拿到 .exe 的路**。
+# Windows 安装包（自研安装器 + 绿色版）—— **本机是 macOS 时唯一能拿到 .exe 的路**。
 #
-# 为什么不在本机交叉编译：`release_tx::installer_plan()` 按宿主分流
-# （macOS → dmg / Windows → NSIS），dmg 要 `hdiutil`、NSIS 要 `makensis`，
-# 两边各自的本机打包链都在场才好使；从 macOS 打 Windows 包不是"多传一个 --target"
-# 的事（MSVC 库、WebView2 导入库、NSIS 插件都要 Windows 那一套）。
+# 为什么不在本机交叉编译：`makensis`、MSVC 库、WebView2 导入库都要 Windows 那一套。
+# **构建可以分批，发布必须统一**：这条工作流只负责「按某一笔源码编出包 + 回执」，然后
+# 把产物交给发布内核；建 Release、上传 Gitee、镜像 GitHub、改清单、打 tag 一行都不在这里。
 #
 # 触发方式：
-#   - push tag `v*`：发版时自动出一份与 tag 同版本的 exe；
-#   - push `feat/**`：合并前也能出包验证（正式发版前的真机检查）；
-#   - workflow_dispatch：合并之后在 Actions 页面手动跑。
+#   - `workflow_dispatch`（发布内核调它）：给 `source_sha` 与 `version`，检出那一笔构建；
+#   - push `feat/**`：合并前也能出包验证（不参与发布）。
 #
-# 产物：`SupportEase_<版本>_x64-setup.exe`，在本 run 的 Artifacts 里。
-# 发布上传仍由 `release_tx`（Gitee Release）负责 —— 这里只构建，不碰任何发布通道。
+# 产物：
+#   `SupportEase_<版本>_x64-setup.exe`（自研安装器）
+#   `SupportEase_<版本>_x64-portable.zip`（绿色版）
+#   `build-receipt.json`（版本 / 源码 SHA / 每个文件的 size+sha256，给内核交叉核对）
 
 name: windows-build
 
 on:
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: '被构建的那一笔提交（发布内核的冻结源码）'
+        required: true
+      version:
+        description: '这一版的版本号（x.y.z 或 x.y.z-preview.N）'
+        required: true
   push:
-    tags: ['v*']
     branches: ['feat/**']
-    # 2026-11-05：只动交付产物 / 文档的分支不 Trigger 这一趟——
-    # 没有一行代码变化，出包验证不出新信息，白占一台 Windows runner。
-    # ★ `paths-ignore` 对 tag push 不生效（GitHub 的既定行为），发版那条路不受影响。
     paths-ignore:
       - 'presets/delivery/**'
       - 'docs/**'
@@ -37,13 +40,34 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # ★ 构建哪一笔由调用方点名；分支 push 时退回这一笔
+          ref: ${{ inputs.source_sha || github.sha }}
+          fetch-depth: 1
+
+      - name: 核对被构建的源码
+        shell: bash
+        run: |
+          set -euo pipefail
+          head_sha=$(git rev-parse HEAD)
+          echo "HEAD=$head_sha"
+          if [ -n "${{ inputs.source_sha }}" ] && [ "$head_sha" != "${{ inputs.source_sha }}" ]; then
+            echo "::error::检出的提交 $head_sha 不是冻结源码 ${{ inputs.source_sha }}"
+            exit 1
+          fi
+          got=$(node -p "require('./package.json').version")
+          if [ -n "${{ inputs.version }}" ] && [ "$got" != "${{ inputs.version }}" ]; then
+            echo "::error::这一笔的版本号是 $got，调用方要发 ${{ inputs.version }}"
+            exit 1
+          fi
+          echo "version=$got" >> "$GITHUB_ENV"
+          echo "source_sha=$head_sha" >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v5
         with:
           node-version: 26
           cache: npm
 
-      # runner 自带 rustup，不引第三方 action（与 ci.yml 同一条纪律）
       - name: 准备工具链
         run: |
           rustup toolchain install stable --profile minimal
@@ -63,65 +87,37 @@ jobs:
 
       - run: npm ci
 
-      # `--bundles nsis`：只出 .exe，不碰 msi（WiX 那条链要额外下载与更长的时间）。
-      # 版本号来自 tauri.conf.json（由 src-tauri/Cargo.toml 派生，四处同源）。
-      - name: 构建 NSIS 安装包
-        run: npm run tauri -- build --bundles nsis
+      - name: 构建安装包（自研安装器）
+        run: npm run build:installer
 
-      # **免安装版**：`tauri build` 编出来的主二进制本来就在 `target/release/`，
-      # NSIS 那一份只是把它包起来（解包后就是同一个 exe）。这里复制一份带版本名的，
-      # 免得下载者把 `SupportEase.exe` 和 `…-setup.exe` 混在一起分不清。
-      #
-      # 依赖 WebView2：Win11 自带；Win10 需要系统里装过 WebView2 Runtime
-      # （setup.exe 会替你装，免安装版不会 —— 这是两种产物唯一的实际差别）。
-      - name: 准备免安装 exe
+      - name: 构建绿色版（zip）
+        run: npm run build:portable
+
+      - name: 写构建回执
         shell: bash
-        run: |
-          v=$(node -p "require('./package.json').version")
-          ls -l target/release/*.exe
-          # 主二进制用的是 cargo 的 bin 名（`mkp-support-ease`），不是 productName ——
-          # 2026-10-27 第一次跑时写成了 SupportEase.exe，cp 直接报 No such file。
-          cp "target/release/mkp-support-ease.exe" "target/release/SupportEase_${v}_x64-portable.exe"
-
-      - name: 上传安装包（setup + 免安装）
-        uses: actions/upload-artifact@v4
-        with:
-          name: SupportEase-windows-${{ github.sha }}
-          path: |
-            target/release/bundle/nsis/*.exe
-            target/release/SupportEase_*_x64-portable.exe
-          if-no-files-found: error
-
-      # ★ 发版那一趟（tag push）把 setup.exe 送进 **Gitee 那个 Release**
-      #   （2026-11-06 双平台发布）：macOS 包由内核在本机构建并上传，Windows 包在这台
-      #   runner 上构建 —— 两台机器两个进程，必须有一个人把它们放进**同一个** Release。
-      #   让 Windows 自己送过去，比"人下载 Artifact 再补包"少一次手工，也少一次版本错配。
-      #
-      #   · 内核建 Release 比这一步晚几分钟，所以脚本会**等**（默认 20 分钟）；
-      #   · 同名附件已存在就跳过 ⇒ 重跑幂等；
-      #   · 没配 `GITEE_TOKEN` 时**只告警不红**：包已经在 Artifacts 里，构建本身的
-      #     契约已经完成；缺凭据是配置问题，不该把一次成功的构建判成失败。
-      - name: 送 Windows 包进 Gitee Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          GITEE_OWNER: MuCoreBenC
-          GITEE_REPO: MKPSupportEase
         run: |
           set -euo pipefail
-          if [ -z "${GITEE_TOKEN}" ]; then
-            echo "::warning::没配 GITEE_TOKEN —— Windows 包只留在 Artifacts，没进 Release"
-            exit 0
-          fi
-          shopt -s nullglob
-          files=(target/release/bundle/nsis/*.exe)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "::error::没找到 NSIS 安装包"
-            exit 1
-          fi
-          # 一个文件一对参数（`--file <路径>`）。别用 `${files[@]/#/--file }` ——
-          # 那样会拼成 "‑‑file 路径" 一个词，解析时整段被当成文件名。
-          args=()
-          for f in "${files[@]}"; do args+=(--file "$f"); done
-          node scripts/gitee-release.mjs upload --tag "${GITHUB_REF_NAME}" "${args[@]}"
+          node -e "
+          const fs=require('fs'), crypto=require('crypto'), path=require('path');
+          const v=process.env.version;
+          const files=[
+            'target/release/bundle/nsis/SupportEase_'+v+'_x64-setup.exe',
+            'dist-portable/SupportEase_'+v+'_x64-portable.zip',
+          ].map(p=>{
+            const b=fs.readFileSync(p);
+            return {name:path.basename(p), size:b.length, sha256:crypto.createHash('sha256').update(b).digest('hex')};
+          });
+          const receipt={version:v, source_sha:process.env.source_sha, platform:'windows', arch:'x64', files, builtAt:new Date().toISOString(), run_id:process.env.GITHUB_RUN_ID};
+          fs.writeFileSync('build-receipt.json', JSON.stringify(receipt,null,2)+'\n');
+          console.log(JSON.stringify(receipt,null,2));
+          "
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: SupportEase-windows-${{ env.source_sha }}
+          path: |
+            target/release/bundle/nsis/*.exe
+            dist-portable/*.zip
+            build-receipt.json
+          if-no-files-found: error

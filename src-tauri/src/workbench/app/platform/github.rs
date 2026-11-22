@@ -23,7 +23,8 @@ use crate::error::AppError;
 
 use super::{
     collapse_checks, collapse_state, AssetUpload, ChecksSummary, Hosting, MergeMethod, ReleaseSpec,
-    ReleaseSummary, RemoteRelease, RemoteReview, ReviewId, ReviewSpec, UploadedAsset,
+    ReleaseSummary, ReleaseUpdate, ReleaseView, RemoteAsset, RemoteRelease, RemoteReview, ReviewId,
+    ReviewSpec, UploadedAsset,
 };
 
 /// GitHub API 基址（可用环境变量覆盖给企业版 / 测试假服务器）。
@@ -105,6 +106,33 @@ impl GitHub {
             .map_err(transport)?;
         read_json(resp)
     }
+
+    /// PATCH 一个 API 路径 —— 发布草稿 / 换 tag 用它。
+    fn patch(&self, path: &str, body: Value) -> Result<Value, AppError> {
+        let url = format!("{}{}", api_base(), path);
+        let resp = super::agent()
+            .patch(&url)
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "SupportEase")
+            .header("Content-Type", "application/json")
+            .send(body.to_string())
+            .map_err(transport)?;
+        read_json(resp)
+    }
+
+    /// DELETE 一个 API 路径。成功以状态码为准，不读 body。
+    fn delete(&self, path: &str) -> Result<(), AppError> {
+        let url = format!("{}{}", api_base(), path);
+        super::agent()
+            .delete(&url)
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "SupportEase")
+            .call()
+            .map_err(transport)?;
+        Ok(())
+    }
 }
 
 /// 读一个 `ureq` 响应体并解析成 JSON（与 `runtime/net.rs` 同一条 `into_reader` 取法）。
@@ -184,17 +212,20 @@ impl Hosting for GitHub {
     }
 
     fn create_release(&self, spec: &ReleaseSpec) -> Result<RemoteRelease, AppError> {
-        // `POST /repos/{o}/{r}/releases`。★ `draft` / `prerelease` 显式给 false：
-        // 我们要的是"发出去就能下载"，留草稿等于发了个看不见的版本。
-        let body = serde_json::json!({
+        // `POST /repos/{o}/{r}/releases`。草稿由 spec 决定：暂存那一段 `draft: true`
+        // （GitHub 到发布那一刻才真正创建 tag），正式封版那一段 `draft: false`。
+        let mut body = serde_json::json!({
             "tag_name": spec.tag_name,
             "name": spec.name,
             "body": spec.body,
-            "draft": false,
+            "draft": spec.draft,
             // 预览版标 prerelease（2026-11-05）—— GitHub 这条发布面在断代后只作历史，
             // 但同一套 spec 喂进来时语义必须一致。
             "prerelease": spec.prerelease,
         });
+        if let Some(c) = &spec.target_commitish {
+            body["target_commitish"] = Value::String(c.clone());
+        }
         match self.post(
             &format!("/repos/{}/{}/releases", spec.owner, spec.repo),
             body,
@@ -238,6 +269,93 @@ impl Hosting for GitHub {
         Ok(v.as_array()
             .map(|list| list.iter().map(summary_of).collect())
             .unwrap_or_default())
+    }
+
+    /* ---------- 发布内核 2.0 ---------- */
+
+    fn find_release(
+        &self,
+        owner: &str,
+        repo: &str,
+        tag: &str,
+    ) -> Result<Option<ReleaseView>, AppError> {
+        match self.get(&format!("/repos/{owner}/{repo}/releases/tags/{tag}")) {
+            Ok(v) => Ok(Some(view_of(&v)?)),
+            Err(e) if e.code == crate::error::ErrorCode::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// GitHub 的 Release 响应**自带** `assets[].size` / `digest` / `id` —— 一次读齐。
+    fn assets(&self, owner: &str, repo: &str, tag: &str) -> Result<Vec<RemoteAsset>, AppError> {
+        let v = match self.get(&format!("/repos/{owner}/{repo}/releases/tags/{tag}")) {
+            Ok(v) => v,
+            Err(e) if e.code == crate::error::ErrorCode::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+        Ok(v.get("assets")
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(|a| {
+                        Some(RemoteAsset {
+                            name: a.get("name").and_then(Value::as_str)?.to_owned(),
+                            size: a.get("size").and_then(Value::as_u64),
+                            // `digest` 形如 `sha256:abc…`；只取十六进制那一段
+                            sha256: a
+                                .get("digest")
+                                .and_then(Value::as_str)
+                                .and_then(|d| d.strip_prefix("sha256:"))
+                                .map(|s| s.to_ascii_lowercase()),
+                            id: a.get("id").and_then(Value::as_u64),
+                            url: a
+                                .get("browser_download_url")
+                                .and_then(Value::as_str)
+                                .unwrap_or("")
+                                .to_owned(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    fn update_release(&self, up: &ReleaseUpdate) -> Result<RemoteRelease, AppError> {
+        let mut body = serde_json::Map::new();
+        if let Some(t) = &up.tag_name {
+            body.insert("tag_name".to_owned(), Value::String(t.clone()));
+        }
+        if let Some(n) = &up.name {
+            body.insert("name".to_owned(), Value::String(n.clone()));
+        }
+        if let Some(b) = &up.body {
+            body.insert("body".to_owned(), Value::String(b.clone()));
+        }
+        if let Some(p) = up.prerelease {
+            body.insert("prerelease".to_owned(), Value::Bool(p));
+        }
+        if let Some(d) = up.draft {
+            body.insert("draft".to_owned(), Value::Bool(d));
+        }
+        let v = self.patch(
+            &format!("/repos/{}/{}/releases/{}", up.owner, up.repo, up.release_id),
+            Value::Object(body),
+        )?;
+        release_from_json(&v)
+    }
+
+    fn delete_release(&self, owner: &str, repo: &str, release_id: u64) -> Result<(), AppError> {
+        self.delete(&format!("/repos/{owner}/{repo}/releases/{release_id}"))
+    }
+
+    fn delete_asset(
+        &self,
+        owner: &str,
+        repo: &str,
+        _release_id: u64,
+        asset_id: u64,
+    ) -> Result<(), AppError> {
+        self.delete(&format!("/repos/{owner}/{repo}/releases/assets/{asset_id}"))
     }
 
     fn upload_asset(&self, up: &AssetUpload) -> Result<UploadedAsset, AppError> {
@@ -306,6 +424,27 @@ fn url_encode(s: &str) -> String {
         }
     }
     out
+}
+
+/// Release JSON → [`ReleaseView`]（含 draft 与标题）。
+fn view_of(v: &Value) -> Result<ReleaseView, AppError> {
+    let r = release_from_json(v)?;
+    Ok(ReleaseView {
+        platform: r.platform,
+        id: r.id,
+        tag_name: r.tag_name,
+        name: v
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        draft: v.get("draft").and_then(Value::as_bool).unwrap_or(false),
+        prerelease: v
+            .get("prerelease")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        url: r.url,
+    })
 }
 
 /// Release JSON → [`RemoteRelease`]。

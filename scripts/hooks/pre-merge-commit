@@ -36,7 +36,7 @@ echo "  本仓库是 PR-only —— main 由 GitHub 上的 PR（squash）推进�
 echo "    git push -u origin HEAD && gh pr create" >&2
 echo "" >&2
 echo "  发版把校验 / PR / 合并 / 打 tag 串成一个动作：" >&2
-echo "    npm run release" >&2
+echo "    npm run ship" >&2
 echo "" >&2
 echo "  这么设计是因为：手工合并极容易在第 4 步分心，第 5 步的 tag 就没了。" >&2
 echo "  试验场 22 个设计稿只留下 12 个 tag，就是这么丢的。" >&2

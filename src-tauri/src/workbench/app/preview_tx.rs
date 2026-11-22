@@ -24,7 +24,7 @@
 //! 滚动    `version.mjs ensure-preview` → 下一版
 //! ```
 //!
-//! 全程**不推送、不建 Release、不碰 CI**；与 `release_tx`（云端发版）物理隔离。
+//! 全程**不推送、不建 Release、不碰 CI**；与 `release`（云端发版）物理隔离。
 //!
 //! # 为什么先提交再构建
 //!
@@ -291,7 +291,7 @@ fn run_logged_env(
         argv.join(" ")
     ));
     /* Windows 上 npm 是 npm.cmd，CreateProcess 不会替你补后缀（会报"起不来 npm"）；
-    和 release_tx 的 npm_build 走同一条 cmd /C。 */
+    和 release 的 npm_build 走同一条 cmd /C。 */
     let mut cmd = if cfg!(windows) && argv[0] == "npm" {
         let mut c = Command::new("cmd");
         c.arg("/C").arg("npm");

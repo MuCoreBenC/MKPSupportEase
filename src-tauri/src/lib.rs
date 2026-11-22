@@ -1111,16 +1111,13 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::diagnostics::default_log_dir,
         ipc::diagnostics::export_logs,
         ipc::diagnostics::reveal_log_export,
-        // ★ **发布软件版本**（第四刀）：闸 / 事务 / 历史各一条 —— 与 CLI 同一个内核
-        app::release_tx::wb_release_preflight,
-        app::release_tx::wb_release_software,
-        app::release_tx::wb_release_history,
-        // run-env 拦下时的一键解法：杀掉本进程自己的 dev 监视器（先验明正身再动手）
-        app::release_tx::wb_release_kill_dev_watcher,
-        // 「复制发布提示词」：把这一版要怎么发整成一段能直接贴给 AI 的任务书（只读）
-        app::release_tx::wb_release_prompt,
-        // 「打开安装包目录」：不管发没发出去，都让人能去文件管理器里看产物在哪个目录（只读）
-        app::release_tx::wb_release_open_bundle,
+        // ★ **发布软件版本**（发布内核 2.0）：工作台只读状态，真发布走 `npm run ship`
+        app::release::wb_release_state,
+        app::release::wb_release_preflight,
+        app::release::wb_release_software,
+        app::release::wb_release_history,
+        app::release::wb_release_kill_dev_watcher,
+        app::release::wb_release_prompt,
         // 「本地测试源（开发）」：起 / 停 / 查那颗按钮背后的 `npm run dev:test-update`。
         // ★ 三条**只为工作台存在**：它起的是客户端 dev，但源地址由环境变量注入
         // （`MKPSE_PRESET_SOURCE_URL`，只在 debug 构建里认），这一层不写任何配置 ——

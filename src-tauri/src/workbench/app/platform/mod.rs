@@ -22,6 +22,7 @@
 //! GitHub 的 "PR + check run / statuses" 与 Gitee 的 "MR + status" 是两套方言。
 //! 前端**只认** [`ReviewState`] 与 [`ChecksSummary`] 这两档 —— 平台差异在各自 impl 内消化。
 
+pub mod actions;
 pub mod gitee;
 pub mod github;
 
@@ -157,6 +158,9 @@ pub struct ReleaseSpec {
     pub repo: String,
     /// tag 名（**带 `v` 前缀**：`v0.0.2`）—— 与 git tag 逐字一致，Release 因此挂在那一笔上
     pub tag_name: String,
+    /// tag 不存在时平台从哪一笔建它（Gitee 必填；GitHub 认 `target_commitish`）。
+    /// 发布内核一律给**冻结源码的 SHA**：Release 指向的那一笔必须是被构建的那一笔。
+    pub target_commitish: Option<String>,
     /// Release 标题（给人在网页上看到的那一句）
     pub name: String,
     /// 正文（发布说明）
@@ -167,6 +171,54 @@ pub struct ReleaseSpec {
     /// 漏掉它的后果不是少个标签：预览版会以"最新正式版"的身份出现在仓库首页，
     /// 而正式版用户看到的就是一个他们没被通知、却挂在最上面的版本。
     pub prerelease: bool,
+    /// ★ **草稿**（发布内核 2.0）：`true` 时 GitHub 不创建 tag、资产对外不可见，
+    /// 直到封版那一步把它发布出去。Gitee 没有草稿概念 —— 它的暂存靠专属 staging tag。
+    pub draft: bool,
+}
+
+/// 一个 Release 的**完整身份**（回读用：draft 与否、标题、tag）。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseView {
+    pub platform: String,
+    pub id: u64,
+    pub tag_name: String,
+    pub name: String,
+    pub draft: bool,
+    pub prerelease: bool,
+    pub url: String,
+}
+
+/// 远端一份资产的**身份**。发布内核只认这一份做判断：名 + 字节数 + 摘要（平台给才认）。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteAsset {
+    pub name: String,
+    /// Gitee 的 Release 对象不给 size，但 `/attach_files` 给；两边都给不出时是 `None`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    /// GitHub 给 `digest: sha256:…`；Gitee 不给
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    /// 平台侧附件 id（删附件用）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<u64>,
+    pub url: String,
+}
+
+/// 改一份已存在的 Release（封版时把草稿发布出去、把 staging tag 换成正式 tag）。
+#[derive(Debug, Clone)]
+pub struct ReleaseUpdate {
+    pub owner: String,
+    pub repo: String,
+    pub release_id: u64,
+    /// 要改成的新 tag（不换给 `None`）
+    pub tag_name: Option<String>,
+    pub name: Option<String>,
+    pub body: Option<String>,
+    pub prerelease: Option<bool>,
+    /// 草稿开关：`false` = 发布出去（GitHub 到这一步才真正创建 tag）
+    pub draft: Option<bool>,
 }
 
 /// 建好的 Release（平台无关）。`id` 是上传 asset 要用的那个号。
@@ -325,6 +377,60 @@ pub trait Hosting {
     /// 去做的事，这条接口上没有删除动作。
     fn list_releases(&self, owner: &str, repo: &str) -> Result<Vec<ReleaseSummary>, AppError> {
         let _ = (owner, repo);
+        Err(platform_not_supported(self.kind()))
+    }
+
+    /* ---------- 发布内核 2.0：按 tag 回读整份身份、改、删 ---------- */
+
+    /// 按 tag 找一份 Release（含 draft 标记）。**没有 = `None`**（一个答案，不是故障）。
+    fn find_release(
+        &self,
+        owner: &str,
+        repo: &str,
+        tag: &str,
+    ) -> Result<Option<ReleaseView>, AppError> {
+        let _ = (owner, repo, tag);
+        Err(platform_not_supported(self.kind()))
+    }
+
+    /// 这一份 Release 上的**资产身份**（名 + 大小 + 摘要 + 平台侧 id）。
+    ///
+    /// 状态派生只认它：同名同大小同摘要 = 同一份字节，重跑直接跳过上传。
+    fn assets(&self, owner: &str, repo: &str, tag: &str) -> Result<Vec<RemoteAsset>, AppError> {
+        let names = self.release_assets(owner, repo, tag)?;
+        Ok(names
+            .into_iter()
+            .map(|name| RemoteAsset {
+                name,
+                size: None,
+                sha256: None,
+                id: None,
+                url: String::new(),
+            })
+            .collect())
+    }
+
+    /// 改一份已存在的 Release（发布草稿、换 tag、改说明）。
+    fn update_release(&self, up: &ReleaseUpdate) -> Result<RemoteRelease, AppError> {
+        let _ = up;
+        Err(platform_not_supported(self.kind()))
+    }
+
+    /// 删一份 Release（封版后清理暂存；**不碰 tag**）。
+    fn delete_release(&self, owner: &str, repo: &str, release_id: u64) -> Result<(), AppError> {
+        let _ = (owner, repo, release_id);
+        Err(platform_not_supported(self.kind()))
+    }
+
+    /// 删一份 Release 上的附件（清理暂存用）。
+    fn delete_asset(
+        &self,
+        owner: &str,
+        repo: &str,
+        release_id: u64,
+        asset_id: u64,
+    ) -> Result<(), AppError> {
+        let _ = (owner, repo, release_id, asset_id);
         Err(platform_not_supported(self.kind()))
     }
 }

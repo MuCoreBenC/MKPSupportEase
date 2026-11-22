@@ -26,7 +26,8 @@ use crate::error::AppError;
 
 use super::{
     collapse_checks, collapse_state, AssetUpload, ChecksSummary, Hosting, MergeMethod, ReleaseSpec,
-    ReleaseSummary, RemoteRelease, RemoteReview, ReviewId, ReviewSpec, UploadedAsset,
+    ReleaseSummary, ReleaseUpdate, ReleaseView, RemoteAsset, RemoteRelease, RemoteReview, ReviewId,
+    ReviewSpec, UploadedAsset,
 };
 
 fn api_base() -> String {
@@ -100,6 +101,34 @@ impl Gitee {
             .send(body.to_string())
             .map_err(transport)?;
         read_json(resp)
+    }
+
+    /// PATCH（body 里带 access_token）—— 改 Release（发布草稿 / 换 tag）用它。
+    fn patch(&self, path: &str, mut body: Value) -> Result<Value, AppError> {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert("access_token".to_owned(), Value::String(self.token.clone()));
+        }
+        let url = format!("{}{}", api_base(), path);
+        let resp = super::agent()
+            .patch(&url)
+            .header("User-Agent", "SupportEase")
+            .header("Content-Type", "application/json")
+            .send(body.to_string())
+            .map_err(transport)?;
+        read_json(resp)
+    }
+
+    /// DELETE（access_token 走查询串）。成功时**不读 body** —— 以状态码为准。
+    fn delete(&self, path: &str) -> Result<(), AppError> {
+        let url = format!("{}{}", api_base(), path);
+        let sep = if path.contains('?') { '&' } else { '?' };
+        let full = format!("{url}{sep}access_token={}", self.token);
+        super::agent()
+            .delete(&full)
+            .header("User-Agent", "SupportEase")
+            .call()
+            .map_err(transport)?;
+        Ok(())
     }
 }
 
@@ -196,9 +225,19 @@ impl Hosting for Gitee {
         //   `400 {"messages":["target_commitish is missing"]}`—— 文档把它标成可选，别信）。
         //   tag 已由 ⑥½ 推上去，这个字段只在"tag 不存在"时才参与建 tag；给 `main`：
         //   那正是发布事务打 tag 的那一支，兜底语义也对。
+        /* Gitee 没有草稿：暂存靠专属 staging tag（`staging/<版本>`），正式封版时才建正式 tag 的
+        Release。要求草稿就直接说「这一支没有」—— 不假装成功。 */
+        if spec.draft {
+            return Err(AppError::invalid_argument(
+                "Gitee 没有草稿 Release —— 暂存用 staging tag，封版才建正式 Release".to_owned(),
+            ));
+        }
         let body = serde_json::json!({
             "tag_name": spec.tag_name,
-            "target_commitish": "main",
+            "target_commitish": spec
+                .target_commitish
+                .clone()
+                .unwrap_or_else(|| "main".to_owned()),
             "name": spec.name,
             "body": spec.body,
             // ★ 预览版必须标成 prerelease（2026-11-05）：正式版用户不该在
@@ -288,6 +327,123 @@ impl Hosting for Gitee {
             .map(|list| list.iter().map(|r| summary_of(r, owner, repo)).collect())
             .unwrap_or_default())
     }
+
+    /* ---------- 发布内核 2.0 ---------- */
+
+    fn find_release(
+        &self,
+        owner: &str,
+        repo: &str,
+        tag: &str,
+    ) -> Result<Option<ReleaseView>, AppError> {
+        match self.get(&format!("/repos/{owner}/{repo}/releases/tags/{tag}")) {
+            Ok(v) => Ok(Some(view_of(&v, owner, repo, tag)?)),
+            Err(e) if e.code == crate::error::ErrorCode::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Gitee 的 Release 对象**不带 size**，但 `/attach_files` 给（还带 id）。
+    /// 两段读：先拿 release id，再读附件表。
+    fn assets(&self, owner: &str, repo: &str, tag: &str) -> Result<Vec<RemoteAsset>, AppError> {
+        let Some(view) = self.find_release(owner, repo, tag)? else {
+            return Ok(Vec::new());
+        };
+        let v = self.get(&format!(
+            "/repos/{owner}/{repo}/releases/{}/attach_files",
+            view.id
+        ))?;
+        Ok(v.as_array()
+            .map(|list| {
+                list.iter()
+                    .filter_map(|a| {
+                        let name = a.get("name").and_then(Value::as_str)?.to_owned();
+                        Some(RemoteAsset {
+                            url: format!(
+                                "https://gitee.com/{owner}/{repo}/releases/download/{tag}/{name}"
+                            ),
+                            name,
+                            size: a.get("size").and_then(Value::as_u64),
+                            sha256: None,
+                            id: a.get("id").and_then(Value::as_u64),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    fn update_release(&self, up: &ReleaseUpdate) -> Result<RemoteRelease, AppError> {
+        let mut body = serde_json::Map::new();
+        if let Some(t) = &up.tag_name {
+            body.insert("tag_name".to_owned(), Value::String(t.clone()));
+        }
+        if let Some(n) = &up.name {
+            body.insert("name".to_owned(), Value::String(n.clone()));
+        }
+        if let Some(b) = &up.body {
+            body.insert("body".to_owned(), Value::String(b.clone()));
+        }
+        if let Some(p) = up.prerelease {
+            body.insert("prerelease".to_owned(), Value::Bool(p));
+        }
+        /* Gitee 没有草稿：要求改动 draft 就是要求一件它没有的东西 */
+        if up.draft.is_some() {
+            return Err(AppError::invalid_argument(
+                "Gitee 没有草稿 Release —— 暂存用 staging tag，封版才建正式 Release".to_owned(),
+            ));
+        }
+        let v = self.patch(
+            &format!("/repos/{}/{}/releases/{}", up.owner, up.repo, up.release_id),
+            Value::Object(body),
+        )?;
+        release_from_json(&v)
+    }
+
+    fn delete_release(&self, owner: &str, repo: &str, release_id: u64) -> Result<(), AppError> {
+        self.delete(&format!("/repos/{owner}/{repo}/releases/{release_id}"))
+    }
+
+    fn delete_asset(
+        &self,
+        owner: &str,
+        repo: &str,
+        release_id: u64,
+        asset_id: u64,
+    ) -> Result<(), AppError> {
+        self.delete(&format!(
+            "/repos/{owner}/{repo}/releases/{release_id}/attach_files/{asset_id}"
+        ))
+    }
+}
+
+/// Release JSON → [`ReleaseView`]（带 draft 与标题；Gitee 永远 `draft=false`）。
+fn view_of(v: &Value, owner: &str, repo: &str, tag: &str) -> Result<ReleaseView, AppError> {
+    let r = release_from_json(v)?;
+    Ok(ReleaseView {
+        platform: r.platform,
+        id: r.id,
+        tag_name: if r.tag_name.is_empty() {
+            tag.to_owned()
+        } else {
+            r.tag_name
+        },
+        name: v
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        draft: false,
+        prerelease: v
+            .get("prerelease")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        url: if r.url.is_empty() {
+            format!("https://gitee.com/{owner}/{repo}/releases/tag/{tag}")
+        } else {
+            r.url
+        },
+    })
 }
 
 /// 一条 Release 摘要。**Gitee 的附件 API 不返回 size** —— 字节数如实给 `None`，
@@ -556,9 +712,11 @@ mod tests {
             owner: "o".to_owned(),
             repo: "r".to_owned(),
             tag_name: "v0.0.3".to_owned(),
+            target_commitish: None,
             name: "SupportEase v0.0.3".to_owned(),
             body: "b".to_owned(),
             prerelease: false,
+            draft: false,
         };
         // 不真发请求：只验证它**不是**默认实现那个错误
         let err = g.create_release(&spec).unwrap_err();
