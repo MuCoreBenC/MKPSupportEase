@@ -587,6 +587,33 @@ pub fn collapse_state(raw: &str) -> ReviewState {
 /// 输入是各平台 impl 归一化后的**少量**词：`pending` / `success` / `failure` /
 /// `error` / `none`。平台原始的多档（GitHub 的 `queued/in_progress/completed` ×
 /// `success/failure/neutral...`）在 impl 里先压成这几个词。
+/// 一批 check-run 的结论 → 四档汇总（纯函数，判据钉它）。
+///
+/// 规则：还没跑完 = Pending；有一个失败/取消/超时 = Failed；
+/// 全部跑完且没有失败 = Passed；一条都没有 = None。
+pub fn collapse_check_runs(runs: &[(String, String)]) -> ChecksSummary {
+    if runs.is_empty() {
+        return ChecksSummary::None;
+    }
+    let mut pending = false;
+    for (status, conclusion) in runs {
+        if status != "completed" {
+            pending = true;
+            continue;
+        }
+        match conclusion.as_str() {
+            "success" | "neutral" | "skipped" => {}
+            "" => pending = true,
+            _ => return ChecksSummary::Failed,
+        }
+    }
+    if pending {
+        ChecksSummary::Pending
+    } else {
+        ChecksSummary::Passed
+    }
+}
+
 pub fn collapse_checks(raw: &str) -> ChecksSummary {
     match raw.trim().to_ascii_lowercase().as_str() {
         "pending" | "queued" | "in_progress" | "running" => ChecksSummary::Pending,
@@ -673,6 +700,33 @@ mod tests {
             assert_eq!(collapse_state(raw), ReviewState::Closed, "{raw}");
         }
         assert_eq!(collapse_state("???"), ReviewState::Unknown, "认不出不猜");
+    }
+
+    #[test]
+    fn check_runs_collapse_to_four_buckets() {
+        let done = |v: &str| ("completed".to_owned(), v.to_owned());
+        assert_eq!(
+            collapse_check_runs(&[done("success")]),
+            ChecksSummary::Passed
+        );
+        assert_eq!(
+            collapse_check_runs(&[done("failure")]),
+            ChecksSummary::Failed
+        );
+        assert_eq!(
+            collapse_check_runs(&[done("cancelled")]),
+            ChecksSummary::Failed
+        );
+        assert_eq!(collapse_check_runs(&[done("")]), ChecksSummary::Pending);
+        assert_eq!(collapse_check_runs(&[]), ChecksSummary::None);
+        assert_eq!(
+            collapse_check_runs(&[done("success"), ("in_progress".to_owned(), String::new())]),
+            ChecksSummary::Pending
+        );
+        assert_eq!(
+            collapse_check_runs(&[done("skipped"), done("success")]),
+            ChecksSummary::Passed
+        );
     }
 
     /// 检查汇总的收敛：多档原始词 → 四档（+ None / Unknown）。
