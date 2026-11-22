@@ -563,6 +563,21 @@ fn merge_assets_by_platform(
     out
 }
 
+/// 清单该摊哪一份产物：**上传成功的那份优先**；只补清单那趟没有上传记录，
+/// 就用本地产物列表（info_only 时已经按这一版从磁盘定位过）。
+///
+/// 不这么分就会出"0.0.15 的版本号 + 0.0.14 的文件名"—— 客户端按那个 URL 下载只会 404。
+fn assets_for_manifest<'a>(
+    on_release: &[&'a BuiltArtifact],
+    artifacts: &'a [BuiltArtifact],
+) -> Vec<&'a BuiltArtifact> {
+    if on_release.is_empty() {
+        artifacts.iter().collect()
+    } else {
+        on_release.to_vec()
+    }
+}
+
 /// 把**这一趟真的在 Release 上**的产物摊成清单资产（纯函数）。
 ///
 /// 平台、类型、文件名、字节数、SHA-256 全部来自产物自己；这一层只补两个下载地址。
@@ -1231,17 +1246,21 @@ fn run_inner(
      *
      * 只在调用方给了 GitHub 通道时做（`hosting.kind() == "github"`）：没有通道 = 这张
      * 清单就**不写** GitHub 源，而不是写一个没人传上去的地址。 */
-    let mirror = (!info_only && hosting.kind() == "github").then_some((t, hosting));
-    if let Some((t, h)) = mirror {
-        on_release = mirror_artifacts(
-            h,
-            t,
-            &tag,
-            &opts.notes,
-            opts.channel,
-            &on_release,
-            &mut report.summary,
-        )?;
+    /* 「有没有 GitHub 通道」与「这一趟要不要镜像」是两件事：只补清单那趟不传，
+    但清单里照样要写 GitHub 源（那一版早传过了）。 */
+    let gh_target = (hosting.kind() == "github").then_some(t);
+    if !info_only {
+        if let Some(t) = gh_target {
+            on_release = mirror_artifacts(
+                hosting,
+                t,
+                &tag,
+                &opts.notes,
+                opts.channel,
+                &on_release,
+                &mut report.summary,
+            )?;
+        }
     }
 
     /* ---------- ⑨ 写清单（`release.json` / `release-preview.json`）→ 它自己的分支与 PR
@@ -1269,9 +1288,10 @@ fn run_inner(
     /* 双平台 / 双源资产：**从同一份产物列表摊开** —— 平台与类型读产物自己带的那两个词，
     不在这一层再判一次（从前这里写死 `windows/nsis`，macOS 的 dmg 就被标成 Windows）。
     主地址 Gitee，`sources.github` 给选了 GitHub 的客户端。 */
-    /* `sources.github` 只在**真的镜像过**时写：镜像通道与上传目标是同一对 owner/repo。 */
-    let gh = mirror.map(|(t, _)| (t.owner.clone(), t.repo.clone()));
-    let platform_assets = manifest_assets(&on_release, &g.owner, &g.repo, &tag, gh.as_ref());
+    /* `sources.github` 只在**有 GitHub 通道**时写：镜像通道与上传目标是同一对 owner/repo。 */
+    let gh = gh_target.map(|t| (t.owner.clone(), t.repo.clone()));
+    let listed = assets_for_manifest(&on_release, &artifacts);
+    let platform_assets = manifest_assets(&listed, &g.owner, &g.repo, &tag, gh.as_ref());
     /* 只补清单（tag/产物都在）时没有新构建：保留上一份的 assets，一个字节都不改。
     补平台时本平台整组替换、**别的平台原样留住**（不合并就会把另一平台的包抹掉）。 */
     let platform_assets = if platform_assets.is_empty() {
@@ -3723,6 +3743,42 @@ mod tests {
         assert!(
             validate_built_artifacts(&[built, broken], "0.0.13").is_err(),
             "坏 zip 必须被拒"
+        );
+    }
+
+    /// 清单摊哪一份：有上传记录就用它；没有（只补清单那趟）用本地产物列表。
+    #[test]
+    fn the_manifest_lists_what_was_uploaded_or_what_is_on_disk() {
+        let d = tempfile::tempdir().unwrap();
+        let one = d.path().join("SupportEase_0.0.15_x64-setup.exe");
+        let two = d.path().join("SupportEase_0.0.15_x64-portable.zip");
+        crate::fsx::atomic::atomic_write(&one, b"a").unwrap();
+        crate::fsx::atomic::atomic_write(&two, b"bb").unwrap();
+        let a = BuiltArtifact::new(
+            one,
+            "SupportEase_0.0.15_x64-setup.exe".to_owned(),
+            "windows",
+            "nsis",
+        )
+        .unwrap();
+        let b = BuiltArtifact::new(
+            two,
+            "SupportEase_0.0.15_x64-portable.zip".to_owned(),
+            "windows",
+            "portable",
+        )
+        .unwrap();
+        let all = vec![a, b];
+        let uploaded = vec![&all[0]];
+        assert_eq!(
+            assets_for_manifest(&uploaded, &all).len(),
+            1,
+            "有上传记录就只听上传的"
+        );
+        assert_eq!(
+            assets_for_manifest(&[], &all).len(),
+            2,
+            "只补清单那趟用本地产物列表，不许拿上一版的名单顶上"
         );
     }
 
