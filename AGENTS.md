@@ -130,6 +130,11 @@ presets/…（源）→ crates/preset/assets/presets/*（include_str! 进客户�
 - 想看会做什么用 `--dry-run`（零写入，不用问）；看状态用 `--check`。
 - **发哪一档由人指定**：只跑 `npm run ship -- --what local|preview|stable|presets`，
   `--what` 取自人当次那句话，AI 不许自己判断。
+- **发版前先跑一次只读探针**：`npm run ship -- --probe` 核对「Gitee 缺 Release 回 200+null /
+  GitHub 草稿按 tag 找得到 / 两边资产身份字段齐全」；它零写入，不对就停。
+- **判据分三层**：纯函数（状态派生 / 清单 / 封版六条）、演练矩阵（`release::rehearsal`，内存假远端
+  + 假 CI，覆盖冻结 / 补平台 / 中断续跑 / 换机 / 幂等 / 失败）、只读探针。**不给第三方 API 写全量
+  契约测试** —— 通用行为由真实发布那一次覆盖；事实清单见 `docs/RELEASE-CONTRACT.md`。
 - **状态从远端现读**：Gitee 暂存/正式资产、GitHub 草稿/正式资产、main 上的清单、正式 tag。
   本地 journal 只记过程，不是判据。换一台机器、上一趟被打断，都是「再跑一次同一条命令」。
 - **同一版本多平台不再是特殊流程**：平台表里谁没齐就补谁；不再有 Append / InfoOnly /
