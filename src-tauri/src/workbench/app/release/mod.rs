@@ -24,9 +24,14 @@ pub mod ci;
 pub mod journal;
 pub mod manifest;
 pub mod platforms;
+pub mod probe;
+#[cfg(test)]
+mod rehearsal;
 pub mod seal;
 pub mod staging;
 pub mod state;
+#[cfg(test)]
+mod testing;
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -36,7 +41,6 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 use crate::runtime::release_info::UpdateChannel;
 use crate::workbench::app::git::Git;
-use crate::workbench::app::platform::actions::Actions;
 use crate::workbench::app::platform::{Hosting, RemoteRelease, RemoteReview, ReviewId, ReviewSpec};
 use crate::workbench::app::publish_tx::{resolve_target, PublishTarget};
 use crate::workbench::app::version;
@@ -170,11 +174,26 @@ pub fn inspect(
 
 /* ---------- 主流程 ---------- */
 
-/// 跑一轮发布：**只做状态机要求的下一步**，不做完所有事。
+/// 跑一轮发布：只负责**把账号凑成两条通道**，编排全在 run_with 上。
 pub fn run(
     repo_root: &Path,
     app_dir: &Path,
     opts: &ReleaseOptions,
+) -> Result<ReleaseReport, AppError> {
+    let ports = ports(app_dir)?;
+    let ci = ci::ActionsCi::new(ports.code.token.clone());
+    run_with(repo_root, opts, &ports, &ci)
+}
+
+/// 可注入的一轮发布：远端通道（Ports）与构建通道（ci::Ci）都由调用方给。
+///
+/// ★ 这一层**只做编排**：不构造网络客户端、不起进程、不读账号目录。演练因此可以在
+/// 内存假远端 + 假 CI 上把整条状态机跑一遍（中断、换机器、重复执行）。
+pub fn run_with(
+    repo_root: &Path,
+    opts: &ReleaseOptions,
+    p: &Ports,
+    ci: &dyn ci::Ci,
 ) -> Result<ReleaseReport, AppError> {
     if !opts.dry_run && !opts.confirmed {
         return Err(AppError::invalid_argument(
@@ -195,15 +214,17 @@ pub fn run(
     let mut summary: Vec<String> = Vec::new();
     let mut pending: Vec<String> = Vec::new();
 
-    /* 预检：两条通道都要在 —— 这次事故是跑到镜像阶段才 401 */
-    let p = ports(app_dir)?;
     summary.push(format!(
         "发布通道：代码仓 {} / 发布仓 {}",
         p.code.platform, p.release.platform
     ));
 
-    /* 冻结源：main 的 tip。版本号必须已经在那一笔上（版本号 PR 先合） */
-    git.fetch("origin")?;
+    /* 冻结源：main 的 tip。版本号必须已经在那一笔上（版本号 PR 先合）
+    ★ 演练（--dry-run）不 fetch：那会改本地 refs（含 prune），"一个字节都没动"里
+    也该包括本地。用现有的 origin/main 就够回答"这一版能不能发"。 */
+    if !opts.dry_run {
+        git.fetch("origin")?;
+    }
     let tip = git.rev_parse("origin/main")?;
     let tip_version = version_at(repo_root, &tip)?;
     if tip_version != version {
@@ -212,7 +233,7 @@ pub fn run(
         )));
     }
 
-    let t = targets(&p);
+    let t = targets(p);
     let mut snap = Snapshot::default();
     staging::fill_snapshot(&t, &version, channel, &git, &mut snap)?;
     let mut st = state::derive(&version, channel, &snap);
@@ -220,6 +241,12 @@ pub fn run(
     if opts.dry_run {
         summary.push("演练：一个字节都没动".to_owned());
         return Ok(report(&st, summary, pending, None, None, None, true));
+    }
+
+    /* 已封版：重跑只核对（不重建暂存面、不重传、不重打 tag） */
+    if st.phase == Phase::Sealed {
+        summary.push("这一代已封版：再跑只核对，不重复上传、不重复建 tag".to_owned());
+        return Ok(report(&st, summary, pending, None, None, None, false));
     }
 
     /* ---------- 逐阶段推进 ---------- */
@@ -270,7 +297,8 @@ pub fn run(
             continue;
         }
         let facts = build_platform(
-            &p,
+            p,
+            ci,
             repo_root,
             &worktree,
             &version,
@@ -309,12 +337,14 @@ pub fn run(
     }
 
     /* ③ 清单：基底取 origin/main，按平台整组写全 */
+    let mut seal_facts: Vec<ArtifactFact> = Vec::new();
     if st.phase == Phase::Staged {
         let mut facts = facts_for_manifest(&snap, &built, &version)?;
         /* 封版要把同一批字节再传一遍：每一份都得在本机有文件（换机器续跑时从暂存面补） */
         for f in facts.iter_mut() {
             *f = staging::ensure_local(&t, &version, f, repo_root)?;
         }
+        seal_facts = facts.clone();
         let url = format!(
             "https://gitee.com/{}/{}/releases/tag/{}",
             p.release.owner,
@@ -335,8 +365,8 @@ pub fn run(
         if staged_paths.is_empty() {
             summary.push("清单没有变化（已在 main 上）".to_owned());
         } else {
-            let review = open_or_reuse_review(&p, &branch, &version, &mut summary)?;
-            let review = wait_checks(&p, &review, &mut summary)?;
+            let review = open_or_reuse_review(p, &branch, &version, &mut summary)?;
+            let review = wait_checks(p, &review, &mut summary)?;
             let merged = p.code_hosting.merge_review(
                 &ReviewId {
                     owner: p.code.owner.clone(),
@@ -347,7 +377,7 @@ pub fn run(
             )?;
             let state_text = format!("{:?}", merged.state);
             summary.push(format!("清单 PR #{} 已合并（{state_text}）", merged.number));
-            git.switch("main").ok();
+            git.switch("main")?;
             git.pull_ff("origin", "main")?;
         }
         refresh(&t, &git, &version, channel, &mut snap, &mut st)?;
@@ -364,7 +394,16 @@ pub fn run(
             .source_commit
             .clone()
             .ok_or_else(|| AppError::internal("状态里没有冻结源码"))?;
-        let facts = facts_for_manifest(&snap, &built, &version)?;
+        let facts = if !seal_facts.is_empty() {
+            seal_facts.clone()
+        } else {
+            /* 走到这里说明③没跑（清单早已合并）：facts 也要带本地文件才能重传 */
+            let mut f = facts_for_manifest(&snap, &built, &version)?;
+            for one in f.iter_mut() {
+                *one = staging::ensure_local(&t, &version, one, repo_root)?;
+            }
+            f
+        };
         let tag = seal::create_formal_tag(&git, &version, &source, &opts.notes, &mut summary)?;
         let gitee = seal::publish_gitee(
             &t,
@@ -428,8 +467,10 @@ fn refresh(
 }
 
 /// 构建一个平台（本机 or CI）。
+#[allow(clippy::too_many_arguments)] // 一次构建要的上下文（通道/注入的 CI/仓库/工作树/版本/平台/源码/摘要）
 fn build_platform(
     p: &Ports,
+    ci: &dyn ci::Ci,
     repo_root: &Path,
     worktree: &Path,
     version: &str,
@@ -437,6 +478,14 @@ fn build_platform(
     source_commit: &str,
     summary: &mut Vec<String>,
 ) -> Result<Vec<ArtifactFact>, AppError> {
+    /* 被构建的那一笔自报的版本号必须就是要发的号（CI 那边只信版本输入串，这里补一道） */
+    let at_source = version_at(repo_root, source_commit)?;
+    if at_source.trim() != version.trim() {
+        return Err(AppError::invalid_argument(format!(
+            "冻结源码 {} 上的版本号是 {at_source}，这一趟要发 {version} —— 源码与版本号不是同一代",
+            short(source_commit)
+        )));
+    }
     if platforms::built_locally(pf) {
         if host_platform_id() != Some(pf.id) {
             return Err(AppError::invalid_argument(format!(
@@ -449,10 +498,9 @@ fn build_platform(
         let _ = worktree;
         build::build_local(&dir, version, pf, summary)
     } else {
-        let actions = Actions::new(p.code.token.clone());
         let mut started = iso_now();
         /* 同一冻结 SHA 上已经有运行 ⇒ 不重新触发（正在跑就等它、已成功就复用产物） */
-        let prefer = match ci::reusable_run(&actions, &p.code.owner, &p.code.repo, source_commit)? {
+        let prefer = match ci.reusable(&p.code.owner, &p.code.repo, source_commit)? {
             Some(run) => {
                 summary.push(format!(
                     "复用同一冻结源码上的 Windows 构建（run {}，{}）",
@@ -463,34 +511,25 @@ fn build_platform(
                 Some(run.id)
             }
             None => {
-                ci::dispatch(
-                    &actions,
-                    &p.code.owner,
-                    &p.code.repo,
-                    source_commit,
-                    version,
-                    summary,
-                )?;
+                ci.start(&p.code.owner, &p.code.repo, source_commit, version, summary)?;
                 None
             }
         };
         let deadline = Instant::now() + Duration::from_secs(60 * 60);
-        let run = ci::wait(
-            &actions,
+        let run = ci.wait(
             &p.code.owner,
             &p.code.repo,
-            source_commit,
             &started,
             prefer,
             deadline,
             summary,
         )?;
         let dest = repo_root.join("target").join("release-artifacts");
-        ci::collect(
-            &actions,
+        ci.collect(
             &p.code.owner,
             &p.code.repo,
             run.id,
+            source_commit,
             version,
             pf,
             &dest,

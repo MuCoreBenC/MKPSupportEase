@@ -65,6 +65,23 @@ fn run_cli() -> Result<Option<ReleaseReport>, AppError> {
 
     let repo_root = mkp_support_ease_lib::workbench::paths::repo_root();
     let app_dir = release::app_dir();
+    if parsed.probe {
+        let mut bad = 0;
+        for line in release::probe::run(&app_dir, &repo_root)? {
+            let mark = if line.ok { "✓" } else { "✗" };
+            eprintln!("{mark} {} —— {}", line.check, line.measured);
+            if !line.ok {
+                bad += 1;
+            }
+        }
+        if bad > 0 {
+            return Err(AppError::invalid_argument(format!(
+                "{bad} 条探测不合预期 —— 适配器对真接口的假设变了，先修再发"
+            )));
+        }
+        eprintln!("三条探测都符合预期（只读，没动任何远端东西）");
+        return Ok(None);
+    }
     eprintln!("仓库根：{}", repo_root.display());
 
     let opts = ReleaseOptions {
@@ -88,6 +105,7 @@ struct Parsed {
     mode: Mode,
     options: ReleaseOptions,
     args_only: bool,
+    probe: bool,
 }
 
 fn parse(args: &[String]) -> Result<Parsed, AppError> {
@@ -96,6 +114,7 @@ fn parse(args: &[String]) -> Result<Parsed, AppError> {
     let mut notes = String::new();
     let mut channel: Option<UpdateChannel> = None;
     let mut dry_run = false;
+    let mut probe = false;
     let mut confirmed = false;
     let mut stop_after: Option<StopAfter> = None;
     let mut only_platform: Option<String> = None;
@@ -108,6 +127,8 @@ fn parse(args: &[String]) -> Result<Parsed, AppError> {
         match a.as_str() {
             "--check" | "--inspect" => mode = Mode::Check,
             "--dry-run" => dry_run = true,
+            /* 只读探测：核对适配器还读得懂真接口（不建/不改/不删任何远端东西） */
+            "--probe" => probe = true,
             "--confirm" => confirmed = true,
             "--args-only" => args_only = true,
             "--notes" => {
@@ -172,6 +193,7 @@ fn parse(args: &[String]) -> Result<Parsed, AppError> {
     Ok(Parsed {
         mode,
         args_only,
+        probe,
         options: ReleaseOptions {
             version,
             notes,

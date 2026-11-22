@@ -184,7 +184,9 @@ pub fn upload_missing(
     for f in facts {
         let remote = existing.iter().find(|a| a.name == f.name);
         if let Some(a) = remote {
-            let same_size = a.size.map(|s| s == f.size).unwrap_or(true);
+            /* ★ 读不到大小 = **不知道**，不是"一样大"：Gitee 的附件表要是回了个
+            形状异常（null / 缺 size），当成同字节就会把旧包留在正式面上而清单写新 SHA。 */
+            let same_size = a.size.map(|s| s == f.size).unwrap_or(false);
             let same_sha = a
                 .sha256
                 .as_deref()
