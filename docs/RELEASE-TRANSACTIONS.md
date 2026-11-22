@@ -99,6 +99,16 @@
 >
 > 补包那一趟**不许把别的平台的安装包抹掉**：`release.json` 的 `asset` 格按"同一版本就留住"
 > （`release_info_text`），否则补一个 Windows 包会把 macOS 的应用内更新入口清掉。
+>
+> ★ **2026-11-22 更新（只补清单那一趟）**：`ReleaseSlot` 多一档 `InfoOnly` ——
+> tag 与两档产物都在、只差清单时，**只补清单**：不重建、不重传、不重打 tag。
+> 它有三条硬规矩：
+> 1. 资产事实来自**本地产物**（`locate_installer` / `locate_portable`），不拿上一版清单顶上；
+> 2. 镜像**只补缺**（先查远端已有），补不齐就不写 `sources.github`（不许承诺 404 地址）；
+> 3. `tag` 与 `HEAD` 不是同一笔时照常跑 —— 它不构建，没有东西会挂到旧 tag 上。
+>
+> 判据：`info_only_fills_the_missing_mirror_asset`、`info_only_runs_without_rebuilding_or_retagging`、
+> `a_failed_mirror_top_up_fails_before_the_manifest`、`stage_allowed_in_drops_files_outside_the_release_list`。
 
 **★ 版本号是单向派生，不是"四处都写着"**：
 

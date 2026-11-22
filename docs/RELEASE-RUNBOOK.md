@@ -6,9 +6,10 @@
 > 与 [`RELEASE-TRANSACTIONS.md`](RELEASE-TRANSACTIONS.md) 的分工：那份管“发布预设 ≠ 发布软件版本”
 > 的概念；本文管“代码 PR 与软件版本发布按什么顺序、谁闸住、失败回到哪”。
 >
-> **实施状态（2026-11-21）**：PR 幂等、CI 统一入口、tag 排到构建之后、
-> `InfoOnly` 只补清单恢复已经落地；十种故障场景中已有构建失败不留 tag、
-> 只补清单、构造 PR 标题等机器判据，其余仍需真机演练。各节末的“现状差距”逐条更新。
+> **实施状态（2026-11-22）**：PR 幂等、CI 统一入口、tag 排到构建之后、
+> `InfoOnly` 只补清单恢复已经落地，并且**上传中断后的恢复有了端到端判据**
+> （#11：一端缺一份 → 重跑只补清单）。十一种故障场景中已有构建失败不留 tag、
+> 只补清单、构造 PR 标题、中断恢复等机器判据，其余仍需真机演练。各节末的“现状差距”逐条更新。
 
 ---
 
@@ -192,13 +193,16 @@ stateDiagram-v2
 | `release.json` 校验 / 提交失败 | 只恢复清单阶段 |
 | manifest 大 PR 未合并 | 人合并后跑 `npm run ship -- --check` |
 | tag 已存在但 Release 无资产 | 只读诊断后进入 `Append` 补包；不得整趟重跑 |
-| tag 指向与当前 HEAD 不同 | 停止；列出两边 sha，由人决定，不自动改写 |
+| tag 指向与当前 HEAD 不同 | 会重新构建的 `Append` / `Fresh` 停止；`InfoOnly` 只补清单不构建，照常跑 |
 
 ### 落地证据
 
 - `ReleaseSlot` 增加 `InfoOnly`：tag 与两档产物都在、只差清单时，只补清单，
   不重构建、不重传、不动 tag。
-- `Append` 仍负责“本平台包缺”的补包；两者都要求 tag 指向当前 HEAD。
+- `Append` 仍负责“本平台包缺”的补包，**要求 tag 指向当前 HEAD**；`InfoOnly` 不构建，
+  不再受这一条约束（2026-11-22：tag 之后又合了修复 PR 就补不了清单）。
+- `InfoOnly` 的资产事实来自**本地产物**（`locate_installer` / `locate_portable`），
+  镜像只补缺（`mirror_artifacts` 先查远端已有），清单只写**确认存在**的 GitHub 源。
 - `ship --check` 仍只核三格；产物与提交的身份由 `release_tx` 的构建基线核对兜住。
 
 ---
@@ -251,7 +255,7 @@ scripts/check/
 
 ---
 
-## 6. 十种故障场景（改造后必须逐条验收）
+## 6. 十一种故障场景（改造后必须逐条验收）
 
 | # | 场景 | 期望 |
 | --- | --- | --- |
@@ -265,6 +269,7 @@ scripts/check/
 | 8 | 重复执行 ship | 不重复建 tag / Release，进入当前阶段 |
 | 9 | GitHub / Gitee tag 不一致 | 拒绝继续，打印两边 sha |
 | 10 | 产物提交 ≠ 最终发布提交 | 拒绝发布，打印两个 sha |
+| 11 | **上传中途被打断**（Gitee 两份齐、GitHub 只传了一份，进程被杀） | 重跑只补清单：从本地产物恢复资产、只补缺的镜像、重写清单；**不重建、不重打 tag、不要求 tag 在 HEAD** |
 
 已有机器判据：
 
@@ -272,6 +277,11 @@ scripts/check/
 - #6 / #7：`the_release_slot_is_decided_per_platform` 覆盖 `InfoOnly`（只补清单）与 `Taken`。
 - #2：`check-pr.mjs` 覆盖“PR 标题独立于后续提交”。
 - #3：`scripts/check/run.mjs rust-windows` 可单独重跑；CI 已按 job 并行。
+- **#11（整条链）**：
+  - `info_only_fills_the_missing_mirror_asset` —— 一端缺一份时补缺、已有的不重传，清单两源的 name/size/SHA/URL 全对；
+  - `info_only_runs_without_rebuilding_or_retagging` —— tag 之后又合了提交也放行，tag 不被重打；
+  - `a_failed_mirror_top_up_fails_before_the_manifest` —— 补镜像失败就整趟失败，清单一个字节都不写；
+  - `stage_allowed_in_drops_files_outside_the_release_list` —— 清单提交只收白名单路径。
 - #1 / #8 / #9 / #10 仍需真机 gh/发布仓库演练，**尚未自动化**，不得声称已通过。
 
 ## 0.0.12 现场核查（2026-11-21）
