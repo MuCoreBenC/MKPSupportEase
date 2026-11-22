@@ -58,7 +58,10 @@ pub fn run(app_dir: &Path, repo_root: &Path) -> Result<Vec<ProbeLine>, AppError>
         ok: draft.as_ref().map(|v| v.draft).unwrap_or(true),
     });
 
-    /* ③ 资产身份字段：形状变了就会把"读不懂"当成"同字节"或"没有" */
+    /* ③ 资产身份字段：形状变了就会把"读不懂"当成"同字节"或"没有"。
+    暂存面被清理过（这一代已封版）就看正式面 —— 两边的字段形状是同一套。 */
+    let formal = super::platforms::tag_of(&version);
+
     for (label, hosting, owner, repo) in [
         (
             "Gitee",
@@ -73,11 +76,17 @@ pub fn run(app_dir: &Path, repo_root: &Path) -> Result<Vec<ProbeLine>, AppError>
             p.code.repo.as_str(),
         ),
     ] {
-        let assets = hosting.assets(owner, repo, &staging)?;
+        let mut assets = hosting.assets(owner, repo, &staging)?;
+        let which = if assets.is_empty() {
+            assets = hosting.assets(owner, repo, &formal)?;
+            formal.clone()
+        } else {
+            staging.clone()
+        };
         if assets.is_empty() {
             out.push(ProbeLine {
                 check: format!("{label} 暂存面资产身份"),
-                measured: "暂存面上还没有资产（这一代还没构建完，属正常）".to_owned(),
+                measured: format!("{which} 上还没有资产（这一代还没构建完，属正常）"),
                 ok: true,
             });
             continue;
@@ -89,7 +98,7 @@ pub fn run(app_dir: &Path, repo_root: &Path) -> Result<Vec<ProbeLine>, AppError>
                 None => "sha256=(平台不提供)".to_owned(),
             };
             out.push(ProbeLine {
-                check: format!("{label} {}", a.name),
+                check: format!("{label} {which} {}", a.name),
                 measured: format!("size={:?} {sha} id={:?}", a.size, a.id),
                 /* Gitee 不提供摘要属正常；**大小读不到**才是不正常（重跑会把旧包当同字节） */
                 ok: size_ok,

@@ -82,6 +82,19 @@ function kernel(passArgs) {
   }
 }
 
+/* ---------- 只读：三条接口探针（发版前） ---------- */
+
+if (args.includes('--probe')) {
+  try {
+    kernel(['--probe'])
+  } catch {
+    /* 内核已经把每条实测值打在 stderr 上，这里只负责给出非零退出码 */
+    exit(1)
+  }
+  ok('三条接口探针都符合预期（零写入）')
+  exit(0)
+}
+
 /* ---------- 只读：到哪一步了 ---------- */
 
 if (check) {
