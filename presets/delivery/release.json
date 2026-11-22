@@ -1,8 +1,8 @@
 {
   "releaseSchema": 1,
-  "version": "0.0.14",
-  "notes": "两源产物一致；更新说明只占一行",
-  "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.14",
+  "version": "0.0.15",
+  "notes": "更新提示不再比当前版本旧；状态标签对齐",
+  "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.15",
   "assets": [
     {
       "name": "SupportEase_0.0.14_x64-setup.exe",
