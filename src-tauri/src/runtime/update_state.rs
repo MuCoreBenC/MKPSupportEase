@@ -306,7 +306,10 @@ mod tests {
         assert!(reconcile(&mut s, "0.0.14"));
         assert!(s.ignored.is_none());
 
+        /* `current` 显式给成 0.0.14：否则 reconcile 光写这一格就会返回 true，
+        测的就不是"忽略记录有没有被清"了。 */
         let mut s = UpdateSnapshot {
+            current: "0.0.14".to_owned(),
             ignored: Some("0.0.15".to_owned()),
             ..Default::default()
         };
