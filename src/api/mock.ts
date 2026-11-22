@@ -600,9 +600,9 @@ import type {
   PostprocPrefsWire,
   RelocateGeo,
   ResolvedPostprocPrefs,
-  SoftwareUpdate,
   ThemePref,
   LocalPresetFile,
+  UpdateCandidate,
   UpdateInfo,
   UpdateResult,
   UpdateState,
@@ -4035,76 +4035,29 @@ export const mockApi: MkpApi = {
     /* 没开过也是成功 */
   },
 
-  async checkSoftwareUpdate(): Promise<SoftwareUpdate> {
-    /* 演示：比当前版本更新一档 —— 设置页因此显示「有新版本 SupportEase」。
-       **想触发"有新版本"那套界面不用真发一版**：装 mock（`?mock=1`）就是这个形状。
-       想演示「已是最新版本」，把 MOCK_NEW_VERSION 设成 MOCK_APP_VERSION */
-    return {
-      hasUpdate: MOCK_NEW_VERSION !== MOCK_APP_VERSION,
-      currentVersion: MOCK_APP_VERSION,
-      latestVersion: MOCK_NEW_VERSION,
-      /* ★ 不给 `notes`：真机上这一格来自 release.json 的发布说明，没有就是没有。
-         预览里塞一句「演示：…」会让版面多出一行、跟真机对不上（作者 2026-11-11）。 */
-      url: 'https://example.com/supportease/releases',
-      /* 演示带安装包 ⇒ 界面会摆「在应用内下载」；删掉这一格就退回"打开下载页" */
-      asset: {
-        name: 'SupportEase_demo.app.zip',
-        url: 'https://example.com/supportease/releases/download/demo/SupportEase_demo.app.zip',
-        size: 7_260_510,
-        sha256: '',
-      },
-      /* ★ 双通道演示：正式版排第一、预览版排第二，界面两张卡都能验。
-         预览版只在这里（主动检查）出现，自动通知永远不读它。 */
-      candidates: [
-        {
-          channel: 'stable',
-          version: MOCK_NEW_VERSION,
-          /* 同上：不塞演示说明，卡里那一行与真机一样只在真有 notes 时出现 */
-          url: 'https://example.com/supportease/releases',
-          asset: {
-            name: 'SupportEase_demo.app.zip',
-            url: 'https://example.com/supportease/releases/download/demo/SupportEase_demo.app.zip',
-            size: 7_260_510,
-            sha256: '',
-          },
-        },
-        {
-          channel: 'preview',
-          version: '0.0.11-preview.1',
-          notes: t('mock.demo.previewHint'),
-          url: 'https://example.com/supportease/releases',
-          asset: {
-            name: 'SupportEase_0.0.11-preview.1_aarch64.app.zip',
-            url: 'https://example.com/supportease/releases/download/preview/SupportEase_preview.app.zip',
-            size: 7_300_000,
-            sha256: '',
-          },
-        },
-      ],
-    }
+  /** 演示：一次"检查成功"，返回整份快照（候选 + 检查记录）。 */
+  async checkSoftwareUpdate(): Promise<UpdateInfo> {
+    return mockSnapshot()
   },
 
   /* ---------- 应用内更新（第五刀）：内存里的假下载 ----------
      ★ 目的是**不用真发一版就能验界面**：标题栏的环、面板的暂停/继续/取消、
        完成后的「重启并安装」都在浏览器里点得到。真机上这些走 `ipc/update.rs`。 */
 
-  async updateInfo(): Promise<UpdateInfo> {
-    return {
-      state: mockUpdate.state,
-      hasUpdate: MOCK_NEW_VERSION !== MOCK_APP_VERSION,
-      currentVersion: MOCK_APP_VERSION,
-      latestVersion: MOCK_NEW_VERSION,
-      notes: t('mock.demo.updateFlow'),
-      url: 'https://example.com/supportease/releases',
-      asset: {
-        name: 'SupportEase_demo.app.zip',
-        url: 'https://example.com/supportease/releases/download/demo/SupportEase_demo.app.zip',
-        size: 7_260_510,
-        sha256: '',
-      },
-      lastResult: mockUpdate.lastResult,
-      installLog: '/mock/run/update-install.log',
+  async getUpdateSnapshot(): Promise<UpdateInfo> {
+    return mockSnapshot()
+  },
+
+  async ignoreUpdate(version: string): Promise<UpdateInfo> {
+    mockUpdate.ignored = version
+    return mockSnapshot()
+  },
+
+  async migrateUpdateIgnored(value: string | null): Promise<UpdateInfo> {
+    if (value !== null && value !== '' && mockUpdate.ignored === null) {
+      mockUpdate.ignored = value
     }
+    return mockSnapshot()
   },
 
   async startUpdate() {
@@ -4178,6 +4131,7 @@ const mockUpdate = {
   state: { state: 'idle' } as UpdateState,
   lastResult: undefined as UpdateResult | undefined,
   lastOpened: undefined as string | undefined,
+  ignored: null as string | null,
   timer: undefined as ReturnType<typeof setInterval> | undefined,
   stopTimer() {
     if (this.timer !== undefined) {
@@ -4185,6 +4139,72 @@ const mockUpdate = {
       this.timer = undefined
     }
   },
+}
+
+/**
+ * 演示用的整份快照 —— 与后端 `UpdateSnapshotDto` 同形。
+ *
+ * 业务事实（候选 / 忽略 / 检查记录）与进程态（`state` / `install`）都在这里合成一次，
+ * 界面只读这一份；想验「已是最新」就把 `MOCK_NEW_VERSION` 设成 `MOCK_APP_VERSION`。
+ */
+function mockSnapshot(): UpdateInfo {
+  const hasUpdate = MOCK_NEW_VERSION !== MOCK_APP_VERSION
+  const asset = {
+    name: 'SupportEase_demo.app.zip',
+    url: 'https://example.com/supportease/releases/download/demo/SupportEase_demo.app.zip',
+    size: 7_260_510,
+    sha256: '',
+  }
+  /* ★ 双通道演示：正式版排第一、预览版排第二，界面两条通道都能验。
+     预览版只在这里（主动检查）出现，自动通知永远不读它。 */
+  const candidates: UpdateCandidate[] = hasUpdate
+    ? [
+        {
+          channel: 'stable',
+          version: MOCK_NEW_VERSION,
+          url: 'https://example.com/supportease/releases',
+          asset,
+        },
+        {
+          channel: 'preview',
+          version: '0.0.11-preview.1',
+          notes: t('mock.demo.previewHint'),
+          url: 'https://example.com/supportease/releases',
+          asset: {
+            name: 'SupportEase_0.0.11-preview.1_aarch64.app.zip',
+            url: 'https://example.com/supportease/releases/download/preview/SupportEase_preview.app.zip',
+            size: 7_300_000,
+            sha256: '',
+          },
+        },
+      ]
+    : []
+  const chosen = candidates.find((c) => c.channel === 'stable')
+  const ready = mockUpdate.state.state === 'ready' ? mockUpdate.state : null
+  return {
+    state: mockUpdate.state,
+    install: ready === null ? { phase: 'idle' } : { phase: 'ready', version: ready.version },
+    hasUpdate,
+    pendingVersion:
+      chosen !== undefined && mockUpdate.ignored !== chosen.version ? chosen.version : null,
+    candidates,
+    currentVersion: MOCK_APP_VERSION,
+    latestVersion: chosen?.version ?? MOCK_APP_VERSION,
+    notes: chosen?.notes,
+    url: chosen?.url,
+    asset: chosen?.asset,
+    lastResult: mockUpdate.lastResult,
+    installLog: '/mock/run/update-install.log',
+    checked: {
+      at: '2026-01-01T00:00:00Z',
+      ok: true,
+      reason: null,
+      trigger: 'manual',
+      channel: 'stable',
+    },
+    ignored: mockUpdate.ignored,
+    schema: 1,
+  }
 }
 
 /** mock 版的"当前版本"：与演示的"最新版本"配合出一个好看的对照 */

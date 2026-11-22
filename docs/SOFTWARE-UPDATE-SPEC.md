@@ -1,93 +1,120 @@
-# 软件更新：「可更新」小胶囊的用户故事
+# 软件更新：一份快照、一套事务、所有 UI 只读
 
-> 只回答一件事：**标题栏右上角那枚「可更新」什么时候出现、点了给什么、什么时候消失**。
-> 判据只有一个出口：`src/app/shared/softwareUpdate.ts` 的 `updateChipIntent()`。
-> 改行为先改这张表和下面的故事，再加测试；别在界面里另写一套判断。
+> 只回答一件事：**「有没有新版、这一版要不要紧、上次装成没成」在哪算、谁说、谁存**。
+> 唯一事实源是 `run/update-state.json`（`src-tauri/src/runtime/update_state.rs`）；
+> 唯一写入路径是 `runtime::update_check` 的四个事务；界面只读
+> `src/app/shared/softwareUpdate.ts` 那一份快照。
 
-## 1. 它在说什么
+## 1. 三件事，三个落点
 
-「自动检查替我找到了一版可以装的更新」。它不是下载进度（那是另一副身子），
-也不是设置页点「重新检查」得到的检查结论 —— 手动检查只在设置页那一块出结果，
-**不点这枚胶囊**。两个事实不许混成一句话：
+| 事实 | 存在哪儿 | 谁写 | 生命周期 |
+|---|---|---|---|
+| 候选 / 检查记录 / 忽略 / 上次安装结果 | `run/update-state.json` | 检查、忽略、作废、启动迁移四个事务 | 跨重启 |
+| 下载进度（downloading / paused / ready / failed） | 进程内存 `updater::session()` | 下载循环 | **重启归零**（不许恢复成"还在下载"） |
+| 旧 `app-state.json` 的 `pendingUpdate`、`run/update-result.json` | 只服务一次性迁移 | 旧版本写的 | 迁完即删 |
 
-| 事实 | 在哪儿说 |
-| --- | --- |
-| 自动检查发现了一版可装的 | 标题栏这枚胶囊 + 8 秒通知 |
-| 两个渠道各有什么、装不装 | 设置页「软件更新」那一块 |
+`install` 在界面上只有两档：`idle` / `ready { version }`。**只有 `ready` 跨进业务语义**，
+其余都是进程态；重启后 `ready` 也回 `idle`（暂存路径不跨进程）。
 
 ## 2. 用户故事
 
 **S1 · 自动发现**
-我开着「自动检查更新」，用着正式版。某次拉云端目录成功之后，后端顺路查到正式版
-出了新版：落 `pendingUpdate`，推一条 8 秒通知。标题栏出现「可更新」。
-测试版同理，只是查的是预览清单；默认渠道由构建决定。
+我开着「自动检查更新」。某次拉云端目录成功之后，后端跑一次**检查事务**：
+查到比当前新的版本就整份替换候选、`checked.ok = true`，广播整份快照
+（`software-update-state`）；标题栏出现「可更新」，右上角弹一条 8 秒通知。
+通知由快照里「候选从无到有」派生，**不是第二个事件**。
 
 **S2 · 点开**
-我看到「可更新」，以为点开能看一眼或不要它 —— 现在就是这么给的：点一下在胶囊
-下方展开一张小面板，写着「发现 {版本}」，两颗按钮：
-
-- **查看**：关掉面板，跳到设置页「软件更新」那一块（落点照旧），由我看说明再决定。
-- **忽略**：记住这一版，胶囊和自动通知都不再为这一版出现；云端出更新版时自动恢复。
-
-点面板外面、按 Esc、或再点一次胶囊，面板收起（胶囊本身还在）。
+点胶囊展开小面板，写着「发现 {版本}」：
+- **查看**：跳到设置页「软件更新」，由我看说明再决定；
+- **忽略**：调 `ignore_update`，**落盘**进快照的 `ignored`；胶囊与通知都不再为这一版出现。
 
 **S3 · 关掉自动检查**
-我在设置页把「自动检查更新」关了。后端在写开关的同一次调用里清掉 `pendingUpdate`，
-前端随即重问一次快照 —— 胶囊当场消失。以后手动点「重新检查」照旧能查，
-但那结果只在设置页里说，不再冒出这枚胶囊。
+后端写开关的同一次调用里跑 `invalidate`：清候选、检查记录回到「没查过」。
+**不清 `ignored`** —— 用户对某一版的忽略不因为关开关就失效。
 
 **S4 · 换渠道**
-我从测试版切到正式版（或反过来）。旧胶囊是上一路的结论，换路即作废：
-后端落新渠道时清掉 `pendingUpdate`，前端重问快照，胶囊当场消失。
-下一次拉目录后按新渠道重新检查，该出现的再出现。
+同上：旧候选作废（否则会出现"切到正式版还挂着测试版的更新"），下一次检查按新渠道重来。
 
 **S5 · 开始下载**
-我点了「查看」→「安装」，或标题栏面板里那颗下载。胶囊从「可更新」换成进度
-（下载中 / 暂停 / 已完成 / 失败），点它开的是下载详情面板，不再弹 S2 那张小面板。
-安装包先落在 `run/update/`（绿色版就是 `app-data/run/update/`）；装完由安装脚本
-清掉这一份暂存，失败则留着供排查。那份 `.exe` 是**两档内核的载体**，不是"安装版跑错地方"。
+`start_update` **从快照的候选里挑资产**，不再联网重算一遍：用户点的是哪张卡，
+下的就是那一版。进度由 `software-update-progress` 推（进程态）。
 
 **S5.5 · 下载源**
-设置里选的源（GitHub / Gitee）决定这一包从哪儿下：`release.json` 的
-`assets[]` 每份资产都带 `sources.gitee` 与 `sources.github`，客户端按当前源换 `url`。
-选 GitHub 就下 GitHub 上同一份 setup，选 Gitee 就下 Gitee 上那一份；两边的文件名、
-大小、SHA-256 必须一致，下载后仍走原来的大小/SHA 校验和静默安装。**不许**因为
-源不同就退回“打开下载页”，也不许写死 Gitee。
+`release.json` 的 `assets[]` 每份资产带 `sources.gitee` 与 `sources.github`，
+客户端按当前源换 `url`。两边的文件名、大小、SHA-256 必须一致，下载后照旧校验。
 
 **S6 · 复查没有更新**
-下一次自动检查没查到新版：后端清掉 `pendingUpdate`，胶囊消失。
-查询失败（离线 / 没发过版）静默，名额放回去；本次不改动胶囊。
+检查事务成功、候选为空：整份替换成空数组，`checked.ok = true`。胶囊消失。
+**失败**（离线 / 没配源 / 远端没部署）：只写 `checked.ok = false` + 原因，
+**候选一个不动** —— 查不到不等于没有新版，界面也不许把旧候选说成"刚查到的"。
 
 **S7 · 装完重启**
-安装成功、版本追上：`candidates` 里不再有这一版，不再落 `pendingUpdate`，胶囊不再出现。
+安装脚本写的 `run/update-result.json` 在下次启动时被 `startup` 迁进快照，
+然后删掉那个文件；`reconcile(current)` 把低于当前版本的候选、忽略记录、安装结果
+一次性作废。**胶囊与「上次更新失败」都不再出现** —— 不依赖自动检查是否成功。
 
-## 3. 状态表（唯一判据）
+## 3. 快照与派生（唯一判据）
 
-`updateChipIntent(state, pending, ignored)` 按顺序判，**先到先得**：
+```text
+UpdateSnapshot { current, checked{at,ok,reason,trigger,channel},
+                 candidates[], ignored, last_result }
+```
 
-| `state` | `pending` | `ignored` | 胶囊 | 点它 |
-| --- | --- | --- | --- | --- |
-| `downloading` / `paused` / `ready` / `failed` | 任意 | 任意 | 进度 + 百分比 | 开/关下载详情面板 |
-| `idle` / `cancelled` 等 | 无 | 任意 | 不渲染 | — |
-| `idle` / `cancelled` 等 | 有 | = pending | 不渲染 | — |
-| `idle` / `cancelled` 等 | 有 | ≠ pending | 「可更新」 | 开/关 S2 的小面板 |
+```text
+has_update     = candidates 非空
+pending        = candidates 里**当前渠道**的第一条，且 version != ignored
+installable    = 进程态 ready.version == 候选里的某一版
+```
 
-要点：**`hasUpdate` 不参与胶囊判定**。它只按正式版清单回答"设置页那张卡要不要摆"，
-关掉自动检查或换渠道之后它仍然可能是 `true`，拿它判胶囊就会出现"关了还一直在"。
+界面不再自己判版本：后端把 `hasUpdate` / `pendingVersion` / `latestVersion` / `asset`
+算好了放进 DTO，前端只摆。
 
 ## 4. 谁写、谁清
 
-- `pendingUpdate`（`run/app-state.json`）：后端自动检查查到新版才写、查不到就清；
-  关自动检查 / 换渠道时也清它（同一次命令里）。
-- `ignoredUpdateVersion`（localStorage，**纯前端偏好**）：只记用户忽略的那一版版本号。
-  它只压这枚胶囊和那条自动通知，不影响设置页的检查结果，也不拦手动下载。
-- 清数据会把这条偏好一起抹掉（`clearClientPrefs` 按 `mkp` 前缀扫）。
+| 事务 | 触发 | 写什么 | 不写 |
+|---|---|---|---|
+| `run_check(trigger)` | 拉目录成功（auto）/「检查更新」（manual） | 整份 `candidates` + `checked` | 失败时不动候选 |
+| `ignore(version)` | 胶囊「忽略」 | `ignored` | 不动候选 |
+| `invalidate()` | 换渠道 / 关自动检查 | 清 `candidates`、`checked` 回 never | 不清 `ignored` |
+| `startup()` | 启动 | `reconcile` + 迁移旧账 | 不联网、不发事件 |
+| 下载/安装 | 用户手势 | 进程态（`UpdateState`） | 不写快照 |
 
-## 5. 测试
+`reconcile(current)` 是唯一的失效出口：装上新版之后，旧候选 / 旧安装结果 / 旧忽略记录
+一起作废。版本序复用 `release_info::is_newer_version`，不另写一套。
 
-| 表里的行 | 测试 |
-| --- | --- |
-| §3 状态表 | `src/app/shared/softwareUpdate.test.ts`（表驱动） |
-| S3 / S4 落盘侧 | `src-tauri/src/runtime/app_state.rs` → `pending_update_roundtrips_and_can_be_cleared`（账能写能清）；清的时机在 `ipc/prefs.rs` 的两个开关命令里 |
+## 5. 迁移（一次性、幂等）
 
-跑法：只跑 `npx vitest run src/app/shared` 与相关的 `cargo test`；全量按 `AGENTS.md` §8.2 先问。
+| 旧数据 | 迁进 | 什么时候删 |
+|---|---|---|
+| `app-state.json.pendingUpdate` | 比当前新才进 `candidates` | 新快照**落盘成功之后**清该格 |
+| `run/update-result.json` | 不低于当前才进 `last_result` | 同上，随后删文件 |
+| `localStorage['mkp.A40.update.ignoredVersion']` | `ignored` | 前端收到 `migrate_update_ignored` **成功返回**之后删键 |
+
+localStorage 只能由前端读：前端先读旧键，把值交给后端，后端写盘成功才返回 `Ok`，
+前端拿到 `Ok` 才 `removeItem`。任意一步中断，下次启动重来一遍 —— 不会丢忽略记录。
+
+坏档 / 版本格式认不出：**不迁**（跳过该条），其余照常；读不出候选不等于失败。
+
+## 6. 事件
+
+| 事件 | 载荷 | 谁发 |
+|---|---|---|
+| `software-update-state` | 整份业务快照（`UpdateSnapshot`） | `run_check`（成功与失败都发） |
+| `software-update-progress` | 下载进度（`UpdateState`） | 下载循环 |
+
+没有 `software-update-available`：通知由前端按快照里的候选派生（`onNewPending`）。
+
+## 7. 测试
+
+| 判据 | 位置 |
+|---|---|
+| `reconcile` 清旧候选 / 留新候选 / 清旧结果 / 清旧忽略 | `runtime::update_state::tests` |
+| 只有 `ready` 跨进快照；下载中/暂停不算可安装 | `runtime::update_state::tests` |
+| 检查成功替换候选；失败保留候选且 `ok=false` | `runtime::update_check::tests` |
+| 启动迁移旧账、搬完才删、可重跑 | `runtime::update_check::tests` |
+| 快照与进程态的事件各一个 | `runtime::update_check`（源码判据） |
+| 胶囊判据（进度 / 待更新 / 无） | `src/app/shared/softwareUpdate.test.ts` |
+| 设置页与标题栏读同一份 | 同一快照类型（`UpdateInfo`），页面不再自己查 |
+
+跑法：`cargo test runtime::update`、`npx vitest run src/app/shared`；全量按 `AGENTS.md` §8.2 先问。

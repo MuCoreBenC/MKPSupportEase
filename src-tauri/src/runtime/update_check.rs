@@ -27,8 +27,12 @@ use crate::error::AppError;
 use crate::fsx::paths::internal_root;
 use crate::runtime::{app_state, net, release_info, source};
 
-/// 前端监听的事件名（顶层只挂一次监听）。
-pub const UPDATE_AVAILABLE_EVENT: &str = "software-update-available";
+use super::update_state::{self, CheckRecord, CheckTrigger, UpdateSnapshot};
+
+/// 更新状态的**唯一事件**：整份快照（业务事实）。
+///
+/// 事件只有两个：这一个（业务事实）与 `software-update-progress`（进程态）。
+pub const UPDATE_STATE_EVENT: &str = "software-update-state";
 
 /// 本会话是否已经查过（`true` 之前的那次不论成功失败都算一次成功的"不再打扰"）。
 static CHECKED: AtomicBool = AtomicBool::new(false);
@@ -40,15 +44,7 @@ pub fn reset_session_check() {
     CHECKED.store(false, Ordering::Release);
 }
 
-/// 推给前端的那点信息。**版本号以外都不带** —— 通知只负责"有新版、点我过去"，
-/// 详情（说明 / 下载地址 / 更新按钮）由设置页「软件更新」那一块自己读。
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateAvailable {
-    pub version: String,
-}
-
-/// 取**正式版**清单内容（自动通知与标题栏供数的唯一取数口子）。
+/// 取**正式版**清单内容（设置页与第一次检查的唯一取数口子）。
 ///
 /// 地址从 Source Manifest 的 `release_url()` 来（不许从 base_url 上跳一级去猜）。
 /// ★ 这里**只读 `ResourceRef::Release`**，不碰 preview：老客户端与新版客户端
@@ -171,30 +167,175 @@ pub fn fetch_update_candidates(
     Ok(fetch_update_bundle(root)?.1)
 }
 
-/// **自动通知的纯判定**：只吃正式版清单，预览版在类型上就进不来。
+/// **检查事务** —— 唯一写候选集的地方（手动、自动共用这一条）。
 ///
-/// 再加一道保险：即便有人把预览清单误塞进正式版入口，预发布版也不会
-/// 触发事件（[`release_info::compare`] 已保证预发布不提醒正式版用户）。
-pub fn auto_notification(
-    stable: &release_info::ReleaseInfo,
-    current: &str,
-) -> Option<UpdateAvailable> {
-    auto_notification_for(stable, current, None)
+/// - 成功：整份替换候选与检查记录；
+/// - 失败：**只**改检查记录（`ok=false` + 原因），旧候选保留 —— 查不到不等于没有新版；
+/// - 两种都落盘；失败把 `Err` 交给调用方，由它决定说不说（手动要报，自动静默）。
+pub fn run_check(root: &Path, trigger: CheckTrigger) -> Result<UpdateSnapshot, AppError> {
+    let mut snap = update_state::load(root)?;
+    update_state::reconcile(&mut snap, crate::runtime::structure::APP_VERSION);
+    let channel = app_state::update_channel(root).unwrap_or_default();
+    let at = update_state::now_iso8601();
+    let fetched = fetch_update_bundle(root).map(|(_stable, candidates)| candidates);
+    match fetched {
+        Ok(candidates) => {
+            apply_check(&mut snap, Ok(candidates), trigger, channel, &at);
+            update_state::save(root, &snap)?;
+            Ok(snap)
+        }
+        Err(e) => {
+            apply_check(&mut snap, Err(e.message.clone()), trigger, channel, &at);
+            /* 写盘失败不该把"这次没查成"也吞掉：记日志，原错误照旧往上抛 */
+            if let Err(w) = update_state::save(root, &snap) {
+                tracing::warn!("检查失败的记录没写进快照：{}", w.message);
+            }
+            Err(e)
+        }
+    }
 }
 
-/// 同上，资产地址按用户当前源挑。
-pub fn auto_notification_for(
-    stable: &release_info::ReleaseInfo,
-    current: &str,
-    source: Option<&str>,
-) -> Option<UpdateAvailable> {
-    let u = release_info::to_update_for_source(stable, current, source);
-    if u.has_update {
-        Some(UpdateAvailable {
-            version: u.latest_version,
-        })
-    } else {
-        None
+/// 把一次检查的结论折进快照（**纯函数**，判据直接喂它）。
+///
+/// 成功：整份替换候选；失败：**候选一个不动**，只把检查记录写成 `ok=false`。
+/// 后者是这条链上最容易写错的一处 —— 失败若顺手清候选，"这次没查成"就变成了
+/// "没有新版"，用户会以为旧版本已经发完了。
+pub fn apply_check(
+    snap: &mut UpdateSnapshot,
+    result: Result<Vec<release_info::UpdateCandidate>, String>,
+    trigger: CheckTrigger,
+    channel: release_info::UpdateChannel,
+    at: &str,
+) -> bool {
+    let before = snap.clone();
+    match result {
+        Ok(candidates) => {
+            snap.candidates = candidates;
+            snap.checked = CheckRecord {
+                at: Some(at.to_owned()),
+                ok: true,
+                reason: None,
+                trigger: Some(trigger),
+                channel,
+            };
+        }
+        Err(reason) => {
+            snap.checked = CheckRecord {
+                at: Some(at.to_owned()),
+                ok: false,
+                reason: Some(reason),
+                trigger: Some(trigger),
+                channel,
+            };
+        }
+    }
+    *snap != before
+}
+
+/// 忽略某一版（落盘）。**只动 `ignored`，不碰候选集**。
+pub fn ignore(root: &Path, version: &str) -> Result<UpdateSnapshot, AppError> {
+    let mut snap = update_state::load(root)?;
+    update_state::reconcile(&mut snap, crate::runtime::structure::APP_VERSION);
+    let v = version.trim();
+    if !v.is_empty() {
+        snap.ignored = Some(v.to_owned());
+    }
+    update_state::save(root, &snap)?;
+    Ok(snap)
+}
+
+/// 换渠道 / 关自动检查：旧结论作废（候选清空、检查记录回到"没查过"）。
+/// **不清 `ignored`** —— 用户对某一版的忽略不因为换渠道就失效。
+pub fn invalidate(root: &Path) -> Result<UpdateSnapshot, AppError> {
+    let mut snap = update_state::load(root)?;
+    snap.candidates.clear();
+    snap.checked = CheckRecord {
+        at: None,
+        ok: false,
+        reason: None,
+        trigger: None,
+        channel: app_state::update_channel(root).unwrap_or_default(),
+    };
+    update_state::save(root, &snap)?;
+    Ok(snap)
+}
+
+/// 启动时读一次：收敛版本、迁移旧账。**不联网、不发事件。**
+///
+/// 迁移的顺序是死的：先把该搬的搬进内存 → 落盘成功 → 才删旧的。
+/// 中途断电最坏是"旧数据还在、新快照没写"，下次启动重来一遍，不会丢忽略记录。
+pub fn startup(root: &Path) -> Result<UpdateSnapshot, AppError> {
+    let mut snap = update_state::load(root)?;
+    let mut dirty = update_state::reconcile(&mut snap, crate::runtime::structure::APP_VERSION);
+    let legacy = take_legacy(root, &mut snap);
+    dirty |= legacy.any();
+    if dirty {
+        update_state::save(root, &snap)?;
+        clear_legacy(root, legacy);
+    }
+    Ok(snap)
+}
+
+/// 旧账里要搬的那些（**只读**，不删）。
+#[derive(Default)]
+struct Legacy {
+    /// `run/app-state.json` 的 `pendingUpdate`（retired 旧格）
+    pending: bool,
+    /// `run/update-result.json`（旧安装账）
+    result: bool,
+}
+
+impl Legacy {
+    fn any(&self) -> bool {
+        self.pending || self.result
+    }
+}
+
+fn take_legacy(root: &Path, snap: &mut UpdateSnapshot) -> Legacy {
+    let current = crate::runtime::structure::APP_VERSION;
+    let mut legacy = Legacy::default();
+
+    if let Ok(Some(v)) = app_state::pending_update(root) {
+        let v = v.trim().to_owned();
+        legacy.pending = true;
+        let usable = release_info::is_newer_version(&v, current)
+            && !snap.candidates.iter().any(|c| c.version == v);
+        if usable {
+            snap.candidates.push(release_info::UpdateCandidate {
+                channel: snap.checked.channel,
+                version: v,
+                notes: None,
+                url: None,
+                asset: None,
+            });
+        }
+    }
+
+    if let Ok(Some(r)) = super::updater::read_result(root) {
+        legacy.result = true;
+        let keep = r.version.trim() == current.trim()
+            || release_info::is_newer_version(&r.version, current);
+        if keep && snap.last_result.is_none() {
+            snap.last_result = Some(r);
+        }
+    }
+
+    legacy
+}
+
+/// 新快照**已经落盘**之后才删旧数据。
+fn clear_legacy(root: &Path, legacy: Legacy) {
+    if legacy.pending {
+        if let Err(e) = app_state::set_pending_update(root, None) {
+            tracing::warn!("旧待更新账没清掉：{}", e.message);
+        }
+    }
+    if legacy.result {
+        if let Err(e) = std::fs::remove_file(super::updater::result_path(root)) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!("旧安装结果没删掉：{e}");
+            }
+        }
     }
 }
 
@@ -220,54 +361,30 @@ pub fn maybe_check_after_catalog(app: &AppHandle) {
     if !enabled {
         return;
     }
-    /* ② 选的是哪一路：正式版只读 release.json；测试版读候选集（含预览清单）。
-    渠道本身也住盘上（`app_state::update_channel`），重启不会退回默认。 */
-    let channel = app_state::update_channel(&root).unwrap_or_default();
 
-    /* ③ 本会话去重：先抢名额再联网，两个窗口同时拉目录也只打一次 */
+    /* ② 本会话去重：先抢名额再联网，两个窗口同时拉目录也只打一次 */
     if CHECKED.swap(true, Ordering::AcqRel) {
         return;
     }
 
-    /* ④ 查；失败静默，且把名额放回去（离线时别把机会用掉） */
-    let notified = match channel {
-        release_info::UpdateChannel::Stable => match fetch_stable_info(&root) {
-            Ok(stable) => {
-                let source_name = source::current_mode(&root)
-                    .unwrap_or(source::SourceMode::Gitee)
-                    .wire();
-                Ok(auto_notification_for(
-                    &stable,
-                    crate::runtime::structure::APP_VERSION,
-                    Some(source_name),
-                ))
-            }
-            Err(e) => Err(e),
-        },
-        release_info::UpdateChannel::Preview => match fetch_update_candidates(&root) {
-            Ok(list) => Ok(list
-                .into_iter()
-                .find(|c| c.channel == release_info::UpdateChannel::Preview)
-                .map(|c| UpdateAvailable { version: c.version })),
-            Err(e) => Err(e),
-        },
-    };
-    match notified {
-        Ok(Some(payload)) => {
-            /* 落盘：8 秒那条通知走掉之后，标题栏那枚小胶囊还得靠它 */
-            let _ = app_state::set_pending_update(&root, Some(&payload.version));
-            if let Err(e) = app.emit(UPDATE_AVAILABLE_EVENT, payload) {
-                tracing::warn!("自动检查更新：通知事件没发出去：{e}");
-            }
-        }
-        Ok(None) => {
-            /* 这一趟没查到新的：把上次留下的那枚胶囊收掉 */
-            let _ = app_state::set_pending_update(&root, None);
-        }
+    /* ③ 跑**同一个检查事务**（渠道由事务自己从盘上读）。成功与失败都广播整份快照：
+    失败也要让界面知道"这次没查成"，而不是停在旧结论上装作刚查过。 */
+    match run_check(&root, CheckTrigger::Auto) {
+        Ok(snap) => emit_state(app, &snap),
         Err(e) => {
             tracing::debug!("自动检查更新静默跳过：{}", e.message);
             CHECKED.store(false, Ordering::Release);
+            if let Ok(snap) = update_state::load(&root) {
+                emit_state(app, &snap);
+            }
         }
+    }
+}
+
+/// 把整份快照推给界面（**唯一**的更新状态事件）。
+fn emit_state(app: &AppHandle, snap: &UpdateSnapshot) {
+    if let Err(e) = app.emit(UPDATE_STATE_EVENT, snap) {
+        tracing::warn!("更新状态事件没发出去：{e}");
     }
 }
 
@@ -275,6 +392,17 @@ pub fn maybe_check_after_catalog(app: &AppHandle) {
 mod tests {
     use super::*;
     use crate::runtime::release_info::{self, UpdateChannel};
+    use crate::runtime::{app_state, updater};
+
+    fn candidate(version: &str) -> release_info::UpdateCandidate {
+        release_info::UpdateCandidate {
+            channel: UpdateChannel::Stable,
+            version: version.to_owned(),
+            notes: None,
+            url: None,
+            asset: None,
+        }
+    }
 
     fn info(version: &str) -> release_info::ReleaseInfo {
         release_info::parse(
@@ -286,37 +414,17 @@ mod tests {
         .unwrap()
     }
 
-    /// ★ **作者点名的独立判据**（2026-11-05）：`0.0.9` 不会收到
-    /// `0.0.10-preview.1` 的自动更新通知。
+    /// **预览版不许进正式版用户的候选集**：给定正式版 0.0.6、预览版
+    /// 0.0.10-preview.1，当前构建看到的候选里既没有旧正式版、也没有被当成更新的预览版。
     ///
-    /// 旧判据：只测 `compare()` 的三段数字比较，预发布标识被吃掉，
-    /// `0.0.10-preview.1` 与 `0.0.10` 都变成 `[0,0,10]`，字符串不等就算有新版。
-    /// 新判据：直接钉**自动通知这条链** —— 给定正式版 0.0.6、预览版
-    /// 0.0.10-preview.1、当前 0.0.9，断言不推 `software-update-available`；
-    /// 同时断言主动检查的候选集里预览版仍然看得见（不是把预览版藏了）。
-    /// 保住的：正式版真的更新时照样通知；主动检查仍能看到两个候选。
-    /// 放弃的：「任何版本号字符串不等就算有新版」这一条旧口径。
-    /// 为什么：预览版只该在用户主动打开更新页时并列出现。
+    /// 版本序的守卫在 `release_info::is_newer_version`：同基础的预发布不比正式版新，
+    /// 而基础版本更高的预发布仍然是"更新的版本"（用户主动打开时看得到，只是不通知）。
     #[test]
-    fn a_stable_0_0_9_is_never_notified_about_a_preview_release() {
+    fn an_older_stable_and_a_preview_never_become_candidates() {
         let stable = info("0.0.6");
         let preview = info("0.0.10-preview.1");
 
-        // ① 自动通知入口只吃正式版清单；正式版没动 ⇒ 不推事件
-        assert_eq!(
-            auto_notification(&stable, "0.0.9"),
-            None,
-            "正式版还停在 0.0.6，0.0.9 不该收到任何通知"
-        );
-        // ② 就算有人把预览清单误塞进自动入口，也不许推
-        assert_eq!(
-            auto_notification(&preview, "0.0.9"),
-            None,
-            "预览版绝不能触发自动通知事件"
-        );
-        // ③ 源码判据：自动路径**按渠道**取数 —— 正式版那条只读 stable，
-        //    测试版那条才允许读候选集（含预览清单）。2026-11-21 起预览也会主动通知，
-        //    但只在用户把渠道选成测试版时；默认仍是正式版。
+        // ① 源码判据：自动路径只调**同一个检查事务**，不再自己取数、不再写旧账。
         let src = std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/src/runtime/update_check.rs"
@@ -325,16 +433,16 @@ mod tests {
         let start = src.find("pub fn maybe_check_after_catalog").unwrap();
         let body = &src[start..src.find("#[cfg(test)]").unwrap()];
         assert!(
-            body.contains("update_channel"),
-            "自动通知路径必须先问用户选的渠道"
+            body.contains("run_check"),
+            "自动检查必须走统一事务，不许再自己取数"
         );
         assert!(
-            body.contains("fetch_stable_info"),
-            "正式版那条取数口子仍要在"
+            body.contains("UPDATE_STATE_EVENT"),
+            "成功与失败都要广播整份快照"
         );
         assert!(
-            body.contains("fetch_update_candidates"),
-            "测试版那条要能读预览清单"
+            !body.contains("set_pending_update"),
+            "旧账已 retired，自动路径不许再写它"
         );
 
         // ④ **当前构建一定看不到比它旧的候选**（旧正式版 0.0.6 必然被滤掉）。
@@ -426,11 +534,90 @@ mod tests {
         assert_eq!(candidates_from_infos(&stable, None).len(), 1);
     }
 
-    /// 正式版真的更新了 ⇒ 自动通知照旧推（别把功能一起改没了）。
+    /// 正式版真的更新了 ⇒ 快照里有一条待更新（胶囊与通知都由它派生，别把功能改没了）。
     #[test]
-    fn a_newer_stable_release_still_notifies() {
-        let stable = info("0.0.11");
-        let n = auto_notification(&stable, "0.0.9").expect("该通知");
-        assert_eq!(n.version, "0.0.11");
+    fn a_newer_stable_release_still_produces_a_pending_candidate() {
+        let stable = info("999.0.1");
+        let snap = crate::runtime::update_state::UpdateSnapshot {
+            candidates: candidates_from_infos(&stable, None),
+            ..Default::default()
+        };
+        let p = crate::runtime::update_state::pending(&snap).expect("该有一条待更新");
+        assert_eq!(p.version, "999.0.1");
+    }
+
+    /// 检查成功：整份替换候选，记录写 `ok=true`。
+    #[test]
+    fn a_successful_check_replaces_the_candidates() {
+        let mut snap = UpdateSnapshot {
+            candidates: vec![candidate("999.0.0")],
+            ..Default::default()
+        };
+        let changed = apply_check(
+            &mut snap,
+            Ok(vec![candidate("999.0.1")]),
+            CheckTrigger::Manual,
+            UpdateChannel::Stable,
+            "2026-11-22T00:00:00Z",
+        );
+        assert!(changed);
+        assert_eq!(snap.candidates[0].version, "999.0.1");
+        assert!(snap.checked.ok);
+        assert_eq!(snap.checked.trigger, Some(CheckTrigger::Manual));
+    }
+
+    /// 检查失败：候选一个不动，记录写 `ok=false` —— 界面据此说"这次没查成"。
+    #[test]
+    fn a_failed_check_keeps_the_old_candidates_and_says_so() {
+        let mut snap = UpdateSnapshot {
+            candidates: vec![candidate("999.0.0")],
+            ..Default::default()
+        };
+        let changed = apply_check(
+            &mut snap,
+            Err("连不上发布地址".to_owned()),
+            CheckTrigger::Manual,
+            UpdateChannel::Stable,
+            "2026-11-22T00:00:00Z",
+        );
+        assert!(changed);
+        assert_eq!(snap.candidates.len(), 1, "旧候选不许被失败擦掉");
+        assert!(!snap.checked.ok, "失败不许长得像刚查过");
+        assert_eq!(snap.checked.reason.as_deref(), Some("连不上发布地址"));
+    }
+
+    /// 启动时把旧账搬进快照，**搬完才删旧的**；再启动一次是幂等的。
+    #[test]
+    fn startup_migrates_the_old_ledgers_then_clears_them() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("run")).unwrap();
+        let newer = "999.0.0";
+        app_state::set_pending_update(d.path(), Some(newer)).unwrap();
+        updater::write_result(
+            d.path(),
+            &updater::UpdateResult {
+                version: newer.to_owned(),
+                ok: true,
+                reason: String::new(),
+                at: "2026-11-21T00:00:00Z".to_owned(),
+            },
+        )
+        .unwrap();
+
+        let snap = startup(d.path()).unwrap();
+        assert_eq!(snap.candidates.len(), 1);
+        assert_eq!(snap.candidates[0].version, newer);
+        assert_eq!(
+            snap.last_result.as_ref().map(|r| r.version.as_str()),
+            Some(newer)
+        );
+        assert!(
+            app_state::pending_update(d.path()).unwrap().is_none(),
+            "旧格要清掉"
+        );
+        assert!(!updater::result_path(d.path()).exists(), "旧结果文件要删掉");
+
+        let again = startup(d.path()).unwrap();
+        assert_eq!(again.candidates.len(), 1, "再跑一次不该多出候选");
     }
 }

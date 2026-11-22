@@ -25,10 +25,12 @@ import { api, errorText } from '../../api'
 import { msg, t, useT } from '../../i18n'
 import { dismiss, notify, update, type Notice, type NotifyAction } from '../notify/notify'
 import type { UpdateState } from '../../api/contract'
-/* 更新会话的那一份事实：设置页读的是同一个（2026-11-06 合并两处入口） */
-import { useSoftwareUpdate, updateChipIntent } from '../shared/softwareUpdate'
-import { useStickyState } from '../../hooks/useStickyState'
-import { STORAGE } from '../../api/storageKeys'
+/* 更新会话的那一份事实：设置页读的是同一个（2026-11-22 统一为一份快照） */
+import {
+  ignoreUpdateVersion,
+  useSoftwareUpdate,
+  updateChipIntent,
+} from '../shared/softwareUpdate'
 import { Btn } from '../ui/Controls'
 import TitlebarChip from './TitlebarChip'
 import s from './UpdateIndicator.module.css'
@@ -230,15 +232,12 @@ export default function UpdateIndicator({
   const tr = useT()
   /* 状态与"有没有新版"来自**全站那一份**（设置页读到的是同一个快照），
      这里不再自己订事件、也不再自己问一次 */
-  const { state, info, refresh } = useSoftwareUpdate()
+  const { state, snapshot: info, refresh } = useSoftwareUpdate()
   /* 进度详情面板开没开（`open`）与「可更新」那张小面板（`detailOpen`）是两件事 */
   const [open, setOpen] = useState(false)
   const [detailOpen, setDetailOpen] = useState(false)
-  /* 「忽略这一版」是纯前端偏好，只压胶囊与自动通知，不碰设置页的检查结果 */
-  const [ignoredVersion, setIgnoredVersion] = useStickyState<string | null>(
-    STORAGE.clientIgnoredUpdateVersion,
-    null,
-  )
+  /* 「忽略这一版」已经落盘（快照里的 `ignored`），不再只住 localStorage */
+  const ignoredVersion = info?.ignored ?? null
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -437,7 +436,7 @@ export default function UpdateIndicator({
                 size="sm"
                 variant="ghost"
                 onClick={() => {
-                  setIgnoredVersion(pending)
+                  void ignoreUpdateVersion(pending)
                   setDetailOpen(false)
                 }}
               >

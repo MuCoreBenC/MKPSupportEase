@@ -348,6 +348,16 @@ pub fn run() {
                         tracing::warn!("目录索引没对上当前 catalog：{e}");
                     }
                 }
+                /* 更新状态收敛（2026-11-22）：装上新版之后把旧结论作废，顺手迁旧账。
+                失败只告警 —— 更新状态坏掉不该挡启动。 */
+                match runtime::update_check::startup(&root) {
+                    Ok(snap) => tracing::info!(
+                        version = %snap.current,
+                        candidates = snap.candidates.len(),
+                        "更新状态已收敛"
+                    ),
+                    Err(e) => tracing::warn!("更新状态没收敛（按空快照继续）：{e}"),
+                }
             }
 
             /* 窗口外观：原生圆角 + 让 AppKit 按统一工具栏那一档摆红绿灯。
@@ -638,7 +648,6 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 软件更新（release.json）—— 与预设数据两条链：设置页「软件更新」块的两个口子
         ipc::catalog::get_app_version,
         ipc::catalog::get_install_flavor,
-        ipc::catalog::check_software_update,
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
@@ -699,7 +708,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // ★ **应用内更新 + 打开外链**（第五刀）—— 2026-10-09 补进客户端清单：
         // 这七条原来只在工作台那份里，正式客户端点「检查更新 / 下载安装」全落到
         // NOT_IMPLEMENTED（X-01）。与下面那份清单一字不差。
-        ipc::update::update_info,
+        ipc::update::get_update_snapshot,
+        ipc::update::check_software_update,
+        ipc::update::ignore_update,
+        ipc::update::migrate_update_ignored,
         ipc::update::start_update,
         ipc::update::pause_update,
         ipc::update::resume_update,
@@ -858,7 +870,6 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 软件更新（release.json）—— 与上面那份清单一字不差
         ipc::catalog::get_app_version,
         ipc::catalog::get_install_flavor,
-        ipc::catalog::check_software_update,
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
@@ -1084,7 +1095,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::build::wb_recent_commits,
         app::build::wb_open_external,
         // ★ **应用内更新 + 打开外链**（第五刀）：`open_url` 修的是「查看更新点了没反应」
-        ipc::update::update_info,
+        ipc::update::get_update_snapshot,
+        ipc::update::check_software_update,
+        ipc::update::ignore_update,
+        ipc::update::migrate_update_ignored,
         ipc::update::start_update,
         ipc::update::pause_update,
         ipc::update::resume_update,
@@ -1233,13 +1247,16 @@ mod command_list_parity {
         );
     }
 
-    /// 更新那七条**必须在两份清单里都有**（这次修复的靶子，单独钉一遍）
+    /// 更新那几条**必须在两份清单里都有**（缺一条就是界面点下去 NOT_IMPLEMENTED）
     #[test]
     fn the_update_commands_are_registered_everywhere() {
         let lists = the_two_lists();
         for list in &lists {
             for cmd in [
-                "ipc::update::update_info",
+                "ipc::update::get_update_snapshot",
+                "ipc::update::check_software_update",
+                "ipc::update::ignore_update",
+                "ipc::update::migrate_update_ignored",
                 "ipc::update::start_update",
                 "ipc::update::pause_update",
                 "ipc::update::resume_update",

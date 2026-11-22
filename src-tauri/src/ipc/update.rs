@@ -1,22 +1,30 @@
-//! **应用内更新**的命令壳（2026-10-05 第五刀）。
+//! **软件更新**的命令壳（2026-11-22 统一状态那一刀）。
 //!
-//! 六个命令，加一个**修 bug 用的** `open_url`：
+//! # 一句话规矩
 //!
-//! | 命令 | 干什么 | 形状 |
+//! 这一层**只读快照、只跑事务**：状态全在 `runtime::update_state`（`run/update-state.json`），
+//! 检查/忽略/作废都走 `runtime::update_check` 的四个事务。命令壳不联网算候选；
+//! 只读命令就只读 —— 清旧账只在事务里发生。
+//!
+//! # 命令表
+//!
+//! | 命令 | 干什么 | 写盘 |
 //! |---|---|---|
-//! | `update_info` | 一次问全：状态 + 有无新版 + 资产 + 上次安装结果 | 只读 `async` |
-//! | `start_update` | 开始下载（有 `asset` 才给开）；**秒回**，进度靠事件 | `async` + 后台任务 |
-//! | `pause_update` / `resume_update` / `cancel_update` | 暂停 / 继续 / 取消 | 同步（只动开关） |
-//! | `install_update` | **退出本进程** → 后台脚本替换 `.app` → 重新拉起 | `async` |
-//! | `open_url` | 在系统默认程序里打开一个 http(s) 链接 | `async` |
+//! | `get_update_snapshot` | 读整份快照（标题栏 / 设置页 / 更新面板共用） | 否 |
+//! | `check_software_update` | 手动检查（事务 `check`） | 是 |
+//! | `ignore_update` | 忽略某一版（事务 `ignore`） | 是 |
+//! | `migrate_update_ignored` | 前端把 localStorage 的旧忽略记录交过来（一次性迁移握手） | 是 |
+//! | `start_update` | 从**快照的候选**里挑资产开始下载（不联网挑版本） | 否 |
+//! | `pause_update` / `resume_update` / `cancel_update` | 只动开关 | 否 |
+//! | `install_update` | 退出本进程，后台脚本替换并拉起 | 否（脚本写旧账） |
+//! | `open_url` | 打开 http(s) 链接 | 否 |
 //!
-//! ★ **`open_url` 是修 bug 来的**：0.0.2 之前「查看更新」是个 `<a target="_blank">`，
-//!   而 Tauri 的 webview **没开 opener 权限** ⇒ 点下去**什么都不发生**
-//!   （用户 2026-10-05 实测："点了没反应，没弹出浏览器"）。前端不该自己开窗口，
-//!   **一律过这个命令**。
+//! # 两个事件
 //!
-//! ★ 事件：下载进度用 `software-update-progress` 推（推的就是 [`UpdateState`]，
-//!   **与快照同一个类型** —— 界面只有一种形状要认，不会两套渲染）。
+//! - `software-update-state`：整份快照（业务事实，`runtime::update_check` 发）；
+//! - `software-update-progress`：下载进度（进程态，这一层发）。
+//!
+//! 没有第三个 `software-update-available`：通知由前端按快照里的候选派生。
 
 use postprocess::diag::messages;
 
@@ -28,83 +36,154 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::error::AppError;
 use crate::ipc::traced;
-use crate::runtime::release_info::ReleaseAsset;
+use crate::runtime::release_info::{ReleaseAsset, UpdateCandidate};
+use crate::runtime::update_state::{
+    self, CheckRecord, InstallPhase, UpdateSnapshot, UPDATE_STATE_SCHEMA,
+};
 use crate::runtime::updater::{self, UpdateState};
 
-/// 给前端的更新状态（`UpdateState` 已经是 camelCase 的 `tag` 形状，直接序列化）。
+/// 给前端的更新状态（`UpdateState` 已是 camelCase 的 `tag` 形状，直接序列化）。
 pub type UpdateStateDto = UpdateState;
 
-/// 「上次更新成没成」+ 当前这一版的可下载信息 —— 界面一次问全，别分两次问。
+/// **整份更新快照 + 进程态** —— 界面一次问全，不再分两次问。
+///
+/// 业务字段全部来自 `UpdateSnapshot`；`state` / `install` 是本次进程的下载态，
+/// 重启即 `idle`（不会被当成"还在下载"）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UpdateInfoDto {
+pub struct UpdateSnapshotDto {
+    /// 下载这一档的进程态（`idle` / `downloading` / `paused` / `ready` / `failed` / `cancelled`）
     pub state: UpdateStateDto,
-    /// 有新版吗（与 `check_software_update` 同一判定，**不重写一遍**）
+    /// 业务阶段：有没有一份**已经下好、等着装**的
+    pub install: InstallPhase,
+    /// 有没有新版（候选非空）。被忽略的那一版仍算"有新版"，只是不冒胶囊。
     pub has_update: bool,
+    /// 标题栏胶囊读的那一版（被忽略 / 不是当前渠道 ⇒ `None`）
+    pub pending_version: Option<String>,
+    /// 并列候选（正式版排第一）。设置页按渠道切换时读它。
+    pub candidates: Vec<UpdateCandidate>,
     pub current_version: String,
+    /// 当前渠道上第一条候选的版本（没有则是当前版本）
     pub latest_version: String,
     pub notes: Option<String>,
-    /// Release / 下载页（**没有它就没什么可打开的**）
+    /// Release / 下载页（没有它就没什么可打开的）
     pub url: Option<String>,
-    /// 这一版有没有安装包（**没有 = 只能打开下载页**，界面就不摆下载按钮）
+    /// 这一版有没有安装包（没有 = 只能打开下载页）
     pub asset: Option<ReleaseAsset>,
-    /// 上一次安装的结果（退出后那个脚本写的账，**下次启动**读）
+    /// 上一次安装的结果（旧账已迁入快照；旧文件不再被读）
     pub last_result: Option<updater::UpdateResult>,
-    /// **安装日志的绝对路径**（`<appData>/run/update-install.log`）。
-    ///
-    /// 作者 2026-11-06 点了「重启并安装」什么都没发生，而旧脚本一个字都不留 ——
-    /// 只能靠猜。把路径交给界面，就是为了让人能**一键把文件发出去**，
-    /// 而不是听我说"你去 ~/Library/Application Support/... 里找找"。
+    /// 安装日志的绝对路径（点「重启并安装」没反应时要看的就是它）
     pub install_log: String,
-    /// **自动检查上次发现的那一版**（`None` = 没有待更新）。
-    ///
-    /// 标题栏那枚"有更新"小胶囊读它：8 秒通知走掉之后还在，且认得测试版
-    /// （`has_update` 只按正式版判定）。
-    pub pending_version: Option<String>,
+    /// 最近一次检查的记录（`ok=false` 时界面要说"这次没查成"）
+    pub checked: CheckRecord,
+    /// 用户忽略的那一版
+    pub ignored: Option<String>,
+    /// 快照协议代次
+    pub schema: u32,
 }
 
-/// 读当前数据源、问一次更新（**命令壳与 `update_info` 共用这一处**）。
-///
-/// 2026-11-05：地址解析 / 版本比较收口到 `runtime::update_check::fetch_update` ——
-/// 设置页手动检查、拉目录后的自动检查、这里给标题栏更新面板供数，**三处同一份**。
-/// 差别只在失败口径：这里是标题栏那一格，问不到就说"问不到"（不弹错、不打扰）。
-pub(crate) fn software_update(
-    root: &std::path::Path,
-) -> crate::runtime::release_info::SoftwareUpdate {
-    crate::runtime::update_check::fetch_update(root)
-        .unwrap_or_else(|_| crate::runtime::release_info::none_available())
+/// 快照 + 进程态 → 界面那一份（派生只在这里算一次，前端不重复推导）。
+fn to_dto(root: &std::path::Path, snap: &UpdateSnapshot) -> UpdateSnapshotDto {
+    let state = updater::session().state();
+    let chosen = snap
+        .candidates
+        .iter()
+        .find(|c| c.channel == snap.checked.channel);
+    let pending_version = update_state::pending(snap).map(|c| c.version.clone());
+    let latest_version = chosen
+        .map(|c| c.version.clone())
+        .unwrap_or_else(|| snap.current.clone());
+    UpdateSnapshotDto {
+        install: update_state::install_phase(&state),
+        state,
+        has_update: update_state::has_update(snap),
+        pending_version,
+        candidates: snap.candidates.clone(),
+        current_version: snap.current.clone(),
+        latest_version,
+        notes: chosen.and_then(|c| c.notes.clone()),
+        url: chosen.and_then(|c| c.url.clone()),
+        asset: chosen.and_then(|c| c.asset.clone()),
+        last_result: snap.last_result.clone(),
+        install_log: updater::install_log_path(root).display().to_string(),
+        checked: snap.checked.clone(),
+        ignored: snap.ignored.clone(),
+        schema: UPDATE_STATE_SCHEMA,
+    }
 }
 
-/// 一次问全。**只读**（不联网之外什么都不做；联网那部分与检查更新同一条）。
+/// 一次问全。**只读**：不联网、不写盘（写盘只在事务里）。
 #[tauri::command]
-pub async fn update_info(app: AppHandle) -> Result<UpdateInfoDto, AppError> {
-    traced("updateInfo", |_| {
+pub async fn get_update_snapshot(app: AppHandle) -> Result<UpdateSnapshotDto, AppError> {
+    traced("getUpdateSnapshot", |_| {
         let root = crate::fsx::paths::internal_root(&app)?;
-        let update = software_update(&root);
-        Ok(UpdateInfoDto {
-            state: updater::session().state(),
-            has_update: update.has_update,
-            current_version: update.current_version,
-            latest_version: update.latest_version,
-            notes: update.notes,
-            url: update.url,
-            asset: update.asset,
-            last_result: updater::last_result(&root),
-            install_log: updater::install_log_path(&root).display().to_string(),
-            pending_version: crate::runtime::app_state::pending_update(&root).unwrap_or(None),
+        let snap = update_state::load(&root)?;
+        Ok(to_dto(&root, &snap))
+    })
+}
+
+/// 手动检查（设置页「检查更新」）。**失败如实拒绝** —— 设置页要把原因摆出来。
+///
+/// 成功与失败都落在同一个事务里：失败只更新检查记录，旧候选保留。
+#[tauri::command]
+pub async fn check_software_update(app: AppHandle) -> Result<UpdateSnapshotDto, AppError> {
+    let task = tauri::async_runtime::spawn_blocking(move || {
+        traced("checkSoftwareUpdate", |_| {
+            let root = crate::fsx::paths::internal_root(&app)?;
+            let snap = crate::runtime::update_check::run_check(
+                &root,
+                crate::runtime::update_state::CheckTrigger::Manual,
+            )?;
+            Ok(to_dto(&root, &snap))
         })
+    });
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.080", &[])).with_detail(e.to_string())
+    })?
+}
+
+/// 忽略某一版（标题栏面板那颗「忽略」）。**只动 `ignored`，候选集不动。**
+#[tauri::command]
+pub async fn ignore_update(app: AppHandle, version: String) -> Result<UpdateSnapshotDto, AppError> {
+    traced("ignoreUpdate", |_| {
+        let root = crate::fsx::paths::internal_root(&app)?;
+        let snap = crate::runtime::update_check::ignore(&root, &version)?;
+        Ok(to_dto(&root, &snap))
+    })
+}
+
+/// **一次性迁移握手**：前端把旧 localStorage 里的忽略版本交过来。
+///
+/// 幂等：已经迁过 / 那个版本已经不需要忽略 ⇒ 照常返回快照（不算失败）。
+/// 前端**只有收到 `Ok` 才删旧键** —— 中断了下次再来一遍也不会丢。
+#[tauri::command]
+pub async fn migrate_update_ignored(
+    app: AppHandle,
+    value: Option<String>,
+) -> Result<UpdateSnapshotDto, AppError> {
+    traced("migrateUpdateIgnored", |_| {
+        let root = crate::fsx::paths::internal_root(&app)?;
+        let mut snap = update_state::load(&root)?;
+        let current = crate::runtime::structure::APP_VERSION;
+        let mut dirty = update_state::reconcile(&mut snap, current);
+        if let Some(v) = value.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()) {
+            if snap.ignored.is_none() && crate::runtime::release_info::is_newer_version(&v, current)
+            {
+                snap.ignored = Some(v);
+                dirty = true;
+            }
+        }
+        if dirty {
+            update_state::save(&root, &snap)?;
+        }
+        Ok(to_dto(&root, &snap))
     })
 }
 
 /// 开始下载安装包。**秒回**（下载在后台跑）。
 ///
-/// ★ 2026-11-05 双通道：`channel` 决定下**用户点中的那一路**的资产。
-///   - `None` / `"stable"`：旧的单一入口（标题栏 `UpdateIndicator` 仍无参调用）；
-///   - `"preview"`：预览版那一档；
-///   - 认不出的字符串**显式报错**，不悄悄兜底成正式版 —— 否则「尝试测试版」
-///     会把正式版包下下来，用户还以为自己在试预览。
-///
-/// ★ 界面**只在候选的 `asset` 存在时**才摆这颗按钮。进度靠事件推。
+/// 版本与资产**从快照的候选里挑**，不再联网重算一遍：
+/// 用户点的是哪张卡，下的就是那一版。快照里没有候选 = 先检查一次再说。
 #[tauri::command]
 pub async fn start_update(app: AppHandle, channel: Option<String>) -> Result<(), AppError> {
     let root = crate::fsx::paths::internal_root(&app)?;
@@ -118,41 +197,18 @@ pub async fn start_update(app: AppHandle, channel: Option<String>) -> Result<(),
         }
     };
 
-    /* 一次取两份清单（最多两次 GET），资产按用户点中的那一路挑。
-     * 取不到候选集时退回旧的「单一正式版」口子 —— 标题栏 / 老前端不传 channel
-     * 时行为与改造前逐字一致，不会多打一次网络请求。 */
-    let candidates =
-        crate::runtime::update_check::fetch_update_candidates(&root).unwrap_or_else(|e| {
-            tracing::debug!("候选集没取到，退回单一正式版资产：{}", e.message);
-            Vec::new()
-        });
-    let chosen = candidates.iter().find(|c| c.channel == channel);
-    /* 版本号跟着**选中的那一版**走：`Ready` 要带着它，界面才能判"已就绪的是不是这张卡" */
-    let (asset, version) = match chosen {
-        Some(c) => (c.asset.clone(), c.version.clone()),
-        None if channel == crate::runtime::release_info::UpdateChannel::Stable
-            && candidates.is_empty() =>
-        {
-            let u = software_update(&root);
-            (u.asset.clone(), u.latest_version.clone())
-        }
-        None => (None, String::new()),
-    };
-
-    if channel == crate::runtime::release_info::UpdateChannel::Stable
-        && chosen.is_some_and(|c| {
-            !crate::runtime::release_info::compare(
-                &c.version,
-                crate::runtime::structure::APP_VERSION,
-            )
-        })
-    {
+    let snap = update_state::load(&root)?;
+    let chosen = snap.candidates.iter().find(|c| c.channel == channel);
+    let Some(chosen) = chosen else {
         return Err(AppError::invalid_argument(messages::text(
-            "ui.ipc.update.156",
+            "ui.ipc.update.157",
             &[],
         )));
-    }
-    let asset = asset
+    };
+    let version = chosen.version.clone();
+    let asset = chosen
+        .asset
+        .clone()
         .ok_or_else(|| AppError::invalid_argument(messages::text("ui.ipc.update.157", &[])))?;
 
     let emit_app = app.clone();
@@ -188,8 +244,8 @@ pub fn cancel_update() {
 ///
 /// ★ 必须**先退出本进程**：正在运行的 `.app` 换不掉（代码段在执行）。所以
 ///   spawn 一个脱离本进程的后台脚本 → `app.exit(0)`。
-///   替换成没成本进程看不见（已经退了）—— 脚本把结果写进 `run/update-result.json`，
-///   **下次启动**由 [`update_info`] 读出来说清（判据 `update_result_is_read_on_next_launch`）。
+///   替换成没成进程看不见（已经退了）—— 脚本把结果写进 `run/update-result.json`，
+///   **下次启动**由 `update_check::startup` 迁进快照（那份文件从此不再当事实源）。
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), AppError> {
     let root = crate::fsx::paths::internal_root(&app)?;
@@ -200,16 +256,13 @@ pub async fn install_update(app: AppHandle) -> Result<(), AppError> {
         )));
     };
     let staged = std::path::PathBuf::from(&path);
-    /* ★ 记的是**装上去的那一版**（2026-11-06 之前记的是本进程的 `APP_VERSION`：
-     *   装完 0.0.10-preview.2，账上却写 `0.0.10-preview.1`，看日志只会更糊涂）。
-     *   远端清单是外部输入 ⇒ 进脚本前先洗一遍。 */
+    /* ★ 记的是**装上去的那一版**。远端清单是外部输入 ⇒ 进脚本前先洗一遍。 */
     let version = updater::safe_version(&version);
     let version = version.as_str();
-    let at = now_iso8601_local();
+    let at = update_state::now_iso8601();
 
-    /* ★ 平台分流（2026-11-05）：
-     * macOS 沿用「替换 .app + open」，Windows 走「NSIS /S 静默安装 + 拉起 exe」。
-     * 两边都把结果写进同一份 `run/update-result.json`，下次启动由 update_info 读。 */
+    /* ★ 平台分流：macOS 替换 `.app` + `open`，Windows 走 NSIS `/S` 静默安装 + 拉起 exe。
+     * 两边都把结果写进同一份 `run/update-result.json`，下次启动迁进快照。 */
     #[cfg(target_os = "windows")]
     {
         let new_exe = updater::running_exe()?;
@@ -243,9 +296,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), AppError> {
     #[cfg(not(target_os = "windows"))]
     {
         let target = updater::running_app()?;
-        /* 把自己这一条的 PID 交给脚本：它要**等这个进程真的消失**才动手。
-         * 不传的话脚本只能盲等 1 秒，而旧实例还活着时 `open` 只会把它的窗口叫到前面
-         * —— 作者 2026-11-06 看到的"点了没反应"就是这个。 */
+        /* 把自己这一条的 PID 交给脚本：它要**等这个进程真的消失**才动手。 */
         let script =
             updater::install_script(&root, &target, &staged, version, &at, std::process::id());
         std::process::Command::new("sh")
@@ -257,14 +308,11 @@ pub async fn install_update(app: AppHandle) -> Result<(), AppError> {
             })?;
     }
     // 给脚本一点时间把最后一句排进 shell（★ 退出后这一段才真正开始）。
-    // 客户端**不带 tokio**：`block_on` 一个"睡 200ms"是这里最省事、也不引依赖的做法。
     tauri::async_runtime::block_on(async {
         std::thread::sleep(std::time::Duration::from_millis(200));
     });
-    /* ★ 不在这里 `cleanup_stage`（2026-11-05 修掉的时序 bug）：
-     * 后台脚本 `sleep 1` 之后才 `mv` 暂存里的 `.app` / 才 `/S` 装 setup.exe，
-     * 而本进程只等 200ms 就退出 —— 立刻清暂存等于把脚本要用的东西删了。
-     * 清理交给下一次 `download`（它开头会先清旧暂存），与「失败即停、如实说」不冲突。 */
+    /* ★ 不在这里 `cleanup_stage`：后台脚本还要用暂存里那份。清理交给下一次下载
+     *   （它开头会先清）与启动时的 `startup` 收敛。 */
     app.exit(0);
     Ok(())
 }
@@ -287,37 +335,4 @@ pub async fn open_url(app: AppHandle, url: String) -> Result<(), AppError> {
             AppError::io(messages::text("ui.ipc.update.161", &[])).with_detail(e.to_string())
         })
     })
-}
-
-/// 这一刻（ISO8601，UTC）——**客户端没有 `workbench::clock`**，这一处用系统时钟自己算。
-/// 格式与工作台那套一致（`2026-10-05T04:01:08Z`），免得同一份账两种写法。
-fn now_iso8601_local() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or_default();
-    // 粗算但够用：按天折算成日期 + 时分秒（闰年细节交给系统时钟的秒数，不做历法运算）
-    let days = secs.div_euclid(86_400);
-    let rem = secs.rem_euclid(86_400);
-    let (y, m, d) = civil_from_days(days);
-    format!(
-        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
-        rem / 3600,
-        (rem % 3600) / 60,
-        rem % 60
-    )
-}
-
-/// 天数 → 年月日（Howard Hinnant 的 civil_from_days；算法是公历的，不用查表）
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    (if m <= 2 { y + 1 } else { y }, m, d)
 }

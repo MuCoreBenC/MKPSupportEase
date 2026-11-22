@@ -405,7 +405,7 @@ pub fn is_newer_version(candidate: &str, current: &str) -> bool {
 ///
 /// 与 `SoftwareUpdate` 的区别：那是「自动通知」的结论（只看正式版）；
 /// 这是「用户主动刷新时能看见什么」（正式版 + 预览版并列）。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCandidate {
     pub channel: UpdateChannel,

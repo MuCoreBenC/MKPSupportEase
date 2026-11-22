@@ -1608,6 +1608,13 @@
   /* 与 `?` 那颗圆点同一档间距（Tip 的 `.dot` 是 margin-left: 6px），同一行才排得齐 */
   margin-left: 6px;
   vertical-align: middle;
+  /*
+   * 视觉对齐：`vertical-align: middle` 让 20px 的胶囊**盒子中线**落在文字 em 盒中线上，
+   * 而中文字形的重心比 em 盒中线略高 —— 实测胶囊中心比文字行中心低约 1.6px。
+   * 只抬 1px，剩下的零头留给字形自己的留白；用相对定位不占位、不改行高。
+   */
+  position: relative;
+  top: -1px;
   height: 20px;
   padding: 0 8px;
   border-radius: 999px;
