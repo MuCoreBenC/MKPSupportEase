@@ -279,19 +279,16 @@ impl Hosting for GitHub {
         repo: &str,
         tag: &str,
     ) -> Result<Option<ReleaseView>, AppError> {
-        match self.get(&format!("/repos/{owner}/{repo}/releases/tags/{tag}")) {
-            Ok(v) => Ok(Some(view_of(&v)?)),
-            Err(e) if e.code == crate::error::ErrorCode::NotFound => Ok(None),
-            Err(e) => Err(e),
+        match self.release_json(owner, repo, tag)? {
+            Some(v) => Ok(Some(view_of(&v)?)),
+            None => Ok(None),
         }
     }
 
     /// GitHub 的 Release 响应**自带** `assets[].size` / `digest` / `id` —— 一次读齐。
     fn assets(&self, owner: &str, repo: &str, tag: &str) -> Result<Vec<RemoteAsset>, AppError> {
-        let v = match self.get(&format!("/repos/{owner}/{repo}/releases/tags/{tag}")) {
-            Ok(v) => v,
-            Err(e) if e.code == crate::error::ErrorCode::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e),
+        let Some(v) = self.release_json(owner, repo, tag)? else {
+            return Ok(Vec::new());
         };
         Ok(v.get("assets")
             .and_then(Value::as_array)
@@ -469,6 +466,28 @@ fn release_from_json(v: &Value) -> Result<RemoteRelease, AppError> {
 }
 
 impl GitHub {
+    /* ---------- 发布内核 2.0 ---------- */
+
+    /// 按 tag 找 Release —— **草稿也要找得到**。
+    ///
+    /// GitHub 的 `/releases/tags/<tag>` **不返回草稿**（草稿还没有 tag），而我们的暂存面
+    /// 正是草稿：只查那个端点会把"已经上传好了"看成"还没上传"（2026-11-22 真机）。
+    /// 404 时把 Release 列表拉一遍（认证请求里草稿也会出现），按 `tag_name` 认它。
+    fn release_json(&self, owner: &str, repo: &str, tag: &str) -> Result<Option<Value>, AppError> {
+        match self.get(&format!("/repos/{owner}/{repo}/releases/tags/{tag}")) {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e.code == crate::error::ErrorCode::NotFound => {
+                let list = self.get(&format!("/repos/{owner}/{repo}/releases?per_page=100"))?;
+                Ok(list.as_array().and_then(|all| {
+                    all.iter()
+                        .find(|r| r.get("tag_name").and_then(Value::as_str) == Some(tag))
+                        .cloned()
+                }))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// 把这个 Release 上**同名的**旧资产删掉（没有就是 no-op）。
     ///
     /// 这是"同一份字节再传一次"能成立的前提：GitHub 不收同名附件，而跳过会留下旧文件。
