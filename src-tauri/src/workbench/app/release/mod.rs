@@ -446,15 +446,30 @@ fn build_platform(
         build::build_local(&dir, version, pf, summary)
     } else {
         let actions = Actions::new(p.code.token.clone());
-        let started = iso_now();
-        ci::dispatch(
-            &actions,
-            &p.code.owner,
-            &p.code.repo,
-            source_commit,
-            version,
-            summary,
-        )?;
+        let mut started = iso_now();
+        /* 同一冻结 SHA 上已经有运行 ⇒ 不重新触发（正在跑就等它、已成功就复用产物） */
+        let prefer = match ci::reusable_run(&actions, &p.code.owner, &p.code.repo, source_commit)? {
+            Some(run) => {
+                summary.push(format!(
+                    "复用同一冻结源码上的 Windows 构建（run {}，{}）",
+                    run.id, run.status
+                ));
+                /* 复用时不再按时间筛，按 id 认它 */
+                started.clear();
+                Some(run.id)
+            }
+            None => {
+                ci::dispatch(
+                    &actions,
+                    &p.code.owner,
+                    &p.code.repo,
+                    source_commit,
+                    version,
+                    summary,
+                )?;
+                None
+            }
+        };
         let deadline = Instant::now() + Duration::from_secs(60 * 60);
         let run = ci::wait(
             &actions,
@@ -462,6 +477,7 @@ fn build_platform(
             &p.code.repo,
             source_commit,
             &started,
+            prefer,
             deadline,
             summary,
         )?;

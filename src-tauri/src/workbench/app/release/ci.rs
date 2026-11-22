@@ -50,22 +50,48 @@ pub fn dispatch(
     Ok(0)
 }
 
+/// 同一冻结 SHA 上**已经存在**的运行 —— 正在跑就等它、已经成功就复用它。
+///
+/// 这一条就是「允许从已有 CI 产物恢复、不重复构建」：换机器、上一趟被打断之后
+/// 再跑同一条命令，不该再占一台 Windows runner。
+pub fn reusable_run(
+    actions: &crate::workbench::app::platform::actions::Actions,
+    owner: &str,
+    repo: &str,
+    source_commit: &str,
+) -> Result<Option<crate::workbench::app::platform::actions::WorkflowRun>, AppError> {
+    let runs = actions.runs(owner, repo, WINDOWS_WORKFLOW)?;
+    let mine: Vec<_> = runs
+        .into_iter()
+        .filter(|r| r.head_sha == source_commit)
+        .collect();
+    if let Some(r) = mine.iter().find(|r| !r.finished()) {
+        return Ok(Some(r.clone()));
+    }
+    Ok(mine.into_iter().find(|r| r.ok()))
+}
+
 /// 等这一笔源码的那次运行跑完。`created_after` 是触发时刻的 ISO8601（防止认到上一趟）。
+#[allow(clippy::too_many_arguments)] // 等一次运行要的上下文（通道/仓/源码/起点/点名 run/时限/摘要）都是不可省的
 pub fn wait(
     actions: &crate::workbench::app::platform::actions::Actions,
     owner: &str,
     repo: &str,
     source_commit: &str,
     created_after: &str,
+    prefer_run: Option<u64>,
     deadline: std::time::Instant,
     summary: &mut Vec<String>,
 ) -> Result<crate::workbench::app::platform::actions::WorkflowRun, AppError> {
     let mut last_note = String::new();
     loop {
         let runs = actions.runs(owner, repo, WINDOWS_WORKFLOW)?;
-        let mine = runs.iter().find(|r| {
-            r.head_sha == source_commit
-                && (created_after.is_empty() || r.created_at.as_str() >= created_after)
+        let mine = runs.iter().find(|r| match prefer_run {
+            Some(id) => r.id == id,
+            None => {
+                r.head_sha == source_commit
+                    && (created_after.is_empty() || r.created_at.as_str() >= created_after)
+            }
         });
         if let Some(run) = mine {
             if run.finished() {
@@ -137,7 +163,7 @@ pub fn collect(
             ))
             .with_detail(format!("解包目录：{}", unpacked.display()))
         })?;
-        let fact = ArtifactFact::from_temp(version, platform, kind, &found)?;
+        let fact = ArtifactFact::from_path(version, platform, kind, &found)?;
         if let Some(r) = &receipt {
             r.cross_check(&fact)?;
         }
