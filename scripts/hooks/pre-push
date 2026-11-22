@@ -46,7 +46,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   if [ "$local_sha" = "$ZERO" ]; then
     case "$remote_ref" in
       # 暂存 tag 是发布内核自己在封版后清理的对象，删它不算破坏历史
-      refs/tags/staging/*) ;;
+      refs/tags/staging-*) ;;
       refs/heads/main | refs/tags/*)
         delete=1
         delete_ref=$remote_ref
@@ -66,7 +66,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     refs/heads/main)
       push_main=1
       ;;
-    refs/tags/staging/*)
+    refs/tags/staging-*)
       # 暂存 tag（`staging/<版本>`）：正式 tag 在封版时才创建，这一条只承载暂存 Release。
       # 仍要求发布事务的标记 —— 手工推一个暂存 tag 同样会绕开状态机。
       if [ "${MKP_RELEASE_TX:-}" != "1" ]; then

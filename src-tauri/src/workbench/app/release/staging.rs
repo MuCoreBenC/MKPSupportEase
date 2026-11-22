@@ -1,7 +1,7 @@
 //! **暂存面** —— 各平台产物在封版之前的落脚处。
 //!
 //! ```text
-//! Gitee   Release @ staging/<版本>   （没有草稿概念，用专属 staging tag 承载）
+//! Gitee   Release @ staging-<版本>   （没有草稿概念，用专属 staging tag 承载）
 //! GitHub  Release  draft:true        （草稿不创建 tag，直到封版那一刻才发布）
 //! ```
 //!

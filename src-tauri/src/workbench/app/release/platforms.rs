@@ -38,9 +38,13 @@ pub const PRODUCT: &str = "SupportEase";
 /// tag 前缀。`v0.0.16` —— 与 `scripts/hooks/pre-push` 闸⑤ 逐字一致。
 pub const TAG_PREFIX: &str = "v";
 
-/// 暂存 tag 的命名空间。**刻意不是 `v*`**：GitHub 的 `tags-v-no-delete` ruleset 保护
-/// `refs/tags/v*`，暂存 tag 一旦落成 `v*` 就再也删不掉（封版后要清理它）。
-pub const STAGING_PREFIX: &str = "staging/";
+/// 暂存 tag 的命名空间。两个约束同时成立：
+///
+/// 1. **不能是 `v*`**：GitHub 的 `tags-v-no-delete` ruleset 保护 `refs/tags/v*`，
+///    暂存 tag 一旦落成 `v*` 就再也删不掉（封版后要清理它）；
+/// 2. **不能带 `/`**：Gitee 的 `GET /releases/tags/<tag>` 会被斜杠切成另一个路径，
+///    查回来是 `null`（2026-11-22 真机：`staging/0.0.16` 直接读不出 Release）。
+pub const STAGING_PREFIX: &str = "staging-";
 
 /// 一次发布涉及的全部平台。**顺序就是执行顺序**：先本机（快、能立刻看到），再 CI。
 pub const PLATFORMS: &[Platform] = &[
@@ -265,8 +269,12 @@ mod tests {
     #[test]
     fn staging_tag_is_not_under_the_protected_namespace() {
         let staging = staging_tag_of("0.0.16");
-        assert!(staging.starts_with("staging/"));
+        assert_eq!(staging, "staging-0.0.16");
         assert!(!staging.starts_with('v'));
+        assert!(
+            !staging.contains('/'),
+            "Gitee 的 /releases/tags/<tag> 不认斜杠"
+        );
         assert_eq!(tag_of("0.0.16"), "v0.0.16");
     }
 

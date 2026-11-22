@@ -31,7 +31,7 @@ stateDiagram-v2
 
 | 事实 | 来源 |
 | --- | --- |
-| 冻结源码 | `staging/<版本>` tag 指向的那一笔 |
+| 冻结源码 | `staging-<版本>` tag 指向的那一笔 |
 | 每平台每源已到哪 | Gitee `attach_files`（名+大小+id）、GitHub release assets（名+大小+digest） |
 | 清单已合并 | `origin/main:presets/delivery/release.json` 的 version 与 assets |
 | 已封版 | 正式 tag `v<版本>` 存在 + 正式 Release 资产与清单逐份一致 |
@@ -49,7 +49,7 @@ stateDiagram-v2
 **暂存面**：
 
 ```text
-Gitee   Release @ staging/<版本>    （Gitee 没有草稿；这条 tag 不在 v* 命名空间，可删）
+Gitee   Release @ staging-<版本>    （Gitee 没有草稿；这条 tag 不在 v* 命名空间，可删）
 GitHub  Release  draft:true         （草稿不创建 tag，封版那一刻才发布）
 ```
 

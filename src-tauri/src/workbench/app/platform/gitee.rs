@@ -337,6 +337,10 @@ impl Hosting for Gitee {
         tag: &str,
     ) -> Result<Option<ReleaseView>, AppError> {
         match self.get(&format!("/repos/{owner}/{repo}/releases/tags/{tag}")) {
+            /* ★ 实测：Gitee 对「这个 tag 上没有 Release」回的是 **200 + 空 body**
+            （读成 `null`），不是 404。把它当成「没有」—— 否则第一趟必挂在
+            "Gitee Release 响应里没有 id"。 */
+            Ok(v) if v.is_null() => Ok(None),
             Ok(v) => Ok(Some(view_of(&v, owner, repo, tag)?)),
             Err(e) if e.code == crate::error::ErrorCode::NotFound => Ok(None),
             Err(e) => Err(e),
