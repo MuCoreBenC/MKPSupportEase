@@ -417,7 +417,8 @@ pub fn derive(version: &str, channel: UpdateChannel, snap: &Snapshot) -> Release
         channel,
         tag: super::platforms::tag_of(version),
         staging_tag: super::platforms::staging_tag_of(version),
-        source_commit: snap.staging_tag_commit.clone(),
+        /* 封版后暂存 tag 会被清理，来源要退回正式 tag 指的那一笔 */
+        source_commit: snap.source_commit().cloned(),
         phase,
         platforms,
         manifest,

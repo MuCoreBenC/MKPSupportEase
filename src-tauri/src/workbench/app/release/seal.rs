@@ -268,7 +268,7 @@ pub fn commit_manifest(
         }
     }
     /* ★ **切完分支再写盘**：先写会让工作区带一份未提交的清单，checkout 直接被拒
-       （断点续跑最常见的现场：上一趟写完清单就被打断）。 */
+    （断点续跑最常见的现场：上一趟写完清单就被打断）。 */
     let rel = super::manifest::write(repo_root, channel, &text)?;
     summary.push(format!("已写 {rel}"));
     let staged = git.stage_allowed_in(

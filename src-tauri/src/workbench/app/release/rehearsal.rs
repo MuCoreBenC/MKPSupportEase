@@ -542,6 +542,11 @@ fn another_machine_resumes_by_downloading_from_staging() {
 
     let sealed = f.run(&f.opts(StopAfter::Seal, None)).expect("封版应成功");
     assert_eq!(sealed.phase, crate::workbench::app::release::Phase::Sealed);
+    assert_eq!(
+        sealed.source_commit.as_deref(),
+        Some(source.as_str()),
+        "封版后仍要报出冻结源码（暂存 tag 已清理，来源是正式 tag）"
+    );
     let formal = asset_sizes(f.gitee, &format!("v{VERSION}"));
     for n in &names {
         assert!(formal.contains_key(n), "正式面上应有 {n}");

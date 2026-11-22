@@ -366,7 +366,7 @@ pub fn run_with(
             summary.push("清单内容已在分支上（这一趟没有新提交）".to_owned());
         }
         /* 不论这一趟有没有新提交：只要 main 上的清单还没覆盖这一代，就把那份 PR 合掉。
-           （断点续跑最常见的现场就是"上一趟推到 PR 就被打断"，这一趟没有新变化。） */
+        （断点续跑最常见的现场就是"上一趟推到 PR 就被打断"，这一趟没有新变化。） */
         if st.manifest.version.as_deref() != Some(version.as_str()) || !st.manifest.complete {
             let review =
                 open_or_reuse_review(p, &branch, &version, !staged_paths.is_empty(), &mut summary)?;
