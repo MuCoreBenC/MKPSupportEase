@@ -363,9 +363,13 @@ pub fn run_with(
             &mut summary,
         )?;
         if staged_paths.is_empty() {
-            summary.push("清单没有变化（已在 main 上）".to_owned());
-        } else {
-            let review = open_or_reuse_review(p, &branch, &version, &mut summary)?;
+            summary.push("清单内容已在分支上（这一趟没有新提交）".to_owned());
+        }
+        /* 不论这一趟有没有新提交：只要 main 上的清单还没覆盖这一代，就把那份 PR 合掉。
+        （断点续跑最常见的现场就是"上一趟推到 PR 就被打断"，这一趟没有新变化。） */
+        if st.manifest.version.as_deref() != Some(version.as_str()) || !st.manifest.complete {
+            let review =
+                open_or_reuse_review(p, &branch, &version, !staged_paths.is_empty(), &mut summary)?;
             let review = wait_checks(p, &review, &mut summary)?;
             let merged = p.code_hosting.merge_review(
                 &ReviewId {
@@ -595,6 +599,7 @@ fn open_or_reuse_review(
     p: &Ports,
     branch: &str,
     version: &str,
+    allow_create: bool,
     summary: &mut Vec<String>,
 ) -> Result<RemoteReview, AppError> {
     if let Some(r) = p
@@ -603,6 +608,11 @@ fn open_or_reuse_review(
     {
         summary.push(format!("复用已开着的清单 PR #{}", r.number));
         return Ok(r);
+    }
+    if !allow_create {
+        return Err(AppError::invalid_argument(format!(
+            "分支 {branch} 上没有新提交，也没有开着的清单 PR —— 现场不完整，先确认上一次停在哪"
+        )));
     }
     let r = p.code_hosting.create_review(&ReviewSpec {
         owner: p.code.owner.clone(),

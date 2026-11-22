@@ -567,15 +567,46 @@ impl GitHub {
     }
 
     /// 一个 sha 的 CI 汇总（`GET /commits/{sha}/status` 的 `state` 字段）。
+    /// 这一笔提交的 CI 结论。
+    ///
+    /// **先看 check-runs，再看 commit status**：GitHub Actions 的检查落在
+    /// `/commits/{sha}/check-runs`（check-run），不落在 `/commits/{sha}/status`
+    /// （那是旧的 commit status）。只读后者会把"三个 job 都绿了"判成 None，
+    /// 等 CI 那一步就永远等下去（2026-11-23 真机：清单 PR 全绿，内核还在"等 CI"）。
     fn checks_for_sha(
         &self,
         owner: &str,
         repo: &str,
         sha: &str,
     ) -> Result<ChecksSummary, AppError> {
+        let runs = self.get(&format!(
+            "/repos/{owner}/{repo}/commits/{sha}/check-runs?per_page=100"
+        ))?;
+        let list = runs
+            .get("check_runs")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if !list.is_empty() {
+            let pairs: Vec<(String, String)> = list
+                .iter()
+                .map(|r| {
+                    (
+                        r.get("status")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_owned(),
+                        r.get("conclusion")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_owned(),
+                    )
+                })
+                .collect();
+            return Ok(super::collapse_check_runs(&pairs));
+        }
+        /* 没有 check-run 时退回旧的 commit status（有的仓库只用 status） */
         let v = self.get(&format!("/repos/{owner}/{repo}/commits/{sha}/status"))?;
-        // 没有 status 时 `state` 会是 "pending"（GitHub 的约定：无检查也算 pending）。
-        // 看 `total_count` 为 0 才算"没有检查"。
         let total = v.get("total_count").and_then(Value::as_u64).unwrap_or(0);
         if total == 0 {
             return Ok(ChecksSummary::None);

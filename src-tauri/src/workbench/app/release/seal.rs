@@ -257,9 +257,6 @@ pub fn commit_manifest(
         &targets.gitee_repo,
         gh.as_ref(),
     )?;
-    let rel = super::manifest::write(repo_root, channel, &text)?;
-    summary.push(format!("已写 {rel}"));
-
     let branch = super::manifest::branch_name(version);
     let current = git.branch().unwrap_or_default();
     if current != branch {
@@ -270,6 +267,10 @@ pub fn commit_manifest(
             git.switch_new_at(&branch, "origin/main")?;
         }
     }
+    /* ★ **切完分支再写盘**：先写会让工作区带一份未提交的清单，checkout 直接被拒
+    （断点续跑最常见的现场：上一趟写完清单就被打断）。 */
+    let rel = super::manifest::write(repo_root, channel, &text)?;
+    summary.push(format!("已写 {rel}"));
     let staged = git.stage_allowed_in(
         std::slice::from_ref(&rel),
         &crate::workbench::app::git::RELEASE_STAGE_ALLOWLIST,
