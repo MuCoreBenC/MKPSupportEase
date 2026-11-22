@@ -1710,11 +1710,14 @@ fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
         return Err(AppError::io("构建安装包失败")
             .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
     }
-    locate_installer(repo_root)
+    /* 追加说明必须在**造 BuiltArtifact 之前**：它改的是文件字节，大小与 SHA 都跟着变 */
+    let one = locate_installer_file(repo_root)?;
+    patch_dmg_extras(repo_root, &one)?;
+    installer_artifact(repo_root, one)
 }
 
-/// 从 `bundle/<本平台>` 找**唯一一份**本平台安装包。**不构建**（InfoOnly 只补清单时用）。
-fn locate_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
+/// 从 `bundle/<本平台>` 找**唯一一份**安装包文件。**不构建、不追加说明**。
+fn locate_installer_file(repo_root: &Path) -> Result<PathBuf, AppError> {
     let plan = installer_plan().ok_or_else(|| {
         AppError::invalid_argument(format!(
             "本机是 {} —— 安装包只在 macOS（dmg）与 Windows（NSIS）上构建",
@@ -1740,34 +1743,7 @@ fn locate_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
             plan.dir, plan.ext
         ))
         .with_detail(dir.display().to_string())),
-        [one] => {
-            // ★ 只有 macOS 的 dmg 要追加「安装说明 + 终端快捷方式」：应用未签名，macOS 会拦
-            //   "浏览器下载"的第一次打开（"已损坏"）—— 让 dmg 自己带着解法（2026-10-06 真机踩的）。
-            //   说明文档能直接打开；终端快捷方式指向 Apple 签名的系统应用，也不会被拦。
-            //   ★ 刻意不放可执行脚本 —— 脚本和应用一样被隔离拦下，形同虚设。
-            //   ★ Windows 那边是另一回事（SmartScreen 警告，解法在 Release 说明里），
-            //     这一步帮不上忙，也不假装帮 —— 不往 .exe 里塞东西。
-            if cfg!(target_os = "macos") {
-                let dmg_path = one.display().to_string();
-                let patched = std::process::Command::new("bash")
-                    .args(["scripts/patch-dmg-extras.sh", &dmg_path])
-                    .current_dir(repo_root)
-                    .output()
-                    .map_err(|e| {
-                        AppError::io("起不了 patch-dmg-extras").with_detail(e.to_string())
-                    })?;
-                if !patched.status.success() {
-                    return Err(AppError::io("安装包追加说明失败")
-                        .with_detail(String::from_utf8_lossy(&patched.stderr).trim().to_owned()));
-                }
-            }
-            /* 资产名必须用**磁盘上的真名**：Windows 自研安装器是 `…-setup.exe`，
-            按 `asset_name()` 模板拼会得到 `…_x64.exe`，清单与实际附件就对不上。 */
-            let name = artifact_name(one, || {
-                super::platform::asset_name(PRODUCT, &version_of(repo_root), arch_name(), plan.ext)
-            });
-            BuiltArtifact::new(one.clone(), name, plan.platform, plan.kind)
-        }
+        [one] => Ok(one.clone()),
         many => Err(AppError::io(format!(
             "bundle/{} 下不止一份 {} —— 自己确认要发哪一份",
             plan.dir, plan.ext
@@ -1779,6 +1755,49 @@ fn locate_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
                 .join("、"),
         )),
     }
+}
+
+/// macOS 的 dmg 追加「安装说明 + 终端快捷方式」：应用未签名，macOS 会拦"浏览器下载"的
+/// 第一次打开（"已损坏"）—— 让 dmg 自己带着解法。说明文档能直接打开；终端快捷方式指向
+/// Apple 签名的系统应用，也不会被拦。**刻意不放可执行脚本** —— 脚本和应用一样被隔离拦下。
+///
+/// Windows 不走这一步（SmartScreen 的解法在 Release 说明里），也不往 .exe 里塞东西。
+fn patch_dmg_extras(repo_root: &Path, dmg: &Path) -> Result<(), AppError> {
+    if !cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    let dmg_path = dmg.display().to_string();
+    let patched = std::process::Command::new("bash")
+        .args(["scripts/patch-dmg-extras.sh", &dmg_path])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| AppError::io("起不了 patch-dmg-extras").with_detail(e.to_string()))?;
+    if !patched.status.success() {
+        return Err(AppError::io("安装包追加说明失败")
+            .with_detail(String::from_utf8_lossy(&patched.stderr).trim().to_owned()));
+    }
+    Ok(())
+}
+
+/// 只补清单那趟：找到这一版的那一份，**不构建、不追加说明**（dmg 在构建时已经打过了）。
+fn locate_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
+    installer_artifact(repo_root, locate_installer_file(repo_root)?)
+}
+
+/// 磁盘上的那一份 → 产物事实（名字用磁盘真名，大小与 SHA 现算）。
+fn installer_artifact(repo_root: &Path, one: PathBuf) -> Result<BuiltArtifact, AppError> {
+    let plan = installer_plan().ok_or_else(|| {
+        AppError::invalid_argument(format!(
+            "本机是 {} —— 安装包只在 macOS（dmg）与 Windows（NSIS）上构建",
+            std::env::consts::OS
+        ))
+    })?;
+    /* 资产名必须用**磁盘上的真名**：Windows 自研安装器是 `…-setup.exe`，
+    按 `asset_name()` 模板拼会得到 `…_x64.exe`，清单与实际附件就对不上。 */
+    let name = artifact_name(&one, || {
+        super::platform::asset_name(PRODUCT, &version_of(repo_root), arch_name(), plan.ext)
+    });
+    BuiltArtifact::new(one, name, plan.platform, plan.kind)
 }
 
 /// 构建本平台安装包：macOS `npm run tauri -- build`，Windows `npm run build:installer`。
