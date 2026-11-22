@@ -81,7 +81,7 @@ pub fn create_formal_tag(
         summary.push(format!("正式 tag {tag} 已存在（同一笔），沿用"));
         return Ok(tag);
     }
-    git.tag(&tag, &format!("{tag} {}", notes.trim()))?;
+    git.tag_at(&tag, source_commit, &format!("{tag} {}", notes.trim()))?;
     git.push_tag(&tag)?;
     summary.push(format!("已打正式 tag {tag} → {}", short(source_commit)));
     Ok(tag)
@@ -266,13 +266,30 @@ pub fn commit_manifest(
         if git.branch_exists(&branch)? {
             git.switch(&branch)?;
         } else {
-            git.switch_new(&branch)?;
+            /* ★ 从 origin/main 起，不从当前 HEAD 起：否则 PR 会把本地别的提交带进来 */
+            git.switch_new_at(&branch, "origin/main")?;
         }
     }
     let staged = git.stage_allowed_in(
         std::slice::from_ref(&rel),
         &crate::workbench::app::git::RELEASE_STAGE_ALLOWLIST,
     )?;
+    /* 提交的是**整个索引**：别人事先 stage 的文件会跟着进这一笔，这里拦下来 */
+    let outside: Vec<String> = git
+        .staged_names()?
+        .into_iter()
+        .filter(|p| {
+            !crate::workbench::app::git::RELEASE_STAGE_ALLOWLIST
+                .iter()
+                .any(|a| a == p)
+        })
+        .collect();
+    if !outside.is_empty() {
+        return Err(AppError::invalid_argument(
+            "索引里还有不在发布白名单里的文件 —— 先清掉再发，否则它们会跟着清单一起提交",
+        )
+        .with_detail(outside.join("、")));
+    }
     if git.has_staged()? {
         git.commit(&super::manifest::pr_title(version))?;
         summary.push(format!("已提交清单（分支 {branch}）"));

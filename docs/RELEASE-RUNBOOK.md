@@ -56,13 +56,25 @@ GitHub  Release  draft:true         （草稿不创建 tag，封版那一刻才�
 封版时把同一批字节放进正式 Release：Gitee 只能重传（不能搬附件），GitHub 是把草稿
 改成正式 tag 再发布。清理时删掉 Gitee 暂存 Release 与 staging tag。
 
+## 2.5 三层判据（测试只测这六件责任）
+
+| 层 | 证明什么 | 何时跑 | 依赖 |
+| --- | --- | --- | --- |
+| 纯函数判据 | 状态派生、清单合并、封版六条 | 每次 PR | 无 |
+| 演练矩阵（`release::rehearsal`） | 冻结只建暂存面、补平台不丢资产、中断只补缺的源、身份读不懂就删重传、判据不足不封版、已封版重跑零写入、换机器从暂存面补字节、CI 失败停在上传前 | 每次 PR（`cargo test`） | 无网络 |
+| 只读探针（`ship --probe`） | 适配器仍读得懂真接口（Gitee 200/null、GitHub 草稿、资产身份字段） | 发版前手动 | 两枚 token |
+
+外部接口的事实与应对写在 [`RELEASE-CONTRACT.md`](RELEASE-CONTRACT.md)。**不给第三方 API 写全量契约测试**：
+上传/下载/删除/列表的通用行为由真实发布那一次覆盖。
+
 ## 3. 命令
 
 ```bash
 npm run ship -- --check                          # 只读：到哪一步、下一步做什么
+npm run ship -- --probe                          # 只读：三条接口事实还成立吗（发版前）
 npm run ship -- --what stable --dry-run          # 演练：零写入
 npm run ship -- --what stable --confirm          # 真发（要人当次许可）
-npm run ship -- --what stable --confirm --stop-after staging --platform windows
+npm run ship -- --what stable --confirm --stop-after staging --platform windows   # 验收用：只做一半
 ```
 
 它自己判断下一件事：冻结 → 构建（本机 macOS / CI Windows）→ 暂存 → 清单 PR（等 CI 绿、

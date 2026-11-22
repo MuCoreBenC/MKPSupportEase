@@ -393,6 +393,22 @@ pub trait Hosting {
         Err(platform_not_supported(self.kind()))
     }
 
+    /// 把远端的一份资产下载到本机（**换机器续跑 / 封版重传**用）。
+    ///
+    /// 默认不支持：没有这条能力的平台如实报错，不假装成功。
+    fn download_asset(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _url: &str,
+        _dest: &std::path::Path,
+    ) -> Result<u64, AppError> {
+        Err(AppError::invalid_argument(format!(
+            "{} 平台不支持把资产下载回本地",
+            self.kind()
+        )))
+    }
+
     /// 这一份 Release 上的**资产身份**（名 + 大小 + 摘要 + 平台侧 id）。
     ///
     /// 状态派生只认它：同名同大小同摘要 = 同一份字节，重跑直接跳过上传。

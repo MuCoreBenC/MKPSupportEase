@@ -614,6 +614,28 @@ impl Git {
         Ok(())
     }
 
+    /// 从**指定起点**开分支。
+    ///
+    /// ★ 清单 PR 必须从 `origin/main` 起：从当前 HEAD 起会把本地那堆未合并的提交
+    /// （或者一条落后的分支）一起带进 PR，diff 里就多出与清单无关的东西。
+    pub fn switch_new_at(&self, branch: &str, start: &str) -> Result<(), AppError> {
+        self.run(&["switch", "-c", branch, start])?;
+        Ok(())
+    }
+
+    /// 索引里已经 stage 的路径（只读）。
+    ///
+    /// 用来核对"这次提交确实只有白名单那几份"：`git commit` 提交的是**整个索引**，
+    /// 仓库里如果事先有人 stage 了别的文件，它们会跟着一起进提交。
+    pub fn staged_names(&self) -> Result<Vec<String>, AppError> {
+        Ok(self
+            .run(&["diff", "--cached", "--name-only"])?
+            .lines()
+            .map(|l| l.trim().to_owned())
+            .filter(|l| !l.is_empty())
+            .collect())
+    }
+
     /// 快进拉取（`git pull --ff-only <remote> <branch>`）。
     ///
     /// ★ **只许 ff-only**：非快进的 pull 会在本地造一个合并提交，而"tag 打在 main 的 tip 上"
@@ -630,6 +652,16 @@ impl Git {
     /// main 上却没有"的那一类错；`pre-push` 闸⑤ 也按"是 main 的祖先"判。
     pub fn tag(&self, name: &str, message: &str) -> Result<(), AppError> {
         self.run(&["tag", "-a", name, "-m", message])?;
+        Ok(())
+    }
+
+    /// 在**指定提交**上打 annotated tag。
+    ///
+    /// ★ 与 [`tag`](Self::tag) 的差别是语义级的：封版 tag 必须指向**被构建的那一笔**
+    /// （冻结源码），而 `git tag -a <name>` 打在当前 HEAD 上 —— 清单 PR 合并之后 HEAD
+    /// 已经前移，那样打出来的 tag 与这一代的源码不是同一笔。
+    pub fn tag_at(&self, name: &str, commit: &str, message: &str) -> Result<(), AppError> {
+        self.run(&["tag", "-a", name, commit, "-m", message])?;
         Ok(())
     }
 

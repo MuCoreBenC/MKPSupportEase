@@ -184,7 +184,9 @@ pub fn upload_missing(
     for f in facts {
         let remote = existing.iter().find(|a| a.name == f.name);
         if let Some(a) = remote {
-            let same_size = a.size.map(|s| s == f.size).unwrap_or(true);
+            /* ★ 读不到大小 = **不知道**，不是"一样大"：Gitee 的附件表要是回了个
+            形状异常（null / 缺 size），当成同字节就会把旧包留在正式面上而清单写新 SHA。 */
+            let same_size = a.size.map(|s| s == f.size).unwrap_or(false);
             let same_sha = a
                 .sha256
                 .as_deref()
@@ -230,6 +232,41 @@ pub fn upload_missing(
         uploaded.push(f.name.clone());
     }
     Ok(uploaded)
+}
+
+/// 拿到这一份的**本地文件**：同机的解包目录 → 暂存面下载（都核大小与 SHA）。
+///
+/// 封版要把同一批字节再传到正式 Release —— Gitee 不能服务端搬附件，所以必须在本机
+/// 有一份。换机器续跑时这一份就是从这里补回来的。
+pub fn ensure_local(
+    t: &Targets<'_>,
+    version: &str,
+    fact: &ArtifactFact,
+    repo_root: &std::path::Path,
+) -> Result<ArtifactFact, AppError> {
+    if let Some(p) = &fact.path {
+        if p.is_file() {
+            return Ok(fact.clone());
+        }
+    }
+    /* 同一台机器上 CI 解包过的那一份（在 target/release-artifacts 下） */
+    let art_root = repo_root.join("target").join("release-artifacts");
+    if let Some(p) = super::ci::find_in(&art_root, &fact.name) {
+        if let Ok(f) = fact.with_path(p) {
+            return Ok(f);
+        }
+    }
+    /* 从暂存面下一份（Gitee 的下载地址是公开的，不用令牌） */
+    let tag = staging_tag_of(version);
+    let dir = art_root.join(format!("resume-{version}"));
+    let dest = dir.join(&fact.name);
+    let url = format!(
+        "https://gitee.com/{}/{}/releases/download/{tag}/{}",
+        t.gitee_owner, t.gitee_repo, fact.name
+    );
+    t.gitee
+        .download_asset(&t.gitee_owner, &t.gitee_repo, &url, &dest)?;
+    fact.with_path(dest)
 }
 
 /// 暂存面上的资产清单（给状态派生用）。

@@ -347,6 +347,29 @@ impl Hosting for Gitee {
         }
     }
 
+    /// Gitee 的附件下载地址是公开的，直接 GET（大文件走流式，不整个进内存）。
+    fn download_asset(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        url: &str,
+        dest: &std::path::Path,
+    ) -> Result<u64, AppError> {
+        let resp = super::upload_agent()
+            .get(url)
+            .header("User-Agent", "SupportEase")
+            .call()
+            .map_err(transport)?;
+        let mut reader = resp.into_body().into_reader();
+        let mut written: u64 = 0;
+        crate::fsx::atomic::atomic_write_stream(dest, |file| {
+            written = std::io::copy(&mut reader, file)
+                .map_err(|e| AppError::io("下载资产失败").with_detail(e.to_string()))?;
+            Ok(())
+        })?;
+        Ok(written)
+    }
+
     /// Gitee 的 Release 对象**不带 size**，但 `/attach_files` 给（还带 id）。
     /// 两段读：先拿 release id，再读附件表。
     fn assets(&self, owner: &str, repo: &str, tag: &str) -> Result<Vec<RemoteAsset>, AppError> {
