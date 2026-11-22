@@ -478,11 +478,11 @@ fn mirrored_asset(
 /// 只在调用方给了 GitHub 通道（`hosting.kind() == "github"`）时调用：没有通道就不镜像，
 /// 清单也就不写 `sources.github` —— 写了就是一个下不到的地址。
 ///
+/// **幂等**：先问远端这一版已有哪几份，只补缺的。上传中途被打断之后重跑（InfoOnly）
+/// 不会重传已经在的那份，也不会因为"同名已存在"被 GitHub 拒。
+///
 /// 返回**真的在 GitHub 上**的那些：`.app.zip` 传不上去只剔掉它（这一版退回「打开下载页」），
 /// 其余产物传不上去是硬错（清单不许宣告一个下不到的地址）。
-///
-/// ★ 与 `gh release upload --clobber` 同一个语义：同名资产先清掉再传。不清的话重编同一版
-///   时 GitHub 会拒（422），而"跳过"会留下旧字节 —— 清单里的 SHA 与远端就对不上。
 fn mirror_artifacts<'a>(
     hosting: &dyn Hosting,
     target: &PublishTarget,
@@ -501,8 +501,15 @@ fn mirror_artifacts<'a>(
         prerelease: channel == release_info::UpdateChannel::Preview,
     })?;
     summary.push_str(&format!("GitHub Release {tag} 已就绪。"));
+    /* 中断恢复的判据就在这一句：远端已有的不再传。 */
+    let existing = hosting.release_assets(&target.owner, &target.repo, tag)?;
     let mut done: Vec<&BuiltArtifact> = Vec::new();
     for a in artifacts {
+        if existing.iter().any(|n| n == &a.name) {
+            summary.push_str(&format!("GitHub 上已有：{}。", a.name));
+            done.push(a);
+            continue;
+        }
         let put = hosting.upload_asset(&super::platform::AssetUpload {
             owner: target.owner.clone(),
             repo: target.repo.clone(),
@@ -756,7 +763,9 @@ fn run_inner(
     }
     // ★ 版本撞车**按平台判**（2026-10-07）：tag 打了不等于这一版发不了 ——
     //   同一版本可以补别的平台的包（见 [`ReleaseSlot`]）。
-    //   不构建（`--no-build`）的那几趟没有"平台"可言，照老规矩：tag 不是 HEAD 就当它被占。
+    //
+    // ★★ 问的是**发布仓库**（`release` / Gitee），不是代码仓库的镜像：GitHub 缺一份
+    //    不代表这一版没发过（2026-11-22 真机：Gitee 两份齐、GitHub 只有安装包）。
     let mut slot = ReleaseSlot::Fresh;
     if opts.build {
         match release_slot(&git, &tag, release) {
@@ -769,7 +778,19 @@ fn run_inner(
             // 问不到（没发布通道 / 网络）就不往下走：不猜"还没发过"
             Err(e) => blocked.push(e.message),
         }
-    } else if git.tag_exists(&tag)? && !tag_points_at_head(&git, &tag) {
+    } else if let Some(ch) = release {
+        /* 不构建的趟也要问一句：只有先知道「这是补清单」，后面 tag≠HEAD 那条才敢放行。 */
+        if let Ok(s) = release_slot(&git, &tag, Some(ch)) {
+            slot = s;
+        }
+    }
+    /* 不构建的趟：tag 存在又不是 HEAD，只拦**还会重新构建**的（`Append`）；
+    只补清单那趟不构建，不该被这条挡（2026-11-22：tag 之后又合了修复 PR 就补不了清单）。 */
+    if !opts.build
+        && !matches!(slot, ReleaseSlot::InfoOnly)
+        && git.tag_exists(&tag)?
+        && !tag_points_at_head(&git, &tag)
+    {
         blocked.push(format!(
             "tag `{tag}` 已经存在。换一个版本号，或先确认那一版发到哪了"
         ));
@@ -1153,8 +1174,9 @@ fn run_inner(
         ));
     }
 
-    /* 不构建的趟（只验编排 / 只打 tag）到此为止：没有产物可建 Release。 */
-    if !opts.build {
+    /* 不构建的趟（只验编排 / 只打 tag）到此为止：没有产物可建 Release。
+     **只补清单**是例外：它不构建，但仍要补镜像缺口、写清单（2026-11-22）。 */
+    if !opts.build && !info_only {
         report.summary.push_str("（本次不构建安装包，到 tag 为止）");
         return Ok(report);
     }
@@ -1246,21 +1268,27 @@ fn run_inner(
      *
      * 只在调用方给了 GitHub 通道时做（`hosting.kind() == "github"`）：没有通道 = 这张
      * 清单就**不写** GitHub 源，而不是写一个没人传上去的地址。 */
-    /* 「有没有 GitHub 通道」与「这一趟要不要镜像」是两件事：只补清单那趟不传，
-    但清单里照样要写 GitHub 源（那一版早传过了）。 */
+    /* 「有没有 GitHub 通道」与「这一趟要不要镜像」是两件事：只补清单那趟也要补 ——
+    上传中途被打断时，缺的那一份正是它该补的（幂等，已有的不重传）。 */
     let gh_target = (hosting.kind() == "github").then_some(t);
-    if !info_only {
-        if let Some(t) = gh_target {
-            on_release = mirror_artifacts(
-                hosting,
-                t,
-                &tag,
-                &opts.notes,
-                opts.channel,
-                &on_release,
-                &mut report.summary,
-            )?;
+    /* 要镜像的清单：正常发版以 **Gitee 上传成功的那些**为准；
+    只补清单那趟没有上传记录，用本地产物（这一版已经在 Gitee 上）。 */
+    let to_mirror: Vec<&BuiltArtifact> = assets_for_manifest(&on_release, &artifacts);
+    let mut mirrored: Option<Vec<&BuiltArtifact>> = None;
+    if let Some(t) = gh_target {
+        let done = mirror_artifacts(
+            hosting,
+            t,
+            &tag,
+            &opts.notes,
+            opts.channel,
+            &to_mirror,
+            &mut report.summary,
+        )?;
+        if !info_only {
+            on_release = done.clone();
         }
+        mirrored = Some(done);
     }
 
     /* ---------- ⑨ 写清单（`release.json` / `release-preview.json`）→ 它自己的分支与 PR
@@ -1288,9 +1316,20 @@ fn run_inner(
     /* 双平台 / 双源资产：**从同一份产物列表摊开** —— 平台与类型读产物自己带的那两个词，
     不在这一层再判一次（从前这里写死 `windows/nsis`，macOS 的 dmg 就被标成 Windows）。
     主地址 Gitee，`sources.github` 给选了 GitHub 的客户端。 */
-    /* `sources.github` 只在**有 GitHub 通道**时写：镜像通道与上传目标是同一对 owner/repo。 */
-    let gh = gh_target.map(|t| (t.owner.clone(), t.repo.clone()));
     let listed = assets_for_manifest(&on_release, &artifacts);
+    /* `sources.github` 只在**这一版每一份都在 GitHub 上**时写：
+    少一份还写，客户端就会拿到一个 404 地址（2026-11-22 真机踩过）。 */
+    let gh = match (gh_target, &mirrored) {
+        (Some(t), Some(done)) if done.len() == listed.len() => {
+            Some((t.owner.clone(), t.repo.clone()))
+        }
+        _ => None,
+    };
+    if gh.is_none() && gh_target.is_some() {
+        report
+            .summary
+            .push_str("GitHub 上还差资产，清单这次不写 GitHub 源。");
+    }
     let platform_assets = manifest_assets(&listed, &g.owner, &g.repo, &tag, gh.as_ref());
     /* 只补清单（tag/产物都在）时没有新构建：保留上一份的 assets，一个字节都不改。
     补平台时本平台整组替换、**别的平台原样留住**（不合并就会把另一平台的包抹掉）。 */
@@ -3821,6 +3860,332 @@ mod tests {
         let got = locate_portable(d.path(), "0.0.15").unwrap().unwrap();
         assert_eq!(got.name, "SupportEase_0.0.15_x64-portable.zip");
         assert!(locate_portable(d.path(), "0.0.16").unwrap().is_none());
+    }
+
+    /* ---------- 中断恢复：一端缺一份 → 重跑只补清单（2026-11-22） ---------- */
+
+    /// 最小合法绿色版 zip：产物校验会真去打开它，找 `SupportEase.exe` 与卸载器。
+    ///
+    /// 先写进内存再走 `fsx::atomic` 落盘 —— 仓库禁止直接 `File::create`。
+    fn write_min_zip(path: &Path) {
+        use std::io::Write;
+        let mut buf = std::io::Cursor::new(Vec::new());
+        {
+            let mut w = zip::ZipWriter::new(&mut buf);
+            for name in ["SupportEase.exe", "卸载 SupportEase.exe"] {
+                w.start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                w.write_all(b"x").unwrap();
+            }
+            w.finish().unwrap();
+        }
+        crate::fsx::atomic::atomic_write(path, buf.get_ref()).expect("写假绿色版");
+    }
+
+    /// 造「这一版两份产物已经在磁盘上」的现场。
+    fn put_this_versions_artifacts(root: &Path, version: &str) -> (String, String) {
+        let plan = installer_plan().expect("判据跑在能打包的平台上");
+        let dir = root.join("target/release/bundle").join(plan.dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let setup = format!("SupportEase_{version}_x64.{}", plan.ext);
+        crate::fsx::atomic::atomic_write(&dir.join(&setup), b"setup-bytes").unwrap();
+        let portable_dir = root.join("dist-portable");
+        std::fs::create_dir_all(&portable_dir).unwrap();
+        let portable = format!("SupportEase_{version}_x64-portable.zip");
+        write_min_zip(&portable_dir.join(&portable));
+        (setup, portable)
+    }
+
+    /// 中断恢复的完整现场：能推的仓库（feat 分支 + 裸 origin）、这一版两份产物、
+    /// tag 已打在 HEAD 上、清单还没写成这一版。
+    #[allow(clippy::type_complexity)]
+    fn info_only_fixture(
+        version: &str,
+    ) -> (
+        tempfile::TempDir,
+        tempfile::TempDir,
+        String,
+        String,
+        PublishTarget,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let bare = tempfile::tempdir().unwrap();
+        std::process::Command::new("git")
+            .args(["init", "-q", "--bare"])
+            .current_dir(bare.path())
+            .status()
+            .unwrap();
+        let git = init_repo(dir.path(), "main");
+        /* 产物目录不进 git —— 否则临时仓库里会先被"工作区不干净"那条预检拦住 */
+        crate::fsx::atomic::atomic_write(
+            &dir.path().join(".gitignore"),
+            b"target/\ndist-portable/\n",
+        )
+        .unwrap();
+        for args in [
+            vec!["add", ".gitignore"],
+            vec!["commit", "-q", "-m", "ignore artifacts"],
+        ] {
+            let out = std::process::Command::new("git")
+                .args(&args)
+                .current_dir(dir.path())
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        let origin = bare.path().to_string_lossy().to_string();
+        std::process::Command::new("git")
+            .args(["remote", "add", "origin", &origin])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        git.push("main").expect("推 main");
+        std::process::Command::new("git")
+            .args(["checkout", "-q", "-b", "feat/demo"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        git.tag(&tag_of(version), &tag_of(version)).expect("打 tag");
+        let (setup, portable) = put_this_versions_artifacts(dir.path(), version);
+        let target = PublishTarget {
+            platform: "fake".to_owned(),
+            repository_url: origin,
+            username: "u".to_owned(),
+            token: "t".to_owned(),
+            owner: "o".to_owned(),
+            repo: "r".to_owned(),
+        };
+        (dir, bare, setup, portable, target)
+    }
+
+    fn info_only_opts(version: &str) -> ReleaseOptions {
+        ReleaseOptions {
+            version: Some(version.to_owned()),
+            notes: "补清单".to_owned(),
+            merge: true,
+            build: false,
+            confirmed: true,
+            ..ReleaseOptions::default()
+        }
+    }
+
+    /// ★ 用户点名的场景：Gitee 两份都已上传、GitHub 只上传一份 → 重跑只补清单。
+    /// 缺的那份要补上，已有的不重传，清单两源的 name/size/SHA/URL 全对。
+    #[test]
+    fn info_only_fills_the_missing_mirror_asset() {
+        let version = "0.0.2";
+        let (dir, _bare, setup, portable, target) = info_only_fixture(version);
+        let root = dir.path();
+
+        /* `target` / `hosting` 是**代码仓**（origin），`release` 才是发布仓（Gitee） */
+        let gh = FakeHosting {
+            kind: "github",
+            ..Default::default()
+        };
+        /* 中断现场：GitHub 上只有安装包，绿色版那份没传上去 */
+        *gh.assets.borrow_mut() = vec![setup.clone()];
+        let gitee = FakeHosting::default();
+        *gitee.assets.borrow_mut() = vec![setup.clone(), portable.clone()];
+        let gitee_target = PublishTarget {
+            platform: "gitee".to_owned(),
+            ..target.clone()
+        };
+        let channel = ReleaseChannel {
+            hosting: &gitee,
+            target: &gitee_target,
+        };
+
+        let report = run(
+            root,
+            &info_only_opts(version),
+            Some(&target),
+            Some(&gh),
+            Some(&channel),
+        )
+        .expect("补清单该跑通");
+
+        assert_eq!(
+            report.stage,
+            ReleaseStage::InfoReviewOpened,
+            "{}",
+            report.summary
+        );
+        assert_eq!(
+            *gh.uploads.borrow(),
+            vec![portable.clone()],
+            "只补缺的那一份"
+        );
+        assert!(gitee.uploads.borrow().is_empty(), "已有的不重传");
+
+        let text = std::fs::read_to_string(root.join(RELEASE_INFO_REL)).unwrap();
+        let info = release_info::parse(text.as_bytes()).unwrap();
+        assert_eq!(info.version, version);
+        let assets = info.assets.as_deref().expect("该有两份资产");
+        assert_eq!(assets.len(), 2, "{assets:?}");
+        for a in assets {
+            let on_disk = if a.name.ends_with(".zip") {
+                root.join("dist-portable").join(&a.name)
+            } else {
+                root.join("target/release/bundle")
+                    .join(installer_plan().unwrap().dir)
+                    .join(&a.name)
+            };
+            assert_eq!(
+                a.sha256,
+                sha256_file(&on_disk).unwrap(),
+                "{} 的 SHA 必须来自磁盘这一份",
+                a.name
+            );
+            let src = a.sources.as_ref().expect("两源都要写");
+            assert!(
+                src.get("gitee")
+                    .is_some_and(|u| u.contains(&format!("/{}/", tag_of(version)))),
+                "{src:?}"
+            );
+            assert!(
+                src.get("github")
+                    .is_some_and(|u| u.contains(&format!("/{}/", tag_of(version)))),
+                "{src:?}"
+            );
+        }
+    }
+
+    /// InfoOnly 不构建、不重打 tag；**tag 之后又合了别的提交也放行**（这次 0.0.15 的真实现场）。
+    #[test]
+    fn info_only_runs_without_rebuilding_or_retagging() {
+        let version = "0.0.2";
+        let (dir, _bare, setup, portable, target) = info_only_fixture(version);
+        let root = dir.path();
+        let git = Git::open(root);
+        let tag_commit = git.rev_parse(&tag_of(version)).unwrap();
+
+        /* tag 之后又合了一笔（= 生产上"补清单前先合了修复 PR"），HEAD 不再等于 tag */
+        crate::fsx::atomic::atomic_write(&root.join("b.txt"), b"x").unwrap();
+        for args in [
+            vec!["add", "b.txt"],
+            vec!["commit", "-q", "-m", "after tag"],
+        ] {
+            let out = std::process::Command::new("git")
+                .args(&args)
+                .current_dir(root)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        assert_ne!(
+            git.rev_parse("HEAD").unwrap(),
+            tag_commit,
+            "现场要造对：HEAD 必须已经前进"
+        );
+
+        let gh = FakeHosting {
+            kind: "github",
+            ..Default::default()
+        };
+        *gh.assets.borrow_mut() = vec![setup.clone(), portable.clone()];
+        let gitee = FakeHosting::default();
+        *gitee.assets.borrow_mut() = vec![setup.clone(), portable.clone()];
+        let gitee_target = PublishTarget {
+            platform: "gitee".to_owned(),
+            ..target.clone()
+        };
+
+        let report = run(
+            root,
+            &info_only_opts(version),
+            Some(&target),
+            Some(&gh),
+            Some(&ReleaseChannel {
+                hosting: &gitee,
+                target: &gitee_target,
+            }),
+        )
+        .expect("只补清单不构建，tag 不该成为前置条件");
+
+        assert_eq!(report.stage, ReleaseStage::InfoReviewOpened);
+        assert_eq!(
+            git.rev_parse(&tag_of(version)).unwrap(),
+            tag_commit,
+            "tag 不许被重打"
+        );
+        assert!(
+            report.summary.contains("本次不构建安装包"),
+            "{}",
+            report.summary
+        );
+        assert!(gh.uploads.borrow().is_empty(), "两份都在，一份都不该重传");
+    }
+
+    /// 补镜像失败 ⇒ 整趟如实失败，清单一个字节都不写（不许承诺下不到的地址）。
+    #[test]
+    fn a_failed_mirror_top_up_fails_before_the_manifest() {
+        let version = "0.0.2";
+        let (dir, _bare, setup, portable, target) = info_only_fixture(version);
+        let root = dir.path();
+        let gh = FakeHosting {
+            kind: "github",
+            ..Default::default()
+        };
+        *gh.assets.borrow_mut() = vec![setup.clone()];
+        *gh.fail.borrow_mut() = vec![portable.clone()];
+        let gitee = FakeHosting::default();
+        *gitee.assets.borrow_mut() = vec![setup.clone(), portable.clone()];
+        let gitee_target = PublishTarget {
+            platform: "gitee".to_owned(),
+            ..target.clone()
+        };
+
+        let err = run(
+            root,
+            &info_only_opts(version),
+            Some(&target),
+            Some(&gh),
+            Some(&ReleaseChannel {
+                hosting: &gitee,
+                target: &gitee_target,
+            }),
+        )
+        .unwrap_err();
+
+        assert!(err.message.contains("假上传失败"), "{}", err.message);
+        assert!(
+            !root.join(RELEASE_INFO_REL).exists(),
+            "补镜像失败之后不许写清单"
+        );
+    }
+
+    /// 清单提交只收白名单路径：混进来的代码文件**一个都不许 stage**。
+    ///
+    /// 2026-11-22 的教训：清单 PR 夹带了别的提交，根因是建分支时基于了带改动的分支。
+    /// 这一条把"即使候选里混进代码，也只提交清单"钉成判据。
+    #[test]
+    fn stage_allowed_in_drops_files_outside_the_release_list() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        init_repo(root, "feat/demo");
+        let git = Git::open(root);
+        std::fs::create_dir_all(root.join("presets/delivery")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        crate::fsx::atomic::atomic_write(&root.join(RELEASE_INFO_REL), b"{}").unwrap();
+        crate::fsx::atomic::atomic_write(&root.join("src/evil.rs"), b"fn main() {}").unwrap();
+
+        let staged = git
+            .stage_allowed_in(
+                &[RELEASE_INFO_REL.to_owned(), "src/evil.rs".to_owned()],
+                &RELEASE_STAGE_ALLOWLIST,
+            )
+            .unwrap();
+
+        assert_eq!(staged, vec![RELEASE_INFO_REL.to_owned()]);
+        assert!(git.has_staged().unwrap());
     }
 
     /// 清单里的平台 / 类型 / SHA 必须**来自产物自己**：这一层没有字面量可写，
