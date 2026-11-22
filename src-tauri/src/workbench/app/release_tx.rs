@@ -1023,6 +1023,15 @@ fn run_inner(
     } else {
         report.summary.push_str("（本次不构建安装包）");
     }
+    /* **只补清单**那一趟：不构建、不重传，但清单要写的是**这一版真实的资产**。
+    从磁盘上找这一版的两份（还没有就如实报），不拿上一版的名单顶上 ——
+    上一版的名字带上一版的号，URL 却指向这一趟的 tag，客户端会下到 404。 */
+    if info_only {
+        artifacts.push(locate_installer(repo_root)?);
+        if let Some(p) = locate_portable(repo_root, &version)? {
+            artifacts.push(p);
+        }
+    }
     if let Some(b) = artifacts.iter().find(|a| a.kind != "portable") {
         report.artifact = Some(ArtifactInfo {
             name: b.name.clone(),
@@ -1030,7 +1039,9 @@ fn run_inner(
             path: b.path.display().to_string(),
         });
         report.stage = ReleaseStage::Built;
-        report.summary.push_str(&format!("已构建 {}。", b.name));
+        if !info_only {
+            report.summary.push_str(&format!("已构建 {}。", b.name));
+        }
     }
     if let Some(p) = artifacts.iter().find(|a| a.kind == "portable") {
         report.portable = Some(ArtifactInfo {
@@ -1694,18 +1705,25 @@ fn assert_artifact_speaks_version(repo_root: &Path, want: &str) -> Result<(), Ap
 
 fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
     assert_no_stale_bundles(repo_root, &version_of(repo_root))?;
+    let out = npm_build(repo_root)?;
+    if !out.status.success() {
+        return Err(AppError::io("构建安装包失败")
+            .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
+    }
+    /* 追加说明必须在**造 BuiltArtifact 之前**：它改的是文件字节，大小与 SHA 都跟着变 */
+    let one = locate_installer_file(repo_root)?;
+    patch_dmg_extras(repo_root, &one)?;
+    installer_artifact(repo_root, one)
+}
+
+/// 从 `bundle/<本平台>` 找**唯一一份**安装包文件。**不构建、不追加说明**。
+fn locate_installer_file(repo_root: &Path) -> Result<PathBuf, AppError> {
     let plan = installer_plan().ok_or_else(|| {
         AppError::invalid_argument(format!(
             "本机是 {} —— 安装包只在 macOS（dmg）与 Windows（NSIS）上构建",
             std::env::consts::OS
         ))
     })?;
-
-    let out = npm_build(repo_root)?;
-    if !out.status.success() {
-        return Err(AppError::io("构建安装包失败")
-            .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
-    }
 
     let dir = bundle_dir(repo_root, plan.dir).ok_or_else(|| {
         AppError::io(format!("找不到安装包目录（构建没产出 {}？）", plan.ext))
@@ -1725,34 +1743,7 @@ fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
             plan.dir, plan.ext
         ))
         .with_detail(dir.display().to_string())),
-        [one] => {
-            // ★ 只有 macOS 的 dmg 要追加「安装说明 + 终端快捷方式」：应用未签名，macOS 会拦
-            //   "浏览器下载"的第一次打开（"已损坏"）—— 让 dmg 自己带着解法（2026-10-06 真机踩的）。
-            //   说明文档能直接打开；终端快捷方式指向 Apple 签名的系统应用，也不会被拦。
-            //   ★ 刻意不放可执行脚本 —— 脚本和应用一样被隔离拦下，形同虚设。
-            //   ★ Windows 那边是另一回事（SmartScreen 警告，解法在 Release 说明里），
-            //     这一步帮不上忙，也不假装帮 —— 不往 .exe 里塞东西。
-            if cfg!(target_os = "macos") {
-                let dmg_path = one.display().to_string();
-                let patched = std::process::Command::new("bash")
-                    .args(["scripts/patch-dmg-extras.sh", &dmg_path])
-                    .current_dir(repo_root)
-                    .output()
-                    .map_err(|e| {
-                        AppError::io("起不了 patch-dmg-extras").with_detail(e.to_string())
-                    })?;
-                if !patched.status.success() {
-                    return Err(AppError::io("安装包追加说明失败")
-                        .with_detail(String::from_utf8_lossy(&patched.stderr).trim().to_owned()));
-                }
-            }
-            /* 资产名必须用**磁盘上的真名**：Windows 自研安装器是 `…-setup.exe`，
-            按 `asset_name()` 模板拼会得到 `…_x64.exe`，清单与实际附件就对不上。 */
-            let name = artifact_name(one, || {
-                super::platform::asset_name(PRODUCT, &version_of(repo_root), arch_name(), plan.ext)
-            });
-            BuiltArtifact::new(one.clone(), name, plan.platform, plan.kind)
-        }
+        [one] => Ok(one.clone()),
         many => Err(AppError::io(format!(
             "bundle/{} 下不止一份 {} —— 自己确认要发哪一份",
             plan.dir, plan.ext
@@ -1764,6 +1755,49 @@ fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
                 .join("、"),
         )),
     }
+}
+
+/// macOS 的 dmg 追加「安装说明 + 终端快捷方式」：应用未签名，macOS 会拦"浏览器下载"的
+/// 第一次打开（"已损坏"）—— 让 dmg 自己带着解法。说明文档能直接打开；终端快捷方式指向
+/// Apple 签名的系统应用，也不会被拦。**刻意不放可执行脚本** —— 脚本和应用一样被隔离拦下。
+///
+/// Windows 不走这一步（SmartScreen 的解法在 Release 说明里），也不往 .exe 里塞东西。
+fn patch_dmg_extras(repo_root: &Path, dmg: &Path) -> Result<(), AppError> {
+    if !cfg!(target_os = "macos") {
+        return Ok(());
+    }
+    let dmg_path = dmg.display().to_string();
+    let patched = std::process::Command::new("bash")
+        .args(["scripts/patch-dmg-extras.sh", &dmg_path])
+        .current_dir(repo_root)
+        .output()
+        .map_err(|e| AppError::io("起不了 patch-dmg-extras").with_detail(e.to_string()))?;
+    if !patched.status.success() {
+        return Err(AppError::io("安装包追加说明失败")
+            .with_detail(String::from_utf8_lossy(&patched.stderr).trim().to_owned()));
+    }
+    Ok(())
+}
+
+/// 只补清单那趟：找到这一版的那一份，**不构建、不追加说明**（dmg 在构建时已经打过了）。
+fn locate_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
+    installer_artifact(repo_root, locate_installer_file(repo_root)?)
+}
+
+/// 磁盘上的那一份 → 产物事实（名字用磁盘真名，大小与 SHA 现算）。
+fn installer_artifact(repo_root: &Path, one: PathBuf) -> Result<BuiltArtifact, AppError> {
+    let plan = installer_plan().ok_or_else(|| {
+        AppError::invalid_argument(format!(
+            "本机是 {} —— 安装包只在 macOS（dmg）与 Windows（NSIS）上构建",
+            std::env::consts::OS
+        ))
+    })?;
+    /* 资产名必须用**磁盘上的真名**：Windows 自研安装器是 `…-setup.exe`，
+    按 `asset_name()` 模板拼会得到 `…_x64.exe`，清单与实际附件就对不上。 */
+    let name = artifact_name(&one, || {
+        super::platform::asset_name(PRODUCT, &version_of(repo_root), arch_name(), plan.ext)
+    });
+    BuiltArtifact::new(one, name, plan.platform, plan.kind)
 }
 
 /// 构建本平台安装包：macOS `npm run tauri -- build`，Windows `npm run build:installer`。
@@ -1779,7 +1813,16 @@ fn build_portable(repo_root: &Path, version: &str) -> Result<BuiltArtifact, AppE
         return Err(AppError::io("构建绿色版失败")
             .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
     }
+    locate_portable(repo_root, version)?
+        .ok_or_else(|| AppError::io(format!("dist-portable 下没有 {version} 的绿色版 zip")))
+}
+
+/// 找 `dist-portable` 下这一版的 zip。**不构建**（InfoOnly 只补清单时用）；没有 = `None`。
+fn locate_portable(repo_root: &Path, version: &str) -> Result<Option<BuiltArtifact>, AppError> {
     let dir = repo_root.join("dist-portable");
+    if !dir.is_dir() {
+        return Ok(None);
+    }
     let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map_err(|e| AppError::io("读不了绿色版产物目录").with_detail(e.to_string()))?
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -1792,17 +1835,27 @@ fn build_portable(repo_root: &Path, version: &str) -> Result<BuiltArtifact, AppE
         })
         .collect();
     found.sort();
-    let [one] = found.as_slice() else {
-        return Err(AppError::io(format!(
-            "dist-portable 下没有 {version} 的绿色版 zip"
-        )));
-    };
-    let name = one
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or_default()
-        .to_owned();
-    BuiltArtifact::new(one.clone(), name, "windows", "portable")
+    match found.as_slice() {
+        [] => Ok(None),
+        [one] => {
+            let name = one
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            BuiltArtifact::new(one.clone(), name, "windows", "portable").map(Some)
+        }
+        many => Err(AppError::io(format!(
+            "dist-portable 下有 {} 份 {version} 的绿色版 —— 自己确认要发哪一份",
+            many.len()
+        ))
+        .with_detail(
+            many.iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("、"),
+        )),
+    }
 }
 
 /// 走的是 `CreateProcess`，它**不会**替你补 `.cmd` 后缀 —— 直接起会报"程序找不到"。
@@ -3659,6 +3712,39 @@ mod tests {
             validate_built_artifacts(&[built, broken], "0.0.13").is_err(),
             "坏 zip 必须被拒"
         );
+    }
+
+    /// 只补清单那一趟（InfoOnly）：从磁盘上找到**这一版**的那一份，不构建。
+    ///
+    /// 找不到就必须报错 —— 拿上一版的名单顶上会写成"0.0.15 的版本号 + 0.0.14 的文件名"，
+    /// 客户端按这个 URL 去下只会 404。
+    #[test]
+    fn info_only_locates_the_artifacts_already_on_disk() {
+        let Some(plan) = installer_plan() else {
+            return;
+        };
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("target/release/bundle").join(plan.dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let setup = dir.join(format!("SupportEase_0.0.15_x64.{}", plan.ext));
+        crate::fsx::atomic::atomic_write(&setup, b"setup").unwrap();
+        let got = locate_installer(d.path()).unwrap();
+        assert_eq!(got.size, 5);
+        assert!(got.name.contains("0.0.15"), "{}", got.name);
+    }
+
+    /// 绿色版同理：这一版的 zip 在就找到，没有就是 `None`（不报错，非 Windows 本来就没有）。
+    #[test]
+    fn locate_portable_finds_this_versions_zip_or_says_none() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("dist-portable");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(locate_portable(d.path(), "0.0.15").unwrap().is_none());
+        let zip = dir.join("SupportEase_0.0.15_x64-portable.zip");
+        crate::fsx::atomic::atomic_write(&zip, b"zip").unwrap();
+        let got = locate_portable(d.path(), "0.0.15").unwrap().unwrap();
+        assert_eq!(got.name, "SupportEase_0.0.15_x64-portable.zip");
+        assert!(locate_portable(d.path(), "0.0.16").unwrap().is_none());
     }
 
     /// 清单里的平台 / 类型 / SHA 必须**来自产物自己**：这一层没有字面量可写，
