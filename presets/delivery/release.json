@@ -3,7 +3,41 @@
   "version": "0.0.15",
   "notes": "更新提示不再比当前版本旧；状态标签对齐",
   "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.15",
+  "asset": {
+    "name": "SupportEase_0.0.15_aarch64.app.zip",
+    "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.15/SupportEase_0.0.15_aarch64.app.zip",
+    "size": 9346203,
+    "sha256": "f660e6f54e51906bbed07f2c26097df4e1c907e6ad6070156bc6ab838ec0591e",
+    "sources": {
+      "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.15/SupportEase_0.0.15_aarch64.app.zip",
+      "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.15/SupportEase_0.0.15_aarch64.app.zip"
+    }
+  },
   "assets": [
+    {
+      "name": "SupportEase_0.0.15_aarch64.dmg",
+      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.15/SupportEase_0.0.15_aarch64.dmg",
+      "size": 10354872,
+      "sha256": "43fad947bf27092d3d41ed42688dbe339323f89154d7ecfa32d22acc7540c646",
+      "platform": "macos",
+      "kind": "dmg",
+      "sources": {
+        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.15/SupportEase_0.0.15_aarch64.dmg",
+        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.15/SupportEase_0.0.15_aarch64.dmg"
+      }
+    },
+    {
+      "name": "SupportEase_0.0.15_aarch64.app.zip",
+      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.15/SupportEase_0.0.15_aarch64.app.zip",
+      "size": 9346203,
+      "sha256": "f660e6f54e51906bbed07f2c26097df4e1c907e6ad6070156bc6ab838ec0591e",
+      "platform": "macos",
+      "kind": "appZip",
+      "sources": {
+        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.15/SupportEase_0.0.15_aarch64.app.zip",
+        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.15/SupportEase_0.0.15_aarch64.app.zip"
+      }
+    },
     {
       "name": "SupportEase_0.0.15_x64-setup.exe",
       "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.15/SupportEase_0.0.15_x64-setup.exe",
