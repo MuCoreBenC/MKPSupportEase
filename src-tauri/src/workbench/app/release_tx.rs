@@ -1023,6 +1023,15 @@ fn run_inner(
     } else {
         report.summary.push_str("（本次不构建安装包）");
     }
+    /* **只补清单**那一趟：不构建、不重传，但清单要写的是**这一版真实的资产**。
+    从磁盘上找这一版的两份（还没有就如实报），不拿上一版的名单顶上 ——
+    上一版的名字带上一版的号，URL 却指向这一趟的 tag，客户端会下到 404。 */
+    if info_only {
+        artifacts.push(locate_installer(repo_root)?);
+        if let Some(p) = locate_portable(repo_root, &version)? {
+            artifacts.push(p);
+        }
+    }
     if let Some(b) = artifacts.iter().find(|a| a.kind != "portable") {
         report.artifact = Some(ArtifactInfo {
             name: b.name.clone(),
@@ -1030,7 +1039,9 @@ fn run_inner(
             path: b.path.display().to_string(),
         });
         report.stage = ReleaseStage::Built;
-        report.summary.push_str(&format!("已构建 {}。", b.name));
+        if !info_only {
+            report.summary.push_str(&format!("已构建 {}。", b.name));
+        }
     }
     if let Some(p) = artifacts.iter().find(|a| a.kind == "portable") {
         report.portable = Some(ArtifactInfo {
@@ -1694,18 +1705,22 @@ fn assert_artifact_speaks_version(repo_root: &Path, want: &str) -> Result<(), Ap
 
 fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
     assert_no_stale_bundles(repo_root, &version_of(repo_root))?;
+    let out = npm_build(repo_root)?;
+    if !out.status.success() {
+        return Err(AppError::io("构建安装包失败")
+            .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
+    }
+    locate_installer(repo_root)
+}
+
+/// 从 `bundle/<本平台>` 找**唯一一份**本平台安装包。**不构建**（InfoOnly 只补清单时用）。
+fn locate_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
     let plan = installer_plan().ok_or_else(|| {
         AppError::invalid_argument(format!(
             "本机是 {} —— 安装包只在 macOS（dmg）与 Windows（NSIS）上构建",
             std::env::consts::OS
         ))
     })?;
-
-    let out = npm_build(repo_root)?;
-    if !out.status.success() {
-        return Err(AppError::io("构建安装包失败")
-            .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
-    }
 
     let dir = bundle_dir(repo_root, plan.dir).ok_or_else(|| {
         AppError::io(format!("找不到安装包目录（构建没产出 {}？）", plan.ext))
@@ -1779,7 +1794,16 @@ fn build_portable(repo_root: &Path, version: &str) -> Result<BuiltArtifact, AppE
         return Err(AppError::io("构建绿色版失败")
             .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
     }
+    locate_portable(repo_root, version)?
+        .ok_or_else(|| AppError::io(format!("dist-portable 下没有 {version} 的绿色版 zip")))
+}
+
+/// 找 `dist-portable` 下这一版的 zip。**不构建**（InfoOnly 只补清单时用）；没有 = `None`。
+fn locate_portable(repo_root: &Path, version: &str) -> Result<Option<BuiltArtifact>, AppError> {
     let dir = repo_root.join("dist-portable");
+    if !dir.is_dir() {
+        return Ok(None);
+    }
     let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
         .map_err(|e| AppError::io("读不了绿色版产物目录").with_detail(e.to_string()))?
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -1792,17 +1816,27 @@ fn build_portable(repo_root: &Path, version: &str) -> Result<BuiltArtifact, AppE
         })
         .collect();
     found.sort();
-    let [one] = found.as_slice() else {
-        return Err(AppError::io(format!(
-            "dist-portable 下没有 {version} 的绿色版 zip"
-        )));
-    };
-    let name = one
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or_default()
-        .to_owned();
-    BuiltArtifact::new(one.clone(), name, "windows", "portable")
+    match found.as_slice() {
+        [] => Ok(None),
+        [one] => {
+            let name = one
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            BuiltArtifact::new(one.clone(), name, "windows", "portable").map(Some)
+        }
+        many => Err(AppError::io(format!(
+            "dist-portable 下有 {} 份 {version} 的绿色版 —— 自己确认要发哪一份",
+            many.len()
+        ))
+        .with_detail(
+            many.iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("、"),
+        )),
+    }
 }
 
 /// 走的是 `CreateProcess`，它**不会**替你补 `.cmd` 后缀 —— 直接起会报"程序找不到"。
@@ -3659,6 +3693,39 @@ mod tests {
             validate_built_artifacts(&[built, broken], "0.0.13").is_err(),
             "坏 zip 必须被拒"
         );
+    }
+
+    /// 只补清单那一趟（InfoOnly）：从磁盘上找到**这一版**的那一份，不构建。
+    ///
+    /// 找不到就必须报错 —— 拿上一版的名单顶上会写成"0.0.15 的版本号 + 0.0.14 的文件名"，
+    /// 客户端按这个 URL 去下只会 404。
+    #[test]
+    fn info_only_locates_the_artifacts_already_on_disk() {
+        let Some(plan) = installer_plan() else {
+            return;
+        };
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("target/release/bundle").join(plan.dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let setup = dir.join(format!("SupportEase_0.0.15_x64.{}", plan.ext));
+        crate::fsx::atomic::atomic_write(&setup, b"setup").unwrap();
+        let got = locate_installer(d.path()).unwrap();
+        assert_eq!(got.size, 5);
+        assert!(got.name.contains("0.0.15"), "{}", got.name);
+    }
+
+    /// 绿色版同理：这一版的 zip 在就找到，没有就是 `None`（不报错，非 Windows 本来就没有）。
+    #[test]
+    fn locate_portable_finds_this_versions_zip_or_says_none() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("dist-portable");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(locate_portable(d.path(), "0.0.15").unwrap().is_none());
+        let zip = dir.join("SupportEase_0.0.15_x64-portable.zip");
+        crate::fsx::atomic::atomic_write(&zip, b"zip").unwrap();
+        let got = locate_portable(d.path(), "0.0.15").unwrap().unwrap();
+        assert_eq!(got.name, "SupportEase_0.0.15_x64-portable.zip");
+        assert!(locate_portable(d.path(), "0.0.16").unwrap().is_none());
     }
 
     /// 清单里的平台 / 类型 / SHA 必须**来自产物自己**：这一层没有字面量可写，
