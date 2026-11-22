@@ -975,13 +975,16 @@ fn run_inner(
         git.pull_ff("origin", base)?;
         git.rev_parse("HEAD")?
     } else {
-        /* 补包趟（tag 已存在）：只能补完 tag 指向的那一版，构建基线就是它。 */
-        if let Some((at_tag, at_head)) = frozen_elsewhere(&git, &tag) {
-            return Err(AppError::invalid_argument(format!(
-                "{tag} 指向 {}，当前 HEAD 是 {} —— 补包不能拿别的提交构建",
-                short_sha(&at_tag),
-                short_sha(&at_head),
-            )));
+        /* 补包趟（tag 已存在）：会构建的那些只能用 tag 指向的那一版做基线；
+        只补清单（InfoOnly）不构建，产物是 tag 那一刻的，与 HEAD 无关。 */
+        if rebuilds_from_worktree(slot) {
+            if let Some((at_tag, at_head)) = frozen_elsewhere(&git, &tag) {
+                return Err(AppError::invalid_argument(format!(
+                    "{tag} 指向 {}，当前 HEAD 是 {} —— 补包不能拿别的提交构建",
+                    short_sha(&at_tag),
+                    short_sha(&at_head),
+                )));
+            }
         }
         git.rev_parse("HEAD")?
     };
