@@ -273,6 +273,37 @@ impl Hosting for GitHub {
 
     /* ---------- 发布内核 2.0 ---------- */
 
+    /// 下载一份资产（草稿的附件也要带认证头）。302 到对象存储时**不外发令牌**。
+    fn download_asset(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        url: &str,
+        dest: &std::path::Path,
+    ) -> Result<u64, AppError> {
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(super::UPLOAD_TIMEOUT))
+            .timeout_connect(Some(super::API_CONNECT_TIMEOUT))
+            .redirect_auth_headers(ureq::config::RedirectAuthHeaders::SameHost)
+            .build()
+            .into();
+        let resp = agent
+            .get(url)
+            .header("Authorization", &format!("Bearer {}", self.token))
+            .header("Accept", "application/octet-stream")
+            .header("User-Agent", "SupportEase")
+            .call()
+            .map_err(transport)?;
+        let mut reader = resp.into_body().into_reader();
+        let mut written: u64 = 0;
+        crate::fsx::atomic::atomic_write_stream(dest, |file| {
+            written = std::io::copy(&mut reader, file)
+                .map_err(|e| AppError::io("下载资产失败").with_detail(e.to_string()))?;
+            Ok(())
+        })?;
+        Ok(written)
+    }
+
     fn find_release(
         &self,
         owner: &str,

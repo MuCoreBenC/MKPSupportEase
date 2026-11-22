@@ -310,7 +310,11 @@ pub fn run(
 
     /* ③ 清单：基底取 origin/main，按平台整组写全 */
     if st.phase == Phase::Staged {
-        let facts = facts_for_manifest(&snap, &built, &version)?;
+        let mut facts = facts_for_manifest(&snap, &built, &version)?;
+        /* 封版要把同一批字节再传一遍：每一份都得在本机有文件（换机器续跑时从暂存面补） */
+        for f in facts.iter_mut() {
+            *f = staging::ensure_local(&t, &version, f, repo_root)?;
+        }
         let url = format!(
             "https://gitee.com/{}/{}/releases/tag/{}",
             p.release.owner,

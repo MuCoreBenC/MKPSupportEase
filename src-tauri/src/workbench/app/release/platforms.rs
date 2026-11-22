@@ -175,6 +175,34 @@ impl ArtifactFact {
         })
     }
 
+    /// 给「从远端拿回来的那一份」补本地路径：**补之前核对身份**（大小 + SHA）。
+    ///
+    /// 对不上就不认它 —— 宁可重下一份，也不拿一个"看起来像"的文件去上传。
+    pub fn with_path(&self, path: std::path::PathBuf) -> Result<Self, crate::error::AppError> {
+        let meta = std::fs::metadata(&path).map_err(|e| {
+            crate::error::AppError::io(format!("读不到产物：{}", path.display()))
+                .with_detail(e.to_string())
+        })?;
+        if meta.len() != self.size {
+            return Err(crate::error::AppError::invalid_argument(format!(
+                "{} 的本地文件 {} 字节，身份记的是 {} 字节",
+                self.name,
+                meta.len(),
+                self.size
+            )));
+        }
+        let got = sha256_file(&path)?;
+        if !got.eq_ignore_ascii_case(&self.sha256) {
+            return Err(crate::error::AppError::invalid_argument(format!(
+                "{} 的本地文件 SHA 与身份不一致",
+                self.name
+            )));
+        }
+        let mut out = self.clone();
+        out.path = Some(path);
+        Ok(out)
+    }
+
     /// CI 拉回来的那一份：文件在临时目录，字节数与自己算的 SHA 都要留。
     pub fn from_temp(
         version: &str,

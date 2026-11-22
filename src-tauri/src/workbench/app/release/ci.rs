@@ -157,7 +157,7 @@ pub fn collect(
     let mut facts = Vec::new();
     for kind in platform.artifacts {
         let want = super::platforms::artifact_name(version, kind);
-        let found = find_file(&unpacked, &want).ok_or_else(|| {
+        let found = find_in(&unpacked, &want).ok_or_else(|| {
             AppError::not_found(format!(
                 "artifact 里没有 {want} —— 工作流产出的文件名与计划不一致"
             ))
@@ -221,13 +221,13 @@ impl Receipt {
 }
 
 fn read_receipt(dir: &Path) -> Option<Receipt> {
-    let path = find_file(dir, "build-receipt.json")?;
+    let path = find_in(dir, "build-receipt.json")?;
     let bytes = std::fs::read(path).ok()?;
     serde_json::from_slice(&bytes).ok()
 }
 
 /// 在解包目录里按文件名递归找（`upload-artifact` 会套一层目录）。
-fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
+pub fn find_in(dir: &Path, name: &str) -> Option<PathBuf> {
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
         let entries = std::fs::read_dir(&d).ok()?;
