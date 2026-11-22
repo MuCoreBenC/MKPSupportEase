@@ -28,6 +28,7 @@ import { api } from '../../api'
 import type { Machine, Plate, ReportBoundaryPiece, ReportBox4, ReportCollision } from '../../api'
 import { useT } from '../../i18n'
 import ZoomLayer from '../../components/zoom/ZoomLayer'
+import { useSourceRevision } from '../state/deliveryState'
 import { arrowPathOf, minArrowLength } from './arrowGeometry'
 import { boundaryNumbering } from './boundaryNumbering'
 import s from './CollisionMap.module.css'
@@ -116,22 +117,31 @@ const BRIM_LOOP_COUNT = 5
 /** 网格几等分（照参数页那张热床图的观感） */
 const GRID = 6
 
-/* 板规格按机型查一次就够 —— 整个会话缓存（参数页/校准页也是这么缓 catalog 的） */
+/*
+ * 板规格按机型查一次就够 —— 整个会话缓存（参数页/校准页也是这么缓 catalog 的）。
+ *
+ * ★ 缓存**认数据源代次**：这两读读的是内部根那份 catalog，换了源就换一条发布线的
+ *   机型与板规格；不带代次的话，报告页的板轮廓 / 可打印区一直按旧源画，要重启才换。
+ */
 type PlateWorld = { machines: Machine[]; plates: Plate[] } | null
-let plateWorld: Promise<PlateWorld> | null = null
-function plateWorldOnce() {
-  plateWorld ??= Promise.all([api.getMachines(), api.getRuntimeCatalog()])
-    .then(([machines, world]) => ({
-      /* 机型的 `defaultPlateId` 住旧世界的 Machine 里（新世界的 catalog 那份没有） */
-      machines,
-      plates: world.plates ?? [],
-    }))
-    .catch((err) => {
-      /* 拉不到就不画板（退回圆角矩形）—— 装饰缺席不拦着事实 */
-      console.error('[collision-map] 目录拉取失败', err)
-      return null
-    })
-  return plateWorld
+let plateWorld: { rev: number; promise: Promise<PlateWorld> } | null = null
+function plateWorldOnce(rev: number) {
+  if (plateWorld !== null && plateWorld.rev === rev) return plateWorld.promise
+  plateWorld = {
+    rev,
+    promise: Promise.all([api.getMachines(), api.getRuntimeCatalog()])
+      .then(([machines, world]) => ({
+        /* 机型的 `defaultPlateId` 住旧世界的 Machine 里（新世界的 catalog 那份没有） */
+        machines,
+        plates: world.plates ?? [],
+      }))
+      .catch((err) => {
+        /* 拉不到就不画板（退回圆角矩形）—— 装饰缺席不拦着事实 */
+        console.error('[collision-map] 目录拉取失败', err)
+        return null
+      }),
+  }
+  return plateWorld.promise
 }
 
 /** 一个框的四至（缺一格就当没有 —— 不许拿 0 顶替） */
@@ -186,19 +196,22 @@ export default function CollisionMap({
   })()
 
   const [plate, setPlate] = useState<Plate | null>(null)
+  /* 换过数据源 ⇒ 按新源那份目录重查这块机型板（见 `plateWorldOnce` 的注释） */
+  const sourceRevision = useSourceRevision()
   useEffect(() => {
     let alive = true
     if (machineType === null) return undefined
-    void plateWorldOnce().then((w) => {
+    void plateWorldOnce(sourceRevision).then((w) => {
       if (!alive || w === null) return
       const m = w.machines.find((x) => x.id === machineType)
       const p = m?.defaultPlateId != null ? w.plates.find((x) => x.id === m.defaultPlateId) : undefined
-      if (p !== undefined) setPlate(p)
+      /* 新源里这台机型没登记板 ⇒ 也回「没板规格」，不让旧源的板继续挂着 */
+      setPlate(p ?? null)
     })
     return () => {
       alive = false
     }
-  }, [machineType])
+  }, [machineType, sourceRevision])
 
   /* 点图 = 浮起来看大的（通用放大层 `components/zoom/ZoomLayer`，内容是这份 SVG 俯视图）。
      报告页不在模态框里 ⇒ 放大层 portal 到 body。`fromRef` 记点的那一下小图在哪（FLIP First） */

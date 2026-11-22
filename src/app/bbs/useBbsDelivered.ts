@@ -22,7 +22,7 @@
 import { t } from '../../i18n'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
-import { useDeliveryRevision } from '../state/deliveryState'
+import { useDeliveryRevision, useSourceRevision } from '../state/deliveryState'
 import type { BbsPresetDoc } from './bbsTypes'
 
 /** catalog 里 BBS 配置那一类的 kind（与 Rust 侧 `runtime::catalog::kind::BBS_CONFIG` 同一个词） */
@@ -67,6 +67,12 @@ export function useBbsDelivered(): BbsDelivered {
    * （2026-10-07 与首页 / 预设页同一条病，同一味药）。
    */
   const deliveryRevision = useDeliveryRevision()
+  /*
+   * 「目录里登记了哪些」是**数据源**的事：`getRuntimeCatalog` 读内部根那份 catalog，
+   * 换过源之后 BBS 配置的登记全变。只跟投递面代次的话，旧源已删的还灰着列、
+   * 新源新增的不出现（点「去下载」还会失败）。
+   */
+  const sourceRevision = useSourceRevision()
 
   useEffect(() => {
     let alive = true
@@ -101,7 +107,7 @@ export function useBbsDelivered(): BbsDelivered {
     return () => {
       alive = false
     }
-  }, [deliveryRevision])
+  }, [deliveryRevision, sourceRevision])
 
   const read = useCallback(async (fileName: string) => {
     const text = await api.readDownloadedText(fileName)

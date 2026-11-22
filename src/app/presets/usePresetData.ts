@@ -570,6 +570,17 @@ interface TreeSeed {
 }
 
 /**
+ * 树那一路读回来的东西：建树的输入 + 本机已有哪些文件。
+ *
+ * 两半必须同一次读 —— `localIds` 是 **asset id**，而 id 连同整份清单一起换（目录换代），
+ * 只换一半的话「本机已下载」这一档会对到新目录里根本不存在的 id 上。
+ */
+interface TreeRead {
+  seed: TreeSeed
+  localIds: string[]
+}
+
+/**
  * `importRevision` 是"外部导入进来过几批"的钥匙（第十二层）：变了就**整屏重读** ——
  * 导入落进 `presets-local/` 之后，「本地文件」那张表要立刻以磁盘为准，不靠切页刷新。
  * 首页（`PageHome`）不给这个参数：它不看本地文件那张表。
@@ -796,16 +807,80 @@ export function usePresetData(importRevision = 0): PresetData {
     setDelivery(next)
   }, [readPresetFeed])
 
+  /*
+   * **机型树那一路的读**（仓库清单 / 机型 / 菜单 / 本机已有的 asset / 每个组合的文件与参数）。
+   *
+   * ★ 这几条与交付那一路**同源**：后端全都读内部根那份 catalog（`ipc::presets::load_presets`）。
+   *   所以目录换代之后必须跟着重读 —— 少这一次，表里还挂着上一条发布线的机型与文件，
+   *   新目录的文件并排出现，要重启才消失。
+   */
+  const readTree = useCallback(async (): Promise<TreeRead> => {
+    const [repo, list, menu, localIds] = await Promise.all([
+      api.getPresetFiles(),
+      api.getMachines(),
+      api.getMenu(),
+      api.getLocalFiles(),
+    ])
+    /* 10 个组合 × 2 个读一起发。顺序无所谓，结果按 machine:version 对回去 */
+    const combos = list.flatMap((m) => m.versions.map((v) => ({ machineId: m.id, versionId: v.id })))
+    const inputs = await Promise.all(
+      combos.map(async ({ machineId, versionId }): Promise<PresetVersionInput> => {
+        const [files, params] = await Promise.all([
+          api.getVersionFiles(machineId, versionId),
+          api.getMachineParams(machineId, versionId),
+        ])
+        return {
+          machineId,
+          versionId,
+          files,
+          changed: params.filter((p) => p.origin === 'variant').length,
+        }
+      }),
+    )
+    /* 仅归档的文件在这里就被剔掉 —— 用户端一处都不该出现 */
+    return { seed: { list, repo, inputs, archived: archivedIds(menu) }, localIds }
+  }, [])
+
+  /**
+   * 把一次树读落地。**选择保持**：换目录之后当前这个组合还在就留着，
+   * 不在（新目录里没有这台机型 / 这个版本）才退回默认那台 —— 不把人踢回第一台。
+   */
+  const applyTree = useCallback(async (read: TreeRead) => {
+    /* 唯一底账的快照（客户端的一次读取）—— 下面默认落地那台机型也要用它 */
+    const entry = await activePresetSnapshot()
+    setMachines(read.seed.list)
+    setTreeSeed(read.seed)
+    setLocalIds(read.localIds)
+    setAt((prev) => {
+      const kept =
+        prev !== null &&
+        read.seed.list.some(
+          (m) => m.id === prev.machineId && m.versions.some((v) => v.id === prev.versionId),
+        )
+      if (kept) return prev
+      /*
+       * 默认落在**正在使用那台机型**：用户打开这一页最先想确认的是「我这台机器现在跑的是哪一套」。
+       * 没有（或它指的机型 / 版本已经不在目录里）就退回第一台 —— 不硬留一个空选择。
+       */
+      const liveMachine = read.seed.list.find((m) => m.id === entry?.machineId)
+      const home = liveMachine ?? read.seed.list[0]
+      const homeVersion =
+        (liveMachine === undefined
+          ? undefined
+          : liveMachine.versions.find((v) => v.id === entry?.versionId)) ?? home?.versions[0]
+      return home !== undefined && homeVersion !== undefined
+        ? { machineId: home.id, versionId: homeVersion.id }
+        : prev
+    })
+  }, [])
+
   useEffect(() => {
     let alive = true
 
     const load = async () => {
       /* 本地文件那一读与其他几个一起发：它不挡首屏（扫一个空目录几乎不花时间） */
-      const [repo, list, menu, local, localPresets, index, copied, marks, draft] = await Promise.all([
-        api.getPresetFiles(),
-        api.getMachines(),
-        api.getMenu(),
-        api.getLocalFiles(),
+      const [treeRead, localPresets, index, copied, marks, draft] = await Promise.all([
+        readTree(),
         api.getLocalPresetFiles(),
         api.getLocalPresetIndex(),
         api.getSlicerCopied(),
@@ -819,45 +894,10 @@ export function usePresetData(importRevision = 0): PresetData {
         draft !== null && draft.dirty && draft.changed > 0 ? (draft.path ?? null) : null,
       )
 
-      /* 10 个组合 × 2 个读一起发。顺序无所谓，结果按 machine:version 对回去 */
-      const combos = list.flatMap((m) => m.versions.map((v) => ({ machineId: m.id, versionId: v.id })))
-      const inputs = await Promise.all(
-        combos.map(async ({ machineId, versionId }): Promise<PresetVersionInput> => {
-          const [files, params] = await Promise.all([
-            api.getVersionFiles(machineId, versionId),
-            api.getMachineParams(machineId, versionId),
-          ])
-          return {
-            machineId,
-            versionId,
-            files,
-            changed: params.filter((p) => p.origin === 'variant').length,
-          }
-        }),
-      )
-
       if (!alive) return
-      /* 唯一底账的快照（客户端的一次读取）—— 下面默认落地那台机型也要用它 */
-      const entry = await activePresetSnapshot()
-      setMachines(list)
-      /* 仅归档的文件在这里就被剔掉 —— 用户端一处都不该出现 */
-      setTreeSeed({ list, repo, inputs, archived: archivedIds(menu) })
-      setLocalIds(local)
+      await applyTree(treeRead)
+      if (!alive) return
       setSlicerCopied(copied)
-
-      /*
-       * 默认落在**正在使用那台机型**：用户打开这一页最先想确认的是「我这台机器现在跑的是哪一套」。
-       * 没有（或它指的机型 / 版本已经不在目录里）就退回第一台 —— 不硬留一个空选择。
-       */
-      const liveMachine = list.find((m) => m.id === entry?.machineId)
-      const home = liveMachine ?? list[0]
-      const homeVersion =
-        (liveMachine === undefined
-          ? undefined
-          : liveMachine.versions.find((v) => v.id === entry?.versionId)) ?? home?.versions[0]
-      if (home !== undefined && homeVersion !== undefined) {
-        setAt({ machineId: home.id, versionId: homeVersion.id })
-      }
       setReady(true)
 
       /*
@@ -905,6 +945,15 @@ export function usePresetData(importRevision = 0): PresetData {
              * `checkBootstrapOnce` 里已经付过了。
              */
             await readLocalPresets().catch(() => {})
+            /*
+             * **机型树也按新目录重读**：树那几读与交付同源（见 `readTree`），目录换过之后
+             * 不重读的话，旧目录的机型与文件会继续挂在表里（重启才消失）。
+             */
+            await readTree()
+              .then(applyTree)
+              .catch(() => {
+                /* 读不到就保持旧树 —— 与首屏同一条纪律：不把这一路升格成整页错误 */
+              })
           }
         })
         .catch(() => {
@@ -921,7 +970,7 @@ export function usePresetData(importRevision = 0): PresetData {
     return () => {
       alive = false
     }
-  }, [readPresetFeedInto, readLocalPresets, importRevision])
+  }, [readTree, applyTree, readPresetFeedInto, readLocalPresets, importRevision])
 
   /*
    * **跨页再同步**（2026-10-07 真机两刀挣来的）：
@@ -1023,11 +1072,13 @@ export function usePresetData(importRevision = 0): PresetData {
    *
    * 验收标准原话：「改完地址 → 保存 → 立即刷新数据源状态 → 下一次读取 / 检查就使用新地址」，
    * **不允许要求重启**。后端那侧本来就是每次现读（`resolve_source` 无进程内缓存），
-   * 所以这里要补的只有两件前端的事：
+   * 所以这里要补的是前端的三件事：
    *
    *   ① 把「本次运行只检查一次」那道刹**复位**，允许后台**再检查一次**目录
    *      （不然用户改完地址，页面还停在旧源的目录与经济状态上）；
-   *   ② 重读来源标签与交付那一路，并把新目录带来的变化照常应用 + 重读。
+   *   ② 重读来源标签与交付那一路，并把新目录带来的变化照常应用 + 重读；
+   *   ③ **机型树也重读** —— 树那几读与交付同源（都读内部根那份 catalog，见 `readTree`），
+   *      漏了它，上一条发布线的机型与文件会继续挂在表里，新源的文件并排出现，要重启才消失。
    *
    * 只在**真的换过**之后跑（代次 0 = 还没有人换过）。
    */
@@ -1040,16 +1091,24 @@ export function usePresetData(importRevision = 0): PresetData {
       const source = await api.getPresetSource().catch(() => null)
       if (!alive) return
       setSourceLabel(source?.mode ?? null)
+      setSourceIdentity(source?.identity ?? null)
       const boot = await checkBootstrapOnce().catch(() => null)
       if (!alive || boot === null) return
       setNeedsNewerClient(boot.needsNewerClient)
       /* 无论换没换目录都重读一遍：新源的自述与它登记的文件可能全都不同 */
       await readPresetFeedInto().catch(() => {})
+      await readLocalPresets().catch(() => {})
+      if (!alive) return
+      await readTree()
+        .then(applyTree)
+        .catch(() => {
+          /* 读不到就保持旧树 —— 与首屏同一条纪律 */
+        })
     })()
     return () => {
       alive = false
     }
-  }, [sourceRevision, readPresetFeedInto])
+  }, [sourceRevision, readPresetFeedInto, readLocalPresets, readTree, applyTree])
 
   /*
    * **对外只说"重读本地那一侧"**（2026-10-20）：切进「云端」那一页时要它刷新那三态，
@@ -1084,8 +1143,14 @@ export function usePresetData(importRevision = 0): PresetData {
     /* 目录换了：两张表都以新目录为准重读（同一条出口，代次守卫管着先后） */
     await readPresetFeedInto().catch(() => {})
     await readLocalPresets().catch(() => {})
+    /* 机型树同源（见 `readTree`）：目录换了就得按新目录重出，不然旧目录的机型与文件还挂着 */
+    await readTree()
+      .then(applyTree)
+      .catch(() => {
+        /* 读不到就保持旧树 —— 与首屏同一条纪律 */
+      })
     return 'synced'
-  }, [readLocalPresets, readPresetFeedInto])
+  }, [readLocalPresets, readPresetFeedInto, readTree, applyTree])
 
   /**
    * 重读「已放入」。**盘是底账**：用户去访达把那一份删了，这里回来就得变「未放入」。

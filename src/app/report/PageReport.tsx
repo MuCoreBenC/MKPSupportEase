@@ -123,6 +123,7 @@ import type {
   ReportTowerFacts,
 } from '../../api'
 import { POSTPROCESS_FINISHED, POSTPROCESS_PRINT_TIME } from '../postprocess/events'
+import { useSourceRevision } from '../state/deliveryState'
 import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
 import { Btn } from '../ui/Controls'
@@ -1450,12 +1451,16 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState<Record<string, boolean>>({})
 
+  /* 换过数据源 ⇒ 字段中文名按新目录重读（这条读的是内部根那份 catalog） */
+  const sourceRevision = useSourceRevision()
   useEffect(() => {
+    /* 换源代次只当"该重读"的开关 —— 值本身不参与这一趟计算 */
+    void sourceRevision
     void api.getRuntimeCatalog().then(
       (cat) => setDefList(cat.registry.params),
       () => setDefList([]),
     )
-  }, [])
+  }, [sourceRevision])
 
   const defs = new Map((defList ?? []).map((m) => [m.key, m]))
   const all: SnapRow[] = Object.entries(snap.params).map(([key, value]) => {
