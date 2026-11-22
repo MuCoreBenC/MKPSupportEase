@@ -85,7 +85,7 @@ import {
 } from 'react'
 import { api, errorText, isAppError } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
-import type { LocalePref, PresetSource, SoftwareUpdate, ThemePref } from '../../api/contract'
+import type { LocalePref, PresetSource, ThemePref } from '../../api/contract'
 /* 前端偏好落 localStorage 的那一件（自定义地址的历史就是它） */
 import { useStickyState } from '../../hooks/useStickyState'
 import { msg, useLocale, useText, useT, type StringKey, type Text } from '../../i18n'
@@ -105,7 +105,7 @@ import {
   type SlicerId,
 } from '../shared/slicer'
 /* 更新会话那一份事实（与标题栏指示器共用同一个快照；2026-11-06 合并两处入口） */
-import { useSoftwareUpdate } from '../shared/softwareUpdate'
+import { checkSoftwareUpdateNow, useSoftwareUpdate } from '../shared/softwareUpdate'
 /* 自绘下拉共用件（#33）：项目里的下拉一律用它，原生 `<select>` 一个不留 */
 import { SelectField } from '../../components/field'
 import type { FieldOption } from '../../components/field'
@@ -589,14 +589,21 @@ export default function PageSettings({
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<{ text: Text; bad?: boolean; detail?: string } | null>(null)
   /*
-   * 软件更新这一块的状态。三态各有各的话：
-   *   `loading`  还在问
-   *   `null`     问不到（没配源 / 离线 / 远端没部署）—— 如实说"这次没查到"，不编"已是最新"
-   *   `SoftwareUpdate`  查到了，按 `hasUpdate` 分两句
+   * 软件更新这一块的事实**只有一份**：`shared/softwareUpdate` 里的整份快照
+   * （后端 `run/update-state.json`）。这一页不再自己存一份 `SoftwareUpdate` ——
+   * 从前那两份各自刷新，于是同一屏能出现「设置页已是最新、标题栏发现 0.0.13」。
+   *
+   * 三态改由快照自己的 `checked` 说：
+   *   没问过 / 问不到 ⇒ `checked.at == null` 或快照为 `null` ⇒ "没查到更新"
+   *   这次失败        ⇒ `checked.ok === false` ⇒ 摆原因（不冒充"已是最新"）
+   *   成功            ⇒ 按候选分「有新版本 / 已是最新」
    */
-  const [update, setUpdate] = useState<SoftwareUpdate | null>(null)
-  /* 查更新**失败的原因**（断网 / 没配源 / 远端没发 release.json）——
-     与「没有新版」严格分开（A-53：失败不许长得像"已是最新"，也不许吞掉原因） */
+  const {
+    state: updateState,
+    snapshot: update,
+    refresh: refreshUpdate,
+  } = useSoftwareUpdate()
+  /* 手动检查失败的原因（断网 / 没配源 / 远端没发 release.json）—— 与「没有新版」严格分开 */
   const [updateErr, setUpdateErr] = useState<string | null>(null)
   const [updateBusy, setUpdateBusy] = useState(true)
   /* 问更新读到的那份「当前版本」：即使远端问不到也要能显示它（它来自构建期，一定拿得到） */
@@ -614,7 +621,6 @@ export default function PageSettings({
    * `pendingChannel` 只记"我点的是哪一路"：`downloading` 那一态里没有通道信息，
    * 而两张卡都可能摆进度条，不记就分不清该把进度画在哪张卡上。
    */
-  const { state: updateState, info: installMeta, refresh: refreshUpdate } = useSoftwareUpdate()
   const [pendingChannel, setPendingChannel] = useState<'stable' | 'preview' | null>(null)
   /* 「更新渠道」那一格选的是哪一路（2026-11-10）：候选只画选中的那一个 */
   const [channelPick, setChannelPick] = useState<'stable' | 'preview'>('stable')
@@ -771,21 +777,17 @@ export default function PageSettings({
     setUpdateBusy(true)
     setUpdateErr(null)
     try {
-      const [version, flavor, got] = await Promise.all([
+      const [version, flavor, snap] = await Promise.all([
         api.getAppVersion().catch(() => ''),
         api.getInstallFlavor().catch(() => ''),
-        api.checkSoftwareUpdate(),
+        /* 检查事务：成功与失败都写进快照；失败这里照旧抛，原因摆在下面那行 */
+        checkSoftwareUpdateNow(),
       ])
-      setAppVersion(version || got.currentVersion)
+      setAppVersion(version || snap.currentVersion)
       setInstallFlavor(flavor)
-      setUpdate(got)
-      /* 顺手刷新共享快照：卡片要靠它判"已就绪的是不是这一版"，上次安装的账与
-         日志路径也在这份里（`checkSoftwareUpdate` 只谈候选，这几格它不带） */
-      await refreshUpdate()
     } catch (e) {
       /* 没配源 / 离线 / 远端还没发 release.json：都不该让设置页出问题 ——
-         如实留"没查到"，**并且把原因摆出来**（吞掉原因 = 失败和"没有新版"长一样） */
-      setUpdate(null)
+         快照里留着上次的候选，`checked.ok=false`；这里把原因摆出来 */
       setUpdateErr(errorText(e))
       const [v, flavor] = await Promise.all([
         api.getAppVersion().catch(() => ''),
@@ -793,6 +795,7 @@ export default function PageSettings({
       ])
       setAppVersion(v)
       setInstallFlavor(flavor)
+      await refreshUpdate()
     } finally {
       setUpdateBusy(false)
     }
@@ -1293,10 +1296,14 @@ export default function PageSettings({
     }
   }
 
-  /* 这一屏真正要画的那几格：**只有真账**（四态由真检查给，不点播） */
+  /* 这一屏真正要画的那几格：**只有真账**（四态由整份快照给，不点播） */
   const upd = update
   const hasUpdate = upd?.hasUpdate === true
-  const releaseUrl = hasUpdate ? upd?.url : undefined
+  /* 快照里的 `url` 可能显式是 `null`（后端 `Option` 序列化）—— 统一收成 `undefined` */
+  const releaseUrl = hasUpdate ? (upd?.url ?? undefined) : undefined
+  /* 「这次没查成」的原因：本次命令抛的在前，快照里记的在后；成功时是 `null` */
+  const updateFailure =
+    updateErr ?? (upd !== null && !upd.checked.ok ? (upd.checked.reason ?? null) : null)
   /**
    * 双通道候选（2026-11-05）：**只有用户主动点「重新检查」才拿得到**。
    * 后端已把正式版排第一，前端再排一次 —— 「正式版优先」是界面契约，
@@ -1546,9 +1553,10 @@ export default function PageSettings({
                 <span className={s.updateIdle}>{tr('settings.update.checking')}</span>
               ) : channelHasUpdate ? (
                 <span className={s.updateFresh}>{tr('settings.update.hasNew')}</span>
-              ) : upd !== null ? (
+              ) : upd !== null && upd.checked.ok ? (
                 /* 「已是最新」是**好消息**（作者 2026-10-05：字体要绿的）；
                    「没查到」才是灰的（不是坏消息，是不知道）。
+                   ★ 只有 `checked.ok` 才配说"已是最新"：失败 / 从没查过都算"不知道"。
                    ★ 按**选中那一路**判：选了正式版、只有测试版候选时，这里仍是"已是最新"。 */
                 <span className={s.updateLatest}>{tr('settings.update.latest')}</span>
               ) : (
@@ -1578,12 +1586,13 @@ export default function PageSettings({
 
             {/* 更新说明只画在下面的「发现新版本」卡里（紧挨「立即更新」），这里不再重复 */}
 
-            {upd === null && !updateBusy && (
+            {!updateBusy && updateFailure !== null && (
               <p className={s.fieldNote}>
-                {updateErr !== null
-                  ? tr('settings.update.failed', { detail: updateErr })
-                  : tr('settings.update.hint')}
+                {tr('settings.update.failed', { detail: updateFailure })}
               </p>
+            )}
+            {!updateBusy && updateFailure === null && upd === null && (
+              <p className={s.fieldNote}>{tr('settings.update.hint')}</p>
             )}
           </div>
 
@@ -1715,20 +1724,18 @@ export default function PageSettings({
 
           {/*
            * 「上次更新没成」+ **安装日志在哪儿**：安装脚本在应用退出之后才跑，那时界面上
-           * 没有任何东西能报错；下一次启动只能靠 `run/update-result.json` 这本账。
+           * 没有任何东西能报错；下一次启动由 `update_check::startup` 把那本账迁进快照。
            *
            * ★★ 判空是 `!= null`，**不是 `!== undefined`**（2026-11-18 白屏那一刀）。
-           * 后端 `UpdateInfoDto.last_result` 是 `Option`，没那本账时**序列化成 `null`**
-           * （不是缺键）—— 只判 `undefined` 时 `null` 会一路走到 `!null.ok`，抛
-           * `Cannot read properties of null`。这一页在 `App` 里是**常驻挂载**的
-           * （页槽只切显示），于是这一抛把整棵 React 树卸掉：窗口一片白、一条字都没有，
-           * 首次安装（还没有 update-result.json）的机器 100% 命中。
+           * 后端 `last_result` 是 `Option`，没那本账时**序列化成 `null`**（不是缺键）——
+           * 只判 `undefined` 时 `null` 会一路走到 `!null.ok`，抛
+           * `Cannot read properties of null`。这一页是**常驻挂载**的，一抛就整窗白。
            */}
-          {installMeta?.lastResult != null && !installMeta.lastResult.ok && (
+          {update?.lastResult != null && !update.lastResult.ok && (
             <p className={s.fieldNote}>
               {tr('settings.update.lastFailed', {
-                detail: installMeta.lastResult.reason,
-                log: installMeta.installLog,
+                detail: update.lastResult.reason,
+                log: update.installLog,
               })}
             </p>
           )}
@@ -1919,7 +1926,9 @@ export default function PageSettings({
           />
         </div>
 
-        {slicerErr !== null && <p className={`${s.note} ${s.noteBad}`}>{say(slicerErr)}</p>}
+        {slicerErr !== null && (
+          <p className={`${s.note} ${s.noteBad}`}>{say(slicerErr as Text)}</p>
+        )}
       </section>
 
       {/*

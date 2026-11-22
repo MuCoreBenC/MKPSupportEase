@@ -463,7 +463,9 @@ export const bridgeApi: MkpApi = {
   getInstallFlavor: () => call('getInstallFlavor', 'get_install_flavor'),
   checkSoftwareUpdate: () => call('checkSoftwareUpdate', 'check_software_update'),
   /* 应用内更新（第五刀）：命令名与前端一一对应，后端在 `ipc/update.rs` */
-  updateInfo: () => call('updateInfo', 'update_info'),
+  getUpdateSnapshot: () => call('getUpdateSnapshot', 'get_update_snapshot'),
+  ignoreUpdate: (version) => call('ignoreUpdate', 'ignore_update', { version }),
+  migrateUpdateIgnored: (value) => call('migrateUpdateIgnored', 'migrate_update_ignored', { value }),
   startUpdate: (channel) => call('startUpdate', 'start_update', { channel: channel ?? null }),
   pauseUpdate: () => call('pauseUpdate', 'pause_update'),
   resumeUpdate: () => call('resumeUpdate', 'resume_update'),

@@ -2259,15 +2259,40 @@ export interface UpdateResult {
   at: string
 }
 
-/** 一次问全：状态 + 有无新版 + 资产 + 上次结果 */
+/** 一次检查的记录。**成功与失败严格分开**（失败不要长得像"刚查过"）。 */
+export interface UpdateCheckRecord {
+  at?: string | null
+  ok: boolean
+  reason?: string | null
+  trigger?: 'auto' | 'manual' | null
+  channel: 'stable' | 'preview'
+}
+
+/** 安装这一档的业务阶段（下载中/暂停属于进程态，见 `state`）。 */
+export type UpdateInstallPhase = { phase: 'idle' } | { phase: 'ready'; version: string }
+
+/**
+ * **整份更新快照** —— 标题栏、设置页、更新面板、通知全部读这一份。
+ *
+ * 业务事实（候选 / 检查记录 / 忽略 / 上次安装结果）来自 `run/update-state.json`；
+ * `state` 与 `install` 是本次进程的下载态，重启即 `idle`。
+ */
 export interface UpdateInfo {
   state: UpdateState
+  install: UpdateInstallPhase
   hasUpdate: boolean
+  /**
+   * 标题栏胶囊读的那一版：当前渠道上第一条候选，且**没被忽略**。
+   * `null` = 没有待更新（可能是有候选但被忽略了）。
+   */
+  pendingVersion?: string | null
+  /** 并列候选（正式版排第一）。设置页按渠道切换时读它。 */
+  candidates?: UpdateCandidate[]
   currentVersion: string
   latestVersion: string
-  notes?: string
-  url?: string
-  asset?: ReleaseAsset
+  notes?: string | null
+  url?: string | null
+  asset?: ReleaseAsset | null
   /**
    * 上一次安装的结果。**没有那本账时是真 `null`**（后端 `Option` 序列化成了 `null`，
    * 不是缺键）；mock 里没装过时给的是 `undefined`。两种"没有"都得认 ——
@@ -2277,13 +2302,12 @@ export interface UpdateInfo {
   lastResult?: UpdateResult | null
   /** 安装日志的绝对路径（点「重启并安装」没反应时要看的就是它） */
   installLog: string
-  /**
-   * 自动检查上次发现的那一版（`undefined` / `null` = 没有待更新）。
-   *
-   * 标题栏那枚"有更新"小胶囊读它 —— `hasUpdate` 只按正式版判定，
-   * 测试版候选进不了那一格，所以另存这一条。
-   */
-  pendingVersion?: string | null
+  /** 最近一次检查的记录 */
+  checked: UpdateCheckRecord
+  /** 用户忽略的那一版（落盘，不再只住 localStorage） */
+  ignored?: string | null
+  /** 快照协议代次 */
+  schema: number
 }
 
 /**
@@ -4571,17 +4595,29 @@ export interface MkpApi {
    * 只读、不在启动/首屏路径上（设置页打开时才调；铁律：云端不参与首屏）。
    * 信息源不可达时**如实拒绝**（`IO` / `NOT_FOUND`），由调用方决定说还是略过。
    */
-  checkSoftwareUpdate(): Promise<SoftwareUpdate>
+  checkSoftwareUpdate(): Promise<UpdateInfo>
 
   /* ---------- 应用内更新（第五刀） ---------- */
 
   /**
-   * 一次问全（状态 + 有无新版 + 资产 + 上次安装结果）。
+   * 读整份更新快照（**只读**：不联网、不写盘）。
    *
    * **不在首屏路径**：标题栏那枚图标在**用户开始下载之后**才订阅事件，
    * 平时只在切到设置页时问一次。
    */
-  updateInfo(): Promise<UpdateInfo>
+  getUpdateSnapshot(): Promise<UpdateInfo>
+
+  /**
+   * 忽略某一版（标题栏面板那颗「忽略」）。**落盘**，不只住 localStorage。
+   */
+  ignoreUpdate(version: string): Promise<UpdateInfo>
+
+  /**
+   * 一次性迁移握手：把旧 localStorage 里的忽略版本交给后端。
+   *
+   * 前端**只有收到成功才删旧键** —— 中断了下次再来一遍，不会丢忽略记录。
+   */
+  migrateUpdateIgnored(value: string | null): Promise<UpdateInfo>
 
   /**
    * 开始下载安装包（**秒回**；进度靠 `software-update-progress` 事件）。
@@ -4596,7 +4632,7 @@ export interface MkpApi {
   cancelUpdate(): Promise<void>
   /**
    * 装上去并重启：**本进程会退出**（正在运行的 `.app` 换不掉）。
-   * 替换成没成，**下次启动**由 `updateInfo().lastResult` 说清。
+   * 替换成没成，**下次启动**由快照的 `lastResult` 说清。
    */
   installUpdate(): Promise<void>
 

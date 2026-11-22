@@ -883,10 +883,10 @@ pub struct AppStateFile {
     ///   读者是 [`crate::runtime::update_check`]；设置页那一格走 `ipc::prefs`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_channel: Option<super::release_info::UpdateChannel>,
-    /// **自动检查发现的待更新版本**（2026-11-21）：上次顺路查到的那一版。
-    ///
-    /// 落盘是为了标题栏那枚"有更新"小胶囊 —— 8 秒通知走掉之后它还得在，
-    /// 且要认得测试版（`hasUpdate` 只按正式版判定）。查到新版就写，查不到就清。
+    /// **retired（2026-11-22）**：更新结论已搬到 `run/update-state.json`
+    /// （[`crate::runtime::update_state`]）。这一格只在**迁移**时读一次
+    /// （见 `update_check::startup`），搬完立刻置 `None` —— 除迁移外没有任何
+    /// 读写点，下一次写状态文件它就不在盘上了。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_update: Option<String>,
     /// **主窗置顶档位**（2026-10-17）：`None` = 还没选过 ⇒ `off`。
@@ -1742,14 +1742,14 @@ pub fn set_update_channel(
     })
 }
 
-/* ---------- pendingUpdate：自动检查发现的待更新版本 ---------- */
+/* ---------- pendingUpdate（retired）：只服务一次性迁移 ---------- */
 
-/// 上次自动检查发现的那一版（没有 = `None`）。标题栏那枚小胶囊读它。
+/// 旧账那一格（**只给迁移读**，界面与检查事务都不再读它）。
 pub fn pending_update(root: &Path) -> Result<Option<String>, AppError> {
     Ok(load(root)?.pending_update)
 }
 
-/// 记下 / 清掉待更新版本。查到新版写进去，查到"没有新版"就清掉。
+/// 迁移搬完、新快照落盘之后把它清掉（写整份状态时该键本就不再序列化）。
 pub fn set_pending_update(root: &Path, version: Option<&str>) -> Result<(), AppError> {
     with_state(root, |state| {
         state.pending_update = version.map(str::to_owned);
