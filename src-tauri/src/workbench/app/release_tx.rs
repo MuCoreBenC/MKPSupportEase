@@ -759,11 +759,12 @@ fn run_inner(
             "tag `{tag}` 已经存在。换一个版本号，或先确认那一版发到哪了"
         ));
     }
-    /* **tag 存在 ⇒ 必须指向当前 HEAD。**
+    /* **会按当前工作区重新构建的趟：tag 存在 ⇒ 必须指向当前 HEAD。**
     续跑会沿用那个 tag、却从当前工作区构建；两者不是同一笔提交时，
     新代码的包就会被挂到旧 tag 的 Release 上 —— 版本号还一样，事后查不出来。
+    `InfoOnly` 不构建、不重传（只按本地这一版的产物写清单），不受这条约束；
     `Taken` 已经报过更准的那句，这里不重复。 */
-    if slot != ReleaseSlot::Taken {
+    if rebuilds_from_worktree(slot) && slot != ReleaseSlot::Taken {
         if let Some((at_tag, at_head)) = frozen_elsewhere(&git, &tag) {
             blocked.push(format!(
                 "tag `{tag}` 指向 {}，当前 HEAD 是 {} —— 这一版冻结在另一笔提交上：\
@@ -2212,6 +2213,14 @@ fn release_slot(
     } else {
         Ok(ReleaseSlot::Append)
     }
+}
+
+/// 这一趟会不会**按当前工作区重新构建**？
+///
+/// 会 ⇒ tag 必须指向 HEAD（否则新代码的包会挂到旧 tag 上）；
+/// 只补清单那一趟（`InfoOnly`）不构建、不重传，产物是 tag 那一刻的，与 HEAD 无关。
+fn rebuilds_from_worktree(slot: ReleaseSlot) -> bool {
+    !matches!(slot, ReleaseSlot::InfoOnly)
 }
 
 /* ---------- 工作台入口（命令壳） ----------
@@ -3712,6 +3721,14 @@ mod tests {
             validate_built_artifacts(&[built, broken], "0.0.13").is_err(),
             "坏 zip 必须被拒"
         );
+    }
+
+    /// 只有会重新构建的趟才要求"tag 必须坐在 HEAD 上"；补清单那趟不构建，不该被挡。
+    #[test]
+    fn only_building_slots_require_the_tag_to_sit_on_head() {
+        assert!(rebuilds_from_worktree(ReleaseSlot::Fresh));
+        assert!(rebuilds_from_worktree(ReleaseSlot::Append));
+        assert!(!rebuilds_from_worktree(ReleaseSlot::InfoOnly));
     }
 
     /// 只补清单那一趟（InfoOnly）：从磁盘上找到**这一版**的那一份，不构建。
