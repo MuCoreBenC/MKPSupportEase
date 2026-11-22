@@ -7,7 +7,7 @@
  * v≤0.0.5 是**断代前的历史记录**（GitHub 发的，`asset.url` 指 GitHub 是事实）——
  * 照旧合法，不改写（总纲 §1③：测试版断代，不是抹历史）。
  *
- * ★ 断代线常量与 `src-tauri/src/workbench/app/release_tx.rs` 的
+ * ★ 断代线常量与 `src-tauri/src/workbench/app/release.rs` 的
  *   `FIRST_GITEE_RELEASE` 同值 —— 那边拦"正在生成的"，这边查"已入库的"。
  *   改断代线时两边一起改（CI 会在文件里 grep 不到时依旧各自为政……所以写在这条注释里提醒）。
  */

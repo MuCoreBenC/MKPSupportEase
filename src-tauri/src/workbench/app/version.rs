@@ -17,7 +17,7 @@
 //! # 为什么 `release.json` 的版本不在这里
 //!
 //! 它记的是"**已发布**出去的版本"，落后于当前开发版本是合法的（还没发的时候就是旧的）。
-//! 所以它只由[`super::release_tx`]在上传成功后写，判据也不要求它与 manifest 相等 ——
+//! 所以它只由[`super::release`]在上传成功后写，判据也不要求它与 manifest 相等 ——
 //! 要求相等等于逼人"改版本号就必须立刻发版"。
 
 use std::path::{Path, PathBuf};
@@ -134,7 +134,7 @@ pub fn is_newer(next: &str, current: &str) -> bool {
 /// **版本真值**：读 `src-tauri/Cargo.toml` 的 `[package].version`。
 ///
 /// 用 `toml_edit` 而不是正则：manifest 里 `version` 出现不止一次（成员表、依赖表里也有），
-/// 正则会改错地方 —— 那条教训在 `scripts/release.mjs` 里已经踩过一次。
+/// 正则会改错地方 —— 那条教训在旧发版脚本里踩过一次。
 pub fn app_version(repo_root: &Path) -> Result<String, AppError> {
     let text = read_text(repo_root, MANIFEST_REL)?;
     let doc = text.parse::<toml_edit::DocumentMut>().map_err(|e| {
@@ -223,9 +223,9 @@ pub fn derived_mismatch(repo_root: &Path) -> Result<Vec<String>, AppError> {
 ///
 /// 第三个是 `Cargo.lock`：它也记着本 crate 的版本号。漏掉的后果是下一次任何人跑 cargo
 /// 都会被它自动改写 —— 工作区凭空变脏，而入库的 lock 与 manifest 不一致
-/// （v0.0.1 那次就是这么漏的，教训记在 `scripts/release.mjs` 里）。
+/// （v0.0.1 那次就是这么漏的，教训记在那条老路上）。
 ///
-/// ★ **为什么是改文件而不是 `cargo update --workspace`**（与 `scripts/release.mjs` 的老做法不同）：
+/// ★ **为什么是改文件而不是 `cargo update --workspace`**（与早先那套做法不同）：
 /// 那条命令是子进程，要 cargo 在 PATH 上、要真 workspace 在场 —— 而"派生"这件事
 /// 本身只是"改一行"。做成纯文件操作之后，判据可以在临时目录里验它，
 /// 事务也不会因为某个环境里没有 cargo 就整条链走不下去。
@@ -313,7 +313,7 @@ fn write_lock(repo_root: &Path, version: &str) -> Result<Vec<String>, AppError> 
 ///
 /// 它也记着本 crate 的版本号。漏掉的后果是下一次任何人跑 cargo 都会被它自动改写 ——
 /// 工作区凭空变脏，而入库的 lock 与 manifest 不一致（v0.0.1 那次就是这么漏的，
-/// 教训记在 `scripts/release.mjs` 里）。
+/// 教训记在那条老路上）。
 /// `--offline`：只刷新本 workspace 的条目，不去网络升级依赖。
 pub fn refresh_lock(repo_root: &Path) -> Result<(), AppError> {
     let out = std::process::Command::new("cargo")
@@ -697,7 +697,7 @@ version = "0.0.1"
     }
 
     /// ★ 真值只认 `[package].version`：依赖表里的 `version` 不许被"改版本号"碰掉。
-    /// 这条是 `scripts/release.mjs` 用正则踩过的坑（`^version = ` 只碰第一行，
+    /// 这条是早先那套正则写法踩过的坑（`^version = ` 只碰第一行，
     /// 换个 manifest 写法就改错地方）—— `toml_edit` 按结构定位，构造上不会再犯。
     #[test]
     fn the_truth_slot_is_the_package_table_not_any_version_line() {

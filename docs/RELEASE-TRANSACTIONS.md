@@ -84,7 +84,7 @@
 | Release 形态 | 正常 **GitHub Release + `vX.Y.Z` tag + macOS 安装包** |
 | 客户端 | 只负责**发现新版本 + 展示信息 + 打开下载页**，**不做应用内自动更新** |
 
-> ★ **2026-10-07 更新（安装包那一行）**：不再"只做 macOS" —— `release_tx` 按**宿主平台**
+> ★ **2026-10-07 更新（安装包那一行）**：不再"只做 macOS" —— `release` 按**宿主平台**
 > 分流（macOS → dmg / Windows → NSIS `.exe`），两端各自在自己的机器上打，`installer_plan()`
 > 是唯一判据。理由：dmg 要 `hdiutil`、NSIS 要 `makensis`，交叉打不是"多传一个参数"的事。
 > 应用内更新的 `.app.zip` **仍只有 macOS 有**（客户端那条替换链替换的是 `.app`），
@@ -92,7 +92,7 @@
 > 表里"GitHub Release"那一行也已由 M6 之后的几刀改成 **Gitee 发布通道**（总纲 §5-M6）。
 >
 > ★ **2026-10-07 再更新（一个版本可以有多个平台）**：判据从"tag 被占就不许发"改成
-> **"这一版 × 本平台"**（`release_tx::release_slot`，闸与事务共用）：
+> **"这一版 × 本平台"**（`release::release_slot`，闸与事务共用）：
 > - tag 还没打 → 走完整流程（版本号 → PR → tag → 构建 → 上传）；
 > - tag 打了、**本平台**的包还不在 Release 上 → **只补包**（不重打 tag、不开 PR、不动版本号）；
 > - 本平台那一份已经在 → 换版本号。
@@ -122,12 +122,12 @@ src-tauri/Cargo.toml  [package].version            ← 唯一真值（人只改�
 `workbench/app/version.rs` 是这条链的唯一实现（读真值 / 推派生 / 推进），
 判据 `the_app_version_has_one_source_of_truth` 钉住"五处同源"。
 
-**★ 与 `scripts/release.mjs` 的关系**：不废弃、不复制 —— **一个内核、两个入口**
-（`workbench/app/release_tx::run`）：
+**★ 与 CLI 的关系**：不废弃、不复制 —— **一个内核、两个入口**
+（`workbench/app/release::run`）：
 
 ```text
-       发布软件版本事务核心（release_tx::run）
-            │            └── CLI：src-tauri/src/bin/release.rs ← scripts/release.mjs（薄壳）
+       发布软件版本事务核心（release::run）
+            │            └── CLI：src-tauri/src/bin/ship.rs ← npm run ship（薄壳）
             └── 工作台：wb_release_preflight / wb_release_software
 ```
 
@@ -136,7 +136,7 @@ src-tauri/Cargo.toml  [package].version            ← 唯一真值（人只改�
 
 | 步 | 动作 | 说明 |
 | --- | --- | --- |
-| 1 | 确认主线 | 工作区干净、不在 main 上、tag 没被占（`release_tx` 的预检，**零写入**） |
+| 1 | 确认主线 | 工作区干净、不在 main 上、tag 没被占（`release` 的预检，**零写入**） |
 | 2 | 确定版本号 | **改一处** `src-tauri/Cargo.toml`，三处派生自动跟随 |
 | 3 | **tag** | `vX.Y.Z` 打在 **main 的 tip** 上（squash 会重写提交） |
 | 4 | 构建安装包 | 本机 `npm run tauri -- build`（第一阶段 macOS / 不签名）；产物 `bundle/dmg` 下**唯一一份** |
@@ -467,7 +467,7 @@ curl -sL https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/c
 
 ### 10.8 预览版发布事务（2026-11-05）
 
-预览版走的是**同一条内核**（`release_tx::run`），只多一个 `channel` 参数。不是第二套流程。
+预览版走的是**同一条内核**（`release::run`），只多一个 `channel` 参数。不是第二套流程。
 
 | | 正式通道（缺省） | 预览通道 `--channel preview` |
 | --- | --- | --- |
@@ -480,7 +480,7 @@ curl -sL https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/c
 
 ```bash
 MKPSE_APP_DIR="$HOME/Library/Application Support/SupportEase-Workbench" \
-  npm run release -- 0.0.10-preview.1 "试试双通道更新" --channel preview
+  npm run ship -- --what preview --confirm
 ```
 
 底层等价：`cargo run --bin release --features workbench -- 0.0.10-preview.1 "…" --channel=preview --merge --confirm`
@@ -499,8 +499,9 @@ MKPSE_APP_DIR="$HOME/Library/Application Support/SupportEase-Workbench" \
 5. **重复发布是 no-op**。同一版同一说明重写一次，清单内容逐字相同，事务据此
    不切分支、不开 PR（`republishing_the_same_preview_version_is_a_no_op`）。
 
-**重复发布与补包**：`release_slot` 按「tag × 本平台」判 —— 预览 tag 与正式 tag 走同一套。
-已经发过本平台 = `Taken`（换号）；tag 在而本平台没包 = `Append`（只补包，不动版本号）。
+**重复发布与补包**（发布内核 2.0）：没有 `release_slot` 的四档了。状态是
+「版本 × 平台 × 源」的派生矩阵（`release::state`），谁没齐就补谁；同一项已在远端且
+同字节 ⇒ 跳过。正式 tag 只在封版时创建，所以也不再有「tag 已存在 = 只读诊断」这条。
 
 **回滚的现实**：远端已经发生的事（tag、Release、上传的包）内核**不回滚** ——
 它会如实报出停在哪一步，并把回退命令打印给人看。特别地，服务端 ruleset
@@ -520,7 +521,12 @@ curl -sL https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/r
 **边界**：这一节只谈软件版本。预览发布**不碰** `presets/delivery/catalog.json` 与
 `publish-serial.json`，不跑 `presets publish`，不推进预设数据序号。
 
-### 10.9 双平台下载：Gitee 收货、GitHub 镜像（2026-11-06）
+### 10.9 双平台下载：Gitee 收货、GitHub 镜像（2026-11-06；2026-11-22 收编进发布内核 2.0）
+
+> ★ **发布内核 2.0 改判**：镜像不再由 `.github/workflows/mirror-release-to-github.yml` 做，
+> 也不再由 Windows runner 直传 Gitee。**上传方只有内核**：
+> CI 只产 artifact（`windows-build.yml` 的 `workflow_dispatch`），内核取回、自己算 SHA、
+> 传 Gitee 暂存 → GitHub 草稿 → 清单 → 封版。细节见 `docs/RELEASE-RUNBOOK.md`。
 
 作者口径：**GitHub 是主仓库**（PR、合并、tag 都从这里出发），**Gitee 是国内下载源**；
 两边同一个版本、同一个 tag、同一组安装包。
@@ -540,13 +546,12 @@ GitHub 事后复制。反过来会产生"清单已宣告、Gitee 还没有包"�
 |---|---|---|
 | tag | 内核（本机） | 打在 GitHub 上，`--confirm` 之后 |
 | Gitee Release + macOS 包 | 内核（本机） | `prerelease` 按通道给 |
-| Gitee Release + Windows 包 | `windows-build.yml` | tag push 触发；脚本**等** Release 出现再传 |
+| Gitee Release + Windows 包 | 内核 | CI 只产 artifact（`workflow_dispatch`），内核取回后统一上传 |
 | GitHub Release + 资产 | `mirror-release-to-github.yml` | 从 Gitee **复制字节**，绝不重新打包 |
 
-**Windows 包怎么进 Release**：内核跑在 macOS 上，等不了一台 Windows 机器，所以让 Windows
-那侧自己送过来 —— `node scripts/gitee-release.mjs upload --tag vX --file …`。它等 Release
-出现（默认 20 分钟）、同名附件跳过（重跑幂等）、传完**回读**确认附件真的在。
-没配 `GITEE_TOKEN` 时只告警不红：包仍在 Artifacts 里，构建本身的契约已经完成。
+**Windows 包怎么进 Release**：内核按**冻结的源码 SHA** 触发 `windows-build.yml`
+（`workflow_dispatch` + `source_sha` 输入），轮询完成后拉 Actions artifact、**自己算 SHA-256**
+（回执只作交叉核对），再上传两个源。CI 不再有发布权。
 
 **一致性三道闸**（`mirror-release-to-github.yml` 的最后一个 step，任一不过即红）：
 
@@ -558,16 +563,15 @@ GitHub 事后复制。反过来会产生"清单已宣告、Gitee 还没有包"�
 
 ★ **Gitee 的附件 API 不返回 `size` / `sha`**（2026-11-06 实测：只有 `name` 与
 `browser_download_url`）。所以"以 Gitee 为准"的校验只能靠**下载回来自己算**；
-清单里的 `sha256` 也一直是发布方本地算的（`release_tx` 的 `sha256_file`），不依赖回读。
+清单里的 `sha256` 也一直是发布方本地算的（`release` 的 `sha256_file`），不依赖回读。
 
 **触发**：`push` tag `v*`（内核刚打完 tag，先等 Gitee Release 齐）、`workflow_run`
 （windows-build 跑完，把 `.exe` 补上）、`workflow_dispatch`（人主动补）。
 同一个 tag 串行，`--clobber` 幂等，重跑不会出现两份同名资产。
 
-**已知边界（本轮没做）**：清单里的 **Windows 资产条目**（`assets[]` 里的 `windows` + `nsis`
-那一项）还没有人写 —— `release_info_text` 的第五格仍是 `None`（"双平台资产：下一轮"）。
-也就是说：Windows 包在两个 Release 上都能**手动下载**，但客户端不会**自动下载**它。
-补法是在内核里写双平台资产（那里已经留好位置），不在镜像这一层。
+**现状（发布内核 2.0）**：清单按平台表写**全部平台**的资产（`manifest::render` 会拒绝
+"缺一份"的清单），每份带 `platform` / `kind` 与 `sources.gitee|github`。CI 只产 artifact，
+上传方只有内核。
 
 **运维前提**：`mirror-release-to-github.yml` 只用仓库自带的 `GITHUB_TOKEN`（读 Gitee 是
 公开数据），**不需要额外 Secret**；但 `windows-build.yml` 那一步要 `GITEE_TOKEN`。
@@ -594,6 +598,6 @@ CI 的 rust job 会把 `cargo fmt --all -- --check` 与 `clippy -D warnings` 各
 - **clippy 那条最常踩的**：测试里造文件也要走 `crate::fsx::atomic::atomic_write`。
   `clippy.toml` 把 `std::fs::write` / `File::create` 列进 `disallowed-methods`，
   全仓只有 `fsx/atomic.rs` 开一个洞。
-- **打 tag 之前不用另记一份清单**：`npm run release` 自己会跑 `cargo fmt --all -- --check`
-  （`scripts/release.mjs`）、版本闸，并等 CI 全绿才建 Release。
+- **打 tag 之前不用另记一份清单**：发布内核自己会跑 `cargo fmt --all -- --check`
+  （`npm run ship`）、版本闸，并等 CI 全绿才建 Release。
 - `--no-verify` 只绕得过本地闸，绕不过 CI 与 main 的 ruleset。

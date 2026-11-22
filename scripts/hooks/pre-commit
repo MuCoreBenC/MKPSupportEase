@@ -35,7 +35,7 @@ if [ "$branch" = "main" ]; then
     echo "    git switch -c feat/<task>" >&2
     echo "" >&2
     echo "  要把这些改动发成一个版本，走发版命令（它会开 PR + 合并 + 打 tag）：" >&2
-    echo "    npm run release" >&2
+    echo "    npm run ship" >&2
     echo "" >&2
     echo "  确实要提在 main 上（会留痕）：" >&2
     echo "    ALLOW_COMMIT_ON_MAIN=1 git commit ..." >&2

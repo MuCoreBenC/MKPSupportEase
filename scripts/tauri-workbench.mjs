@@ -45,7 +45,7 @@ if (action !== 'dev' && action !== 'build') {
 // tauri dev 的文件监视器清单里 —— 不关监视器，版本号一落盘 dev 就重建重启，
 // 发版事务被杀在半路（2026-10-06 真机踩的）。关掉监视器，工作台 dev 与发版
 // 互不干扰；代价只是改 Rust 代码要手动重启（前端 HMR 走 vite，不受影响）。
-// release_tx 那道 run-env 闸按祖先进程链实时探测监视器，就是读这一行命令行里的
+// release 那道 run-env 闸按祖先进程链实时探测监视器，就是读这一行命令行里的
 // `--no-watch` 来放行的。
 const isDev = action === 'dev'
 const cmd = `tauri ${action}${isDev ? ' --no-watch' : ''} --config src-tauri/tauri.workbench.conf.json --features workbench`

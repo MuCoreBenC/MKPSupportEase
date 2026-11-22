@@ -1,310 +1,128 @@
-# 发布机械协议：PR 与正式发布
+# 发布机械协议（发布内核 2.0）
 
-> 这是 PR 与软件版本发布的**执行规则**。AI 只负责写改动；流程合法性由脚本判定，
-> 不靠 AI 记住“这次该干什么”。改本文要作者点头。
->
-> 与 [`RELEASE-TRANSACTIONS.md`](RELEASE-TRANSACTIONS.md) 的分工：那份管“发布预设 ≠ 发布软件版本”
-> 的概念；本文管“代码 PR 与软件版本发布按什么顺序、谁闸住、失败回到哪”。
->
-> **实施状态（2026-11-22）**：PR 幂等、CI 统一入口、tag 排到构建之后、
-> `InfoOnly` 只补清单恢复已经落地，并且**上传中断后的恢复有了端到端判据**
-> （#11：一端缺一份 → 重跑只补清单）。十一种故障场景中已有构建失败不留 tag、
-> 只补清单、构造 PR 标题、中断恢复等机器判据，其余仍需真机演练。各节末的“现状差距”逐条更新。
+> 软件版本发布的**执行规则**。流程合法性由内核判定，不靠人记「这次该干什么」。
+> 改本文要作者点头。
 
----
-
-## 0. 三条不可越过的时间线
+## 0. 一句话
 
 ```text
-阶段 A  开发与 PR          ── 不改正式版本号、不写 release.json、不打 tag
-阶段 B  最终发布准备        ── 可以改程序版本文件、可以构建；绝不打 tag
-阶段 C  正式发布            ── tag 是最后动作之一；tag 之后不许改代码
+冻结源码 → 多平台分批构建 → 资产集中暂存 → 统一上传两个源 → 清单合并 → 最后封版打 tag
 ```
 
-两样东西必须分开：
+**构建可以分批，发布必须统一。** 平台只负责产出安装包，发布权只在内核。
 
-| 东西 | 何时写 | 为什么 |
-| --- | --- | --- |
-| 程序版本文件（`version.toml` + 四处派生） | **阶段 B**，所有代码 PR 合并后 | 安装包里自报的版本来自编译期常量，必须在构建前改好 |
-| `presets/delivery/release.json` | **阶段 C**，产物上传成功之后 | 它要写下载地址和 SHA，必须先有真实上传产物 |
-
-提前写 `release.json` 不会让 tag 更早生效，只会让人误以为“清单准备好了就能发”。
-tag 早于构建是这次事故的根源：构建失败时 tag 已经推到远端，重跑又被 tag 闸拦住。
-
----
-
-## 1. 阶段 A：开发与 PR
-
-### 入口条件
-
-- 有一个待改的需求 / 缺陷。
-- 当前分支不是 `main`；分支名带 `feat/ fix/ refactor/ chore/ docs/ style/` 前缀。
-
-### 允许
-
-1. 改源码、改测试、改文档。
-2. 本地跑改动相关检查（与 CI 同一入口，见 §4）。
-3. 推到**同一个分支**、更新**同一个 PR**。
-4. CI 红了就在原分支修复再推；只重跑失败的那一项。
-5. CI 全绿后合并进 `main`。
-
-### 禁止
-
-- 改 `version.toml` / `package.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json` / `Cargo.lock` 里的正式版本号。
-- 改 `presets/delivery/release.json` 或 `release-preview.json`。
-- 创建任何 `v*` tag。
-- 仅因为最新提交标题变了就关闭重开 PR。
-
-### PR 生命周期
-
-```mermaid
-flowchart TD
-    A[需求/缺陷] --> B[开 feat/fix 分支]
-    B --> C[改动 + 本地检查]
-    C --> D[推分支 → 建或更新同一个 PR]
-    D --> E[CI: web / rust / rust-windows 并行]
-    E -->|红| F[只修失败项 → 推回原分支]
-    F --> E
-    E -->|全绿| G[squash 合并 main]
-    G --> H[核对 main 的提交与 PR 记录]
-    H --> I{还有代码 PR?}
-    I -->|有| C
-    I -->|没有| Z[进入阶段 B]
-    E -->|PR 标题需改| T[gh pr edit 改标题，不重开]
-    T --> E
-```
-
-### 硬约束
-
-| 约束 | 脚本行为 |
-| --- | --- |
-| 一个任务一个分支一个 PR | 重复执行 `npm run pr` 只能找到并更新同一个 PR |
-| PR 标题独立于提交标题 | 改标题走 `gh pr edit`，不允许关旧开新 |
-| CI 全绿才允许合并 | 合并前重查 checks；红 / 排队未完成都不合 |
-| 只重跑失败项 | 记录每项 check 的结论，绿的不重跑 |
-| 合并后核验 | 核对 `origin/main` 的提交 sha 与 PR 的 squash 记录 |
-
-### 落地证据
-
-- `scripts/pr.mjs` 已改为按分支查 `--state all`：open 复用、merged 直接报“已合并”，
-  标题取 `--title` / 最早提交 / 分支名，不再与最新提交绑定。
-- `scripts/check-pr.mjs` 的标题判据同步改成“显式 > 最早提交 > 分支名”。
-- `scripts/check/run.mjs` 是本地与 CI 共用入口；CI 三个 job 已改为调用它。
-
----
-
-## 2. 阶段 B：最终发布准备
-
-### 入口条件
-
-- 所有代码 PR 已合并，`main` 干净且 `git fetch` 后与 `origin/main` 一致。
-- 用户已明确给出要发的正式版本号（如 `0.0.12`）。
-
-### 允许
-
-1. 在发布准备分支上改程序版本文件到目标号，并用 `npm run version:check` 确认五处一致。
-2. 构建安装版与绿色版。
-3. 检查产物：自报版本、文件完整性、SHA、大小。
-4. 失败则停止发布，回阶段 A 修代码，重新走 PR，再重新准备。
-
-### 禁止
-
-- 创建或推送 `v*` tag。
-- 建 Release、上传产物。
-- 写 `release.json`。
-- 用“构建快成功了”当理由提前打 tag。
-
-### 门禁
-
-| 门禁 | 判据 |
-| --- | --- |
-| 主线干净 | `git status --porcelain` 为空；`origin/main` 已 fetch |
-| 版本一致 | `version.toml` 与四处派生都等于目标正式号 |
-| 安装版构建成功 | 产物存在、自报版本 == 目标号 |
-| 绿色版构建成功 | 产物存在、自报版本 == 目标号 |
-| 产物可核验 | 大小 > 0、SHA-256 已记录、与清单资产一一对应 |
-| 无 tag | 本地与仓库都没有目标 tag |
-
-### 落地证据
-
-- `release_tx.rs` 已把 tag 创建移到构建、产物自报版本核对、构建期间 HEAD 未变这三关之后。
-- 构建失败/版本不符时直接返回，不创建 tag、不建 Release。
-- Windows 构建同时产出安装版与绿色版；两者都进 Release，失败则停在 tag 之前。
-
----
-
-## 3. 阶段 C：正式发布
-
-### 入口条件
-
-- 阶段 B 全部门禁绿。
-- 用户**当次**明确授权真发布，`--confirm` 已给。
-
-### 固定顺序
-
-1. 最终一致性预检：主线、版本、产物、SHA、目标仓库。
-2. 创建并推送 tag `v<版本>`。
-3. 创建 Release。
-4. 上传安装版与绿色版。
-5. 根据**已上传**的产物生成 `release.json`，写入版本号、下载地址、SHA；
-   Windows 资产同时写 `sources.gitee` 与 `sources.github`（同一份文件、同一 SHA），
-   客户端按用户当前源取地址。
-6. 核对 GitHub tag / Gitee Release / 远端 tag / main 清单四者一致。
-
-### 状态图
+## 1. 状态机
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Ready: 阶段 B 全绿 + 当次授权
-    Ready --> Tagging: 预检通过
-    Tagging --> Tagged: tag 创建并推送
-    Tagged --> ReleaseCreated: Release 建好
-    ReleaseCreated --> AssetUploaded: 两档产物都上传成功
-    AssetUploaded --> InfoCommitted: release.json 写好
-    InfoCommitted --> InfoReviewOpened: 清单 PR 开好，等人合并
-    InfoReviewOpened --> [*]: 人合并清单 PR，ship --check 全绿
-
-    Ready --> Failed: 任一预检失败（零写入）
-    Tagged --> Tagged: 上传失败 → 只读诊断 + 从上传阶段恢复
-    AssetUploaded --> AssetUploaded: JSON 失败 → 只恢复 JSON 阶段
-    Tagged --> Blocked: 发现 tag 已存在 → 禁止重跑完整 ship
-    Blocked --> Diagnose: 进入只读诊断，输出 tag 指向 / Release 资产 / 清单版本
+    [*] --> Preparing
+    Preparing --> Frozen: 冻结源码（staging tag）
+    Frozen --> Building: 逐平台构建 + 暂存
+    Building --> Staged: 两个源都齐
+    Staged --> ManifestMerged: 清单 PR 合并
+    ManifestMerged --> Verified: 六条判据全过
+    Verified --> Sealed: 打 tag + 正式 Release + 清暂存
+    Sealed --> [*]
+    Building --> Building: 失败 / 中断，续跑只补未完成平台
+    Staged --> Staged: 远端同字节则跳过上传
 ```
 
-### 不可逆保护
+状态**全部从远端现读派生**（`src-tauri/src/workbench/app/release/state.rs`）：
 
-| 约束 | 脚本行为 |
+| 事实 | 来源 |
 | --- | --- |
-| tag 前必须完成构建与产物验证 | 阶段 B 门禁全绿才允许进入 `Tagging` |
-| tag 后不改代码 | 内核在构建前再核 `tag` 与 `HEAD`（`frozen_elsewhere`） |
-| tag 已存在 | 禁止重跑完整 `ship`；进入只读诊断与阶段恢复 |
-| 不自动删 / 移 / 覆盖已推 tag | 任何修复都必须显式授权，且先写清后果 |
-| GitHub / Gitee tag 不一致 | 拒绝继续发布并列出两边 sha |
-| 产物提交与最终发布提交不一致 | 拒绝发布 |
+| 冻结源码 | `staging/<版本>` tag 指向的那一笔 |
+| 每平台每源已到哪 | Gitee `attach_files`（名+大小+id）、GitHub release assets（名+大小+digest） |
+| 清单已合并 | `origin/main:presets/delivery/release.json` 的 version 与 assets |
+| 已封版 | 正式 tag `v<版本>` 存在 + 正式 Release 资产与清单逐份一致 |
 
-### 恢复入口
+本地 journal（`target/release-journal.jsonl`）**只记过程，不参与判断**。所以换机器、
+换目录、上一趟被打断，都只是再跑一次同一条命令。
 
-只允许“从当前阶段往后接着做”，不允许从头重跑：
+## 2. 两条远端通道，两个落点
 
-| 失败阶段 | 恢复动作 |
+| 用途 | 在哪 | 说明 |
+| --- | --- | --- |
+| 代码仓（PR / CI / 草稿镜像） | GitHub | `workflow_dispatch` 触发 Windows 构建；清单 PR 也开在这里 |
+| 发布仓（正式下载） | Gitee | `release.json` 的主地址永远是 Gitee；GitHub 作 `sources.github` 镜像 |
+
+**暂存面**：
+
+```text
+Gitee   Release @ staging/<版本>    （Gitee 没有草稿；这条 tag 不在 v* 命名空间，可删）
+GitHub  Release  draft:true         （草稿不创建 tag，封版那一刻才发布）
+```
+
+封版时把同一批字节放进正式 Release：Gitee 只能重传（不能搬附件），GitHub 是把草稿
+改成正式 tag 再发布。清理时删掉 Gitee 暂存 Release 与 staging tag。
+
+## 3. 命令
+
+```bash
+npm run ship -- --check                          # 只读：到哪一步、下一步做什么
+npm run ship -- --what stable --dry-run          # 演练：零写入
+npm run ship -- --what stable --confirm          # 真发（要人当次许可）
+npm run ship -- --what stable --confirm --stop-after staging --platform windows
+```
+
+它自己判断下一件事：冻结 → 构建（本机 macOS / CI Windows）→ 暂存 → 清单 PR（等 CI 绿、
+squash 合并）→ 封版。
+
+### 封版六条判据（任一不过就不许封版）
+
+1. 所有计划支持的平台都齐了（`release::platforms::PLATFORMS` 里的每一行）；
+2. Gitee 资产完整；
+3. GitHub 资产完整；
+4. 两边同一份字节的大小 / 摘要一致；
+5. `main` 上的 `release.json` 含全部平台资产；
+6. 版本号 / 源码 SHA / 资产身份一致（正式 tag 指向冻结源码）。
+
+判据实装在 `release::state::derive`（纯函数，有单测）与 `release::seal::ensure_sealable`。
+
+## 4. 不可逆保护
+
+| 约束 | 怎么实现 |
 | --- | --- |
-| 创建 Release 失败 | 从 Release 阶段重试，不碰 tag |
-| 上传失败 | 从上传阶段重试，不碰 tag |
-| `release.json` 校验 / 提交失败 | 只恢复清单阶段 |
-| manifest 大 PR 未合并 | 人合并后跑 `npm run ship -- --check` |
-| tag 已存在但 Release 无资产 | 只读诊断后进入 `Append` 补包；不得整趟重跑 |
-| tag 指向与当前 HEAD 不同 | 会重新构建的 `Append` / `Fresh` 停止；`InfoOnly` 只补清单不构建，照常跑 |
+| 正式 tag 只在封版时创建 | 之前所有资产落在暂存 tag / GitHub 草稿上 |
+| tag 指向被构建的那一笔 | 封版用 `source_commit`（staging tag 指向它），不是 `main` 的 tip |
+| 已封版的号不许重打 | `seal::create_formal_tag` 比对已存在 tag 的提交，不一致就停 |
+| 上传前先读远端 | 同名同大小同摘要 ⇒ 跳过；同名不同字节 ⇒ 先删再传 |
+| 不上传没有身份的包 | `ArtifactFact` 在读取文件那一刻定下 size + SHA-256，清单与上传只读它 |
+| 清单基底永远取 `origin/main` | `manifest::published_info` 从 `git show origin/main:…` 读 |
 
-### 落地证据
-
-- `ReleaseSlot` 增加 `InfoOnly`：tag 与两档产物都在、只差清单时，只补清单，
-  不重构建、不重传、不动 tag。
-- `Append` 仍负责“本平台包缺”的补包，**要求 tag 指向当前 HEAD**；`InfoOnly` 不构建，
-  不再受这一条约束（2026-11-22：tag 之后又合了修复 PR 就补不了清单）。
-- `InfoOnly` 的资产事实来自**本地产物**（`locate_installer` / `locate_portable`），
-  镜像只补缺（`mirror_artifacts` 先查远端已有），清单只写**确认存在**的 GitHub 源。
-- `ship --check` 仍只核三格；产物与提交的身份由 `release_tx` 的构建基线核对兜住。
-
----
-
-## 4. 本地检查与 CI 同一入口
-
-目标：CI 的每个 job 都对应一条本地命令；本地跑过绿，CI 不应该因为同一条检查再红。
+## 5. 本地检查与 CI 同一入口
 
 ```text
 scripts/check/
-  lint          # npm run lint
-  typecheck     # npx tsc -b
-  rust          # cargo fmt --all -- --check + 两组 clippy + 两组 test
-  rust-windows  # Windows 独立 crate 的 cargo check
-  web           # build + check:bundle + check:zero-network + check:channel-args + check:release-source
-  build         # 安装版 + 绿色版
-  all           # 上述全部；CI 与发版前都调它
+  web / rust / rust-windows / build / all
 ```
 
-- CI 工作流只调用 `scripts/check/<name>`，不内联另一套命令。
-- `npm run release` 前置检查只调用 `scripts/check/all`，不再自己拼一遍。
-- 失败时按名字单独重跑：`node scripts/check/rust-windows.mjs`。
-- CI 三个 job（`web` / `rust` / `rust-windows`）并行；`build` 是阶段 B 的本地动作。
-  绿的那几项不重跑。
+- `npm run lint` 里保留的发布自检只有静态那几格（`check-release-readiness.mjs --static`）与
+  清单地址断代（`check-release-source.mjs`）。
+- 内核单测：`cargo test -p mkp-support-ease --features workbench --lib release::`。
 
-### 落地证据
-
-- `scripts/check/run.mjs` 提供 `web` / `rust` / `rust-windows` / `build` / `all`；
-  CI 三个 job 已改为调用 `npm run check:web|check:rust|check:rust-windows`。
-- `package.json` 的 `check:rust` 已切到同一入口；`release.mjs` 的前置校验也改调
-  `scripts/check/run.mjs web|rust`。
-
----
-
-## 5. 发布前检查器（目标判据）
-
-只回答机器能判的项；任一红就停，并指出文件名，不允许 AI 代替判断：
-
-```text
-[ ] 所有代码 PR 已合并
-[ ] main 与 origin/main 一致且工作区干净
-[ ] 正式版本文件 == 目标版本，四处派生一致
-[ ] 安装版构建成功，自报版本 == 目标版本
-[ ] 绿色版构建成功，自报版本 == 目标版本
-[ ] 两份产物大小 > 0，SHA-256 已记录
-[ ] release.json 目标内容正确（版本 / 资产名 / SHA / 地址）
-[ ] tag 尚不存在；若存在则进入只读诊断
-[ ] GitHub / Gitee 目标仓库正确、tag 未分叉
-```
-
----
-
-## 6. 十一种故障场景（改造后必须逐条验收）
+## 6. 故障场景
 
 | # | 场景 | 期望 |
 | --- | --- | --- |
-| 1 | CI 第一次失败，修复后推原分支 | 复用同一 PR；只重跑失败 check |
-| 2 | 最新提交标题变了 | 不改 PR 标题、不重开 PR |
-| 3 | Windows check 失败 | 只重跑 `rust-windows`，其余不重跑 |
-| 4 | 安装版构建失败 | 停在阶段 B；无 tag |
-| 5 | 绿色版构建失败 | 停在阶段 B；无 tag |
-| 6 | JSON 校验失败 | 停在阶段 C 的清单阶段；tag 已存在时只恢复清单 |
-| 7 | tag 成功、上传失败 | 从上传阶段恢复；不重打 tag |
-| 8 | 重复执行 ship | 不重复建 tag / Release，进入当前阶段 |
-| 9 | GitHub / Gitee tag 不一致 | 拒绝继续，打印两边 sha |
-| 10 | 产物提交 ≠ 最终发布提交 | 拒绝发布，打印两个 sha |
-| 11 | **上传中途被打断**（Gitee 两份齐、GitHub 只传了一份，进程被杀） | 重跑只补清单：从本地产物恢复资产、只补缺的镜像、重写清单；**不重建、不重打 tag、不要求 tag 在 HEAD** |
+| 1 | 构建中途失败 | 停在那个平台；已完成的平台与暂存资产保留 |
+| 2 | 上传中断 | 重跑先读远端，同字节跳过，只补缺的那几份 |
+| 3 | 换一台机器续跑 | `--check` 读出的状态与上一台一致，续跑不重传 |
+| 4 | 清单 PR 的 CI 红 | 停在 ManifestMerged 之前；清单已在分支上，修完重跑 |
+| 5 | 封版后重跑 | 判 `sealed`，不重复上传、不重复建 tag |
+| 6 | 正式 tag 指向别的提交 | 停（不许重打/移动已封版的 tag） |
+| 7 | 暂存与正式同名字节不同 | 判冲突停下（两份不同的包不能都叫这一版） |
+| 8 | Gitee / GitHub 少一份 | 封版判据不过，列出缺哪几份 |
+| 9 | GitHub 草稿被谁发布过 | 判冲突（暂存面必须先是草稿） |
+| 10 | 版本号没合进 main | 预检直接拒（`origin/main` 的 `version.toml` 与目标不同） |
+| 11 | 发布账户缺一条通道 | 预检直接拒（GitHub / Gitee 都要；不再等到镜像阶段才 401） |
 
-已有机器判据：
+## 7. 验收（0.0.16）
 
-- #4 / #5：`release_tx::tests::a_failed_build_leaves_no_tag`（构建失败不留 tag / Release）。
-- #6 / #7：`the_release_slot_is_decided_per_platform` 覆盖 `InfoOnly`（只补清单）与 `Taken`。
-- #2：`check-pr.mjs` 覆盖“PR 标题独立于后续提交”。
-- #3：`scripts/check/run.mjs rust-windows` 可单独重跑；CI 已按 job 并行。
-- **#11（整条链）**：
-  - `info_only_fills_the_missing_mirror_asset` —— 一端缺一份时补缺、已有的不重传，清单两源的 name/size/SHA/URL 全对；
-  - `info_only_runs_without_rebuilding_or_retagging` —— tag 之后又合了提交也放行，tag 不被重打；
-  - `a_failed_mirror_top_up_fails_before_the_manifest` —— 补镜像失败就整趟失败，清单一个字节都不写；
-  - `stage_allowed_in_drops_files_outside_the_release_list` —— 清单提交只收白名单路径。
-- #1 / #8 / #9 / #10 仍需真机 gh/发布仓库演练，**尚未自动化**，不得声称已通过。
-
-## 0.0.12 现场核查（2026-11-21）
-
-- GitHub 与 Gitee 的 `v0.0.12` raw ref 都是 `e1de821`，这是 **annotated tag 对象**；
-  两边剥开后都指向提交 `a4fcc43`，**没有分叉**。
-- 之前的“tag 指向与 HEAD 不同”是脚本拿 tag 对象 SHA 比提交 SHA 的误报，
-  已在 `check-release-readiness.mjs` 修正为优先读 `^{}` 剥皮行。
-- GitHub / Gitee Release 均未创建，安装包未上传，`release.json` 仍是 0.0.6。
-- 因此 0.0.12 可以保留原 tag；恢复走 `Append`：构建两档产物 → 上传 Release →
-  只补清单，不移动任何 tag。
-- **工具用新代码、被构建的源码用 tag 那一笔**：在 `a4fcc43` 上开临时 worktree，
-  用新代码编出的 `release` 内核并以 `MKPSE_REPO_DIR=<worktree>` 指向它执行；
-  `release_tx` 会要求 tag == HEAD（成立），然后只补包与清单，不重打 tag。
-
----
-
-## 7. 耗时统计
-
-目标指标：正常 PR 一轮 CI；PR 因标题/脚本问题重开 0 次；因漏跑本地检查导致 CI 红 0 次。
-
-每次发布在 `target/release/journal.json` 追加阶段耗时（已有只追加账本：
-`release_tx.rs:1634-1651`），至少记：`pr_opened_at`、`ci_green_at`、`merged_at`、
-`artifacts_ready_at`、`tag_created_at`、`release_assets_at`、`manifest_pr_at`。
-用 `merged_at - pr_opened_at` 看 PR 周期，用 `tag_created_at - artifacts_ready_at`
-看阶段 B→C 的等待；异常轮次注明排队 / 构建 / 重复检查 / 人工操作各占多久。
+```text
+1. npm run ship -- --what stable --confirm --stop-after staging --platform windows
+2. 换一个终端 / 目录，npm run ship -- --check     # 应显示 Windows 已完成、macOS 未完成
+3. npm run ship -- --what stable --confirm         # 只构建上传 macOS，接清单与封版
+4. npm run ship -- --check                         # 应显示 sealed
+5. 再跑一次 --confirm                              # 不重复上传、不重复建 tag
+```

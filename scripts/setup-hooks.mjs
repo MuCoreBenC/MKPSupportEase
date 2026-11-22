@@ -145,7 +145,7 @@ if (legacyHooks && existsSync(legacyHooks)) {
 /* 5. 发版标记残留会让闸①/①b 一直放行 main 上的提交，必须显眼报出来 */
 if (gitDir && existsSync(join(gitDir, 'RELEASE_IN_PROGRESS'))) {
   warn('检测到 .git/RELEASE_IN_PROGRESS 残留 —— 闸①/①b 现在会放行 main 上的提交！')
-  info('上次 npm run release 没走完。确认没在发版中，删掉这个文件。')
+  info('上次 npm run ship 没走完。确认没在发版中，删掉这个文件。')
 }
 
 console.log(`
@@ -161,7 +161,7 @@ console.log(`
   ⑦  pre-commit        密钥文件 / >2MB 非 public/   ALLOW_BIG_OR_SECRET=1
 
 main 只能由 PR 推进（squash 合并），本地永远不 push main。
-发版走一条命令：npm run release
+发版走一条命令：npm run ship
 逃生开关一律留痕到 .git/bypass.log，下次发版时会当着你的面复述。
 细节见 docs/GIT-WORKFLOW.md
 `)

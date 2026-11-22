@@ -45,6 +45,8 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   # 不该动用逃生开关 —— 逃生开关一旦变成日常工具，bypass.log 就失去信号价值。
   if [ "$local_sha" = "$ZERO" ]; then
     case "$remote_ref" in
+      # 暂存 tag 是发布内核自己在封版后清理的对象，删它不算破坏历史
+      refs/tags/staging/*) ;;
       refs/heads/main | refs/tags/*)
         delete=1
         delete_ref=$remote_ref
@@ -63,6 +65,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
   case "$remote_ref" in
     refs/heads/main)
       push_main=1
+      ;;
+    refs/tags/staging/*)
+      # 暂存 tag（`staging/<版本>`）：正式 tag 在封版时才创建，这一条只承载暂存 Release。
+      # 仍要求发布事务的标记 —— 手工推一个暂存 tag 同样会绕开状态机。
+      if [ "${MKP_RELEASE_TX:-}" != "1" ]; then
+        tag_bad=1
+        tag_msg="暂存 tag '$remote_ref' 只能由发布事务推送（npm run ship）"
+      fi
       ;;
     refs/tags/*)
       name=${remote_ref#refs/tags/}
@@ -132,7 +142,7 @@ if [ "$tag_bad" = "1" ]; then
     echo "  闸⑤：$tag_msg" >&2
     echo "" >&2
     echo "  发布 tag 由发版命令生成，不用手打：" >&2
-    echo "    npm run release" >&2
+    echo "    npm run ship" >&2
     echo "" >&2
     echo "  确实要推这个 tag（会留痕）：ALLOW_TAG_MISMATCH=1 git push origin <tag>" >&2
     fail=1
@@ -151,7 +161,7 @@ if [ "$push_main" = "1" ]; then
     echo "    git push -u origin HEAD && gh pr create" >&2
     echo "" >&2
     echo "  发版把校验 / PR / 合并 / 打 tag 串成一个动作：" >&2
-    echo "    npm run release" >&2
+    echo "    npm run ship" >&2
     echo "" >&2
     echo "  就算用 --no-verify 绕过这道本地闸，GitHub 的 main ruleset 也会拒。" >&2
     echo "" >&2

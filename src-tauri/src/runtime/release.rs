@@ -320,8 +320,11 @@ mod tests {
     /// 两条配合才完整 —— 只有前者，将来有人在 setup 里改回 `release_bytes` 不会被拦；
     /// 只有后者，`ensure_released` 自己实现走样了也看不出来。
     ///
-    /// 扫描口径：`lib.rs` 全文里，`release::` 之后的标识符只能是 `ensure_released`。
-    /// `release_bytes` 出现在注释里不算（先剥掉 `//` 起头的行）。
+    /// 扫描口径：`lib.rs` 全文里，**`runtime::release::`** 之后的标识符只能是
+    /// `ensure_released`。`release_bytes` 出现在注释里不算（先剥掉 `//` 起头的行）。
+    ///
+    /// ★ 只认 `runtime::release::`：工作台那条发布线（`workbench::app::release`）与
+    /// 客户端启动无关，把它一起算进来只会让这条闸在无关的地方变红（发布内核 2.0）。
     #[test]
     fn the_startup_path_only_ever_ensures_never_upgrades() {
         let lib = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
@@ -334,8 +337,8 @@ mod tests {
 
         let mut bad: Vec<String> = Vec::new();
         let mut rest = code.as_str();
-        while let Some(at) = rest.find("release::") {
-            let after = &rest[at + "release::".len()..];
+        while let Some(at) = rest.find("runtime::release::") {
+            let after = &rest[at + "runtime::release::".len()..];
             let ident: String = after
                 .chars()
                 .take_while(|c| c.is_alphanumeric() || *c == '_')
@@ -347,7 +350,7 @@ mod tests {
         }
         assert!(
             bad.is_empty(),
-            "启动路径调了 `release::{bad:?}` —— catalog 是 OTA 数据，启动只能铺空位\
+            "启动路径调了 `runtime::release::{bad:?}` —— catalog 是 OTA 数据，启动只能铺空位\
              （`ensure_released`），用升级语义会把用户 OTA 拿到的目录覆盖回随包那份"
         );
     }

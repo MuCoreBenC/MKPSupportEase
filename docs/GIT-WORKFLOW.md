@@ -212,7 +212,7 @@ npm run pr -- --list        # 看还有哪些 PR 开着（收旧 PR 用）
 `git switch -c fix/x <sha>` 就回去了。tag 只是给还原点起个好记的名字，不是还原能力本身。
 
 **什么时候开始用：第一次把包交给任何人的时候** —— 包括拷一个 `.dmg` 给自己另一台机器。
-从那一刻起规矩反过来：每个交出去的包都必须是 `npm run release` 发的，否则
+从那一刻起规矩反过来：每个交出去的包都必须是 `npm run ship` 发的，否则
 「用户说的 0.2.0」和「你手里的 0.2.0」可能不是同一份代码。
 
 **版本号住在四个地方**，`release.mjs` 一起改，别手工改其中任何一个：
@@ -249,7 +249,7 @@ npm run pr -- --list        # 看还有哪些 PR 开着（收旧 PR 用）
 
 ## 5. 发版
 
-**先跑 `npm run ship`，不要直接 `npm run release`。**
+**发布只有 `npm run ship` 一条路**（`npm run release` 已删除）。
 
 `ship` 用中文问「这次发什么」，四选一，把影响范围复述一遍再要你敲 yes，
 发完用**可核对的事实**回答「到底生效没有」。
@@ -293,9 +293,9 @@ AI 只许跑 `npm run ship -- --what <local|preview|stable|presets>`，并且：
 `ship` 自己会拦：版本号形状与通道不匹配（`-preview.N` 不能按正式版发）、
 工作区脏（本地包那次）、没敲 yes / 没带 `--confirm`。
 
-### `npm run release` 的细节
+### `npm run ship` 的细节
 
-`npm run release`（`scripts/release.mjs`）是内核的壳，`ship` 最终调它。它串起：
+`npm run ship`（`scripts/ship.mjs`）是内核的壳，所有发布动作都在 `release::run` 里。它串起：
 
 1. 前置检查：不在 main 上、工作区干净、闸门已生效、`origin` 已配置、复述 `bypass.log` 里
    上次 tag 之后的绕过记录；

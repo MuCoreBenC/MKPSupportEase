@@ -110,7 +110,7 @@ npm run tauri:workbench:dev   # 工作台（另一份 identifier、另一套数�
 npm run presets -- check | diff | generate | verify | publish [--dry-run]
 npm run lint         # eslint + stylelint
 npm run build        # tsc -b + vite build
-npm run release      # 发版：校验 → 开 PR → 等 CI → squash 合并 → 打 tag
+npm run ship         # 发版：冻结源码 → 多平台构建 → 暂存 → 清单 PR → 最后封版打 tag
 cd src-tauri && cargo test
 ```
 

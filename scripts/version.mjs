@@ -337,7 +337,7 @@ function sync() {
 function release() {
   const version = assertConsistent()
   if (version.kind !== 'preview') {
-    fail(`当前 ${version.text} 不是预览号`, '正式发布由 scripts/release.mjs 显式给出号')
+    fail(`当前 ${version.text} 不是预览号`, '正式发布由 npm run ship 显式给出号')
   }
   if (stableReleased(version.base)) {
     fail(`v${version.base} 已经发过正式版，不能再用同一个号`)

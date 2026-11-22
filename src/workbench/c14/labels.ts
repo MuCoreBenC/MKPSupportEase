@@ -52,6 +52,15 @@ export const deliveryStageText = {
  * 人话只有一处，分头写的话同一格 `stage` 在这边说「回执」、那边说别的。
  */
 export const releaseStageText: Record<string, string> = {
+  /* 发布内核 2.0：阶段（`release::state::Phase`） */
+  preparing: '准备中',
+  frozen: '源码已冻结',
+  building: '平台构建中',
+  staged: '资产已暂存',
+  manifestMerged: '清单已合并',
+  verified: '核验通过',
+  sealed: '已封版',
+  /* 旧内核的 14 个动作名：历史回执不重写，老记录还得读得懂 */
   blockedPreflight: '停在预检',
   ready: '预检通过',
   versionBumped: '版本号已推进',

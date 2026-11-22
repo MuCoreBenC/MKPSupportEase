@@ -27,7 +27,7 @@
 //! `publish_into` / `publish_tx::run` / `publish_book`。这里只做：解析参数、开会话、
 //! 调那一处、把结果按**一套固定的 JSON** 打出来。
 //!
-//! # 输出约定（与 `bin/release.rs` 同一条）
+//! # 输出约定（与 `bin/ship.rs` 同一条）
 //!
 //! - **stdout**：一行 JSON（给脚本 / AI 解析）
 //! - **stderr**：人话摘要

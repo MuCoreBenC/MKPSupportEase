@@ -17,14 +17,14 @@ default-run = "mkp-support-ease"
 name = "mkp_support_ease_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
-# 「发布软件版本」的命令行入口（第四刀）。
+# 「发布软件版本」的命令行入口（发布内核 2.0 起叫 `ship`）。
 #
 # ★ `required-features`：它整份活在 workbench 那一档里 —— 给用户的二进制（默认 feature）
 # **编不到这个文件**，也就不会把"发布"这两个字带进客户端。与 `src/workbench/**`
 # 那道闸是同一条思路，只是这道由 cargo 站在编译期守着。
 [[bin]]
-name = "release"
-path = "src/bin/release.rs"
+name = "ship"
+path = "src/bin/ship.rs"
 required-features = ["workbench"]
 
 # 「假钩子」：把开场 / 进度 / 那一问 / 结论演给已经开着的那扇窗看（第二次截图改样式用）。

@@ -63,7 +63,7 @@ pub const RELEASE_STAGE_ALLOWLIST: [&str; 6] = [
     // ★ 2026-11-06 真机：预览通道写的是 `release-preview.json`，它不在这张表里 ——
     //   `stage_allowed_in` 把它过滤掉，于是"写好了但没 stage"，事务接着报
     //   "没有变化，没有可提交的"，**清单 PR 开不出来**。两条通道各有一份清单，
-    //   这里就得两行；`release_tx::tests` 有一条判据盯着"每个通道的落点都在表里"。
+    //   这里就得两行；`release::tests` 有一条判据盯着"每个通道的落点都在表里"。
     "presets/delivery/release-preview.json",
 ];
 
@@ -625,9 +625,9 @@ impl Git {
 
     /// 打一个**带注释**的 tag（`git tag -a <name> -m <message>`）。
     ///
-    /// ★ 纪律（作者定死，**与 `scripts/release.mjs` 同一条**）：tag 必须打在 **main 的 tip 上**。
-    /// 分支上打的 tag 指向一个不在 main 历史里的提交（squash 会重写提交）——
-    /// 那是"看起来发了，其实 main 上没有"的那一类错。
+    /// ★ 纪律（发布内核 2.0）：正式 tag 指向**冻结源码**那一笔 —— 它必须是 main 的祖先。
+    /// 指向一个不在 main 历史里的提交（例如只在分支上存在的那一笔）是"看起来发了、
+    /// main 上却没有"的那一类错；`pre-push` 闸⑤ 也按"是 main 的祖先"判。
     pub fn tag(&self, name: &str, message: &str) -> Result<(), AppError> {
         self.run(&["tag", "-a", name, "-m", message])?;
         Ok(())
@@ -648,6 +648,20 @@ impl Git {
         Ok(self
             .try_run(&["rev-parse", "-q", "--verify", &format!("refs/tags/{name}")])?
             .is_some())
+    }
+
+    /// 删本地一个 tag（`git tag -d`）。**只给暂存 tag 用**：正式 tag 永不删。
+    pub fn delete_tag_local(&self, name: &str) -> Result<(), AppError> {
+        self.run(&["tag", "-d", name])?;
+        Ok(())
+    }
+
+    /// 删远端一个 tag（`git push origin :refs/tags/<name>`）。
+    ///
+    /// ★ 只给 `staging/*` 用：`v*` 由服务端 ruleset 与本地闸④ 双重保护，删不掉也不该删。
+    pub fn delete_tag_remote(&self, remote: &str, name: &str) -> Result<(), AppError> {
+        self.run(&["push", remote, &format!(":refs/tags/{name}")])?;
+        Ok(())
     }
 
     /// 推一个 tag（`git push origin refs/tags/<name>`，**不带认证**）。

@@ -35,7 +35,7 @@ pub const HISTORY_MAX: usize = 100;
 pub struct ReleaseRecord {
     /// 写入时刻（ISO8601）
     pub at: String,
-    /// 停在 / 走到了哪一阶段（[`super::release_tx::ReleaseStage::wire_name`]）
+    /// 停在 / 走到了哪一阶段（[`super::release::state::Phase::wire`]）
     pub stage: String,
     /// 这一轮的版本号（`x.y.z`）
     pub version: String,
@@ -55,7 +55,7 @@ pub struct ReleaseRecord {
     pub release: Option<super::platform::RemoteRelease>,
     /// 安装包（文件名 + 字节数）
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub artifact: Option<super::release_tx::ArtifactInfo>,
+    pub artifact: Option<super::release::build::ArtifactInfo>,
     /// ② `release.json` 那一笔的分支
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub info_branch: Option<String>,
@@ -67,21 +67,34 @@ pub struct ReleaseRecord {
 }
 
 impl ReleaseRecord {
-    /// 从一次事务报告造一条回执 —— **字段映射只写这一处**。
-    pub fn from_report(report: &super::release_tx::ReleaseTxReport, at: String) -> Self {
+    /// 从一次发布报告造一条回执 —— **字段映射只写这一处**。
+    ///
+    /// `stage` 记的是**状态机的阶段**（`release::state::Phase` 的线上名），
+    /// 不再是旧内核那 14 个动作名 —— 因为发布内核 2.0 的推进单位就是阶段。
+    pub fn from_release_report(report: &super::release::ReleaseReport, at: String) -> Self {
+        let artifact = report
+            .platforms
+            .iter()
+            .flat_map(|p| p.artifacts.iter())
+            .find(|a| a.kind == "dmg" || a.kind == "nsis")
+            .map(super::release::build::artifact_info);
         Self {
             at,
-            stage: report.stage.wire_name().to_owned(),
+            stage: report.phase.wire().to_owned(),
             version: report.version.clone(),
             tag: report.tag.clone(),
-            branch: report.branch.clone(),
-            commit: report.commit.clone(),
+            branch: None,
+            commit: report.source_commit.clone(),
             review: report.review.clone(),
-            release: report.release.clone(),
-            artifact: report.artifact.clone(),
-            info_branch: report.info_branch.clone(),
-            info_review: report.info_review.clone(),
-            summary: report.summary.clone(),
+            release: report.gitee_release.clone(),
+            artifact,
+            info_branch: None,
+            info_review: report.review.clone(),
+            summary: if report.summary.is_empty() {
+                report.next.clone()
+            } else {
+                report.summary.join("；")
+            },
         }
     }
 }

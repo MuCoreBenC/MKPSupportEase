@@ -353,7 +353,7 @@ fn published_version(repo: &Path) -> Option<String> {
 
 /// 安装包自己报的版本（`.app/Contents/Info.plist` 的 `CFBundleShortVersionString`）。
 ///
-/// 与发布内核里那道 [`super::release_tx`] 的核对是**同一个事实**：包里的号
+/// 与发布内核里那道 [`super::release`] 的核对是**同一个事实**：包里的号
 /// 才是用户打开"关于"会看到的那个。读不到（没编过 / 不是 macOS）= `None`。
 fn build_version(repo: &Path) -> Option<String> {
     if !cfg!(target_os = "macos") {
@@ -618,7 +618,7 @@ fn origin() -> String {
 ///
 /// ★ **Windows 上必须过一层 `cmd /C`**：那边 `npm` 是 `npm.cmd`，而
 /// `Command::new("npm")` 走 `CreateProcess`，它**不替你补 `.cmd` 后缀** ——
-/// 直接起会报"程序找不到"。与 `release_tx::npm_build` 同一条理由。
+/// 直接起会报"程序找不到"。与 `release::npm_build` 同一条理由。
 ///
 /// ★ 端哪一份由 [`ROOT_ENV`] 交下去（`server.mjs` 读它，`--root` 参数仍然优先）：
 /// 命令本身不带参数，于是"换源"不必给这条命令另开一条 argv 路径。
@@ -691,7 +691,7 @@ fn descendants_deepest_first(parents: &HashMap<u32, u32>, root: u32) -> Vec<u32>
 ///
 /// ★ **必须收整棵**：只杀包装层的话，8787 那个服务与客户端 dev 会变成孤儿 ——
 /// 下一次「启动」会撞在占着的端口上，而界面上看不出是谁占的。
-/// 杀法用 `sysinfo`（`release_tx` 已在用同一套，没有再拉依赖），逐个进程 kill。
+/// 杀法用 `sysinfo`（`release` 已在用同一套，没有再拉依赖），逐个进程 kill。
 fn kill_process_tree(root: u32) {
     let mut sys = System::new();
     sys.refresh_processes(ProcessesToUpdate::All, true);
@@ -869,7 +869,7 @@ fn conflict_sentence(conflicts: &[PortConflict]) -> String {
     format!("起不来 —— {}", parts.join("；"))
 }
 
-/// 停掉一个进程：**先走 `sysinfo`**（`release_tx` 已在用同一套），
+/// 停掉一个进程：**先走 `sysinfo`**（`release` 已在用同一套），
 /// **拿不到再退回系统命令**（`taskkill /F` / `kill -9`）—— 权限不对时前者会悄悄失败。
 fn kill_pid(pid: u32) -> Result<(), AppError> {
     let mut sys = System::new();
@@ -1244,7 +1244,7 @@ pub fn wb_open_path(path: String) -> Result<(), AppError> {
 ///
 /// ★ **先验明正身再动手**：前端把它当时看到的 `pid` 交回来，这里重新问一次
 /// "这个端口现在是谁的" —— 对不上就拒绝（PID 会被复用，照
-/// `release_tx::wb_release_kill_dev_watcher` 那条纪律：宁可让人自己动手，也不误伤）。
+/// `release::wb_release_kill_dev_watcher` 那条纪律：宁可让人自己动手，也不误伤）。
 ///
 /// **幂等**：端口上没人了就直接说"不用停"，不报错（界面那颗按钮不该因为
 /// "其实已经没了"而炸）。
