@@ -9,7 +9,7 @@
 //! 于是请求这样造：
 //!
 //! ```text
-//! Referer: https://d2026-11-23.mkp-usage.test/0.0.18-preview.2/macos
+//! Referer: https://d2026-11-23.mkp-usage-v1.test/0.0.18-preview.2/macos
 //!          └────── 一天一个 origin ──────┘└──── 版本 ────┘└ 平台 ┘
 //! ```
 //!
@@ -46,7 +46,7 @@ const ENDPOINT: &str = "https://busuanzi.ibruce.info/busuanzi?jsonpCallback=cb";
 
 /// 造 Referer 用的域名。**不需要能解析** —— 它只当分桶用的名字：
 /// origin 决定"哪一天"，path 决定"哪个版本 + 哪个平台"。
-const REFERER_HOST: &str = "mkp-usage.test";
+const REFERER_HOST: &str = "mkp-usage-v1.test";
 
 const STATE_FILE: &str = "run/usage-ping.json";
 
@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn referer_carries_day_version_and_platform() {
         let r = referer_for("2026-11-23", "0.0.18-preview.2", "macos");
-        assert_eq!(r, "https://d2026-11-23.mkp-usage.test/0.0.18-preview.2/macos");
+        assert_eq!(r, "https://d2026-11-23.mkp-usage-v1.test/0.0.18-preview.2/macos");
     }
 
     /// 一天一个 origin：换一天必须换 origin（否则两天合成一个桶，趋势就没了）

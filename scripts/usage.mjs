@@ -11,7 +11,7 @@
  * # 分桶规则（与 `src-tauri/src/runtime/usage_ping.rs` 必须一致）
  *
  * ```text
- * Referer: https://d2026-11-23.mkp-usage.test/0.0.18-preview.2/macos
+ * Referer: https://d2026-11-23.mkp-usage-v1.test/0.0.18-preview.2/macos
  *          └────── 一天一个 origin ──────┘└──── 版本 ────┘└ 平台 ┘
  * ```
  *
@@ -34,7 +34,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 
 const ENDPOINT = 'https://busuanzi.ibruce.info/busuanzi?jsonpCallback=cb'
 /** 与客户端同一个域名后缀（只当分桶用的名字，不需要能解析） */
-const HOST_SUFFIX = 'mkp-usage.test'
+const HOST_SUFFIX = 'mkp-usage-v1.test'
 const PLATFORMS = ['macos', 'windows', 'linux']
 /** 两次请求之间歇多久：那是个人维护的免费服务，别打它 */
 const GAP_MS = 150
@@ -111,18 +111,22 @@ function loadLedger() {
   }
 }
 
+/** 记账的键带上命名空间：换了计数域，旧读数不该继续跟着减 */
+const scope = (day) => `${HOST_SUFFIX}|${day}`
+
 function totalReads(day) {
-  return Object.values(loadLedger()[day] ?? {}).reduce((s, n) => s + Number(n), 0)
+  return Object.values(loadLedger()[scope(day)] ?? {}).reduce((s, n) => s + Number(n), 0)
 }
 
 function readsOf(day, key) {
-  return Number(loadLedger()[day]?.[key] ?? 0)
+  return Number(loadLedger()[scope(day)]?.[key] ?? 0)
 }
 
 function bumpRead(day, key) {
   const ledger = loadLedger()
-  ledger[day] ??= {}
-  ledger[day][key] = Number(ledger[day][key] ?? 0) + 1
+  const k = scope(day)
+  ledger[k] ??= {}
+  ledger[k][key] = Number(ledger[k][key] ?? 0) + 1
   mkdirSync('.scratch', { recursive: true })
   writeFileSync(LEDGER, JSON.stringify(ledger, null, 2))
 }
