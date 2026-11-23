@@ -255,6 +255,9 @@ import {
   splitFileName,
   /* 更新状态的唯一出口：按钮显示 / 下载还是更新，都读它 */
   updateStatusOf,
+  /* 切片器档云端行的那一个动作（没有 `localState` 那本账）—— 与操作列共用 */
+  slicerCloudActionOf,
+  CLOUD_STATE_TEXT,
 } from './presetTree'
 import type {
   LocateTarget,
@@ -3553,16 +3556,37 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
        * 说更新才更新；说不清 / 来源不同 / 目录异常一律**不给动作**，并把原因写进
        * title。右键菜单是第二个入口，不许自己再判一套。
        */
-      const st = updateStatusOf(row)
+      /*
+       * 切片器档**没有 `localState` 那本账**（只有 MKP 有）：它按 `presetState` 与
+       * `basedOn === 'newer'` 判，与操作列同一个出口（`slicerCloudActionOf`）。
+       * 直接问 `updateStatusOf` 会落到"状态未知"的兜底上 —— 菜单把这一行念成
+       * 「云端较旧」并把下载一起禁掉，而同一行的操作列明明给着「下载」。
+       */
+      const slicer = row.localState === undefined ? slicerCloudActionOf(row) : null
+      const st = slicer === null ? updateStatusOf(row) : null
+      const action = slicer === null ? st!.action : slicer.action
       const label =
-        st.action === 'update'
-          ? tr(UPDATE_ACTION_TEXT.update)
-          : st.action === 'download'
-            ? tr(UPDATE_ACTION_TEXT.missing)
-            : st.text !== null
-              ? tr(st.text, st.params)
-              : tr('presets.table.staleOlder')
-      const disabled = st.action === 'none' ? (st.text === null ? tr('presets.table.staleOlder.title') : tr(st.text, st.params)) : undefined
+        slicer === null
+          ? st!.action === 'update'
+            ? tr(UPDATE_ACTION_TEXT.update)
+            : st!.action === 'download'
+              ? tr(UPDATE_ACTION_TEXT.missing)
+              : st!.text !== null
+                ? tr(st!.text, st!.params)
+                : tr('presets.table.staleOlder')
+          : slicer.older
+            ? tr('presets.tree.cloudLocal.newer')
+            : slicer.gotIt
+              ? tr(CLOUD_STATE_TEXT.downloaded)
+              : tr(slicer.action === 'update' ? UPDATE_ACTION_TEXT.update : UPDATE_ACTION_TEXT.missing)
+      const disabled =
+        action === 'none'
+          ? slicer !== null
+            ? tr(slicer.older ? 'presets.table.staleOlder.title' : CLOUD_STATE_TEXT.downloaded)
+            : st!.text === null
+              ? tr('presets.table.staleOlder.title')
+              : tr(st!.text, st!.params)
+          : undefined
       return [
         {
           id: 'download',
@@ -3578,12 +3602,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
          * 走这一手（后端 `slicer_of_kind` 同一张表）。永远做不到的整项不列。
          * 词跟着上面那一项走（下载 / 更新），用户不用猜这一项对应哪个动作。
          */
-        ...(st.action !== 'none' && row.kind === 'bbs_profile'
+        ...(action !== 'none' && row.kind === 'bbs_profile'
           ? [
               {
                 id: 'downloadOnly',
                 label: tr(
-                  st.action === 'update'
+                  action === 'update'
                     ? 'presets.page.menu.updateNoPlace'
                     : 'presets.page.menu.downloadNoPlace',
                 ),

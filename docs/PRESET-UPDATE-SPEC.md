@@ -21,7 +21,14 @@
 | 目录自相矛盾 | `basedOn = inconsistent` | 云端数据异常 | — | 同上（同序号、字节却不同） |
 | 说不清版本关系 | `basedOn = unverified` | 原因来自 `unverifiedReason` | — | 同上（缺发布线 / 缺身份 / 缺摘要 / 不在目录里） |
 | 用户自己拷出来的独立一份 | `detached` | 本地副本 | — | `presetTree.ts`（开关关着时不跟云端算账） |
-| 切片器档 | `localState` 不存在 | 不画这一档 | 按切片器自己的三态 | `PresetTable.tsx` |
+| 切片器档 · 本机没有 | `presetState = missing`（或没登记） | 不画这一档 | **下载** + 右键「下载不放入」 | `presetTree.ts` `slicerCloudActionOf` |
+| 切片器档 · 有旧版 / 认不出 | `presetState = old / tampered` | 不画这一档 | **更新** + 右键「更新不放入」 | 同上 |
+| 切片器档 · 已是这一版 | `presetState = ok`（或没丢状态时 `downloaded`） | 不画这一档 | —（「已下载」） | 同上 |
+| 切片器档 · 云端比本机旧 | `basedOn = newer` | 不画这一档 | — | 同上（与 MKP 档同一条：不把用户往回带） |
+
+**右键菜单与操作列读同一个出口**：MKP 档 `updateStatusOf`、切片器档 `slicerCloudActionOf`。
+菜单不许自己再判一套 —— 从前切片器档问 MKP 那条判据，落进"状态未知"的兜底，
+把一行「未下载」念成「云端较旧」并把下载一起禁掉。
 
 **主份与副本**：同一份云端可能在本机有多份文件（`… copy 2.toml`）。云端行的
 `localState` **只由下载建的那一份决定**（`provenanceKind = download`，没账的老文件也算）；
