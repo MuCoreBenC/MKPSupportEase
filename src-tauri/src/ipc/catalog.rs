@@ -318,7 +318,7 @@ pub async fn download_runtime_file(
     place: Option<bool>,
 ) -> Result<String, AppError> {
     /* `place: false` = 这一次只要文件，别往切片器目录里塞（界面「下载不放入」）。
-       缺省 / None = 老口径：切片器配置下完就放进每个账号目录。 */
+    缺省 / None = 老口径：切片器配置下完就放进每个账号目录。 */
     let place = place.unwrap_or(true);
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("downloadRuntimeFile", |_| {
@@ -504,7 +504,7 @@ pub async fn download_runtime_files(
 
             let outcomes = runtime::delivery::deliver_all(&root, &wanted, &remote, &report);
             /* 取到的那几份里，切片器配置顺手放进切片器（每个账号目录一份；
-               `place: false` 这一次一份都不放） */
+            `place: false` 这一次一份都不放） */
             if place {
                 for outcome in outcomes.iter().filter(|o| o.ok) {
                     if let Some(file) = wanted.iter().find(|f| f.file_name == outcome.file_name) {
