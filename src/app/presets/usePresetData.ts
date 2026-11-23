@@ -316,10 +316,17 @@ export interface PresetData {
    * 与云端文件那颗「下载」（`api.downloadFiles()`，假后端必抛未实现）不同，
    * 这一条**真的能下**。失败照抛给页面说出来。
    *
-   * 返回值 = 这一份现在是不是已经躺在切片器的每个账号目录里（下载会顺手放入；
+   * 返回值 = 这一份**现在**是不是已经躺在切片器的每个账号目录里（下载会顺手放入；
    * 本机没有切片器目录时是 `false`，页面照实说，不假装放好了）。
+   *
+   * `place = false`：**这一次只要文件**，不往切片器目录里写（「下载不放入」）。
+   * 已经放进去过的那一份因此保持原样 —— 返回值照实答"它在不在"，页面按它说话。
    */
-  downloadPreset: (fileName: string, onTick?: (tick: DownloadTick) => void) => Promise<boolean>
+  downloadPreset: (
+    fileName: string,
+    onTick?: (tick: DownloadTick) => void,
+    place?: boolean,
+  ) => Promise<boolean>
   /**
    * **一次处理多份**（批量补齐 / 批量更新）。
    *
@@ -334,6 +341,7 @@ export interface PresetData {
   downloadPresetBatch: (
     fileNames: string[],
     onTick?: (tick: DownloadTick) => void,
+    place?: boolean,
   ) => Promise<DownloadOutcome[]>
 
   /**
@@ -1245,12 +1253,19 @@ export function usePresetData(importRevision = 0): PresetData {
    * ★ 2026-11-18：下载**同时放进切片器**（后端 `download_runtime_file` 里那一手）。
    * 回来重读「已放入」，并把结论交回页面 —— 提示条按它说实话：放进了 / 本机没有
    * 切片器目录、得自己点「放入」。
+   *
+   * ★ `place: false`（「下载不放入」）：只落文件，切片器目录里那份**一个字节不动**
+   * （已经放进去过的那一份保持原样，版本可能因此落后 —— 页面按 `placed` 说实话）。
    */
   const downloadPreset = useCallback(
-    async (fileName: string, onTick?: (tick: DownloadTick) => void): Promise<boolean> => {
+    async (
+      fileName: string,
+      onTick?: (tick: DownloadTick) => void,
+      place = true,
+    ): Promise<boolean> => {
       let placed = false
       try {
-        await api.downloadCatalogFile(fileName, onTick)
+        await api.downloadCatalogFile(fileName, onTick, place)
       } finally {
         /* 成没成都广播：`deliver` 是"先归档旧份、再换新"，失败也可能动过盘 ——
            宁可多读一次，不赌"失败 = 没变"（与首页 `applyCurrent` 同一条） */
@@ -1475,8 +1490,8 @@ export function usePresetData(importRevision = 0): PresetData {
    * 再把逐份结局原样交回页面。顺序 = 请求顺序（后端保证），页面按它列。
    */
   const downloadPresetBatch = useCallback(
-    async (fileNames: string[], onTick?: (tick: DownloadTick) => void) => {
-      const outcomes = await api.downloadCatalogFiles(fileNames, onTick)
+    async (fileNames: string[], onTick?: (tick: DownloadTick) => void, place = true) => {
+      const outcomes = await api.downloadCatalogFiles(fileNames, onTick, place)
       deliveryMutated()
       return outcomes
     },
