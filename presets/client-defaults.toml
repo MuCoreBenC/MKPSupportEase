@@ -45,3 +45,4 @@ AutoCopyScript = true
 AutoUseAfterDownload = true
 AutoCleanHistory = true
 AutoCheckUpdate = true
+Online = true

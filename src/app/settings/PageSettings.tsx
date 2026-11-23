@@ -703,6 +703,13 @@ export default function PageSettings({
   const [autoCheckErr, setAutoCheckErr] = useState<Text | null>(null)
   /* 「更新渠道」落盘失败时的那一句（成功不提示，选中态本身就是回执） */
   const [channelErr, setChannelErr] = useState<Text | null>(null)
+  /*
+   * 「在线增强」那一格：`null` = 还没读到（控件先禁用，不拿猜出来的默认值顶上去）。
+   * 点一下立即落盘 —— 开关本身就是回执，成功不另说话。
+   */
+  const [online, setOnline] = useState<boolean | null>(null)
+  const [onlineBusy, setOnlineBusy] = useState(false)
+  const [onlineErr, setOnlineErr] = useState<Text | null>(null)
 
   /*
    * **备份与恢复**（2026-10-17 / 2026-11-09）。
@@ -850,6 +857,38 @@ export default function PageSettings({
   useEffect(() => {
     void readAutoCheckUpdate()
   }, [readAutoCheckUpdate])
+
+  /** 在线增强那一格：打开这一页时读一次（不联网）。 */
+  const readOnline = useCallback(async () => {
+    try {
+      setOnline(await api.getOnline())
+      setOnlineErr(null)
+    } catch (e) {
+      setOnline(null)
+      setOnlineErr(msg('settings.history.readFailed', { detail: errorText(e) }))
+    }
+  }, [])
+
+  useEffect(() => {
+    void readOnline()
+  }, [readOnline])
+
+  /** 开关在线增强：立即落盘，写完拿回传值校准这一格。 */
+  const pickOnline = async (next: boolean) => {
+    if (onlineBusy) return
+    setOnlineBusy(true)
+    setOnlineErr(null)
+    track('settings.online', { on: next })
+    try {
+      setOnline(await api.setOnline(next))
+      /* 关的时候后端作废了待更新账 —— 重问快照，标题栏那枚胶囊当场消失 */
+      await refreshUpdate()
+    } catch (e) {
+      setOnlineErr(msg('settings.history.writeFailed', { detail: errorText(e) }))
+    } finally {
+      setOnlineBusy(false)
+    }
+  }
 
   /** 更新渠道：打开这一页时读一次盘上那一格（不联网）。 */
   const readUpdateChannel = useCallback(async () => {
@@ -2042,6 +2081,24 @@ export default function PageSettings({
           title={tr('settings.advanced.title')}
           desc={tr('settings.advanced.desc')}
         />
+
+        {/* 在线增强：管的是"这个程序出不出网"，所以摆在高级设置最上面 */}
+        <div className={`${s.field} ${s.fieldRow}`}>
+          <div className={s.fieldText}>
+            <div className={s.fieldTitle}>
+              {tr('settings.online.label')}
+              <Tip text={tr('settings.online.hint')} />
+            </div>
+            <p className={s.current}>{tr('settings.online.note')}</p>
+          </div>
+          <Switch
+            checked={online ?? false}
+            ariaLabel={tr('settings.online.label')}
+            onChange={(v) => void pickOnline(v)}
+            disabled={online === null || onlineBusy}
+          />
+        </div>
+        {onlineErr !== null && <p className={`${s.note} ${s.noteBad}`}>{say(onlineErr)}</p>}
 
         {/* 一行：左标题 + 「当前：…」，右侧一只下拉。下面那句就是"现在用的是哪一个"（原在章末） */}
         <div className={`${s.field} ${s.fieldRow}`}>

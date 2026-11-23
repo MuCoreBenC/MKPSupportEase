@@ -738,6 +738,7 @@ let mockTheme: ThemePref | null = null
 let mockAutoClean = true
 /** 自动检查软件更新（2026-11-05）：出厂 = 开，与真机 app_state 同一档 */
 let mockAutoCheckUpdate = true
+let mockOnline = true
 /** 更新渠道（2026-11-20）：没选过 = 正式版，与真机 app_state 同一档 */
 let mockUpdateChannel = 'stable'
 
@@ -3360,6 +3361,16 @@ export const mockApi: MkpApi = {
   async setAutoCheckUpdate(enabled) {
     mockAutoCheckUpdate = enabled
     return mockAutoCheckUpdate
+  },
+
+  /* 在线增强：与自动检查同一套口径 —— 内存镜像、回写进去的那一档 */
+  async getOnline() {
+    return mockOnline
+  },
+
+  async setOnline(enabled) {
+    mockOnline = enabled
+    return mockOnline
   },
 
   /* 更新渠道（2026-11-20）：与自动检查同一套口径 —— 内存镜像、回写进去的那一档 */

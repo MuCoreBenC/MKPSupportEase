@@ -9,12 +9,13 @@
 //! 于是请求这样造：
 //!
 //! ```text
-//! Referer: https://d2026-11-23.mkp-usage-v1.test/0.0.18-preview.2/macos
-//!          └────── 一天一个 origin ──────┘└──── 版本 ────┘└ 平台 ┘
+//! Referer: https://mkp-usage-v2.test/2026-11-23/0.0.18-preview.2/macos
+//!                                   └── 日期 ──┘└──── 版本 ────┘└ 平台 ┘
 //! ```
 //!
-//! 一次请求同时回答两件事：**当天总共有多少台次**（`site_pv`）、
-//! **其中这个版本这个平台多少台次**（`page_pv`）。不再发第二次请求。
+//! ★ **日期必须住在 path 里，不能住子域**：不蒜子的桶按**主域名 + path** 记，
+//! 子域不参与（`d11-23.xxx.test` 与 `d11-24.xxx.test` 是同一个桶，实测）。
+//! 所以一台机器一天发两次：`/<日期>/` 记"当天总数"，`/<日期>/<版本>/<平台>` 记分布。
 //!
 //! # 三条纪律
 //!
@@ -46,7 +47,7 @@ const ENDPOINT: &str = "https://busuanzi.ibruce.info/busuanzi?jsonpCallback=cb";
 
 /// 造 Referer 用的域名。**不需要能解析** —— 它只当分桶用的名字：
 /// origin 决定"哪一天"，path 决定"哪个版本 + 哪个平台"。
-const REFERER_HOST: &str = "mkp-usage-v1.test";
+const REFERER_HOST: &str = "mkp-usage-v2.test";
 
 const STATE_FILE: &str = "run/usage-ping.json";
 
@@ -113,17 +114,28 @@ pub fn platform() -> &'static str {
 ///
 /// 版本里的点与连字符在 path 上都是合法字符，不需要转义。
 pub fn referer_for(day: &str, version: &str, platform: &str) -> String {
-    format!("https://d{day}.{REFERER_HOST}/{version}/{platform}")
+    format!("https://{REFERER_HOST}/{day}/{version}/{platform}")
+}
+
+/// 「当天总数」那一条：只带日期。脚本读它拿当天的台次，不必逐个版本去加。
+pub fn referer_total_for(day: &str) -> String {
+    format!("https://{REFERER_HOST}/{day}/")
 }
 
 /// 当天还没报过就报一次。返回"这一趟真的发了没有"。
 pub fn ping_today(root: &Path) -> Result<bool, AppError> {
+    /* 在线增强关着 ⇒ 连统计都不报（那是"出网"的一部分，见 runtime::online） */
+    if !super::online::is_on(root)? {
+        return Ok(false);
+    }
     let day = today();
     if load(root).last_day.as_deref() == Some(day.as_str()) {
         return Ok(false);
     }
-    let referer = referer_for(&day, APP_VERSION, platform());
-    net::usage_ping(ENDPOINT, &referer)?;
+    /* 两条：总数与分布。**先总数后分布** —— 前一条失败就不记这一天，
+     * 免得出现"有分布、没总数"那种读起来缺一块的日子。 */
+    net::usage_ping(ENDPOINT, &referer_total_for(&day))?;
+    net::usage_ping(ENDPOINT, &referer_for(&day, APP_VERSION, platform()))?;
     save(root, &day)?;
     Ok(true)
 }
@@ -144,29 +156,27 @@ mod tests {
     #[test]
     fn referer_carries_day_version_and_platform() {
         let r = referer_for("2026-11-23", "0.0.18-preview.2", "macos");
-        assert_eq!(r, "https://d2026-11-23.mkp-usage-v1.test/0.0.18-preview.2/macos");
+        assert_eq!(r, "https://mkp-usage-v2.test/2026-11-23/0.0.18-preview.2/macos");
     }
 
-    /// 一天一个 origin：换一天必须换 origin（否则两天合成一个桶，趋势就没了）
+    /// 一天一个 path 段：换一天必须换桶（不蒜子只认主域名 + path，子域不算）
     #[test]
-    fn a_new_day_is_a_new_origin() {
-        let a = referer_for("2026-11-23", "0.0.18-preview.2", "macos");
-        let b = referer_for("2026-11-24", "0.0.18-preview.2", "macos");
-        let origin = |u: &str| u.split('/').nth(2).unwrap_or_default().to_owned();
-        assert_ne!(origin(&a), origin(&b));
+    fn a_new_day_is_a_new_path() {
+        let a = referer_total_for("2026-11-23");
+        let b = referer_total_for("2026-11-24");
+        assert_ne!(a, b);
+        assert!(a.contains("/2026-11-23/") && b.contains("/2026-11-24/"));
     }
 
-    /// 同一天里版本/平台各占一个 path（同一个 origin 下 site_pv 才是当天总数）
+    /// 同一天里版本/平台各占一个更深的段，总数那条是它们的前缀
     #[test]
-    fn same_day_keeps_one_origin_per_version_and_platform() {
+    fn same_day_shares_the_day_segment() {
+        let total = referer_total_for("2026-11-23");
         let m = referer_for("2026-11-23", "0.0.18-preview.2", "macos");
         let w = referer_for("2026-11-23", "0.0.18-preview.2", "windows");
-        let o = referer_for("2026-11-23", "0.0.17", "macos");
-        let origin = |u: &str| u.split('/').nth(2).unwrap_or_default().to_owned();
-        assert_eq!(origin(&m), origin(&w));
-        assert_eq!(origin(&m), origin(&o));
+        assert!(m.starts_with(&total), "{m} 该以 {total} 开头");
+        assert!(w.starts_with(&total));
         assert_ne!(m, w);
-        assert_ne!(m, o);
     }
 
     /// 坏档 / 缺档都当"没记过"：宁可多报一次，也不能让统计从此停摆

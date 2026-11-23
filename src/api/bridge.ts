@@ -389,6 +389,8 @@ export const bridgeApi: MkpApi = {
   getAutoCheckUpdate: () => call('getAutoCheckUpdate', 'get_auto_check_update'),
   setAutoCheckUpdate: (enabled) =>
     call('setAutoCheckUpdate', 'set_auto_check_update', { enabled }),
+  getOnline: () => call('getOnline', 'get_online'),
+  setOnline: (enabled) => call('setOnline', 'set_online', { enabled }),
   /* 更新渠道（2026-11-20）：落 updateChannel 格。自动检查按它挑清单 */
   getUpdateChannel: () => call('getUpdateChannel', 'get_update_channel'),
   setUpdateChannel: (channel) =>

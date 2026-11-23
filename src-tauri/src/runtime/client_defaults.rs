@@ -63,6 +63,9 @@ pub struct ClientDefaults {
     pub auto_use_after_download: bool,
     pub auto_clean_history: bool,
     pub auto_check_update: bool,
+    /// **在线增强**：关掉之后这个程序一个字节都不出网
+    /// （预设 / 模型下载、检查更新、匿名统计全停，见 `ipc` 各命令开头那道闸）。
+    pub online: bool,
 }
 
 impl ClientDefaults {
@@ -81,6 +84,7 @@ impl ClientDefaults {
         "AutoUseAfterDownload",
         "AutoCleanHistory",
         "AutoCheckUpdate",
+        "Online",
     ];
 
     /// 一格 → JSON 值（工作台照它画控件）。键不认识给 `None`（调用方报错）。
@@ -99,6 +103,7 @@ impl ClientDefaults {
             "AutoUseAfterDownload" => Value::Bool(self.auto_use_after_download),
             "AutoCleanHistory" => Value::Bool(self.auto_clean_history),
             "AutoCheckUpdate" => Value::Bool(self.auto_check_update),
+            "Online" => Value::Bool(self.online),
             _ => return None,
         })
     }
@@ -135,7 +140,7 @@ mod tests {
         }
         assert_eq!(
             ClientDefaults::KEYS.len(),
-            13,
+            14,
             "加了键要同时加进 KEYS（工作台那一页照它画）"
         );
         assert!(d.value_of("Theme2").is_none(), "不认识的键不该有值");
@@ -158,6 +163,7 @@ mod tests {
         assert!(d.auto_use_after_download, "下载后自动使用：出厂开");
         assert!(d.auto_clean_history);
         assert!(d.auto_check_update);
+        assert!(d.online, "新装默认联网（在线增强开着）");
     }
 
     /// 缺字段要炸，不许拿默认值圆过去（§8.1）。

@@ -672,6 +672,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 自动检查软件更新（设置页「软件更新」那一格；读口在 runtime::update_check）
         ipc::prefs::get_auto_check_update,
         ipc::prefs::set_auto_check_update,
+        // 在线增强：关掉之后这个程序一个字节都不出网，闸在 runtime::online
+        ipc::prefs::get_online,
+        ipc::prefs::set_online,
         // 更新渠道（2026-11-20）：自动检查按这一路挑清单，所以要落盘
         ipc::prefs::get_update_channel,
         ipc::prefs::set_update_channel,
@@ -891,6 +894,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 自动检查软件更新（设置页「软件更新」那一格；读口在 runtime::update_check）
         ipc::prefs::get_auto_check_update,
         ipc::prefs::set_auto_check_update,
+        // 在线增强 —— 与上面那份清单一字不差
+        ipc::prefs::get_online,
+        ipc::prefs::set_online,
         // 更新渠道（2026-11-20）—— 与上面那份清单一字不差
         ipc::prefs::get_update_channel,
         ipc::prefs::set_update_channel,
