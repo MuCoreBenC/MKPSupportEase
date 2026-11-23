@@ -1,7 +1,7 @@
 {
   "name": "mkp-support-ease",
   "private": true,
-  "version": "0.0.18-preview.2",
+  "version": "0.0.18",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
