@@ -3363,7 +3363,7 @@ export const mockApi: MkpApi = {
     return mockAutoCheckUpdate
   },
 
-  /* 在线增强：与自动检查同一套口径 —— 内存镜像、回写进去的那一档 */
+  /* 联网功能：与自动检查同一套口径 —— 内存镜像、回写进去的那一档 */
   async getOnline() {
     return mockOnline
   },

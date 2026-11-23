@@ -323,7 +323,7 @@ pub async fn download_runtime_file(
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("downloadRuntimeFile", |_| {
             let root = internal_root(&app)?;
-            /* 在线增强关着 ⇒ 一个字节都不出网（见 runtime::online） */
+            /* 联网功能关着 ⇒ 一个字节都不出网（见 runtime::online） */
             runtime::online::require(&root)?;
             let catalog = runtime::load_released_catalog(&root)?;
             let file = catalog
@@ -446,7 +446,7 @@ pub async fn download_runtime_files(
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("downloadRuntimeFiles", |_| {
             let root = internal_root(&app)?;
-            /* 在线增强关着 ⇒ 一个字节都不出网（见 runtime::online） */
+            /* 联网功能关着 ⇒ 一个字节都不出网（见 runtime::online） */
             runtime::online::require(&root)?;
             let catalog = runtime::load_released_catalog(&root)?;
 
@@ -617,7 +617,7 @@ pub async fn fetch_cloud_preset(
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("fetchCloudPreset", |_| {
             let root = internal_root(&app_handle)?;
-            /* 在线增强关着 ⇒ 一个字节都不出网（见 runtime::online） */
+            /* 联网功能关着 ⇒ 一个字节都不出网（见 runtime::online） */
             runtime::online::require(&root)?;
             let user = crate::fsx::paths::user_root(&app_handle)?;
             let catalog = runtime::load_released_catalog(&root)?;
@@ -1323,7 +1323,7 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("checkRemoteUpdate", |_| {
             let root = internal_root(&app)?;
-            /* 在线增强关着 ⇒ 连目录都不问（见 runtime::online） */
+            /* 联网功能关着 ⇒ 连目录都不问（见 runtime::online） */
             runtime::online::require(&root)?;
             let resolved = runtime::source::resolve_source(&root)?;
             let bytes = runtime::net::get_catalog(&resolved.catalog_url()?)?;
@@ -1368,7 +1368,7 @@ pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("applyRemoteUpdate", |_| {
             let root = internal_root(&app)?;
-            /* 在线增强关着 ⇒ 不换目录（见 runtime::online） */
+            /* 联网功能关着 ⇒ 不换目录（见 runtime::online） */
             runtime::online::require(&root)?;
             let resolved = runtime::source::resolve_source(&root)?;
             let bytes = runtime::net::get_catalog(&resolved.catalog_url()?)?;

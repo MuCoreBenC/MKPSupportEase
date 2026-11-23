@@ -98,7 +98,7 @@ pub mod update;
 /// `release.json`，有新版就推一个事件给右上角通知。本会话去重、失败静默、
 /// 不进启动/首屏路径（铁律 2）。版本比较不重写，复用 [`release_info`]。
 pub mod update_check;
-/// **「在线增强」那道闸**：关着时这个程序一个字节都不出网（预设 / 模型下载、
+/// **「联网功能」那道闸**：关着时这个程序一个字节都不出网（预设 / 模型下载、
 /// 检查更新、匿名统计全停）。判据只有一条 —— [`app_state::online`]。
 pub mod online;
 pub mod update_state;

@@ -704,7 +704,7 @@ export default function PageSettings({
   /* 「更新渠道」落盘失败时的那一句（成功不提示，选中态本身就是回执） */
   const [channelErr, setChannelErr] = useState<Text | null>(null)
   /*
-   * 「在线增强」那一格：`null` = 还没读到（控件先禁用，不拿猜出来的默认值顶上去）。
+   * 「联网功能」那一格：`null` = 还没读到（控件先禁用，不拿猜出来的默认值顶上去）。
    * 点一下立即落盘 —— 开关本身就是回执，成功不另说话。
    */
   const [online, setOnline] = useState<boolean | null>(null)
@@ -858,7 +858,7 @@ export default function PageSettings({
     void readAutoCheckUpdate()
   }, [readAutoCheckUpdate])
 
-  /** 在线增强那一格：打开这一页时读一次（不联网）。 */
+  /** 联网功能那一格：打开这一页时读一次（不联网）。 */
   const readOnline = useCallback(async () => {
     try {
       setOnline(await api.getOnline())
@@ -873,7 +873,7 @@ export default function PageSettings({
     void readOnline()
   }, [readOnline])
 
-  /** 开关在线增强：立即落盘，写完拿回传值校准这一格。 */
+  /** 开关联网功能：立即落盘，写完拿回传值校准这一格。 */
   const pickOnline = async (next: boolean) => {
     if (onlineBusy) return
     setOnlineBusy(true)
@@ -2082,7 +2082,7 @@ export default function PageSettings({
           desc={tr('settings.advanced.desc')}
         />
 
-        {/* 在线增强：管的是"这个程序出不出网"，所以摆在高级设置最上面 */}
+        {/* 联网功能：管的是"这个程序出不出网"，所以摆在高级设置最上面 */}
         <div className={`${s.field} ${s.fieldRow}`}>
           <div className={s.fieldText}>
             <div className={s.fieldTitle}>
@@ -2101,7 +2101,8 @@ export default function PageSettings({
         {onlineErr !== null && <p className={`${s.note} ${s.noteBad}`}>{say(onlineErr)}</p>}
 
         {/* 一行：左标题 + 「当前：…」，右侧一只下拉。下面那句就是"现在用的是哪一个"（原在章末） */}
-        <div className={`${s.field} ${s.fieldRow}`}>
+        {/* 联网功能关着 ⇒ 整行灰掉：数据源是联网的从属设置，闸关了就不给改 */}
+        <div className={`${s.field} ${s.fieldRow} ${online === false ? s.sourceOff : ''}`}>
           <div className={s.fieldText}>
             <div className={s.fieldTitle}>
               {tr('settings.advanced.sourceLabel')}
@@ -2127,7 +2128,7 @@ export default function PageSettings({
                 label={tr('settings.advanced.sourceLabel')}
                 options={sourceOptions}
                 value={sourceShow}
-                disabled={busy}
+                disabled={busy || online === false}
                 onChange={(v) => void pick(v as Mode)}
               />
             </span>
@@ -2140,7 +2141,7 @@ export default function PageSettings({
             ★ 这两块（自定义 + 用过的地址）套在 `.sourceKids` 里：缩进 + 一道左竖线，
             读起来是上面「预设数据源」那一行的子项，不是并列的另外两条（见 CSS 头注）。 */}
         {customOpen && (
-          <div className={s.sourceKids}>
+          <div className={`${s.sourceKids} ${online === false ? s.sourceOff : ''}`}>
             <div className={`${s.field} ${s.fieldRow}`}>
               <div className={s.fieldText}>
                 <div className={s.fieldTitle}>
@@ -2153,6 +2154,7 @@ export default function PageSettings({
                   ref={draftRef}
                   className={s.input}
                   value={draft}
+                  disabled={online === false}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
                     /* 输入法还在组字：这一下回车是"上屏"，不是"应用"。
@@ -2167,7 +2169,7 @@ export default function PageSettings({
                   placeholder={tr('settings.advanced.addressPlaceholder')}
                   aria-label={tr('settings.advanced.addressAria')}
                 />
-                <Btn onClick={() => void apply()} disabled={busy || !canSet}>
+                <Btn onClick={() => void apply()} disabled={busy || !canSet || online === false}>
                   {busy ? tr('settings.advanced.checking') : tr('settings.advanced.apply')}
                 </Btn>
               </div>
@@ -2199,7 +2201,7 @@ export default function PageSettings({
                       className={s.addrChip}
                       data-tip={addr}
                       aria-label={tr('settings.advanced.historyPick', { address: addr })}
-                      disabled={busy}
+                      disabled={busy || online === false}
                       onClick={() => setDraft(addr)}
                     >
                       {addr}

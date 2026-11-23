@@ -5626,9 +5626,9 @@ note = "超时/没答时终止处理的那句"
 
 ["ui.online.001"]
 code = "W_ONLINE_OFF_001"
-text = "在线增强关着，这一步不会联网"
-text_en = "Online enhancements are off, so this step stays offline"
-text_zh_tw = "線上增強關著，這一步不會連網"
-text_ja = "オンライン拡張がオフのため、この操作では通信しません"
+text = "联网功能关着，这一步不会联网"
+text_en = "Online features are off, so this step stays offline"
+text_zh_tw = "連網功能關著，這一步不會連網"
+text_ja = "オンライン機能がオフのため、この操作では通信しません"
 params = []
-note = "设置页关掉「在线增强」后，任何要联网的命令都回这一句"
+note = "设置页关掉「联网功能」后，任何要联网的命令都回这一句"

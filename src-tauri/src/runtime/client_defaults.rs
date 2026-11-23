@@ -63,7 +63,7 @@ pub struct ClientDefaults {
     pub auto_use_after_download: bool,
     pub auto_clean_history: bool,
     pub auto_check_update: bool,
-    /// **在线增强**：关掉之后这个程序一个字节都不出网
+    /// **联网功能**：关掉之后这个程序一个字节都不出网
     /// （预设 / 模型下载、检查更新、匿名统计全停，见 `ipc` 各命令开头那道闸）。
     pub online: bool,
 }
@@ -163,7 +163,7 @@ mod tests {
         assert!(d.auto_use_after_download, "下载后自动使用：出厂开");
         assert!(d.auto_clean_history);
         assert!(d.auto_check_update);
-        assert!(d.online, "新装默认联网（在线增强开着）");
+        assert!(d.online, "新装默认联网（联网功能开着）");
     }
 
     /// 缺字段要炸，不许拿默认值圆过去（§8.1）。

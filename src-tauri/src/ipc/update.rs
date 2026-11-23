@@ -130,7 +130,7 @@ pub async fn check_software_update(app: AppHandle) -> Result<UpdateSnapshotDto, 
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("checkSoftwareUpdate", |_| {
             let root = crate::fsx::paths::internal_root(&app)?;
-            /* 在线增强关着 ⇒ 不问版本（见 runtime::online） */
+            /* 联网功能关着 ⇒ 不问版本（见 runtime::online） */
             crate::runtime::online::require(&root)?;
             let snap = crate::runtime::update_check::run_check(
                 &root,
@@ -189,7 +189,7 @@ pub async fn migrate_update_ignored(
 #[tauri::command]
 pub async fn start_update(app: AppHandle, channel: Option<String>) -> Result<(), AppError> {
     let root = crate::fsx::paths::internal_root(&app)?;
-    /* 在线增强关着 ⇒ 不下安装包（见 runtime::online） */
+    /* 联网功能关着 ⇒ 不下安装包（见 runtime::online） */
     crate::runtime::online::require(&root)?;
     let channel = match channel.as_deref().map(str::trim) {
         None | Some("") | Some("stable") => crate::runtime::release_info::UpdateChannel::Stable,

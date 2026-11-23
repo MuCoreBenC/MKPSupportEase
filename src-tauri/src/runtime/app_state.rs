@@ -875,7 +875,7 @@ pub struct AppStateFile {
     /// 读者是 [`crate::runtime::update_check`]；设置页那一格走 `ipc::prefs` 的命令。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_check_update: Option<bool>,
-    /// **在线增强**：关掉之后这个程序一个字节都不出网。
+    /// **联网功能**：关掉之后这个程序一个字节都不出网。
     /// `None` = 还没选过 ⇒ `[Client] Online`（出厂开）。
     ///
     /// ★ 它不是"只关统计"这一格 —— 预设 / 模型下载、检查更新、匿名统计
@@ -1235,7 +1235,7 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         auto_clean_history: None,
         /* 自动检查更新是 2026-11-05 才有的：旧档里本来就没有它（没选过 = 开着） */
         auto_check_update: None,
-        /* 在线增强同理：旧档里没有它（没选过 = 开着） */
+        /* 联网功能同理：旧档里没有它（没选过 = 开着） */
         online: None,
         /* 更新渠道是 2026-11-20 才有的：旧档里没有（没选过 = 正式版） */
         update_channel: None,
@@ -1718,7 +1718,7 @@ pub fn set_auto_clean_history(root: &Path, enabled: bool) -> Result<bool, AppErr
 /// 自动检查开着吗。**还没选过 ⇒ `[Client] AutoCheckUpdate`**（出厂开）。
 ///
 /// 读者是 [`crate::runtime::update_check`] —— 界面不直接读它，设置页那格走 `ipc::prefs`。
-/// **在线增强开着吗**。还没选过 ⇒ `[Client] Online`（出厂开）。
+/// **联网功能开着吗**。还没选过 ⇒ `[Client] Online`（出厂开）。
 ///
 /// 它是「这个程序出不出网」的唯一判据：预设 / 模型下载、检查更新、匿名统计
 /// 都在自己的命令开头问这一句（见各命令的 `online_guard`）。
@@ -1727,7 +1727,7 @@ pub fn online(root: &Path) -> Result<bool, AppError> {
     Ok(load(root)?.online.unwrap_or(fallback))
 }
 
-/// 开关在线增强。落盘成功即生效 —— 已经发出的请求不撤回，之后的不再发。
+/// 开关联网功能。落盘成功即生效 —— 已经发出的请求不撤回，之后的不再发。
 pub fn set_online(root: &Path, enabled: bool) -> Result<bool, AppError> {
     with_state(root, |state| {
         state.online = Some(enabled);

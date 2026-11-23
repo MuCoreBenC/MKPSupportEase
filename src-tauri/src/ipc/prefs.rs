@@ -242,9 +242,9 @@ pub async fn set_auto_check_update(app: AppHandle, enabled: bool) -> Result<bool
     })
 }
 
-/* ---------- 在线增强：设置页「高级设置」那一格（关掉 = 一个字节都不出网） ---------- */
+/* ---------- 联网功能：设置页「高级设置」那一格（关掉 = 一个字节都不出网） ---------- */
 
-/// **在线增强**开着吗（出厂 = 开）。
+/// **联网功能**开着吗（出厂 = 开）。
 #[tauri::command]
 pub async fn get_online(app: AppHandle) -> Result<bool, AppError> {
     traced("getOnline", |_| {
@@ -253,7 +253,7 @@ pub async fn get_online(app: AppHandle) -> Result<bool, AppError> {
     })
 }
 
-/// 开关在线增强。落盘成功即生效；**关的方向顺手作废旧候选与待更新账** ——
+/// 开关联网功能。落盘成功即生效；**关的方向顺手作废旧候选与待更新账** ——
 /// 不关的话标题栏那枚胶囊是关之前那次检查留下的，关了还挂着。
 #[tauri::command]
 pub async fn set_online(app: AppHandle, enabled: bool) -> Result<bool, AppError> {
@@ -264,7 +264,7 @@ pub async fn set_online(app: AppHandle, enabled: bool) -> Result<bool, AppError>
             runtime::update_check::reset_session_check();
         } else if let Err(e) = runtime::update_check::invalidate(&root) {
             /* 开关已经写进盘了，不能因为清旧结论失败把它退回去 */
-            tracing::warn!("关在线增强时没作废旧候选：{}", e.message);
+            tracing::warn!("关联网功能时没作废旧候选：{}", e.message);
         }
         notify_app_state(&app);
         Ok(got)

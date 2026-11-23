@@ -124,7 +124,7 @@ pub fn referer_total_for(day: &str) -> String {
 
 /// 当天还没报过就报一次。返回"这一趟真的发了没有"。
 pub fn ping_today(root: &Path) -> Result<bool, AppError> {
-    /* 在线增强关着 ⇒ 连统计都不报（那是"出网"的一部分，见 runtime::online） */
+    /* 联网功能关着 ⇒ 连统计都不报（那是"出网"的一部分，见 runtime::online） */
     if !super::online::is_on(root)? {
         return Ok(false);
     }

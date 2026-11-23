@@ -469,7 +469,7 @@ export const zhCN = {
 
   /* 设置页：高级设置 */
   'settings.advanced.title': '高级设置',
-  'settings.online.label': '在线增强',
+  'settings.online.label': '联网功能',
   'settings.online.note': '关掉后收不到新预设与版本更新',
   'settings.online.hint': '关掉后这个程序不再联网：不下载预设与模型，也不检查更新',
   'settings.advanced.desc': '云端数据地址',
@@ -1246,7 +1246,8 @@ export const zhCN = {
   'report.debug.actions': '动作序列',
   'report.debug.actMount': '落笔',
   'report.debug.actUnmount': '收笔',
-  'report.calib.modeLabel': '校准身份',
+  'report.calib.modeLabel': '校准模式',
+  'report.calibMap.label': '校准件位置图',
   'report.calib.verdict3mf': '校准件',
   'report.calib.verdictAbsent': '没有校准标记',
   'report.calib.gone': '文件已不在',
@@ -1338,6 +1339,7 @@ export const zhCN = {
   'report.map.label': '查看碰撞俯视图',
   'report.map.legendTower': '擦料塔',
   'report.map.legendSlicerTower': '切片器擦料塔',
+  'report.map.legendBox': '实测包围盒',
   'report.map.legendModel': '模型轮廓',
   'report.map.legendOverflow': '超出范围',
   'report.map.legendPen': '笔尖轮廓',

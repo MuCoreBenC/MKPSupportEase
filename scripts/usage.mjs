@@ -272,7 +272,7 @@ function renderHtml(rows, latest) {
 <h2>今天 · 版本 / 平台</h2>
 <table><thead><tr><th>版本</th><th>平台</th><th class="num">台次</th></tr></thead>
 <tbody>${bd}</tbody></table>
-<footer>「台次」= 当天报过心跳的机器数；离线、或关掉「在线增强」的机器不会出现在这里。</footer>
+<footer>「台次」= 当天报过心跳的机器数；离线、或关掉「联网功能」的机器不会出现在这里。</footer>
 </body></html>`
 }
 
