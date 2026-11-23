@@ -1918,6 +1918,7 @@ mod tests {
     use crate::ir::Ir;
 
     fn tower_ir() -> Ir {
+        crate::postproc::machine_dims::install_repo_tables_for_tests();
         // wiper (20,20) + brim bbox：local [2.96, 37.04]² → machine [22.96, 57.04]²
         let mut ir = Ir::default();
         ir.tower.use_towers = true;

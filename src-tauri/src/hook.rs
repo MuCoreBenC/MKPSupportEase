@@ -2217,9 +2217,12 @@ fn refs<'a>(params: &'a [(&'static str, String)]) -> Vec<(&'static str, &'a str)
 
 /// **钩子进程的入口**：接上通道 → 干活 → 把结论写进通道 → 立刻退。
 ///
+/// 参数 [`crate::boot::Runtime`] 是「运行时数据已经装好」的凭据 —— 这一趟要查机型表，
+/// 拿不到凭据就进不来（见 [`crate::boot`]）。`hook::run` 与判据那条无通道的路不走它。
+///
 /// 退出码与那一行 stderr 是切片器看得见的全部；进度与结论是**给界面那扇窗看的**，
 /// 写不出去也不影响成败（产物优先于界面，见 [`crate::hook_ipc`]）。
-pub fn run_with_channel(job: &HookJob) -> ExitCode {
+pub fn run_with_channel(_boot: &crate::boot::Runtime, job: &HookJob) -> ExitCode {
     let cancel = CancelToken::new();
     /* Ctrl-C → 协作取消（不是硬杀）：内核在步骤边界停下，`.part` 丢掉、原文件不动。
     装不上处理器**不阻断**这一趟 —— 用户按 Ctrl-C 时最坏退回默认硬杀。 */
@@ -3143,6 +3146,7 @@ mod tests {
     }
 
     fn job(toml: &std::path::Path, gcode: &std::path::Path) -> HookJob {
+        crate::boot::install_machine_tables_for_tests();
         HookJob {
             toml: to_path_buf(toml),
             gcode: to_path_buf(gcode),
@@ -3246,6 +3250,7 @@ mod tests {
     }
 
     fn run_headless(toml: &std::path::Path, gcode: &std::path::Path) -> Result<Outcome, HookError> {
+        crate::boot::install_machine_tables_for_tests();
         isolate_data_root();
         let mut sink = NoProgress;
         run(
@@ -4039,6 +4044,7 @@ mod tests {
     /// 机型判据本身：认不出（UNKNOWN / 空）**不算**不匹配；大小写差异也不算
     #[test]
     fn the_mismatch_rule_does_not_cry_wolf() {
+        crate::boot::install_machine_tables_for_tests();
         assert!(!is_machine_mismatch("A1", "A1"));
         assert!(!is_machine_mismatch("A1", "a1"));
         assert!(!is_machine_mismatch("A1", "UNKNOWN"));

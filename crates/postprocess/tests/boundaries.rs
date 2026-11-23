@@ -1,8 +1,9 @@
 //! 架构边界的机械门禁。
 //!
 //! 来源仓库 mkp-sr 有 **12** 条这样的断言（靠 `crates/gatecheck` 读 Cargo.toml 实现），
-//! 本项目只有**恰好 2** 条。这是**证据等级的真实下降，不是清理**：
-//! 文本扫描比 Cargo 的依赖图弱（换个写法就绕过去了）。
+//! 本项目只有**恰好 3** 条。这是**证据等级的真实下降，不是清理**：
+//! 文本扫描比 Cargo 的依赖图弱（换个写法就绕过去了）。第三条（判据 3）守的是
+//! 「机型表只有注入一个来源」，理由见那一条自己的文档。
 //!
 //! ## 被丢掉的 10 条，逐条实测归类（Task 13.3）
 //!
@@ -232,5 +233,54 @@ fn no_fma_anywhere() {
         "禁止 FMA 融合（arm64/amd64 分叉会换几何分支，见本判据文档）。命中 {} 处：\n{}",
         hits.len(),
         hits.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 判据 3：机型表只有"注入"这一个来源
+// ---------------------------------------------------------------------------
+
+/// **`machine_dims` 不许自己找数据。**
+///
+/// 发布物没有仓库里的 `presets/`；只要库内有任何一个"找不到就去别处找"的入口，
+/// 开发态就会替发布态把数据缺失盖住 —— 那类事故的表现是切片器只显示 `Error code: 101`，
+/// 而本地与 CI 全绿。这里把入口本身钉死：`tables()` 只能用 `install` 装进来的那一份。
+///
+/// 扫描面只取 `#[cfg(test)]` 之前的部分：判据自己的装表入口读仓库是正当的，
+/// 而它编不进任何可执行物（`#[cfg(test)]`）。禁的是运行时发现：
+/// 编译期路径、环境变量、当前目录、懒初始化。
+#[test]
+fn machine_tables_have_no_hidden_second_source() {
+    let path = repo_root().join("src/postproc/machine_dims.rs");
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("读不到 {}（{e}）—— 判据已空转", path.display()));
+
+    let production = text
+        .split_once("\n#[cfg(test)]")
+        .map(|(head, _)| head)
+        .unwrap_or(&text);
+    // 反空转：切出来的必须真的是生产那一段。
+    assert!(
+        production.contains("pub fn tables()") && production.contains("pub fn install("),
+        "切分点找错了：`#[cfg(test)]` 之前的代码里没有 tables/install，判据不成立"
+    );
+
+    let forbidden = [
+        "CARGO_MANIFEST_DIR",
+        "MKPSE_PRESETS_DIR",
+        "env::var",
+        "current_dir",
+        "get_or_init",
+    ];
+    let hits: Vec<&str> = forbidden
+        .iter()
+        .copied()
+        .filter(|p| production.contains(p))
+        .collect();
+    assert!(
+        hits.is_empty(),
+        "machine_dims 生产代码里出现了运行时发现数据的写法：{hits:?}\n\
+         机型表只能由 `install` 注入（发布物从随包 catalog 构，CLI 从 --presets 读，\
+         判据自己装）。任何备用来源都会让开发态替发布物兜底。"
     );
 }

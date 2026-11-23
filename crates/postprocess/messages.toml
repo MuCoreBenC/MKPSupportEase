@@ -4883,11 +4883,19 @@ text_zh_tw = "日誌初始化失敗（{detail}），繼續以無日誌執行"
 text_ja = "ログ初期化に失敗（{detail}）。ログなしで継続します"
 params = ["detail"]
 
+["cli.presets_unavailable"]
+text = "机型表读不出来（{dir}）：{detail}"
+text_en = "Cannot read the machine table from {dir}: {detail}"
+text_zh_tw = "機型表讀不出來（{dir}）：{detail}"
+text_ja = "機種テーブルを読み込めません（{dir}）：{detail}"
+params = ["dir", "detail"]
+
 ["cli.assets.not_found"]
-text = "找不到 presets/assets.toml（请在仓库根运行，或用 --manifest 指定）"
-text_en = "Cannot find presets/assets.toml (run from the repository root, or name it with --manifest)"
-text_zh_tw = "找不到 presets/assets.toml（請在倉庫根執行，或用 --manifest 指定）"
-text_ja = "presets/assets.toml が見つかりません（リポジトリルートで実行するか、--manifest で指定してください）"
+text = "台账不存在：{path}（用 --manifest 指定，或把 --presets 指向别的树）"
+text_en = "No manifest at {path} (name one with --manifest, or point --presets at another tree)"
+text_zh_tw = "台帳不存在：{path}（用 --manifest 指定，或把 --presets 指向別的樹）"
+text_ja = "台帳がありません：{path}（--manifest で指定するか、--presets を変更してください）"
+params = ["path"]
 
 ["cli.assets.unreadable"]
 text = "台账读不出来（{path}）：{detail}"

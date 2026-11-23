@@ -25,6 +25,8 @@ pub mod ax;
 /// 没有这个模块，调用点因此要用 `cfg` 挡一下（见 `ipc::guide`）。
 #[cfg(target_os = "macos")]
 pub mod ax_watch;
+/// **进程启动的运行时数据初始化**：界面与钩子共用一份，凭据由 [`boot::Runtime`] 表达。
+pub mod boot;
 pub mod chrome;
 /// **开发台的故障档位表**（2026-10-19）：给某一个 API 方法装一条错，客户端里所有走
 /// 这个方法的界面从此真的报错。**无条件编译** —— 造错发生在客户端进程里（工作台那条
@@ -124,6 +126,9 @@ main 窗口，那段整个不编译，导入留着就是一条 unused import（C
 use tauri::Manager;
 
 /// 界面的入口（也是唯一入口）。
+///
+/// 参数 [`boot::Runtime`] 是「运行时数据已经装好」的凭据 —— 拿不到它就进不来，
+/// 见 [`crate::boot`]。
 ///
 /// **钩子进程不走这里**：切片器带 `--Toml/--Gcode` 拉起来的那一次走
 /// [`crate::hook::run_with_channel`]（干活 + 退出码，不开窗、不建 Tauri 应用）；
@@ -269,7 +274,7 @@ mod fingerprint_tests {
     }
 }
 
-pub fn run() {
+pub fn run(_boot: boot::Runtime) {
     let view = hook_ui::HookView::new();
     let for_setup = view.clone();
 

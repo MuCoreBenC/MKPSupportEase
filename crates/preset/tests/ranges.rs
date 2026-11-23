@@ -11,6 +11,8 @@
 //! 这一轮就是被这类静默丢弃坑过（`machineMinVariants` / `machineMaxVariants` 白躺着没人读），
 //! 所以键名集合必须登记在案；出现次数刻意不钉，免得改一次数据就要改一次判据。
 
+mod common;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use preset::registry::{RangeSource, load_param_registry};
@@ -233,6 +235,7 @@ fn kr3_variant_lookup_is_case_insensitive() {
 
 #[test]
 fn kr1_all_presets_still_load_after_switching_the_source_of_truth() {
+    common::install_tables();
     use std::path::PathBuf;
 
     // 9 份冻结样本（仓库内，必跑）

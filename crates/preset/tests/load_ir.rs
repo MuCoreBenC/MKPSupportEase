@@ -45,6 +45,8 @@
 // （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
 #![allow(clippy::disallowed_methods)]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
@@ -82,6 +84,7 @@ fn golden_output() -> PathBuf {
 }
 
 fn live_text() -> String {
+    common::install_tables();
     std::fs::read_to_string(live_preset()).expect("读实时预设夹具")
 }
 
@@ -102,6 +105,7 @@ fn live_preset_with<F: FnOnce(&mut toml::Value)>(f: F) -> String {
 ///
 /// 调用方必须持有 [`lock_sequence`]：里面会 reset 进程级伪随机序列。
 fn run_chain(preset_path: &Path, tag: &str) -> String {
+    common::install_tables();
     postprocess::gcode::reset_pseudo_random();
     let dir = tempfile::tempdir().expect("临时目录");
     let work = dir.path().join("input.gcode");
@@ -324,6 +328,7 @@ fn turning_ironing_on_only_adds_the_ironing_moves() {
 /// 这份整链输入不产塔（`useTowers` 关着），所以差分放在**偏移层**做 —— 比例真正被消费的地方。
 #[test]
 fn tower_extrude_ratio_scales_only_the_e_values() {
+    common::install_tables();
     use postprocess::gcode::OffsetMode;
     use postprocess::postproc::offset::process_gcode_offset;
 
@@ -511,6 +516,7 @@ fn preset_chain_matches_the_support_ease_golden() {
 
 /// 写一份最小可解析的预设到临时目录，`machine` 头由调用方给。
 fn minimal_preset(dir: &Path, machine_header: Option<&str>) -> PathBuf {
+    common::install_tables();
     let src = std::fs::read_to_string(live_preset()).expect("读基准预设");
     // 去掉原有的 `# machine:` 行，再按需要加回一条 —— 这样其余字段全是真实值，
     // 判据测的是机型这一个变量。

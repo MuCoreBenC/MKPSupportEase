@@ -13,9 +13,9 @@
 //! 后处理那一趟（[`crate::postproc::disk::calibration`]）：尺寸校验的标称外形、
 //! 图案基准偏移、XY 模板偏移、质心旋转判据的期望，四处都从这里取。
 //!
-//! 装载由 [`crate::postproc::machine_dims`] 统一做（`load_presets_dir` 顺手读它），
-//! 读取链与机型表**同一条**：显式 `install` → `MKPSE_PRESETS_DIR` → 仓库相对
-//! `../../presets`。不另造一份路径依赖，也不另开一个进程级 `OnceLock`。
+//! 装载跟着机型表走：`load_presets_dir` 顺手读它，随
+//! [`crate::postproc::machine_dims::install`] 一起进程级装一次。不另造一份路径依赖，
+//! 也不另开一个进程级 `OnceLock`。
 //!
 //! # 坏了会怎样
 //!

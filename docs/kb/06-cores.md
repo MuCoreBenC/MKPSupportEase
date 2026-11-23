@@ -230,6 +230,6 @@ flowchart LR
 ## 8. 未核实
 
 1. `presets/` 的**写权限规则**（谁能写、经不经 `fsx`）是否有书面约定 —— 只见各模块自行 `atomic_write`。
-2 `machine_dims::install()` 在发布物里的接线（`HANDOFF.md:259` 记欠账）。
+2. ~~`machine_dims::install()` 在发布物里的接线~~ —— 已核（2026-11-23）：`main.rs` → `boot::Runtime::initialize()` → `runtime::install_machine_tables_from_catalog()`，界面与钩子共用；库内的仓库兜底已删。
 3. `crates/postprocess/src/postproc/**` 内部是否真的没有回读 `presets/`（只按 `machine_dims` 一处确认；`pass1/pass2/tower` 未逐段读）。
 4. 前端是否存在**隐藏的判据**（例如某处自己算"能不能修"）—— 本轮只抽查了 `BuildPage` / `deliveryStatus`，未全量。

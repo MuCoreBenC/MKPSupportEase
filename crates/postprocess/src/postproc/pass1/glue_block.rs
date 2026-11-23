@@ -1567,6 +1567,7 @@ mod continuity_tests {
     const LAST_LAYER_Z: f64 = 40.68;
 
     fn test_ir() -> Ir {
+        crate::postproc::machine_dims::install_repo_tables_for_tests();
         let mut ir = Ir::default();
         ir.machine.nozzle_diameter = 0.4;
         ir.machine.travel_speed = 700.0;

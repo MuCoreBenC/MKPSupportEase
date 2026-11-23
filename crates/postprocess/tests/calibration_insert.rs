@@ -5,11 +5,14 @@
 //! （Task 4.3 只导出了生成器对），此处为行为判据 —— 如实登记，不假称字节级。
 //! 三种 exec_mode 各一条（13.5）。
 
+mod common;
+
 use postprocess::ir::Ir;
 use postprocess::postproc::calibration::{Mode, insert_calibration_gcode, minimize_startup_gcode};
 use postprocess::postproc::disk::{BBox, CentroidResult};
 
 fn fixture_ir() -> Ir {
+    common::install_tables();
     let json = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/ir/golden_42274_2.json"),

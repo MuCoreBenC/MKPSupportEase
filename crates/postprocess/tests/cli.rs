@@ -359,3 +359,26 @@ fn set_from_command_line_reaches_the_output() {
     assert_eq!(v["Tower"]["SafeZOffset"], 1.25);
     let _ = std::fs::remove_file(&input);
 }
+
+/// **没有第二数据源**：`--presets` 指到不存在的目录 ⇒ 退 2 并点名那个目录。
+///
+/// 这条咬的是机制而不是某次事故：只要有人给 CLI 加回「读不到就回仓库找 `presets/`」，
+/// 这里就会从 2 变成 0 —— 而「开发态跑得好、发布物炸掉」正是那条回落造出来的。
+#[test]
+fn a_missing_presets_tree_is_an_error_not_a_repo_fallback() {
+    let missing = std::env::temp_dir().join("mkpse-pp-no-such-presets-tree");
+    let _ = std::fs::remove_dir_all(&missing);
+    let out = run_cli(&[
+        "--presets",
+        &missing.to_string_lossy(),
+        "check",
+        "-c",
+        &config_a1().to_string_lossy(),
+    ]);
+    assert_eq!(code_of(&out), 2, "stderr:\n{}", stderr_of(&out));
+    let err = stderr_of(&out);
+    assert!(
+        err.contains("机型表") && err.contains("no-such-presets-tree"),
+        "错误要说是机型表读不出来、并点名那个目录（否则用户不知道 --presets 指错了）：{err}"
+    );
+}

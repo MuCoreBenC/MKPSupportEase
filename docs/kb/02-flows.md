@@ -223,7 +223,7 @@ argv 解析 → 读 G-code 全文 → 归档原始文件（gcode_history/日期/
 ## 6. 未核实
 
 1. 客户端"下载并应用"把交付预设落到 `presets-local/` 的具体落点函数（只看了调用点，未逐行读）。
-2. `machine_dims::install()` 在发布物中的实际接线（`src-tauri/` 内未搜到调用，`HANDOFF.md:259` 记为欠账）——发布物当前可能依赖 `MKPSE_PRESETS_DIR` 或编译期路径。
+2. ~~`machine_dims::install()` 在发布物中的实际接线~~ —— 已核：`main.rs` → `boot::Runtime::initialize()` → `runtime::install_machine_tables_from_catalog()`，界面与钩子共用；库内已无仓库兜底。
 3. `postproc/pass1|pass2|tower|disk` 的内部算法只按模块归类，阶段表是行为摘要，不是逐行结论。
 4. 客户端下载的 BBS 文件落盘后由谁消费（`HOME-BUNDLE-DOWNLOAD.md:3-4` 说"先只落盘"），未逐行核。
 5. `wb_assign_bundle_versions` 的回执只回 `BundleList`，前端拿不到"哪几条真变了"（`app/bundles.rs:422`）——是否需要补未裁决。

@@ -36,6 +36,25 @@
 - 闸：`node scripts/check-no-factory-defaults.mjs`（已挂在 `npm run lint`）扫 `src/`，
   命中 `factoryByKey` / `factoryValue` / `baseValue` / `params.row.dt.package` 即红。
 
+## 1.7 运行环境等价（Runtime Environment Equivalence）
+
+**开发态不许替发布物兜底。** 能在开发环境跑通的业务流程，不得依赖发布环境不存在的
+文件、目录、环境变量，或「有人记得调用」的初始化。
+
+- **数据来源唯一，缺了就报错。** 机型 / 别名 / 禁区 / 校准档表只来自 `machine_dims::install`
+  注入的那一份（发布物从随包 catalog 构，诊断 CLI 从 `--presets` 读，判据自己装）；
+  用户数据在用户数据根；云端内容只在下载落盘之后。找不到就失败，**不许**换下一个来源。
+- **库内不许有逃生链。** `machine_dims::tables()` 没装就 panic：不读 `MKPSE_PRESETS_DIR`，
+  不按编译期路径回仓库找 `presets/`。`CARGO_MANIFEST_DIR` 只准出现在
+  `include_str!/include_bytes!/build.rs` 与测试里，二进制运行时不得回头读仓库。
+- **初始化是入口的必经步骤。** 进程入口先拿 `boot::Runtime`（`Runtime::initialize()`）再进业务；
+  界面 / 钩子 / 以后的新角色共用这一套。凭据作为参数传进入口函数 —— 漏接线要是编译错误，
+  不是运行到一半才发现表是空的。
+- **开发态只多调试工具，不多业务能力。** 日志可以更详细、可以有热更新；数据来源与业务初始化
+  必须与发布物相同。绿色版与安装版的数据根可以不同，但同一份数据不许两个入口读两个根。
+- 验证分三层，别混：单元测试（业务逻辑）、发布形态探针（`npm run probe:release-hook`，
+  真 exe + 无仓库 + 隔离数据根）、上面这些架构约束。**不靠"以后多测几遍"**。
+
 ## 2. 验证
 
 ```text

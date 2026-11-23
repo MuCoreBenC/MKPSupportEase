@@ -114,8 +114,9 @@ Mac 上同样是这套代码却不犯：Mac 从仓库跑，第③档逃生链把
 
 ## 4. 防复发：完整测试
 
-### 结构性盲区
-CI 的 Rust job 都在仓库根跑，`presets/` 永远在 ⇒ 第③档逃生链永远成立 ⇒ 上面两类坑**在 CI 里结构性不可见**。
+### 结构性盲区（已消除）
+CI 的 Rust job 都在仓库根跑，测试可以从仓库装机型表；发布物只有随包数据。这条差别本身没法靠
+"多跑几遍 CI"覆盖 —— 所以库内**不留第二数据源**（逃生链已删），再由探针验真交付物。
 
 ### 加了两层
 
@@ -125,7 +126,7 @@ CI 的 Rust job 都在仓库根跑，`presets/` 永远在 ⇒ 第③档逃生链
 - `bundled_calibration_profiles_are_recognisable_by_size`：随包档表里每个带外形的档，按标称尺寸必须能被认档函数命中
 
 **② 本地端到端探针（手动，`npm run probe:release-hook`）**
-用隔离数据根 + 清 `MKPSE_PRESETS_DIR` 模拟发布物。**先检测界面端点，没起就退出 2、零副作用**——不拉窗、不弹空的
+用隔离数据根 + 隔离的 `presets/` 模拟发布物。**先检测界面端点，没起就退出 2、零副作用**——不拉窗、不弹空的
 `[::1] 拒绝连接` 页面（那是 debug 界面在连没启动的 dev server，不是产品问题）。按用户定的方式：先起真界面再跑：
 
 ```bash
@@ -148,9 +149,13 @@ runtime 5/5、校准 12+2、`cargo fmt --check`、`cargo clippy -D warnings` 全
 
 全仓排查按三类分。前两类是这次同族风险，第三类是已知的跨平台差异。
 
-### A. 仓库数据 vs 随包数据（与本次同源，事故密度最高）
-- **残留最高风险**：`machine_dims.rs:258-273` 的第③档逃生链还在。将来任何**新二进制 / 新入口**绕过 `main.rs`
-  直接调 `tables()`，101 会原样重现——现在只有一行注释和 CI 判据挡着，判据测的是数据完整、不是入口接线。
+### A. 仓库数据 vs 随包数据（与本次同源，已收口）
+- **逃生链已整个删除**：`machine_dims::tables()` 不读环境变量 `MKPSE_PRESETS_DIR`，也不按编译期路径回仓库找
+  `presets/`；没装就 panic 并说明谁来装。`mkpse-pp` 改成显式 `--presets`（缺省是本仓库那棵树，读不出来退 2）。
+- **入口接线从"靠人记得调用"改成类型约束**：`boot::Runtime` 只能由 `Runtime::initialize()` 造出来，
+  界面（`lib::run`）与钩子（`hook::run_with_channel`）的签名都要它 —— 新入口漏初始化是编译错误。
+- 判据：`crates/postprocess/tests/cli.rs` 的 `a_missing_presets_tree_is_an_error_not_a_repo_fallback`
+  （CLI 没有第二数据源）、`runtime` 下随包数据完整性两条、`npm run probe:release-hook`（真交付物、无仓库）。
 - 同族历史事故：`PRINT-FAILURE-2026-11-04` —— 本机预设 `offset_z=3.95`、仓库副本 `3.9`，按仓库数据归因会得出错误结论。
   教训：**归因必须看用户盘上的原件，不能看仓库副本**。
 
@@ -166,8 +171,8 @@ runtime 5/5、校准 12+2、`cargo fmt --check`、`cargo clippy -D warnings` 全
 - 通知、控制台隐藏、大小写改名判同文件等
 
 **判断**：别人电脑上「更多问题」最可能出在 A 类和 B 类——都是**发布形态/数据位置**问题，不是业务逻辑。
-C 类有 CI 的 `rust-windows` 编译保险。真要进一步降风险，下一步该做的是：把 CI 的 Windows job 加一步
-「把构建产物复制到无 `presets/` 的目录后跑钩子入口」，让第③档逃生链失效的场景在 CI 里也能出现。
+C 类有 CI 的 `rust-windows` 编译保险。A 类现在**没有可回落的第二数据源**，剩下的验证手段是
+`npm run probe:release-hook`（真 exe + 无仓库 + 隔离数据根）；它不进 CI，按需手动跑。
 
 ---
 
@@ -175,11 +180,13 @@ C 类有 CI 的 `rust-windows` 编译保险。真要进一步降风险，下一�
 
 | 文件 | 做什么 |
 | --- | --- |
-| `src-tauri/src/main.rs` | 入口装机型表（钩子 + 界面） |
-| `src-tauri/src/runtime/mod.rs` | 从随包 catalog + 编入的校准档表构表 / 装表；两条新判据 |
-| `crates/postprocess/src/postproc/machine_dims.rs` | `MachineTables::from_catalog_parts` |
+| `src-tauri/src/boot.rs` | `Runtime::initialize()`：两个入口共用的运行时初始化凭据 |
+| `src-tauri/src/main.rs` | 先拿凭据再分流；钩子 / 界面都把凭据传进入口函数 |
+| `src-tauri/src/runtime/mod.rs` | 从随包 catalog + 编入的校准档表构表 / 装表，失败返回 `Err`（不再静默跳过）；两条新判据 |
+| `crates/postprocess/src/postproc/machine_dims.rs` | 删掉仓库逃生链与环境变量；没装就 panic；`MachineTables::from_catalog_parts` |
+| `crates/postprocess/src/main.rs` | `--presets` 显式装表（缺省仓库那一棵），去掉按当前目录找台账 |
 | `crates/postprocess/src/postproc/calib_models.rs` | `parse(raw, where)`，`load` 复用 |
-| `crates/postprocess/src/pipeline/bed_glue.rs`、`postproc/calibration.rs` | 去掉引用 Go 实现的注释（用户要求） |
+| `crates/postprocess/tests/*`、`crates/preset/tests/*` | 集成判据显式装表（`tests/common/mod.rs`）；CLI「无第二数据源」判据 |
 | `crates/postprocess/tests/fixtures/dev/calib-combined.gcode` + `README.md` | 二合一真机夹具 |
 | `scripts/check/release-hook-probe.mjs`、`package.json` | 本地端到端探针（`probe:release-hook`） |
 

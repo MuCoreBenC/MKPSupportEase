@@ -7,6 +7,8 @@
 //! helper 直测的 3 条（findPrevPositionCmd 索引 0、stripSkippableBlocks 两形态）
 //! 在各模块的单元测试里（scan.rs / delete_wipe.rs）。
 
+mod common;
+
 use postprocess::ir::Ir;
 
 fn fixture_ir() -> Ir {
@@ -28,6 +30,7 @@ fn lines(v: &[&str]) -> Vec<String> {
 
 /// runFirstPass（pass1_state_test.go:161）：跑 first_pass，返回 (输出行, 突变后 IR)。
 fn run_first_pass(gcode: &[String], ir_data: Ir) -> (Vec<String>, Ir) {
+    common::install_tables();
     let mut ir = ir_data;
     let toml_machine = ir.machine.machine_type.clone();
     let mut progress = |_, _: String| {};

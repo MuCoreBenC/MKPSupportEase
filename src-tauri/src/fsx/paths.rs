@@ -165,11 +165,13 @@ pub fn internal_root_headless() -> Option<PathBuf> {
     } else if cfg!(target_os = "macos") {
         PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support")
     } else {
-        std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/share")
-            })
+        /* 两个都没有 ⇒ `None`：不许退成相对路径 —— 那会把数据根落到**当前目录**
+        （`unwrap_or_default()` 的空串正好是这么算的），下一层 `ensure_dirs` 还会
+        真的在那里建目录。 */
+        match std::env::var_os("XDG_DATA_HOME") {
+            Some(v) => PathBuf::from(v),
+            None => PathBuf::from(std::env::var_os("HOME")?).join(".local/share"),
+        }
     };
     let root = base.join(APP_IDENTIFIER);
     ensure_dirs(&root, &INTERNAL_DIRS).ok()?;

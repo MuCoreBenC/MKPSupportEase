@@ -178,34 +178,24 @@ pub const EMBEDDED_CALIBRATION_MODELS: &str =
 
 /// 把随包 catalog 的机型数据装进 postprocess 的进程级表。
 ///
-/// 发布物没有仓库里的 `presets/` 目录，钩子又必须查机型尺寸 / 禁区；不装就会在
-/// `machine_dims::tables()` 那里 panic（Windows 只显示 `Error code: 101`）。
-/// catalog 里没有校准模型档，留空由消费方按既有兜底处理。
+/// 这是**唯一一条**装表路径：发布物与界面都由 [`crate::boot::Runtime::initialize`] 走到这里。
+/// 随包数据读不出来就返回 `Err` —— 调用方停下，库那边也不会去别处找第二份数据。
 ///
-/// 只装一次；重复调用（`OnceLock` 已装）记日志后返回，不覆盖、不 panic。
-pub fn install_machine_tables_from_catalog() {
-    let tables = match machine_tables_from_catalog() {
-        Some(t) => t,
-        None => return,
-    };
-    if let Err(e) = postprocess::postproc::machine_dims::install(tables) {
-        tracing::debug!("机型表已装过，忽略重复安装：{e}");
-    }
+/// 只装一次；重复调用（`OnceLock` 已装）返回 `Err`：那是入口接线的错误，不能吞。
+pub fn install_machine_tables_from_catalog() -> Result<(), String> {
+    let tables = machine_tables_from_catalog()?;
+    postprocess::postproc::machine_dims::install(tables)
 }
 
 /// 从随包 catalog 构出机型表。纯函数，便于判据直接验数据。
-fn machine_tables_from_catalog() -> Option<postprocess::postproc::machine_dims::MachineTables> {
+fn machine_tables_from_catalog(
+) -> Result<postprocess::postproc::machine_dims::MachineTables, String> {
     use postprocess::postproc::machine_dims::{
         MachineDimensions, MachineTables, ZonePoint, ZonePolygon,
     };
 
-    let catalog = match Catalog::parse(EMBEDDED_CATALOG) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("随包 catalog 读不出来，机型表未安装：{e}");
-            return None;
-        }
-    };
+    let catalog =
+        Catalog::parse(EMBEDDED_CATALOG).map_err(|e| format!("随包 catalog 读不出来：{e}"))?;
 
     let mut dimensions = std::collections::HashMap::new();
     let mut alias_map = std::collections::HashMap::new();
@@ -276,22 +266,16 @@ fn machine_tables_from_catalog() -> Option<postprocess::postproc::machine_dims::
         }
     }
 
-    let calibration_models = match postprocess::postproc::calib_models::parse(
-        EMBEDDED_CALIBRATION_MODELS,
-        "随包校准档表",
-    ) {
-        Ok(models) => Some(models),
-        Err(e) => {
-            tracing::error!("随包校准档表读不出来，合体校准件将无法定档：{e}");
-            None
-        }
-    };
+    /* 档表读不出来就是硬错：装一张没有档的机型表会让合体校准件在用户机器上
+     * 被判成"不是校准件"，然后静默按普通模型跑完。 */
+    let calibration_models =
+        postprocess::postproc::calib_models::parse(EMBEDDED_CALIBRATION_MODELS, "随包校准档表")?;
 
-    Some(MachineTables::from_catalog_parts(
+    Ok(MachineTables::from_catalog_parts(
         dimensions,
         alias_map,
         forbidden_zones,
-        calibration_models,
+        Some(calibration_models),
     ))
 }
 

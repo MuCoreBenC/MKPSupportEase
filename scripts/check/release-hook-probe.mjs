@@ -2,13 +2,12 @@
 /**
  * 发布物形态的钩子探针 —— 专治「开发机绿、用户机器红」。
  *
- * 为什么需要它：CI 的 rust job 都在仓库根跑，`presets/` 永远在盘上，于是
- * `machine_dims::tables()` 的第三条逃生链（CARGO_MANIFEST_DIR/../../presets）
- * 永远成立 —— 发布物上「没有 presets/ 目录」那一支在 CI 里结构性不可见。
- * 2026-11-23 的 Error code: 101 就是这么漏过去的。
+ * 为什么需要它：CI 的 rust job 都在仓库根跑，测试可以从仓库装机型表；而发布物
+ * 只有随包数据，`presets/` 不在盘上。**库内已经没有「去仓库找」的备用源**
+ * （见 `machine_dims.rs` 模块头），本探针验的是最后一步：真交付物在隔离根里
+ * 能不能只靠随包数据跑完整钩子。
  *
  * 本探针把 exe 拿出来，在**不含 presets/ 的隔离数据根**里跑完整钩子：
- *   - 清掉 MKPSE_PRESETS_DIR（不让显式逃生链生效）
  *   - 预设 / 3MF / gcode 都从仓库夹具复制到临时目录（不写仓库、不碰用户数据根）
  *   - 断言退出码、身份探测字段、校准问句
  *
@@ -104,7 +103,6 @@ function runHook({ label, gcode, origin, waitMs }) {
   copyFileSync(PRESET, preset)
 
   const env = { ...process.env }
-  delete env.MKPSE_PRESETS_DIR
   env.MKP_SUPPORT_EASE_DATA = dataRoot
   env.RUST_BACKTRACE = '1'
 

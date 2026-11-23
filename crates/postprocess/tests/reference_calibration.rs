@@ -4,6 +4,8 @@
 //! 期望值是**本项目人工确认过的输出**，不是外部实现的投影：它回答「校准块的字节有没有变」，
 //! 不回答「校准块对不对」—— 后者靠真机验收。证据等级见 `tests/reference/README.md`。
 
+mod common;
+
 use postprocess::ir::Ir;
 use postprocess::postproc::disk::{BBox, CentroidResult, generate_calibration_gcode_with_centroid};
 use serde::Deserialize;
@@ -61,6 +63,7 @@ fn join_lines(lines: &[String]) -> String {
 }
 
 fn check_mode(mode: &str) {
+    common::install_tables();
     let input_text = std::fs::read_to_string(repo_relative(&format!(
         "tests/reference/calibration/{mode}.input.json"
     )))

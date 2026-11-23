@@ -68,9 +68,16 @@ fn main() -> ExitCode {
     #[cfg(windows)]
     hide_own_console();
 
-    /* 机型表必须早于任何 postprocess 调用：发布物没有仓库里的 presets/ 目录，
-     * 不装就会在 `machine_dims::tables()` 里 panic（切片器只显示 Error code: 101）。 */
-    mkp_support_ease_lib::runtime::install_machine_tables_from_catalog();
+    /* 运行时数据（机型表 / 别名 / 禁区 / 校准档表）**早于一切业务**：两个角色共用
+     * 这一份初始化，凭据要一路传到入口函数（见 `boot` 模块头）。装不上就不跑 ——
+     * 半装机型表的后处理会在用户机器上算错几何，比不跑更糟。 */
+    let boot = match mkp_support_ease_lib::boot::Runtime::initialize() {
+        Ok(boot) => boot,
+        Err(why) => {
+            eprintln!("运行时数据没装上：{why}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     match mkp_support_ease_lib::args::parse(std::env::args_os()) {
         Ok(mkp_support_ease_lib::args::Mode::Hook(job)) => {
@@ -81,7 +88,7 @@ fn main() -> ExitCode {
                     .and_then(|root| mkp_support_ease_lib::runtime::app_state::locale(&root).ok())
                     .flatten(),
             );
-            mkp_support_ease_lib::hook::run_with_channel(&job)
+            mkp_support_ease_lib::hook::run_with_channel(&boot, &job)
         }
         Ok(mkp_support_ease_lib::args::Mode::Gui) => {
             /*
@@ -96,7 +103,7 @@ fn main() -> ExitCode {
                 let _ = mkp_support_ease_lib::webview2::prompt_download();
                 return ExitCode::FAILURE;
             }
-            mkp_support_ease_lib::run();
+            mkp_support_ease_lib::run(boot);
             ExitCode::SUCCESS
         }
         Err(why) => {

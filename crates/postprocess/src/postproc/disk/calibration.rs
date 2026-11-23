@@ -196,7 +196,7 @@ const Z_OFFSET_SING_LINES: &[&str] = &[
 /// `Z_PATTERN_*` / `XY_PATTERN_*` / `Z_SQUARE_*` 一组，加一块板就得改代码）。
 ///
 /// 这里只留一个取表的口子，读的是**进程级那张机型表**（`machine_dims::tables()`，
-/// 读取链见那边的模块头：显式 install → `MKPSE_PRESETS_DIR` → 仓库相对 `presets/`）。
+/// 由进程入口显式装进来；库内没有备用数据源）。
 ///
 /// 表缺失 = 配置/构建坏了，不是用户能修的东西 ⇒ 报 `E_CAL_FAILED_001`
 /// （「校准代码没有生成出来：…」），**不 panic、也不静默退化成"没有校准图案"**。
@@ -204,9 +204,7 @@ fn model_profiles() -> Result<&'static [ModelProfile], PostprocError> {
     machine_dims::tables()
         .calibration_models()
         .ok_or_else(|| PostprocError::Calibration {
-            message: "没有校准模型档：presets/calibration_models.toml 读不到\
-                      （读取链见 postproc/machine_dims.rs）"
-                .to_string(),
+            message: "没有校准模型档：程序随包的数据不完整".to_string(),
         })
 }
 
@@ -1367,6 +1365,7 @@ mod tests {
     /// （travel 150、max_speed 12000、边界 ±999），这样本文件的手写判据与那份
     /// 参考夹具处在同一个数值语境里，两边对不上时能直接对照。
     fn test_ir() -> Ir {
+        crate::postproc::machine_dims::install_repo_tables_for_tests();
         let mut ir = Ir::default();
         ir.machine.min_x = -999.0;
         ir.machine.max_x = 999.0;
@@ -1711,6 +1710,7 @@ mod tests {
     /// 从生产档位表取一档 —— 判据看的必须是 `presets/calibration_models.toml` 的真内容
     /// （档名或数值被改坏时，这里先红）。
     fn profile_of(id: &str) -> &'static ModelProfile {
+        crate::postproc::machine_dims::install_repo_tables_for_tests();
         model_profiles()
             .expect("presets/calibration_models.toml 读不到")
             .iter()

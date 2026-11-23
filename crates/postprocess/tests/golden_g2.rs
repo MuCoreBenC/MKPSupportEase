@@ -4,12 +4,14 @@
 //! expected 里擦料塔相关计数为 0 ⇒ 本判据不覆盖换料塔端到端
 //! （design.md §六）。它钉住的是 pass1→pass2 主链的其余全部行为。
 
+mod common;
 mod golden_common;
 
 use golden_common as gc;
 
 /// 全链：first_pass（IR fixture）→ second_pass（消耗式吃 Pass1Output）。
 fn run_pass2_chain(input: &str) -> Vec<String> {
+    common::install_tables();
     let content: Vec<String> = gc::split_lines(input);
     let ir_json = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

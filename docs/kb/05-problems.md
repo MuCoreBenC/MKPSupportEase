@@ -86,7 +86,7 @@
 |---|---|---|---|
 | B1 | 客户端下载的 BBS 文件落盘后由谁消费 | **已核实（2026-11-07）** | 落点 `<appDataDir>/assets/bbs/Process/<喷嘴>mm/`（`runtime/catalog.rs:258/300`）；被 `ipc/catalog.rs:239` 与 `src/app/bbs/useBbsDelivered.ts:106` 读取，参与 BBS 页（`useBbsData.ts:142-185`），并可一键写入切片器（`ipc/presets.rs:1062`）。**后处理 0 依赖**（`crates/postprocess` 仅注释、`hook.rs` 0 命中）。详见 `04-data.md` §4.1 |
 | B2 | `public/bbs/*.json` 与套餐/资产是否有 join | **部分核实** | 与**交付 bbs 预设**靠参数名字符串 join（`bbsMerge.ts:192/188`）、预设间按 `name`/`inherits`（`:100-105`）；与**套餐**无直接 join。702 条参数与 9 份 json 的覆盖率未逐条核 |
-| B3 | `machine_dims::install()` 在发布物里是否真的接线 | 待核 | 搜 `src-tauri/`；看 `HANDOFF.md:259` 的欠账 |
+| B3 | `machine_dims::install()` 在发布物里是否真的接线 | **已核实（2026-11-23）** | `main.rs` → `boot::Runtime::initialize()` → `runtime::install_machine_tables_from_catalog()`；界面与钩子共用同一个凭据，库内已无仓库兜底 |
 | B4 | 生成时是否用到机型尺寸数值 | **已核实（2026-11-07）** | **不参与产物**：`render` 只用 `machine.id`（`build.rs:309`）；尺寸只进 `catalog.machines[].dimensions`（`runtime/catalog.rs:194/628`）进 `revision`（`:842`），不进 `structureSignature`（`structure.rs:148-156`）。改尺寸**不需要重新生成产物**，但要让客户端看见需重发目录。详见 `04-data.md` §4.2 |
 | B5 | 草稿 overlay 是否造成页面显示与产物不一致 | **已核实（2026-11-07）** | **不是活动路径**：套餐页两个写操作都即时落盘（`app/bundles.rs:255`、`app/machines.rs:291`）；`Patch::SetBundle` 前端只有类型无构造（`api.ts:806`）；生成前 `require_clean` 拒绝任何脏（`build.rs:696-700`）。唯一差异窗口是"有未保存草稿时页面读 `Book`（含草稿）"，但那时生成被拦。见 A10 |
 | B6 | 停用机型后 `content/machine_catalog.json` 与 `catalog.json` 条目是否同时消失 | 待核（Lab） | 在 Delivery Lab 跑一次（不在此仓动手） |

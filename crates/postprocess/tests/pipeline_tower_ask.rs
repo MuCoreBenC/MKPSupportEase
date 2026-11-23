@@ -17,6 +17,8 @@
 
 use std::path::PathBuf;
 
+mod common;
+
 use postprocess::diag::{CancelToken, PostprocError};
 use postprocess::ir::{Ir, TowerRelocateModeIr};
 use postprocess::pipeline::{
@@ -40,6 +42,7 @@ G1 X140 Y60 E0.7
 ";
 
 fn ir_at(wiper: [f64; 2]) -> Ir {
+    common::install_tables();
     let mut ir = Ir::default();
     ir.machine.machine_type = "A1".to_string();
     ir.machine.nozzle_diameter = 0.4;

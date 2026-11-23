@@ -10,8 +10,9 @@
 #   ② 图案基准：`datumX/datumY`（相对包围盒左下角）+ `squareSpacing/squareCount`；
 #   ③ XY 图案模板的七个偏移（`[models.pattern]`）；
 #   ④ 质心旋转判据的期望（`[models.centroid]`）。
-# 读取走机型表同一条链（显式 install → MKPSE_PRESETS_DIR → 仓库相对 presets/）——
-# 见 postproc/machine_dims.rs 的模块头，不另造一份路径依赖。
+# 读取跟着机型表走：由进程入口随表一起装（发布物从编译期钉进来的这份文件读，
+# 诊断 CLI 从 `--presets` 那棵树读）。见 postproc/machine_dims.rs 的模块头，
+# 不另造一份路径依赖。
 #
 # 【切进来的是不是校准件】**只由模型身份标记回答**，不看尺寸：
 #   3MF 里 `3D/3dmodel.model` 的 <metadata name="MKPSE:Calibration">（持久身份，

@@ -551,6 +551,14 @@ mod tests {
     /// IR 判据的冻结输入已搬到 `fixtures/ir/presets/`，基线目录不再兼作他用。
     #[test]
     fn nine_real_presets_pass_both_layers() {
+        /* 判据自己装机型表：库内没有备用数据源（不读环境变量、不回仓库找 presets/）。 */
+        let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets");
+        postprocess::postproc::machine_dims::install(
+            postprocess::postproc::machine_dims::load_presets_dir(&presets_dir)
+                .expect("仓库 presets/ 的机型表必须读得出来"),
+        )
+        .expect("单元测试进程里机型表只该装一次");
+
         let reg = load_param_registry();
         // 预设 fixture 在**内核那份**里（crates/postprocess/tests/fixtures/presets），
         // 不在本 crate 下 —— 判据资产只留一份，路径只认 `generate::fixtures_dir()`。

@@ -23,6 +23,7 @@
 //!
 //! 反空转：至少要检查到 3 个 swap#1 块和 3 次长距离横移，否则判据视为没接上。
 
+mod common;
 mod golden_common;
 
 use golden_common as gc;
@@ -33,6 +34,7 @@ const EPS: f64 = 1e-6;
 
 /// pass1 + pass2 全链（与 `marks_protocol.rs` 同一条路径）。
 fn run_pass2_chain(input: &str) -> Vec<String> {
+    common::install_tables();
     let content: Vec<String> = gc::split_lines(input);
     let ir_json = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
