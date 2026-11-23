@@ -1038,6 +1038,7 @@ const PREF_FIELDS: &[&str] = &[
     "locale",
     "autoCleanHistory",
     "autoCheckUpdate",
+    "online",
     "updateChannel",
     "pin",
     "compact",
