@@ -470,7 +470,7 @@ export const zhCN = {
   /* 设置页：高级设置 */
   'settings.advanced.title': '高级设置',
   'settings.online.label': '联网功能',
-  'settings.online.note': '关掉后收不到新预设与版本更新',
+  'settings.online.note': '收不到云端预设、模型与版本更新',
   'settings.online.hint': '关掉后这个程序不再联网：不下载预设与模型，也不检查更新',
   'settings.advanced.desc': '云端数据地址',
   'settings.advanced.sourceLabel': '预设数据源',

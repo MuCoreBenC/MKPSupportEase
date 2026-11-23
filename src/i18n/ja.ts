@@ -439,7 +439,7 @@ export const ja: Record<StringKey, string> = {
 
   'settings.advanced.title': '詳細設定',
   'settings.online.label': 'オンライン機能',
-  'settings.online.note': 'オフにすると新しいプリセットと更新を受け取れません',
+  'settings.online.note': 'クラウドのプリセット、モデル、バージョン更新を受け取れません',
   'settings.online.hint': 'オフにすると一切通信しません：プリセットやモデルの取得、更新確認も行いません',
   'settings.advanced.desc': 'クラウドデータの URL',
   'settings.advanced.sourceLabel': 'プリセットのデータソース',
