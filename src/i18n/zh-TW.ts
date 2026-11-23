@@ -455,7 +455,7 @@ export const zhTW: Record<StringKey, string> = {
   /* 設定頁：高級設定 */
   'settings.advanced.title': '高級設定',
   'settings.online.label': '連網功能',
-  'settings.online.note': '收不到雲端預設、模型與版本更新',
+  'settings.online.note': '關閉後收不到雲端預設、模型與版本更新',
   'settings.online.hint': '關掉後這個程式不再連網：不下載預設與模型，也不檢查更新',
   'settings.advanced.desc': '雲端資料位址',
   'settings.advanced.sourceLabel': '預設資料來源',

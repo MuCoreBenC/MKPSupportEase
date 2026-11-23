@@ -438,7 +438,7 @@ export const en: Record<StringKey, string> = {
 
   'settings.advanced.title': 'Advanced settings',
   'settings.online.label': 'Online features',
-  'settings.online.note': 'No cloud presets, models, or version updates',
+  'settings.online.note': 'Off: no presets, models or updates',
   'settings.online.hint': 'Off means the app never goes online: no preset or model downloads, no update check',
   'settings.advanced.desc': 'Cloud data address',
   'settings.advanced.sourceLabel': 'Preset data source',
