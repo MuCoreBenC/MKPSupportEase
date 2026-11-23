@@ -164,8 +164,15 @@ export interface ReportModelMap {
   printable?: ReportBox4
   /** 一个模型一个框（内核按 2mm 占用格连通块切） */
   modelBoxes?: ReportBox4[]
-  /** 一个模型一块轮廓（凸包，≤24 边，机器坐标）—— 画的是它 */
+  /** 一个模型一块轮廓（凸包，≤24 边，机器坐标）—— 碰撞示意图与旧记录的兜底 */
   modelPolygons?: [number, number][][]
+  /**
+   * **一个模型一块真实外形**（内凹保留，≤24 点，机器坐标；2026-11-23）。
+   *
+   * 与 `modelPolygons` 的分工：那个是凸包（L 形会被填平成梯形），这个是沿占用格
+   * 走出来的一圈。报告页的校准件画布画它；空 / 缺这一格（旧记录）⇒ 退回凸包。
+   */
+  modelOutlines?: [number, number][][]
   /** 机型禁区（通常没有） */
   forbiddenZones?: [number, number][][]
 }

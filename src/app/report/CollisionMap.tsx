@@ -82,6 +82,13 @@ interface Props {
    */
   allowed?: ReportBox4 | null
   /**
+   * **一块参考框**（机器坐标，2026-11-23）：校准件画布用它标"实测包围盒"。
+   *
+   * 与 `ghost` / `towerBox` 都不同：那两个是"塔按哪块判"，这个是记录里量的实物尺寸，
+   * 只画一圈细虚线，不参与任何判据。
+   */
+  box?: ReportBox4 | null
+  /**
    * **越界那一屏的每块模型**（2026-11-19）：轮廓 + 建议位移。
    *
    * 给了就按它画（每块一条凸包，**不按板裁** —— 板外那截正是要标红的东西），
@@ -168,6 +175,7 @@ export default function CollisionMap({
   label,
   noTower = false,
   allowed = null,
+  box = null,
   pieces = null,
   pen = null,
   numbered = false,
@@ -561,18 +569,21 @@ export default function CollisionMap({
    * 改成**图容器里的绝对定位元素**，位置按画布百分比算，缩放由同一层 `transform` 带着走；
    * 尺寸用 `--zoom-k` 反着除（放大层里也保持 ~20px，读得清又不糊住模型）。
    */
-  const badgeNodes = badges.map((b) => (
-    <span
-      key={`bd${b.n}`}
-      className={s.badge}
-      style={{
-        left: pct(b.x - view.x0, view.w),
-        top: pct(b.y - view.y0, view.h),
-      }}
-    >
-      {b.n}
-    </span>
-  ))
+  /* 行内那份缩小一号（2026-11-23 作者：「小图的时候那个序号太大了……放大之后的刚刚好」），
+     放大层原样 —— 只改这一处。 */
+  const badgeNodes = (zoomed: boolean) =>
+    badges.map((b) => (
+      <span
+        key={`bd${b.n}`}
+        className={zoomed ? s.badge : `${s.badge} ${s.badgeSm}`}
+        style={{
+          left: pct(b.x - view.x0, view.w),
+          top: pct(b.y - view.y0, view.h),
+        }}
+      >
+        {b.n}
+      </span>
+    ))
 
   const factSvg = (
     <svg
@@ -616,6 +627,21 @@ export default function CollisionMap({
           />
         )
       })}
+
+      {/* 参考框（校准件的实测包围盒）：只圈位置，不参与任何判据 */}
+      {box != null &&
+        box.xMin !== undefined &&
+        box.xMax !== undefined &&
+        box.yMin !== undefined &&
+        box.yMax !== undefined && (
+          <rect
+            className={s.guide}
+            x={bedPt(box.xMin, box.yMax)[0]}
+            y={bedPt(box.xMin, box.yMax)[1]}
+            width={box.xMax - box.xMin}
+            height={box.yMax - box.yMin}
+          />
+        )}
 
       {/* 模型轮廓（另一种颜色 + 虚线：一眼和塔分开）。
           ★ **一个模型一块轮廓**，不是矩形（2026-10-18 作者：「图片的都是矩形的看着好像
@@ -825,7 +851,7 @@ export default function CollisionMap({
           </div>
           {factSvg}
           {arrowSvg}
-          {badgeNodes}
+          {badgeNodes(zoomed)}
         </div>
       ) : (
         /* 没板规格：退回圆角矩形热床（事实照画 —— 不因为装饰缺席吞掉整块图） */
@@ -874,7 +900,7 @@ export default function CollisionMap({
             </div>
           )}
           {arrowSvg}
-          {badgeNodes}
+          {badgeNodes(zoomed)}
         </div>
       )
 
@@ -918,6 +944,12 @@ export default function CollisionMap({
           <li>
             <span className={s.swOverflow} aria-hidden="true" />
             {tr('report.map.legendOverflow')}
+          </li>
+        )}
+        {box !== null && (
+          <li>
+            <span className={s.swGuide} aria-hidden="true" />
+            {tr('report.map.legendBox')}
           </li>
         )}
         <li>
