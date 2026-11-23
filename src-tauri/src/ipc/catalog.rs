@@ -1334,8 +1334,16 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
         AppError::internal(messages::text("ui.ipc.catalog.077", &[])).with_detail(e.to_string())
     })?;
     if out.is_ok() {
+        let usage_app = notify_app.clone();
         tauri::async_runtime::spawn_blocking(move || {
             runtime::update_check::maybe_check_after_catalog(&notify_app);
+        });
+        /* 匿名使用统计：一天最多报一次「今天用过」（见 runtime::usage_ping 的模块头）。
+        与上面那趟同一个触发点 —— 拉目录本来就要联网，顺路；失败静默，不进启动路径。 */
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Ok(root) = internal_root(&usage_app) {
+                runtime::usage_ping::maybe_ping(&root);
+            }
         });
     }
     out
