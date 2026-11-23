@@ -6,6 +6,7 @@
  * npm run usage                             # 最近 14 天，一天一行
  * npm run usage -- --days 30                # 换窗口
  * npm run usage -- --html                   # 生成网页报告（最近 30 天）并打开
+ * npm run usage -- --html --out ~/x.html    # 另外写一份到指定路径（发给手机）
  * npm run usage -- --day 2026-11-23         # 单日，外加版本 / 平台分布
  * ```
  *
@@ -34,7 +35,9 @@
  */
 
 import { execSync } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 
 const ENDPOINT = 'https://busuanzi.ibruce.info/busuanzi?jsonpCallback=cb'
 /** 与客户端同一个域名后缀（只当分桶用的名字，不需要能解析） */
@@ -50,6 +53,8 @@ const getArg = (name, fallback) => {
 }
 
 const html = args.includes('--html')
+/** `--out <path>`：另外把报告写到哪儿（手机能拿到的地方） */
+const outPath = getArg('out', null)
 const days = Number(getArg('days', html ? '30' : '14'))
 const onlyDay = getArg('day', null)
 
@@ -287,10 +292,25 @@ async function main() {
   }
   const day = rows[rows.length - 1].day
   const bd = await collectBreakdown(day)
+  const page = renderHtml(rows, { day, rows: bd })
   mkdirSync('.scratch', { recursive: true })
   const file = '.scratch/usage-report.html'
-  writeFileSync(file, renderHtml(rows, { day, rows: bd }))
-  console.log(`\n  报告：${process.cwd()}/${file}\n`)
+  writeFileSync(file, page)
+  console.log(`\n  报告：${process.cwd()}/${file}`)
+  /* 再放一份到手机打得开的地方。iCloud 盘是本机就能同步到手机的那一格：
+     手机上用「文件」App 点开，Safari 直接渲染，不需要任何服务。 */
+  const icloud = join(homedir(), 'Library/Mobile Documents/com~apple~CloudDocs')
+  const targets = [outPath, existsSync(icloud) ? join(icloud, 'SupportEase/usage-report.html') : null]
+  for (const t of targets) {
+    if (!t) continue
+    mkdirSync(dirname(t), { recursive: true })
+    writeFileSync(t, page)
+    console.log(`  也写到：${t}`)
+  }
+  if (!outPath && existsSync(icloud)) {
+    console.log('  手机上：打开「文件」App → iCloud 云盘 → SupportEase → usage-report.html')
+  }
+  console.log('')
   try {
     execSync(`open "${file}"`)
   } catch {
