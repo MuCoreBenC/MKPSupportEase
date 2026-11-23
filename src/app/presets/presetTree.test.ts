@@ -6,6 +6,7 @@ import {
   branchOf,
   familyLayoutOf,
   isMainCopy,
+  slicerCloudActionOf,
   updateStatusOf,
 } from './presetTree'
 
@@ -186,5 +187,45 @@ describe('族视图（A）', () => {
     expect(old?.meta?.depth).toBe(2)
     expect(old?.meta?.tagName).toBeNull()
     expect(old?.meta?.last).toBe(true)
+  })
+})
+
+/*
+ * 切片器档云端行的那一个动作。
+ *
+ * 这一档没有 MKP 的 `localState` 那本账；从前菜单直接问 `updateStatusOf`，于是落到
+ * "状态未知"的兜底上，念成「云端较旧」并把下载禁掉（同一行操作列却给着「下载」）。
+ */
+describe('切片器云端行的动作', () => {
+  it('本机没有 ⇒ 下载', () => {
+    expect(slicerCloudActionOf({ presetState: 'missing' })).toEqual({
+      action: 'missing',
+      gotIt: false,
+      older: false,
+    })
+  })
+
+  it('下了且与目录一致 ⇒ 不给动作（已下载）', () => {
+    expect(slicerCloudActionOf({ presetState: 'ok' })).toEqual({
+      action: 'none',
+      gotIt: true,
+      older: false,
+    })
+  })
+
+  it('盘上是旧版 / 认不出 ⇒ 更新', () => {
+    expect(slicerCloudActionOf({ presetState: 'old' }).action).toBe('update')
+    expect(slicerCloudActionOf({ presetState: 'tampered' }).action).toBe('update')
+  })
+
+  it('云端比本机旧 ⇒ 不给动作，也不许念成"可以下载"', () => {
+    const r = slicerCloudActionOf({ presetState: 'old', basedOn: 'newer' })
+    expect(r.action).toBe('none')
+    expect(r.older).toBe(true)
+  })
+
+  it('没有 presetState 时看 downloaded 那一位', () => {
+    expect(slicerCloudActionOf({ downloaded: true }).gotIt).toBe(true)
+    expect(slicerCloudActionOf({ downloaded: false }).action).toBe('missing')
   })
 })

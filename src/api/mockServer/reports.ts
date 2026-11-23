@@ -68,7 +68,7 @@ interface FixtureRow {
 }
 
 const rows: FixtureRow[] = [
-  { startedAt: '11:17:11', gcode: '.42952.1.gcode', preset: 'A1_MINI-fastv3.3.toml', machine: 'A1_MINI', elapsedMs: 19000, ok: true, seq: 456, modelName: '帕姆' },
+  { startedAt: '11:17:11', gcode: '.37392.1.gcode', preset: 'A1_MINI-fastv3.3.toml', machine: 'A1_MINI', elapsedMs: 19000, ok: true, seq: 456, modelName: 'Calibration_Combined' },
   { startedAt: '11:04:48', gcode: '.42952.0.gcode', preset: 'A1_MINI-fastv3.3.toml', machine: 'A1_MINI', elapsedMs: 238, ok: true, seq: 448, modelName: '帕姆' },
   { startedAt: '11:02:33', gcode: '.26212.1.gcode', preset: 'A1_MINI-fastv3.3.toml', machine: 'A1_MINI', elapsedMs: 524, ok: true, seq: 441, modelName: 'deepfish' },
   { startedAt: '11:02:12', gcode: '.26212.0.gcode', preset: 'A1_MINI-fastv3.3.toml', machine: 'A1_MINI', elapsedMs: 244, ok: true, seq: 439 },
@@ -178,6 +178,38 @@ function mockSnapshot(): NonNullable<ReportDetail['snapshot']> {
  * `geo.collision` 的 `modelBoxes` / `modelPolygons`）；A1 mini 的可打印区 180²。
  * 与真机同一个口径：一个模型一块轮廓 + 一个框（内核按占用格切）。
  */
+/**
+ * **校准件（二合一）在板上的俯视几何**（2026-11-23）。
+ *
+ * 量级抄真机那一盘（`37392.1`，A1）：实测包围盒 14.9–70.5 × 16.7–72.3。
+ * `modelOutlines` 是**L 形**（内凹留着）—— 就是作者要的那条：以前用凸包画出来是梯形。
+ */
+const MOCK_CALIB_MAP: NonNullable<ReportDetail['modelMap']> = {
+  printable: { xMin: 0, xMax: 180, yMin: 0, yMax: 180 },
+  modelBoxes: [{ xMin: 14, xMax: 72, yMin: 16, yMax: 74 }],
+  modelPolygons: [
+    [
+      [14, 16],
+      [72, 16],
+      [72, 28],
+      [28, 28],
+      [28, 74],
+      [14, 74],
+    ],
+  ],
+  modelOutlines: [
+    [
+      [14, 16],
+      [72, 16],
+      [72, 28],
+      [28, 28],
+      [28, 74],
+      [14, 74],
+    ],
+  ],
+  forbiddenZones: [],
+}
+
 const MOCK_MODEL_MAP: NonNullable<ReportDetail['modelMap']> = {
   printable: { xMin: 0, xMax: 180, yMin: 0, yMax: 180 },
   modelBoxes: [
@@ -490,9 +522,23 @@ function firstDetail(summary: ReportSummary, r: FixtureRow): ReportDetail {
     },
     /* 真机夹具里没有碰撞那一趟（那条记录是别的失败）⇒ 恒 null */
     collision: null,
-    /* 模型俯视几何（2026-10-27）：成功那趟也有 —— 擦料塔那一栏的俯视图画它 */
-    modelMap: MOCK_MODEL_MAP,
-    /* 参数快照：擦料塔那一栏的俯视图与"参数快照"那一栏都靠它（从前夹具里没有） */
+    /* 校准件那一段（2026-11-23）：数值照真机那一盘 —— 结论页据此摆板子画布 */
+    calibration: {
+      originPath: null,
+      model3mf: `${USER_ROOT}/../assets/models/Calibration_Combined.3mf`,
+      exists: true,
+      identity3mf: 'Combined',
+      verdict: 'from_3mf',
+      note: null,
+      measured: [14.9, 70.5, 16.7, 72.3],
+      profileId: 'xy-square-55',
+      tolerance: 0.5,
+      footprint: [55.5, 55.5],
+      mode: 'Precise',
+    },
+    /* 模型俯视几何（2026-10-27）：这一行是校准件 ⇒ L 形（含真实外形） */
+    modelMap: MOCK_CALIB_MAP,
+    /* 参数快照 */
     snapshot: mockSnapshot(),
     warnings: [],
     invocation: {

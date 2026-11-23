@@ -441,7 +441,6 @@ fn model_map_of(
     ir: &postprocess::ir::Ir,
 ) -> Option<postprocess::postproc::disk::collision::ModelMapFacts> {
     postprocess::postproc::disk::model_map_facts(content, ir)
-        .map(|f| postprocess::postproc::disk::collision::ModelMapFacts::of(&f))
 }
 
 /// **失败 / 取消那一趟**：没有 IR 终态，只能借用"当时那份 IR"的机器维度（机型维度 +

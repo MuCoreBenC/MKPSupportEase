@@ -489,6 +489,131 @@ impl Occupancy {
             })
             .collect()
     }
+
+    /// **每个模型的真实外形**（2026-11-23）。
+    ///
+    /// 与 [`Self::polygons`] 的分工：那个交**凸包**（碰撞那几张示意图用它 —— 图宁可大一点，
+    /// 也不许看起来"明明没碰到"）；这个交**贴着实心走一圈**的轮廓，内凹留着。
+    /// L 形件用凸包画出来是一块斜切的梯形：凹口被填平，塔明明蹲在缺口里，图上却像压在
+    /// 实体上。
+    ///
+    /// 做法：把这一块的格子放进集合，只在「实心 ↔ 空」的邻接边上放一条有向边
+    /// （实心在左 ⇒ 外环逆时针），沿边首尾相接走成闭环，取**面积最大**的那一环
+    /// （内孔不要：俯视图要回答的是"这件东西占地多大"，不是"它中间有没有孔"）。
+    ///
+    /// ★ **一块都不许丢**：走不出闭环（孤点 / 退化）就退回这一块的凸包，再不行退回矩形。
+    pub fn outlines(&self) -> Vec<Vec<[f64; 2]>> {
+        self.components()
+            .iter()
+            .map(|cells| {
+                if let Some(poly) = self.outline_of(cells) {
+                    return poly;
+                }
+                let points: Vec<[f64; 2]> = cells.iter().map(|&c| self.cell_center(c)).collect();
+                let hull = crate::postproc::disk::wipe::convex_hull(&points);
+                if hull.len() >= 3 {
+                    return simplify_polygon(hull);
+                }
+                let b = self.bbox_of(cells);
+                vec![
+                    [b.x_min, b.y_min],
+                    [b.x_max, b.y_min],
+                    [b.x_max, b.y_max],
+                    [b.x_min, b.y_max],
+                ]
+            })
+            .collect()
+    }
+
+    /// 一块格子的外边界闭环（格角坐标 → 机器坐标，已整形）；走不出来给 `None`。
+    fn outline_of(&self, cells: &[(usize, usize)]) -> Option<Vec<[f64; 2]>> {
+        use std::collections::{HashMap, HashSet};
+
+        let filled: HashSet<(i64, i64)> =
+            cells.iter().map(|&(x, y)| (x as i64, y as i64)).collect();
+        let is_filled = |x: i64, y: i64| filled.contains(&(x, y));
+
+        /* 有向边：起点格角 → 终点格角。实心一侧永远在前进方向的左边。 */
+        let mut next: HashMap<(i64, i64), Vec<(i64, i64)>> = HashMap::new();
+        for &(cx, cy) in cells {
+            let (x, y) = (cx as i64, cy as i64);
+            if !is_filled(x, y - 1) {
+                next.entry((x, y)).or_default().push((x + 1, y));
+            }
+            if !is_filled(x + 1, y) {
+                next.entry((x + 1, y)).or_default().push((x + 1, y + 1));
+            }
+            if !is_filled(x, y + 1) {
+                next.entry((x + 1, y + 1)).or_default().push((x, y + 1));
+            }
+            if !is_filled(x - 1, y) {
+                next.entry((x, y + 1)).or_default().push((x, y));
+            }
+        }
+
+        let mut used: HashSet<((i64, i64), (i64, i64))> = HashSet::new();
+        let mut starts: Vec<(i64, i64)> = next.keys().copied().collect();
+        starts.sort();
+        let mut rings: Vec<Vec<(i64, i64)>> = Vec::new();
+        for start in starts {
+            while let Some(ends) = next.get(&start) {
+                let Some(&first) = ends.iter().find(|to| !used.contains(&(start, **to))) else {
+                    break;
+                };
+                let mut ring = vec![start];
+                let mut to = first;
+                used.insert((start, to));
+                while to != start {
+                    ring.push(to);
+                    let continue_at = next
+                        .get(&to)
+                        .and_then(|ends| ends.iter().find(|n| !used.contains(&(to, **n))).copied());
+                    let Some(nxt) = continue_at else {
+                        ring.clear();
+                        break;
+                    };
+                    used.insert((to, nxt));
+                    to = nxt;
+                }
+                if ring.len() >= 3 {
+                    rings.push(ring);
+                }
+            }
+        }
+
+        /* 取面积最大的一环（孔洞比外环小；格角坐标是整数，叉积用整数累加不会漂）。 */
+        let best = rings.into_iter().max_by(|a, b| {
+            ring_area2(a)
+                .abs()
+                .partial_cmp(&ring_area2(b).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })?;
+        let poly: Vec<[f64; 2]> = best
+            .iter()
+            .map(|&(gx, gy)| {
+                [
+                    self.origin_x + gx as f64 * self.cell,
+                    self.origin_y + gy as f64 * self.cell,
+                ]
+            })
+            .collect();
+        if poly.len() < 3 {
+            return None;
+        }
+        let simplified = simplify_polygon(poly);
+        (simplified.len() >= 3).then_some(simplified)
+    }
+}
+
+/// 闭合环的有向面积 ×2（逆时针为正）。格角坐标是整数，这条算式只用来比大小。
+fn ring_area2(ring: &[(i64, i64)]) -> f64 {
+    let mut sum = 0i64;
+    for i in 0..ring.len() {
+        let (x1, y1) = ring[i];
+        let (x2, y2) = ring[(i + 1) % ring.len()];
+        sum += x1 * y2 - x2 * y1;
+    }
+    sum as f64
 }
 
 /// 模型轮廓最多几条边（作者给的上限：12 或 24 —— 取细的那一档，
@@ -598,11 +723,12 @@ fn simplify_polygon(poly: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
 /// 与报告页那几张"只有塔没有碰撞"的图都从这里拿，所以图上那块模型永远与碰撞判据是
 /// 同一批点、同一套切法。
 ///
-/// 三档数据一次给全：
+/// 四档数据一次给全：
 /// - `bbox`：所有板内模型点的整体外接框（`None` = 板上没有模型点）。
 ///   ★ 不含切片器的 prime tower（那段是切片器自己的塔，不是用户模型）。
 /// - `boxes`：按 2mm 占用格连通块切出来的**一个一个框**。
-/// - `polygons`：同批点的凸包（≤24 边），图上优先画它。
+/// - `polygons`：同批点的凸包（≤24 边），碰撞示意图用它。
+/// - `outlines`：同批格的**真实外形**（内凹保留，≤24 点），报告页模型图用它。
 ///
 /// 边界口径与碰撞检测逐字一致（不许在这里另立一套）：
 /// - **床 = 打印范围**（gcode 的 `; printable_area` 优先，没写退回机型维度）；
@@ -613,12 +739,16 @@ pub struct ModelFootprint {
     pub bbox: Option<GBBox>,
     pub boxes: Vec<GBBox>,
     pub polygons: Vec<Vec<[f64; 2]>>,
+    pub outlines: Vec<Vec<[f64; 2]>>,
 }
 
 impl ModelFootprint {
-    /// 图上"有没有东西可画"：三个都空 ⇒ 这份 gcode 里一个板内模型点都没有。
+    /// 图上"有没有东西可画"：全空 ⇒ 这份 gcode 里一个板内模型点都没有。
     pub fn is_empty(&self) -> bool {
-        self.bbox.is_none() && self.boxes.is_empty() && self.polygons.is_empty()
+        self.bbox.is_none()
+            && self.boxes.is_empty()
+            && self.polygons.is_empty()
+            && self.outlines.is_empty()
     }
 
     /// 把这一份几何灌进一份**对外事实**（报告页画图读的就是这三个键）。
@@ -644,28 +774,28 @@ impl ModelFootprint {
 ///
 /// `None` = 这份 G-code 里一个板内模型点都没有（读不动 / 空文件）—— 调用方不写这一格，
 /// 报告页就不摆图（与"没给就不摆"同一条，不画编出来的图）。
-pub fn model_map_facts(content: &[String], ir: &Ir) -> Option<CollisionFacts> {
+pub fn model_map_facts(content: &[String], ir: &Ir) -> Option<ModelMapFacts> {
     let foot = model_footprint(content, ir);
     if foot.is_empty() {
         return None;
     }
-    let mut facts = CollisionFacts {
+    Some(ModelMapFacts {
         printable: printable_area_of(content).unwrap_or(Box4 {
             x_min: ir.machine.min_x,
             x_max: ir.machine.max_x,
             y_min: ir.machine.min_y,
             y_max: ir.machine.max_y,
         }),
+        model_boxes: foot.boxes.iter().map(Box4::of).collect(),
+        model_polygons: foot.polygons.clone(),
+        model_outlines: foot.outlines.clone(),
         forbidden_zones: ir
             .machine
             .forbidden_zones
             .iter()
             .map(|zone| zone.iter().map(|p| [p[0], p[1]]).collect())
             .collect(),
-        ..CollisionFacts::default()
-    };
-    foot.apply_to(&mut facts);
-    Some(facts)
+    })
 }
 
 /// `_meta.json` 里**模型俯视几何**那一格（2026-10-27）：报告页的擦料塔俯视图拿它画
@@ -680,23 +810,17 @@ pub struct ModelMapFacts {
     pub printable: Box4,
     #[serde(default)]
     pub model_boxes: Vec<Box4>,
+    /// 凸包（与碰撞那一屏同一份；旧记录 / 旧界面的兜底）
     #[serde(default)]
     pub model_polygons: Vec<Vec<[f64; 2]>>,
+    /// **真实外形**（内凹保留，≤24 点；2026-11-23）。空数组 = 旧记录 ⇒ 界面退回凸包。
+    #[serde(default)]
+    pub model_outlines: Vec<Vec<[f64; 2]>>,
     #[serde(default)]
     pub forbidden_zones: Vec<Vec<[f64; 2]>>,
 }
 
 impl ModelMapFacts {
-    /// 从一份完整事实里摘（字段意义与 `CollisionFacts` 逐字相同 —— 同一个来源）。
-    pub fn of(facts: &CollisionFacts) -> Self {
-        Self {
-            printable: facts.printable,
-            model_boxes: facts.model_boxes.clone(),
-            model_polygons: facts.model_polygons.clone(),
-            forbidden_zones: facts.forbidden_zones.clone(),
-        }
-    }
-
     /// 反查成画布要的那份（`kind` / 塔 / 冲突全是空 ⇒ `CollisionMap` 只画板子与模型）。
     pub fn as_collision(&self) -> CollisionFacts {
         CollisionFacts {
@@ -761,6 +885,7 @@ fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
         bbox,
         boxes: occ.boxes(),
         polygons: occ.polygons(),
+        outlines: occ.outlines(),
     }
 }
 
@@ -2650,6 +2775,92 @@ mod tests {
         assert!(
             area < rect * 0.9,
             "圆形轮廓该明显小于外接矩形（这才叫俯视图）：{area} vs {rect}"
+        );
+    }
+
+    /// 点是否在多边形里（射线法；测试里判"凹口有没有被填平"）
+    fn point_in_polygon(p: [f64; 2], poly: &[[f64; 2]]) -> bool {
+        let n = poly.len();
+        let mut inside = false;
+        let mut j = n - 1;
+        for i in 0..n {
+            let (xi, yi) = (poly[i][0], poly[i][1]);
+            let (xj, yj) = (poly[j][0], poly[j][1]);
+            if (yi > p[1]) != (yj > p[1]) && p[0] < (xj - xi) * (p[1] - yi) / (yj - yi) + xi {
+                inside = !inside;
+            }
+            j = i;
+        }
+        inside
+    }
+
+    /// **真实外形要留住内凹**（2026-11-23）：L 形件的凸包会把凹口填平，报告页上就成了
+    /// 一块斜切的梯形 —— 塔蹲在凹口里，图上却像压在实体上。
+    #[test]
+    fn outlines_keep_the_notch_the_hull_fills() {
+        let bed = Box4 {
+            x_min: 0.0,
+            x_max: 60.0,
+            y_min: 0.0,
+            y_max: 60.0,
+        };
+        let mut occ = Occupancy::new(&bed, 2.0);
+        /* L 形：横臂 40×12mm + 竖臂 12×40mm（格坐标，30mm 一格 15 个） */
+        for cy in 0..20 {
+            for cx in 0..20 {
+                if (cx < 20 && cy < 6) || (cx < 6 && cy < 20) {
+                    occ.mark(cx as f64 * 2.0, cy as f64 * 2.0);
+                }
+            }
+        }
+        let hull = &occ.polygons()[0];
+        let real = &occ.outlines()[0];
+        assert!(real.len() >= 6, "L 形至少六个角：{real:?}");
+        /* 凹口里的点：落在凸包内、必须落在真实外形外 */
+        let notch = [20.0, 20.0];
+        assert!(
+            point_in_polygon(notch, hull),
+            "凸包该把凹口包进去：{hull:?}"
+        );
+        assert!(
+            !point_in_polygon(notch, real),
+            "真实轮廓把凹口填平了（又变成梯形）：{real:?}"
+        );
+        let (h, r) = (polygon_area(hull).abs(), polygon_area(real).abs());
+        assert!(h > 0.0 && r > 0.0, "面积算不出来：{h} / {r}");
+        assert!(r < h * 0.85, "真实外形该明显瘦于凸包：{r} vs {h}");
+    }
+
+    /// **旧记录仍能读**：`modelOutlines` 是后加的键，缺了要当成空数组（界面退回凸包）。
+    #[test]
+    fn an_old_model_map_without_outlines_reads_as_empty() {
+        let json = r#"{"printable":{"xMin":0.0,"xMax":10.0,"yMin":0.0,"yMax":10.0}}"#;
+        let facts: ModelMapFacts =
+            serde_json::from_str(json).expect("旧记录（没有 modelOutlines）必须能读");
+        assert!(facts.model_outlines.is_empty());
+    }
+
+    /// **报告页那份模型图真的带着真实外形出门**（不只是 Occupancy 里算得出来）。
+    #[test]
+    fn the_model_map_carries_outlines_alongside_the_hull() {
+        let ir = tower_ir();
+        let content = lines(&[
+            "; printable_area = 0x0,180x0,180x180,0x180",
+            "G1 X30 Y30 E0.5",
+            "G1 X32 Y30 E0.6",
+            "G1 X34 Y30 E0.7",
+            "G1 X30 Y32 E0.8",
+        ]);
+        let facts = model_map_facts(&content, &ir).expect("板上有模型点就得给出几何");
+        assert_eq!(
+            facts.model_outlines.len(),
+            facts.model_polygons.len(),
+            "两块轮廓要一一对应（一块模型一份）"
+        );
+        assert!(
+            facts.model_outlines.iter().all(|poly| poly.len() >= 3),
+            "真实外形至少三个点：{:?}",
+            facts.model_outlines
         );
     }
 

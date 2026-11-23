@@ -454,6 +454,9 @@ export const zhTW: Record<StringKey, string> = {
 
   /* 設定頁：高級設定 */
   'settings.advanced.title': '高級設定',
+  'settings.online.label': '連網功能',
+  'settings.online.note': '關閉後收不到雲端預設、模型與版本更新',
+  'settings.online.hint': '關掉後這個程式不再連網：不下載預設與模型，也不檢查更新',
   'settings.advanced.desc': '雲端資料位址',
   'settings.advanced.sourceLabel': '預設資料來源',
   'settings.advanced.sourceNote': '中國境內用 Gitee 較穩定。',
@@ -1226,7 +1229,8 @@ export const zhTW: Record<StringKey, string> = {
   'report.debug.actions': '動作序列',
   'report.debug.actMount': '落筆',
   'report.debug.actUnmount': '收筆',
-  'report.calib.modeLabel': '校準身份',
+  'report.calib.modeLabel': '校準模式',
+  'report.calibMap.label': '校準件位置圖',
   'report.calib.verdict3mf': '校正件',
   'report.calib.verdictAbsent': '沒有校準標記',
   'report.calib.gone': '檔案已不在',
@@ -1318,6 +1322,7 @@ export const zhTW: Record<StringKey, string> = {
   'report.map.label': '檢視碰撞俯視圖',
   'report.map.legendTower': '擦料塔',
   'report.map.legendSlicerTower': '切片器擦料塔',
+  'report.map.legendBox': '實測包圍盒',
   'report.map.legendModel': '模型輪廓',
   'report.map.legendOverflow': '超出範圍',
   'report.map.legendPen': '筆尖輪廓',

@@ -275,6 +275,26 @@
   pointer-events: none;
 }
 
+/*
+ * 行内小图那一份徽标（2026-11-23）：132px 高的缩略图里 20px 的圆圈太抢眼，
+ * 缩到 13px。**放大层继续用 `.badge`** —— 那份大小作者说"刚刚好"，一个像素都别动。
+ */
+.badgeSm {
+  width: 13px;
+  height: 13px;
+  margin: -6.5px 0 0 -6.5px;
+  font-size: 8.5px;
+}
+
+/* 实测包围盒（校准件画布）：细虚线参考框，压在模型层下面 */
+.guide {
+  fill: none;
+  stroke: var(--text-3);
+  stroke-width: 0.8;
+  stroke-dasharray: 3 3;
+  opacity: 0.8;
+}
+
 /* 判据框：碰撞按这一块算（与塔的真实形状同一个外沿，所以画成虚线压在上面） */
 .towerBox {
   fill: none;
@@ -346,6 +366,12 @@
 .swModel {
   background: rgb(107 114 128 / 14%);
   border: 1px dashed var(--text-2, #6b7280);
+}
+
+/* 实测包围盒（校准件画布）：与模型的灰虚线分开 —— 细一点、淡一点 */
+.swGuide {
+  background: transparent;
+  border: 1px dashed var(--text-3);
 }
 
 .swHit {
