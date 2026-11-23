@@ -840,7 +840,7 @@ impl Machine {
 
     /// **复制已有版本**（b05 Task 14.3 / doc §4.3 第 2–5 步）：新版本除了 `id` 与
     /// `name`，其余各格与模板**逐格相同**（套餐指向、三册译名、角标、说明、备注、版图）——
-    /// 「照抄一份，再只改想改的」。
+    /// 「沿用一份，再只改想改的」。
     ///
     /// 两条**刻意不做**：
     /// - **不复制参数源状态** —— 新版本默认「待补」（`hasRecipe` 14.4 呈现它）；
@@ -848,7 +848,7 @@ impl Machine {
     ///   独立动作（`wb_copy_recipe`）。两步分离让每次写都只落一个文件，
     ///   不需要 16.2 的跨文件事务。
     ///
-    /// `tag` / `description` 传 `Some` 就是改写模板那两格；传 `None` 照抄。
+    /// `tag` / `description` 传 `Some` 就是改写模板那两格；传 `None` 沿用。
     pub fn copy_version(
         &mut self,
         template_id: &str,
@@ -892,7 +892,7 @@ impl Machine {
     /// 免得两条路分岔（谁忘了同步 `self.versions` 都会让界面上少一行）。
     ///
     /// **`template` 决定这一版带多少格**：`None` = 空壳，除 `id` 与 `name` 外一个键都不写；
-    /// `Some` = 其余各格整份照抄。`tag` / `description` 是调用方的改写（`None` = 照抄）。
+    /// `Some` = 其余各格整份沿用。`tag` / `description` 是调用方的改写（`None` = 沿用）。
     #[allow(clippy::too_many_arguments)]
     fn append_version(
         doc: &mut toml_edit::DocumentMut,
@@ -910,7 +910,7 @@ impl Machine {
                 t[key] = literal_str(s);
             }
         }
-        /// 调用方给的覆盖优先；`Some("")` = 明确不要这一格，不是"照抄"。
+        /// 调用方给的覆盖优先；`Some("")` = 明确不要这一格，不是"沿用"。
         fn pick(given: Option<&str>, fallback: Option<&str>) -> Option<String> {
             match given {
                 Some(s) => Some(s.trim()).filter(|s| !s.is_empty()).map(str::to_owned),

@@ -1,7 +1,7 @@
 //! printtime —— 独立算法，不知道 Engine（doc.md §8.1 钉死）。
 //!
 //! 对照 packages/go-printtime 全量移植（parse/planner/kinematics/clamp/limits/
-//! meta/classify）。与 Go 的接口差异（登记）：
+//! meta/classify）。与既有口径 的接口差异（登记）：
 //! - Go 的 Estimate(path) 读文件；Rust 吃**内容行**（engine 全程持内容在内存，
 //!   design.md §3.2）。ComputeDelta 的 `_original` 兄弟文件检查属路径域，
 //!   留给 CLI 层（Task 15），本模块不支持 delta（参考输出该项为 null，一致）。
@@ -229,7 +229,7 @@ fn trapezoid_time(entry: f64, cruise: f64, exit_v: f64, distance: f64, accel: f6
     t_accel + t_cruise + t_decel
 }
 
-// 9 参签名是旧侧 arcLength 契约的复刻。
+// 9 参签名是原口径 arcLength 契约的复刻。
 #[allow(clippy::too_many_arguments)]
 fn arc_length(
     x0: f64,
@@ -902,7 +902,7 @@ fn contains_ascii_ci(haystack: &str, needle: &str) -> bool {
 
 /// ParseGcode（内容版）。
 // in_config_block 的两个置位在 Go 里同样只写不读（注释行分支恒 continue）——
-// 保留状态机形态与旧侧对照。
+// 保留状态机形态与原口径对照。
 #[allow(unused_assignments)]
 pub fn parse_gcode(content: &str, limits: &Limits, disable_arc: bool) -> (Vec<Block>, Overhead) {
     let mut p = Parser::new(*limits, disable_arc);

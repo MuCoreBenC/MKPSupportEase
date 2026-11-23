@@ -4,11 +4,13 @@
 //! 7 项覆写已含在导出里）。判据：先比行数再逐行，零容差、不许 Skip。
 //! 附 11.7 哨兵：`M1031 S1` 出现次数 ≤ 20（RISK-002 回归锚）。
 
+mod common;
 mod golden_common;
 
 use golden_common as gc;
 
 fn run_first_pass(input: &str) -> Vec<String> {
+    common::install_tables();
     let content: Vec<String> = gc::split_lines(input);
     let ir_json = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

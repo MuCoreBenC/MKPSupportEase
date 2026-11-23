@@ -3,7 +3,7 @@
 //! 契约来源（逐字对照）：
 //! - `config.ValidateConfig`（config.go:54）：6 条硬检查，先跑；
 //! - `preset.ValidateAgainstRegistry`（validate_registry.go:30）：按 param_registry
-//!   全参数强校验，后跑。Go 侧 CLI 与 GUI 两条装配路径都生效（main.go:152-156 /
+//!   全参数强校验，后跑。原口径 CLI 与 GUI 两条装配路径都生效（main.go:152-156 /
 //!   app_lifecycle startup()）；Rust 侧 registry 是嵌入快照**恒就绪**，不存在
 //!   Go 的「registry 未就绪跳过」分支（登记差异，非缺口）。
 //!
@@ -42,7 +42,7 @@ fn invalid(message: String) -> PostprocError {
     PostprocError::InvalidConfig { message }
 }
 
-/// `DtoToConfigMap`（dto_mapper.go:16）的值形态——Go 侧 map[string]any 的类型面。
+/// `DtoToConfigMap`（dto_mapper.go:16）的值形态——原口径 map[string]any 的类型面。
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfigVal {
     F64(f64),
@@ -88,7 +88,7 @@ fn format_bound(b: Option<f64>) -> String {
 
 /// dto.TomlConfig → configKey 值（`DtoToConfigMap` 逐键对照，77 键）。
 /// 未知 configKey 返回 None = Go map 查不到 ⇒ 该参数跳过。
-/// `TowerFirstLayerFlow` 的 ADR-007 零值替换（0→1.0）与 Go 同在此发生。
+/// `TowerFirstLayerFlow` 的 ADR-007 零值替换（0→1.0）与既有口径 同在此发生。
 pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
     let t = &cfg.toolhead;
     let w = &cfg.wiping;
@@ -181,7 +181,7 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
         "GlueZCompPatchFR" => ConfigVal::F64(w.glue_z_comp_patch_fr),
         "GlueZCompPatchBL" => ConfigVal::F64(w.glue_z_comp_patch_bl),
         "GlueZCompPatchBR" => ConfigVal::F64(w.glue_z_comp_patch_br),
-        // Go 侧经 FastTowerModeToString：string 输入原样返回（bool 分支 dto 不触达）
+        // 原口径经 FastTowerModeToString：string 输入原样返回（bool 分支 dto 不触达）
         "FastTowerMode" => ConfigVal::Str(w.fast_tower_mode.clone()),
         "TowerGlueLayerSpeed" => ConfigVal::F64(w.tower_glue_layer_speed),
         "TowerSheathSpeed" => ConfigVal::F64(w.tower_sheath_speed),
@@ -209,7 +209,7 @@ pub fn validate_config(cfg: &TomlConfig) -> Result<(), PostprocError> {
     // **这里只剩一条，而且它不是区间。**
     //
     // 它守的是「注册表零值豁免」的补集：`validate_registry_entry` 在 `f == 0.0` 时直接放过
-    // （照抄 Go，本轮不改），所以 `speed_limit = 0` 只有这一条拦得住 ——
+    // （沿用 Go，本轮不改），所以 `speed_limit = 0` 只有这一条拦得住 ——
     // 而 0 速度会让后续管线得到无意义的进给。**这条里不许出现区间数字。**
     if t.speed_limit <= 0.0 {
         return Err(invalid(format!(
@@ -314,10 +314,10 @@ fn validate_registry_entry(
             return Ok(());
         }
         let Some(f) = as_f64(val) else {
-            return Ok(()); // 非数值面不校验（Go asFloat64 !ok）
+            return Ok(()); // 非数值面不校验（转数值失败）
         };
         if f == 0.0 {
-            return Ok(()); // 零值=未设置，跳过（Go 语义，本轮不改；补集由 validate_config 守）
+            return Ok(()); // 零值=未设置，跳过（补集由 validate_config 守）
         }
         if r.min.is_some_and(|m| f < m) || r.max.is_some_and(|m| f > m) {
             return Err(invalid(format!(
@@ -368,7 +368,7 @@ mod tests {
 
     /// **K-R6：零值豁免的补集。**
     ///
-    /// 注册表那道范围检查在 `f == 0.0` 时直接放过（Go 语义，本轮不改），
+    /// 注册表那道范围检查在 `f == 0.0` 时直接放过（既有语义，本轮不改），
     /// 所以 `speed_limit = 0` 只有第一层拦得住 —— 这就是那条硬规则**留下来的全部理由**。
     /// 反过来 `wiper_x = 0` 今天是被放过的（豁免），删掉第一层的区间也不改变这一点。
     #[test]
@@ -384,7 +384,7 @@ mod tests {
         );
         // 而第二层**放过它**（零值豁免）—— 这正是第一层不能删的证据
         validate_against_registry(&zero_speed, &reg, "A1", None)
-            .expect("零值豁免：第二层放过 speed_limit = 0（Go 语义）");
+            .expect("零值豁免：第二层放过 speed_limit = 0（既有语义）");
 
         // wiper_x = 0：两层都放过（与删除硬编码之前一致）
         let mut zero_wiper = cfg_from("");
@@ -481,8 +481,8 @@ mod tests {
     /// `GlueZCompensation*` 参数的 configKey（全拼）在 Go 的 DtoToConfigMap 里
     /// 是缩写形态（`GlueZCompBedFL`…）⇒ `values[entry.ConfigKey]` 查不到 ⇒
     /// **Go 的强校验从未真正校验过这 10 个参数**。本移植逐字复刻（arm 表按
-    /// DtoToConfigMap 命名，查不到返回 None ⇒ 跳过）。若哪天旧侧修了键名漂移，
-    /// 这里同步——不许先于旧侧「修好」。
+    /// DtoToConfigMap 命名，查不到返回 None ⇒ 跳过）。若哪天原口径修了键名漂移，
+    /// 这里同步——不许先于原口径「修好」。
     #[test]
     fn registry_skips_glue_z_compensation_family_like_go() {
         let cfg = cfg_from("glue_z_compensation_bed_fl = 0.3\n");
@@ -551,6 +551,14 @@ mod tests {
     /// IR 判据的冻结输入已搬到 `fixtures/ir/presets/`，基线目录不再兼作他用。
     #[test]
     fn nine_real_presets_pass_both_layers() {
+        /* 判据自己装机型表：库内没有备用数据源（不读环境变量、不回仓库找 presets/）。 */
+        let presets_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets");
+        postprocess::postproc::machine_dims::install(
+            postprocess::postproc::machine_dims::load_presets_dir(&presets_dir)
+                .expect("仓库 presets/ 的机型表必须读得出来"),
+        )
+        .expect("单元测试进程里机型表只该装一次");
+
         let reg = load_param_registry();
         // 预设 fixture 在**内核那份**里（crates/postprocess/tests/fixtures/presets），
         // 不在本 crate 下 —— 判据资产只留一份，路径只认 `generate::fixtures_dir()`。

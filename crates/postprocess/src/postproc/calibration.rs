@@ -1,7 +1,7 @@
 // 校准检测与插入（对照 internal/calibration/mode.go + engine/helpers.go 的
 // InsertCalibrationGcode / filterModelMotionPaths / MinimizeStartupGcode 家族）。
 //
-// 偏离登记（tasks.md 13.3）：Go 侧 InsertCalibrationGcode 会**再读一次输出文件**
+// 偏离登记（tasks.md 13.3）：原口径 InsertCalibrationGcode 会**再读一次输出文件**
 // 再原子写回；Rust 改为在内存行序列上插入后返回，落盘由 engine write 步统一
 // 执行 —— 行为等价、少两次 IO。
 //

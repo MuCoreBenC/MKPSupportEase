@@ -422,7 +422,7 @@ pub async fn begin_preset_edit(
                 /*
                  * 编辑器里给的是**正文**（那三行来源记录是程序的元数据，不是用户该改的内容）——
                  * 与云端线同一副样子：两条线打开编辑器看到的都是"预设本身"。
-                 * 保存时 `save_back` 会照抄文件里原来那三行，所以用户在编辑器里删掉它们
+                 * 保存时 `save_back` 会沿用文件里原来那三行，所以用户在编辑器里删掉它们
                  * 也不会把出处弄丢。
                  */
                 let text = runtime::provenance::strip_for_compare(&raw);
@@ -1329,7 +1329,7 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
             }
             /*
              * 用户线：**写回它自己**（第八层）—— 同一个路径、同一份文件，
-             * 来源记录照抄原来那三行（出处没变）。这一条不查目录、也不需要目录：
+             * 来源记录沿用原来那三行（出处没变）。这一条不查目录、也不需要目录：
              * 我那份的出处写在它自己身上。
              */
             runtime::state::ActiveOrigin::Local => {

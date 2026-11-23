@@ -14,6 +14,8 @@
 //! 2. [`the_field_really_drives_the_decision`] —— 反空转：这个字段真的会改变结果
 //! 3. [`pipeline_decision_matches_independent_recomputation`] —— 管线真的用了它
 
+mod common;
+
 use std::path::PathBuf;
 
 use postprocess::config;
@@ -147,6 +149,7 @@ fn the_field_really_drives_the_decision() {
 /// （或改回读一个不存在的预设结构），左右两边会立刻不同。
 #[test]
 fn pipeline_decision_matches_independent_recomputation() {
+    common::install_tables();
     let config_path = repo_root().join("tests/fixtures/config/A1.toml");
     let input = repo_root().join("tests/golden/42274.2.gcode");
     let out_path = std::env::temp_dir().join("mkpse-pp-wiping-source.gcode");

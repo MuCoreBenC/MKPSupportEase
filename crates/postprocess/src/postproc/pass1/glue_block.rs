@@ -1,6 +1,6 @@
 //! 涂胶块发射（对照 processor/glue_block.go + pass1_emit.go 的 Z 补偿与微抬）。
 
-// 逐字对照 glue_block.go：嵌套 if 与 Go 同形（涂胶块的分支链本身就近百行）。
+// 逐字对照 glue_block.go：嵌套 if 与 同形（涂胶块的分支链本身就近百行）。
 #![allow(
     clippy::collapsible_if,
     clippy::needless_range_loop,
@@ -981,7 +981,7 @@ pub(crate) fn restore_fan_state(sink: &mut LineSink, ir_data: &Ir, machine_type:
 /// `emitGlueBlock`（glue_block.go:27）：生成完整涂胶块（换笔→涂胶→擦料→准备下一塔）。
 ///
 /// 副作用：修改 ir_data.state.this_layer_revitalization 与 stats 计数字段；
-/// write_glue_lines 可能修改传入的 iface（稀疏化），调用方按 Go 语义传拷贝。
+/// write_glue_lines 可能修改传入的 iface（稀疏化），调用方按 既有语义传拷贝。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_glue_block(
     sink: &mut LineSink,
@@ -1027,7 +1027,7 @@ pub(crate) fn emit_glue_block(
 
     // 1) 小螺旋只做 z-hop：抬到「层顶 + swap_hop_height」脱离层顶（默认 1.0，面板可调）。
     //    尺度与切片器自己的 `G3 Z.8 I.706 J.991 P1` 一致（只脱层 0.2~1.0）；
-    //    I/J 分量照抄切片器（`sqrt(.706² + .991²) = 1.217`），不用 `I{半径} J0` 那种写法。
+    //    I/J 分量沿用切片器（`sqrt(.706² + .991²) = 1.217`），不用 `I{半径} J0` 那种写法。
     sink.push_str("M204 S10000");
     sink.push_str("G17");
     /* 回抽单独一行，位置由 `MKP_retract_at` 决定（默认就是这里：起飞前）。
@@ -1076,7 +1076,7 @@ pub(crate) fn emit_glue_block(
     }
 
     for (seg_idx, seg) in segments.iter().enumerate() {
-        // Go 侧此处先累计 segESum，但该值从未被消费（死存储），未移植。
+        // 原口径此处先累计 segESum，但该值从未被消费（死存储），未移植。
 
         /*
          * 整段没有一条挤出移动 ⇒ 它只是段尾剩下的空走（切段时被 `;ZJUMP_START` 分出来的）。
@@ -1567,6 +1567,7 @@ mod continuity_tests {
     const LAST_LAYER_Z: f64 = 40.68;
 
     fn test_ir() -> Ir {
+        crate::postproc::machine_dims::install_repo_tables_for_tests();
         let mut ir = Ir::default();
         ir.machine.nozzle_diameter = 0.4;
         ir.machine.travel_speed = 700.0;

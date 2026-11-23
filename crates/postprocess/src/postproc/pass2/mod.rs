@@ -1024,7 +1024,7 @@ pub fn second_pass(
             // 塔出不出片不在这里定：只要这一层比上一片高，就出片（见塔块处）。
 
             // 底面涂胶块插入（pass1 预生成于 State.BottomGlueEntries）。
-            // 先按值取出命中条目再写（避免与 ctx 的可变借用冲突；Go 语义不变）。
+            // 先按值取出命中条目再写（避免与 ctx 的可变借用冲突；既有语义不变）。
             if !ctx.ir_data.state.bottom_glue_entries.is_empty() {
                 let mut hit: Option<(usize, Vec<String>)> = None;
                 for (i, entry) in ctx.ir_data.state.bottom_glue_entries.iter().enumerate() {

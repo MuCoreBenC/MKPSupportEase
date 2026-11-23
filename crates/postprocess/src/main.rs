@@ -1,4 +1,5 @@
-//! `mkpse-pp` —— 唯一可执行产物，纯终端，无前端。
+//! `mkpse-pp` —— 内核的诊断 CLI，纯终端，无前端。**不是发布物**：它只在仓库里用，
+//! 机型表从 `--presets` 指着的那棵树读（缺省 = 本仓库的 `presets/`）。
 //!
 //! ```text
 //! mkpse-pp run <in.gcode> -c <config.toml> [-o out.gcode] [--set K=V]...
@@ -77,6 +78,18 @@ struct Cli {
     /// 客户端与钩子各自按 AppState 的语言格设，不靠这个参数
     #[arg(long, global = true, default_value = "zh")]
     lang: String,
+    /// 机型表 / 校准档表所在的那棵树（与仓库 `presets/` 同形）。
+    ///
+    /// **这是本 CLI 唯一的数据来源**：没有环境变量、没有"找不到就回仓库"的备用源。
+    /// 缺省是本仓库的 `presets/` —— 写死的那一条路径只服务于这个仓库里的诊断工具，
+    /// 发布物（src-tauri 那个可执行物）根本不含本程序。
+    #[arg(
+        long,
+        global = true,
+        value_name = "目录",
+        default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/../../presets")
+    )]
+    presets: PathBuf,
     #[command(subcommand)]
     command: Command,
 }
@@ -164,6 +177,37 @@ fn main() -> ExitCode {
             messages::text("cli.logging.init_failed", &[("detail", &e.to_string())])
         );
     }
+    /* 机型表是进程级的一次性注入：**每条子命令之前**、由本入口显式装。
+     * 读不出来就退 2 —— 不退回空表，也不去别的地方找第二份数据。 */
+    let tables = match postprocess::postproc::machine_dims::load_presets_dir(&cli.presets) {
+        Ok(t) => t,
+        Err(detail) => {
+            eprintln!(
+                "{}",
+                messages::text(
+                    "cli.presets_unavailable",
+                    &[
+                        ("dir", &cli.presets.display().to_string()),
+                        ("detail", &detail)
+                    ]
+                )
+            );
+            return ExitCode::from(EXIT_BAD_INPUT);
+        }
+    };
+    if let Err(detail) = postprocess::postproc::machine_dims::install(tables) {
+        eprintln!(
+            "{}",
+            messages::text(
+                "cli.presets_unavailable",
+                &[
+                    ("dir", &cli.presets.display().to_string()),
+                    ("detail", &detail)
+                ]
+            )
+        );
+        return ExitCode::from(EXIT_BAD_INPUT);
+    }
     match cli.command {
         Command::Run {
             gcode,
@@ -174,7 +218,9 @@ fn main() -> ExitCode {
         Command::Init { out } => cmd_init(out.as_deref()),
         Command::DumpIr { config, set, gcode } => cmd_dump_ir(&config, &set, gcode.as_deref()),
         Command::Check { config, set } => cmd_check(&config, &set),
-        Command::CheckAssets { manifest, scan } => cmd_check_assets(manifest.as_deref(), scan),
+        Command::CheckAssets { manifest, scan } => {
+            cmd_check_assets(manifest.as_deref(), scan, &cli.presets)
+        }
     }
 }
 
@@ -189,16 +235,25 @@ fn main() -> ExitCode {
 /// 3. `--scan`：`assets/models` 下有 `.3mf` 却没登记进台账的，报出来（防漏登记）。
 ///
 /// 判定逻辑全部走 `calibration_asset`（与工作台同一个实现），本函数只负责排序与输出。
-fn cmd_check_assets(manifest: Option<&Path>, scan: bool) -> ExitCode {
+fn cmd_check_assets(manifest: Option<&Path>, scan: bool, presets: &Path) -> ExitCode {
     let manifest = match manifest {
         Some(p) => p.to_path_buf(),
-        None => match default_manifest() {
-            Some(p) => p,
-            None => {
-                eprintln!("{}", messages::text("cli.assets.not_found", &[]));
+        None => {
+            /* 缺省台账就在 `--presets` 那棵树里 —— 与机型表同一个数据根，
+            不按当前目录往上摸仓库。 */
+            let p = presets.join("assets.toml");
+            if !p.is_file() {
+                eprintln!(
+                    "{}",
+                    messages::text(
+                        "cli.assets.not_found",
+                        &[("path", &p.display().to_string())]
+                    )
+                );
                 return ExitCode::from(2);
             }
-        },
+            p
+        }
     };
 
     let text = match std::fs::read_to_string(&manifest) {
@@ -353,20 +408,6 @@ fn cmd_check_assets(manifest: Option<&Path>, scan: bool) -> ExitCode {
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
-    }
-}
-
-/// 缺省台账：从当前目录往上找 `presets/assets.toml`（仓库根跑、`src-tauri` 里跑都行）。
-fn default_manifest() -> Option<PathBuf> {
-    let mut at = std::env::current_dir().ok()?;
-    loop {
-        let p = at.join("presets").join("assets.toml");
-        if p.is_file() {
-            return Some(p);
-        }
-        if !at.pop() {
-            return None;
-        }
     }
 }
 

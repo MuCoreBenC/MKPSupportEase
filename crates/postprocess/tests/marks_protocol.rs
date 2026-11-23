@@ -10,6 +10,7 @@
 //! - `EV_MONO` → 抓底面涂胶块被提前落地导致 ev 倒退
 //! - `STATS_MATCH` → 抓 finalize 的计数与产物不符
 
+mod common;
 mod golden_common;
 
 use golden_common as gc;
@@ -50,6 +51,7 @@ fn is_layer_marker(line: &str) -> bool {
 
 /// pass1 + pass2 全链（与 `golden_g2.rs` 同一条路径）。
 fn run_pass2_chain(input: &str) -> Vec<String> {
+    common::install_tables();
     let content: Vec<String> = gc::split_lines(input);
     let ir_json = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

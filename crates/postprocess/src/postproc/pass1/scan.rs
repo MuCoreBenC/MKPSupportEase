@@ -188,7 +188,7 @@ mod tests {
 
     #[test]
     fn strip_z_and_e_combo() {
-        // Go 语义：截到 Z 前的尾随空格保留（后续 ProcessGCodeOffset 自行 trim）
+        // 既有语义：截到 Z 前的尾随空格保留（后续 ProcessGCodeOffset 自行 trim）
         assert_eq!(strip_z_and_e("G1 X10 Y20 Z0.5 E1.2"), "G1 X10 Y20 ");
         assert_eq!(strip_z_and_e("G1 X10 E1.2"), "G1 X10");
         assert_eq!(strip_z_and_e("G1 X10"), "G1 X10");

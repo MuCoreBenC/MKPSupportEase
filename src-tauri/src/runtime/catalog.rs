@@ -1269,6 +1269,9 @@ mod tests {
     /// 条数与源 TOML 对齐（变了要在提交里说清为什么，与 presetdata 的真数据判据同一纪律）
     #[test]
     fn the_definition_travels_with_the_catalog() {
+        /* 构目录要过机型表（别名 / 尺寸校验）；库内没有备用数据源 —— 判据自己装一份，
+        和产品入口装的是同一份随包数据。 */
+        crate::boot::install_machine_tables_for_tests();
         let catalog = Catalog::build_from_repo(&repo_root()).expect("构建不该失败");
 
         assert_eq!(catalog.brands.len(), 1, "实测 1 个品牌");

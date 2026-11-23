@@ -4543,7 +4543,7 @@ fn scalar_item(v: &Value, key: &str) -> Result<toml_edit::Item, AppError> {
 }
 
 /// 可选项的值写回文件的那一项。与 `scalar_item` 只差一处：**整数按整数写**
-/// （`0` 不许漂成 `0.0`）—— 可选项是照抄原文的东西，表示一动就天天出无谓 diff
+/// （`0` 不许漂成 `0.0`）—— 可选项是沿用原文的东西，表示一动就天天出无谓 diff
 fn choice_value_item(v: &Value, key: &str, n: usize) -> Result<toml_edit::Item, AppError> {
     match v {
         Value::String(s) => Ok(super::literal_str(s)),

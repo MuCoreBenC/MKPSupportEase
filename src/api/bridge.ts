@@ -348,10 +348,20 @@ export const bridgeApi: MkpApi = {
   /* 删除本机那份交付预设文件（一切皆可删：删了回到「未下载」，随时可从云端重下） */
   deleteDeliveryFile: (fileName) =>
     call<void>('deleteDeliveryFile', 'delete_delivery_file', { fileName }),
-  downloadCatalogFile: (fileName, onTick) =>
-    call<void>('downloadCatalogFile', 'download_runtime_file', withTick({ fileName }, onTick)),
-  downloadCatalogFiles: (fileNames, onTick) =>
-    call('downloadCatalogFiles', 'download_runtime_files', withTick({ fileNames }, onTick)),
+  /* `place` 一律显式发一个布尔（缺省 true）：Rust 侧是 `Option<bool>`，
+     不发的老口径与"下完就放进切片器"是同一件事，但显式说清免得两处各记一份默认 */
+  downloadCatalogFile: (fileName, onTick, place) =>
+    call<void>(
+      'downloadCatalogFile',
+      'download_runtime_file',
+      withTick({ fileName, place: place ?? true }, onTick),
+    ),
+  downloadCatalogFiles: (fileNames, onTick, place) =>
+    call(
+      'downloadCatalogFiles',
+      'download_runtime_files',
+      withTick({ fileNames, place: place ?? true }, onTick),
+    ),
   readDownloadedText: (fileName) =>
     call('readDownloadedText', 'read_downloaded_text', { fileName }),
   getPresetSource: () => call('getPresetSource', 'get_preset_source'),

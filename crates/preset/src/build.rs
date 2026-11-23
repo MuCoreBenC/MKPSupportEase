@@ -1,10 +1,10 @@
 //! `build()` —— TomlConfig → Ir 的唯一翻译点（对照 ir/build.go 逐段移植）。
 //!
-//! 顺序与 Go 一字不差：弃用检查 → 零值→注册表默认 → 逐字段映射 → 兼容迁移 →
+//! 顺序与既有口径 一字不差：弃用检查 → 零值→注册表默认 → 逐字段映射 → 兼容迁移 →
 //! 派生/回退 → 范围校验（fail fast）→ 零值兜底 clamp → 枚举归一化。
 //!
-//! 与旧侧的刻意差异（逐条登记）：
-//! - **无 sink 参数**：旧侧 sink 是 GUI 装配层的回退管控通道，sink=nil 时全部
+//! 与原口径的刻意差异（逐条登记）：
+//! - **无 sink 参数**：原口径 sink 是 GUI 装配层的回退管控通道，sink=nil 时全部
 //!   检查跳过、行为 = 本实现（CLI 链路即为 nil）。Phase 3 需要时再加参数，
 //!   语义分支已在旧源码锁定。
 //! - **单位换算 `* 60.0` 只发生在此文件**（gatecheck `speed_unit_conversion_only_in_ir`）。
@@ -71,7 +71,7 @@ impl CalibrationExecMode {
     }
 }
 
-/// 单一翻译点。`registry` 传 [`None`] 时退回硬编码默认（与 Go nil registry
+/// 单一翻译点。`registry` 传 [`None`] 时退回硬编码默认（与既有口径 nil registry
 /// 分支逐字一致）；Phase 1 的 CLI 恒传 [`Some`]（嵌入快照）。
 pub fn build(
     cfg: &TomlConfig,
@@ -1125,7 +1125,7 @@ mod tests {
         assert_eq!(split_gcode_lines(""), vec![""]);
     }
 
-    /// 7.5：零值→注册表默认（nil registry 走硬编码兜底，与 Go 同分支）。
+    /// 7.5：零值→注册表默认（nil registry 走硬编码兜底，与既有口径 同分支）。
     #[test]
     fn zero_values_get_defaults() {
         let ir = build(&minimal_cfg(), None, CalibrationExecMode::Fallback).unwrap();

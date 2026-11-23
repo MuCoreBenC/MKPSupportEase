@@ -1,15 +1,18 @@
 //! Task 13 判据：校准插入（insert_calibration_gcode）。
 //!
 //! 字节锚点：生成器本体已由 reference_calibration.rs（Task 9.5，四模式逐字节）
-//! 钉住；插入编排（filter/minimize/插入点选择）在旧侧**无字节参考**
+//! 钉住；插入编排（filter/minimize/插入点选择）在原口径**无字节参考**
 //! （Task 4.3 只导出了生成器对），此处为行为判据 —— 如实登记，不假称字节级。
 //! 三种 exec_mode 各一条（13.5）。
+
+mod common;
 
 use postprocess::ir::Ir;
 use postprocess::postproc::calibration::{Mode, insert_calibration_gcode, minimize_startup_gcode};
 use postprocess::postproc::disk::{BBox, CentroidResult};
 
 fn fixture_ir() -> Ir {
+    common::install_tables();
     let json = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/ir/golden_42274_2.json"),

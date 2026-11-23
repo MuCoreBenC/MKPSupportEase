@@ -54,7 +54,7 @@ pub fn analyze_need_wiping(
         }
         return (true, REASON_NEEDED_SUPPORT, Vec::new());
     }
-    // 3. 多色检测（Go 侧 TODO，同现状）
+    // 3. 多色检测（原口径 TODO，同现状）
     (false, REASON_NOT_NEEDED, Vec::new())
 }
 

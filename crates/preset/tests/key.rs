@@ -3,6 +3,8 @@
 //! 这把钥匙决定三件事：列表里哪些条目该合成一条、副本叫什么名字、
 //! 副本的来源找不到时拿谁作对照。三处用同一把，所以它算错一次会同时错三处。
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
 use preset::{PresetKey, read_preset_from_bytes};
@@ -33,6 +35,7 @@ fn fixtures() -> Vec<PathBuf> {
 }
 
 fn key_of(text: &str) -> PresetKey {
+    common::install_tables();
     PresetKey::of(&read_preset_from_bytes(text.to_string()).expect("预设能读"))
 }
 
@@ -99,6 +102,7 @@ fn the_cloud_shorthand_is_the_same_key_as_our_own_spelling() {
 /// 大小写不算差别（变体），别名归一（机型）；**没有变体是另一把钥匙**。
 #[test]
 fn klc0_case_and_missing_variant() {
+    common::install_tables();
     assert_eq!(
         PresetKey::new("A1_MINI", Some("FAST")),
         PresetKey::new("A1_MINI", Some("fast")),

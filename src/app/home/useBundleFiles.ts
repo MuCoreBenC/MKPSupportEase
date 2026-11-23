@@ -36,6 +36,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import type { FileRef, VersionFiles } from '../../api/contract'
 import { t } from '../../i18n'
+import { useSourceRevision } from '../state/deliveryState'
 
 export interface BundleFiles {
   /**
@@ -71,6 +72,13 @@ function toBundle(vf: VersionFiles | null, key: string): BundleFiles {
 
 export function useBundleFiles(machineId: string | null, versionId: string | null): BundleFiles {
   const key = machineId !== null && versionId !== null ? `${machineId}/${versionId}` : null
+  /*
+   * **换过数据源 ⇒ 套餐清单作废**：`getVersionFiles` 读的是内部根那份 catalog，
+   * 同一个 `机型/版本` 在另一条发布线上对应的是另一份套餐。缓存按 key 认，
+   * 代次进缓存键，换了源就是另一格 —— 不清缓存也不会拿旧源的事实说"全齐"。
+   */
+  const sourceRevision = useSourceRevision()
+  const cacheKey = key === null ? null : `${sourceRevision}|${key}`
 
   /*
    * ★★ 状态**跟着组合钥匙走**（2026-10-17，与 `usePreset` 同一条规矩）。
@@ -82,28 +90,28 @@ export function useBundleFiles(machineId: string | null, versionId: string | nul
    */
   const [entry, setEntry] = useState<{ key: string; bundle: BundleFiles } | null>(null)
   const state = useMemo<BundleFiles>(() => {
-    if (key === null) return UNKNOWN
-    if (entry !== null && entry.key === key) return entry.bundle
-    return cache.get(key) ?? UNKNOWN
-  }, [entry, key])
+    if (cacheKey === null) return UNKNOWN
+    if (entry !== null && entry.key === cacheKey) return entry.bundle
+    return cache.get(cacheKey) ?? UNKNOWN
+  }, [entry, cacheKey])
 
   useEffect(() => {
-    if (key === null || machineId === null || versionId === null) return
+    if (key === null || cacheKey === null || machineId === null || versionId === null) return
 
     let alive = true
     void api.getVersionFiles(machineId, versionId).then(
       (vf) => {
         if (!alive) return
         const next = toBundle(vf, key)
-        if (next.problems.length === 0) cache.set(key, next)
-        setEntry({ key, bundle: next })
+        if (next.problems.length === 0) cache.set(cacheKey, next)
+        setEntry({ key: cacheKey, bundle: next })
       },
       (err: unknown) => {
         if (!alive) return
         console.error(`[bundle] 套餐拉取失败 ${key}`, err)
         /* ★ 纪律②：拿不到就说拿不到 —— 不写缓存、更不当成"套餐为空" */
         setEntry({
-          key,
+          key: cacheKey,
           bundle: {
             files: null,
             problems: [t('bundle.fetchFailed', { key })],
@@ -115,7 +123,7 @@ export function useBundleFiles(machineId: string | null, versionId: string | nul
     return () => {
       alive = false
     }
-  }, [key, machineId, versionId])
+  }, [key, cacheKey, machineId, versionId])
 
   return state
 }

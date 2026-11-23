@@ -850,7 +850,7 @@ fn run(
         );
         out_lines =
             hooks::apply_skip_vibration_calibration(out_lines, ir.prefs.skip_vibration_calibration);
-        /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从旧侧移植） */
+        /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从原口径移植） */
         out_lines = bed_glue::apply_bed_glue(out_lines, &ir, calib_mode);
     }
 
@@ -1016,7 +1016,7 @@ impl ProgressSink for StepTimer<'_> {
         if let Some((step, _, message)) = self.current.as_mut()
             && *step == event.step
         {
-            // 覆盖而不是拼接：口径 = 「该步最后一条消息」（旧世代 meta 同款）
+            // 覆盖而不是拼接：口径 = 「该步最后一条消息」（原口径 meta 同款）
             message.clear();
             message.push_str(&event.message);
         }

@@ -1015,7 +1015,7 @@ impl Presets {
         Ok(())
     }
 
-    /// **复制一条套餐**：内容（assetRefs）与归属照抄，id 必须是新的。
+    /// **复制一条套餐**：内容（assetRefs）与归属沿用，id 必须是新的。
     /// 复制出来的那份**不被任何版本指着** —— 指向是要人显式改的动作
     pub fn copy_bundle(
         &mut self,
@@ -1054,13 +1054,13 @@ impl Presets {
     ///
     /// 三步，任何一步失败整笔拒绝（内存改了一半的由命令层 `run_struct` 回滚）：
     ///
-    /// 1. 版本定义照抄（[`Catalog::copy_version`]，行为不变，指针先照抄）；
+    /// 1. 版本定义沿用（[`Catalog::copy_version`]，行为不变，指针先沿用）；
     /// 2. 模板套餐复制一份，id = `{机型}_{新版本 id}`；
     /// 3. 套餐里**属于模板版本**的 `mkPreset` 登记换成本版本自己的
     ///    （新 id = `{机型小写}-{新版本小写}`，与现有 `a1-fastv3.3` 同形），
     ///    新版本 `recommendedBundle` 指过去。
     ///
-    /// 模板没有套餐时什么都不建（`Ok(None)`）；模板套餐本来就没有 MKP 登记时照抄引用、
+    /// 模板没有套餐时什么都不建（`Ok(None)`）；模板套餐本来就没有 MKP 登记时沿用引用、
     /// 不造第二份（历史数据允许这种形状）；有登记但**不属于模板版本**时整笔拒绝 ——
     /// 把别的版本的登记挂到新版本上是错归属，不能猜。
     #[allow(clippy::too_many_arguments)]
@@ -1078,7 +1078,7 @@ impl Presets {
         let template_vid = template_version_id.trim();
         let new_vid = new_version_id.trim();
 
-        /* 模板指着哪份套餐 —— 必须在写版本之前读：`copy_version` 会把它照抄到新版本上 */
+        /* 模板指着哪份套餐 —— 必须在写版本之前读：`copy_version` 会把它沿用到新版本上 */
         let template_bundle = self
             .catalog
             .machine(machine_id)
@@ -1809,7 +1809,7 @@ mod tests {
             )
             .is_err());
 
-        // 正路径：落盘重读真的有了，refs 照抄
+        // 正路径：落盘重读真的有了，refs 沿用
         p.add_bundle(
             "A1_NEW",
             "A1",
@@ -1874,7 +1874,7 @@ mod tests {
         );
     }
 
-    /// 复制：内容照抄、id 必须是新的、**复制出来的那份没人指着**
+    /// 复制：内容沿用、id 必须是新的、**复制出来的那份没人指着**
     #[cfg(feature = "workbench")]
     #[test]
     fn copying_a_bundle_keeps_the_refs_and_stays_unreferenced() {
@@ -2463,7 +2463,7 @@ mod tests {
             "空操作不该写盘"
         );
 
-        // 换内容：返回 true，落盘重读真的变了、日期盖今天（原来那格是迁移照抄的 2026-07-12）
+        // 换内容：返回 true，落盘重读真的变了、日期盖今天（原来那格是迁移沿用的 2026-07-12）
         let changed = presets
             .set_bundle_refs(
                 "a1_default",

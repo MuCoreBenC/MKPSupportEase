@@ -61,11 +61,10 @@ fn golden_input() -> PathBuf {
 }
 
 /// 把 fixture 那张机型表装进**本进程** —— 只有装过，`has_machine_dimensions` /
-/// `get_machine_dimensions` 才会给出 fixture 的答案（否则它们会去读 `presets/`，
-/// 于是「有没有尺寸」的差集变成生产数据的事，判据又回到了老路上）。
+/// `get_machine_dimensions` 才会给出 fixture 的答案。库内没有备用数据源：
+/// 不装就 panic，所以「有没有尺寸」的差集永远是 fixture 的事。
 ///
-/// 子进程那侧不走 `install`，走 `MKPSE_PRESETS_DIR`（见 `run_cli`）—— 那是 pipeline
-/// 自己的逃生链口子。
+/// 子进程那侧走 CLI 的 `--presets`（见 `run_cli`）—— 同一条显式注入边界。
 ///
 /// **只装一次**：`install` 第二次会返回 Err（那是它的语义，防的是"两处数据看谁先跑"）。
 fn install_fixture_tables() {
@@ -130,11 +129,12 @@ fn a_canonical_name_without_dimensions() -> String {
     }
 }
 
-/// 起 CLI 时**把机型表指向 fixture**：pipeline 的逃生链口子是 `MKPSE_PRESETS_DIR`，
-/// 不设它就会去读 `presets/`（那正是这次要甩掉的依赖）。
+/// 起 CLI 时**把机型表指向 fixture**：`--presets` 是 CLI 唯一的数据来源，
+/// 不指就用它编译时记下的仓库 `presets/`（那正是这组判据要甩开的依赖）。
 fn run_cli(args: &[&str]) -> Output {
     Command::new(bin())
-        .env("MKPSE_PRESETS_DIR", fixture_presets_dir())
+        .arg("--presets")
+        .arg(fixture_presets_dir())
         .args(args)
         .output()
         .expect("CLI 二进制必须能起来")

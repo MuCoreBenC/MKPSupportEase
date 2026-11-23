@@ -2,7 +2,7 @@
 //!
 //! 用例矩阵逐条译自旧 `tower_matrix_golden_test.go`（含共用常量与 23 条用例的
 //! 全部标量入参）；块渲染 / `<nil>` vs `<empty>` 语义见 `golden_common`。
-//! 浮点纪律：所有入参与旧侧逐字相同；实现侧禁止 FMA 融合写法（gatecheck 已钉）。
+//! 浮点纪律：所有入参与原口径逐字相同；实现侧禁止 FMA 融合写法（gatecheck 已钉）。
 
 mod golden_common;
 
@@ -170,7 +170,7 @@ fn all_cases() -> Vec<(String, Option<Vec<String>>)> {
             TM_MODEL_TALL_HEIGHT,
             0.4,
         ),
-        // —— Rib 分支矩阵（mid_tower_h250 已被旧侧移出字节 golden，勿加回）——
+        // —— Rib 分支矩阵（mid_tower_h250 已被原口径移出字节 golden，勿加回）——
         rib(
             "first_layer_fillet",
             0,
@@ -224,7 +224,7 @@ fn all_cases() -> Vec<(String, Option<Vec<String>>)> {
 #[test]
 fn g3_tower_matrix_matches_golden() {
     let cases = all_cases();
-    // 反空转 + 名字唯一（与旧侧同判法）
+    // 反空转 + 名字唯一（与原口径同判法）
     assert!(!cases.is_empty(), "矩阵为空 —— golden 退化为空转，视为失败");
     let mut names: Vec<&str> = cases.iter().map(|(n, _)| n.as_str()).collect();
     names.sort_unstable();

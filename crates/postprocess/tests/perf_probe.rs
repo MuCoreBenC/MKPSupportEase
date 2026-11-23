@@ -18,7 +18,7 @@ use std::time::Instant;
 mod golden_common;
 use golden_common as gc;
 
-/// 迭代数：与 Go 侧 `-benchtime 10x` 对齐。
+/// 迭代数：与 原口径 `-benchtime 10x` 对齐。
 const ITERS: usize = 10;
 
 fn fixture_ir() -> postprocess::ir::Ir {

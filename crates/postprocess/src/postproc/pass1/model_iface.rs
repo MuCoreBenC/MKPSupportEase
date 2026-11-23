@@ -1,6 +1,6 @@
 //! iface 的按模型分组与熨平/支撑面混合（对照 processor/model_z_map.go）。
 
-// 逐字对照 model_z_map.go：索引循环与 Go 同形。
+// 逐字对照 model_z_map.go：索引循环与 同形。
 #![allow(clippy::needless_range_loop)]
 
 use crate::gcode::{MARKER_ZJUMP_INTERNAL, MARKER_ZJUMP_START, extract_coord};
@@ -422,7 +422,7 @@ pub(crate) fn build_per_model_iface(
     (result, MergeStats { min_coverage })
 }
 
-// parseFloat（model_z_map.go:140）在 Go 侧无消费者，未移植。
+// parseFloat（model_z_map.go:140）在 原口径无消费者，未移植。
 
 #[cfg(test)]
 mod tests {

@@ -10,7 +10,7 @@
 ///   和报告页同一个词；英文标记 `;Gluepen Revitalization Start/End` 保持不动，
 ///   `postproc/calibration.rs` 与旧产物靠它认段。
 /// LeaveTower/PressureRestore/ReturnModel/LayerProgress/M991Notify 由 pass2
-/// 消费（Task 12 接线），枚举面与 Go stages.go 对齐保持完整。
+/// 消费（Task 12 接线），枚举面与既有口径 stages.go 对齐保持完整。
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MkpStage {

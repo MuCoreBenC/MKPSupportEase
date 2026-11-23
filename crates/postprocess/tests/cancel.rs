@@ -15,6 +15,8 @@
 //! **阈值 0.60 / 0.90 一个字没放宽**。产品默认仍是 100ms
 //! （`DEFAULT_CANCEL_CHECK_INTERVAL`），由 `process` 传入，本文件不动它。
 
+mod common;
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -68,6 +70,7 @@ impl TriggerSink {
 
 /// 原地模式的输入副本 + 其原始字节（取消后必须逐字节相同）。
 fn inplace_copy(tag: &str) -> (PathBuf, Vec<u8>) {
+    common::install_tables();
     let path = std::env::temp_dir().join(format!("mkpse-pp-cancel-{tag}.gcode"));
     std::fs::copy(golden_input(), &path).expect("复制输入失败");
     let pristine = std::fs::read(&path).expect("读副本失败");
@@ -227,6 +230,7 @@ fn step_boundary_checkpoint_is_the_only_thing_that_can_stop_it_when_loops_are_th
 
 #[test]
 fn cancel_with_explicit_out_writes_neither_out_nor_part() {
+    common::install_tables();
     let token = CancelToken::new();
     let out = std::env::temp_dir().join("mkpse-pp-cancel-explicit-out.gcode");
     let _ = std::fs::remove_file(&out);

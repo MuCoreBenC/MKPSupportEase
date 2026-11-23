@@ -171,9 +171,168 @@ pub fn catalog_for_ui(root: &std::path::Path) -> Result<Catalog, crate::error::A
 /// 「没有未经审阅的变化」在构造上成立，与对照基线同一思路。
 pub const EMBEDDED_CATALOG: &[u8] = include_bytes!("catalog.generated.json");
 
+/// 校准档表：源在 `presets/`，编译期钉进二进制。发布物磁盘上没有 presets/，
+/// 而合体（Combined）校准件靠外形定档必须要这张表，缺了就会把校准件判成普通模型。
+pub const EMBEDDED_CALIBRATION_MODELS: &str =
+    include_str!("../../../presets/calibration_models.toml");
+
+/// 把随包 catalog 的机型数据装进 postprocess 的进程级表。
+///
+/// 这是**唯一一条**装表路径：发布物与界面都由 [`crate::boot::Runtime::initialize`] 走到这里。
+/// 随包数据读不出来就返回 `Err` —— 调用方停下，库那边也不会去别处找第二份数据。
+///
+/// 只装一次；重复调用（`OnceLock` 已装）返回 `Err`：那是入口接线的错误，不能吞。
+pub fn install_machine_tables_from_catalog() -> Result<(), String> {
+    let tables = machine_tables_from_catalog()?;
+    postprocess::postproc::machine_dims::install(tables)
+}
+
+/// 从随包 catalog 构出机型表。纯函数，便于判据直接验数据。
+fn machine_tables_from_catalog(
+) -> Result<postprocess::postproc::machine_dims::MachineTables, String> {
+    use postprocess::postproc::machine_dims::{
+        MachineDimensions, MachineTables, ZonePoint, ZonePolygon,
+    };
+
+    let catalog =
+        Catalog::parse(EMBEDDED_CATALOG).map_err(|e| format!("随包 catalog 读不出来：{e}"))?;
+
+    let mut dimensions = std::collections::HashMap::new();
+    let mut alias_map = std::collections::HashMap::new();
+    let mut forbidden_zones = std::collections::HashMap::new();
+
+    for machine in &catalog.machines {
+        alias_map.insert(machine.id.to_uppercase(), machine.id.clone());
+        for alias in &machine.external_aliases {
+            alias_map.insert(alias.to_uppercase(), machine.id.clone());
+        }
+        if let Some(d) = &machine.dimensions {
+            dimensions.insert(
+                machine.id.clone(),
+                MachineDimensions {
+                    bed_size: postprocess::postproc::machine_dims::BedSize {
+                        width: d.bed_size.width,
+                        depth: d.bed_size.depth,
+                    },
+                    movement_range: postprocess::postproc::machine_dims::MovementRange {
+                        min_x: d.movement_range.min_x,
+                        max_x: d.movement_range.max_x,
+                        min_y: d.movement_range.min_y,
+                        max_y: d.movement_range.max_y,
+                        max_z: d.movement_range.max_z,
+                    },
+                    edge_zone: d.edge_zone,
+                    glue_area: postprocess::postproc::machine_dims::GlueArea {
+                        glue_min_x: d.glue_area.glue_min_x,
+                        glue_max_x: d.glue_area.glue_max_x,
+                        glue_min_y: d.glue_area.glue_min_y,
+                        glue_max_y: d.glue_area.glue_max_y,
+                        wipe_x: d.glue_area.wipe_x,
+                    },
+                    calibration: postprocess::postproc::machine_dims::Calibration {
+                        l_shape_base_x: d.calibration.l_shape_base_x,
+                        l_shape_base_y: d.calibration.l_shape_base_y,
+                        x_line_x: d.calibration.x_line_x,
+                        x_line_y: d.calibration.x_line_y,
+                        x_line_y_end: d.calibration.x_line_y_end,
+                        y_line_x: d.calibration.y_line_x,
+                        y_line_y: d.calibration.y_line_y,
+                        y_line_x_end: d.calibration.y_line_x_end,
+                        z_start_x: d.calibration.z_start_x,
+                        z_start_y: d.calibration.z_start_y,
+                    },
+                    flags: postprocess::postproc::machine_dims::Flags {
+                        gcode_marker: d.flags.gcode_marker.clone(),
+                        has_second_fan: d.flags.has_second_fan,
+                    },
+                },
+            );
+        }
+        if !machine.zones.is_empty() {
+            forbidden_zones.insert(
+                machine.id.clone(),
+                machine
+                    .zones
+                    .iter()
+                    .map(|z| ZonePolygon {
+                        points: z
+                            .points
+                            .iter()
+                            .map(|(x, y)| ZonePoint { x: *x, y: *y })
+                            .collect(),
+                    })
+                    .collect(),
+            );
+        }
+    }
+
+    /* 档表读不出来就是硬错：装一张没有档的机型表会让合体校准件在用户机器上
+     * 被判成"不是校准件"，然后静默按普通模型跑完。 */
+    let calibration_models =
+        postprocess::postproc::calib_models::parse(EMBEDDED_CALIBRATION_MODELS, "随包校准档表")?;
+
+    Ok(MachineTables::from_catalog_parts(
+        dimensions,
+        alias_map,
+        forbidden_zones,
+        Some(calibration_models),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 发布物靠这张表后处理：尺寸 / 别名 / 禁区少一样都会在真机上静默算错几何。
+    /// 这条把「装表」这件事钉住，防的是有人删掉 main 里的 install 接线后
+    /// 又以 `Error code: 101` 的形式在用户机器上重现。
+    #[test]
+    fn catalog_machine_tables_carry_dimensions_aliases_and_zones() {
+        let tables = machine_tables_from_catalog().expect("随包 catalog 必须能构出机型表");
+        assert!(!tables.dimensions().is_empty(), "尺寸表空了");
+        assert_eq!(
+            tables.alias_map().get("A1F").map(String::as_str),
+            Some("A1")
+        );
+        assert!(
+            tables.forbidden_zones().values().any(|z| !z.is_empty()),
+            "至少有台机型带禁区"
+        );
+        assert!(
+            tables
+                .calibration_models()
+                .is_some_and(|models| !models.is_empty()),
+            "合体校准件靠档表按外形定档，档表空了就会把它当普通模型"
+        );
+    }
+
+    /// 二合一（Combined）身份必须靠档表按外形定档。档表空了 ⇒ 认不出 ⇒ 报「不是校准件」，
+    /// 静默把校准件当普通模型跑。这条咬住「随包档表能被认档函数命中」，是那次回归的直接判据。
+    #[test]
+    fn bundled_calibration_profiles_are_recognisable_by_size() {
+        use postprocess::postproc::calib_models::find_profile;
+
+        let tables = machine_tables_from_catalog().expect("随包 catalog 必须能构出机型表");
+        let models = tables
+            .calibration_models()
+            .expect("档表必须随包装入，否则合体校准件会报「不是校准件」");
+        let with_shape: Vec<_> = models
+            .iter()
+            .filter(|p| p.has_footprint() && !p.mode.is_empty())
+            .collect();
+        assert!(!with_shape.is_empty(), "档表里没有参与认档的档");
+        for p in with_shape {
+            let mode = &p.mode[0];
+            let hit = find_profile(models, mode, p.footprint_w, p.footprint_h);
+            assert!(
+                hit.is_some(),
+                "档 {}（{mode} {}×{}）按自己的标称尺寸竟认不出 —— 认档链或档表坏了",
+                p.id,
+                p.footprint_w,
+                p.footprint_h
+            );
+        }
+    }
 
     /// 嵌进二进制的那份必须是当前源 + 交付产物能重新构建出来的那一份。
     /// 改了源忘了跑 `gen-catalog`，这条就红 —— 它是层① → 层② 的失联报警。

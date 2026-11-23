@@ -3,7 +3,7 @@
 //! 消费方：润笔（revitalization_block）与热床预涂胶。返回违规列表交给
 //! 上层发警告——本 crate 不做 IO、不打日志。
 //!
-//! 与旧侧的一处刻意偏离：Go 在 movement_range 全零时 `fmt.Println` 一条提示
+//! 与原口径的一处刻意偏离：Go 在 movement_range 全零时 `fmt.Println` 一条提示
 //! （污染 stdout）。Rust 侧静默返回空——CLI 的 stdout 是结果通道
 //!（tasks.md 15.4），诊断走返回值。行为差异仅限诊断噪声，检测语义不变。
 

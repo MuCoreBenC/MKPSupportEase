@@ -28,7 +28,7 @@ import { t } from '../../i18n'
 import type { AppError, Axes, Preset, AxisLimit, AxisLimits } from '../../api/contract'
 import type { Selection } from '../home/MachinePicker'
 import { useActivePreset } from '../state/appState'
-import { useDeliveryRevision } from '../state/deliveryState'
+import { useDeliveryRevision, useSourceRevision } from '../state/deliveryState'
 
 export type { Preset }
 
@@ -87,6 +87,12 @@ export function usePreset(sel: Selection): PresetState {
 
   /* 本机文件面代次：别处下载 / 另存 / 删除之后，这一支要重读（见 effect 尾部注释） */
   const deliveryRevision = useDeliveryRevision()
+  /*
+   * **换过数据源 ⇒ 这一版的三轴 / 速度作废**：`getVersionFiles` 与 `getMachineParams`
+   * 读的都是内部根那份 catalog，同一个组合在另一条发布线上是另一套文件与默认值。
+   * 代次进钥匙（而不是清缓存），换了源就落到另一格，旧源的读数不会被当成同一件事。
+   */
+  const sourceRevision = useSourceRevision()
 
   /*
    * ★★ **"同一版、两份文件"要读出各自的数**（2026-10-20 作者实测）。
@@ -119,12 +125,15 @@ export function usePreset(sel: Selection): PresetState {
    * 现在状态带钥匙：渲染时发现钥匙对不上，**当帧**就换成新版的（缓存命中直接 ready），
    * 不会出现混合态。`useMemo` 保证对象身份稳定（`useCalibration` 那条 effect 依赖它）。
    *
-   * 钥匙 = `机型/版本|在用的那一份`（2026-10-20 补后半截）：同一版下换成另一份时要按
-   * 另一份重读，不能拿上一份的 ready 冒充（那正是"切了还是旧值"）。
+   * 钥匙 = `数据源代次|机型/版本|在用的那一份`：
+   *   · 后半截（2026-10-20 补）：同一版下换成另一份时要按另一份重读，不能拿上一份的
+   *     ready 冒充（那正是"切了还是旧值"）；
+   *   · 前半截：换过数据源之后，同一个组合在另一条发布线上是另一套文件与默认值 ——
+   *     钥匙不带它，缓存会把旧源的读数原样端出来。
    */
   const comboKey =
     complete && machine !== null && version !== null ? `${machine}/${version}` : null
-  const key = comboKey === null ? null : `${comboKey}|${activePath}`
+  const key = comboKey === null ? null : `${sourceRevision}|${comboKey}|${activePath}`
   const [entry, setEntry] = useState<{ key: string; state: PresetState } | null>(null)
   const state = useMemo<PresetState>(() => {
     if (key === null) return { status: 'idle' }

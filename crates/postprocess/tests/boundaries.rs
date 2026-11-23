@@ -1,13 +1,14 @@
 //! 架构边界的机械门禁。
 //!
 //! 来源仓库 mkp-sr 有 **12** 条这样的断言（靠 `crates/gatecheck` 读 Cargo.toml 实现），
-//! 本项目只有**恰好 2** 条。这是**证据等级的真实下降，不是清理**：
-//! 文本扫描比 Cargo 的依赖图弱（换个写法就绕过去了）。
+//! 本项目只有**恰好 3** 条。这是**证据等级的真实下降，不是清理**：
+//! 文本扫描比 Cargo 的依赖图弱（换个写法就绕过去了）。第三条（判据 3）守的是
+//! 「机型表只有注入一个来源」，理由见那一条自己的文档。
 //!
 //! ## 被丢掉的 10 条，逐条实测归类（Task 13.3）
 //!
 //! 计划里原本写的是「那 10 条守护的对象在新项目里都不存在」。**这句话经实测是错的** ——
-//! 其中 3 条在这里**完全适用、当前恰好成立、但没有任何守卫**。照抄那句话等于给自己发免罪符，
+//! 其中 3 条在这里**完全适用、当前恰好成立、但没有任何守卫**。沿用那句话等于给自己发免罪符，
 //! 所以改成下面这张表：
 //!
 //! ### (a) 扫描面真的不存在（5 条）
@@ -177,13 +178,13 @@ fn fma_pattern() -> String {
 
 /// 禁止 `f64::mul_add`。
 ///
-/// **这是实测事实，不是洁癖**：旧 Go 侧 rib 圆角的 epsilon 比较（`polygon.go:23` 排序 /
+/// **这是实测事实，不是洁癖**：原口径 rib 圆角的 epsilon 比较（`polygon.go:23` 排序 /
 /// `removeDuplicatePoints` / `rib.go:351` 的 `math.Abs(cosangle) < cosAngleTol`）撞上
 /// **arm64 允许 FMA 融合、amd64 不融合** ⇒ 阈值一翻就**换几何分支**。
-/// `rib/mid_tower_h250` 实测 1201 vs 1195 行、坐标 X/Y 转置，**在同一份 Go 代码上就已经
+/// `rib/mid_tower_h250` 实测 1201 vs 1195 行、坐标 X/Y 转置，**在同一份 原实现上就已经
 /// 不可复现**，那条用例已被移出字节 golden（vendored 的 23 块里没有它）。
 ///
-/// 所以几何层必须按 Go 源码的运算顺序逐字复刻，禁止 `mul_add` 与任何可被编译器自由融合的
+/// 所以几何层必须按既有口径 源码的运算顺序逐字复刻，禁止 `mul_add` 与任何可被编译器自由融合的
 /// 写法。clippy 的 `suboptimal_flops` 给的建议正是 mul_add，因此 Cargo.toml 里**刻意不
 /// deny 它** —— 真守卫就是这条文本扫描。
 ///
@@ -232,5 +233,54 @@ fn no_fma_anywhere() {
         "禁止 FMA 融合（arm64/amd64 分叉会换几何分支，见本判据文档）。命中 {} 处：\n{}",
         hits.len(),
         hits.join("\n")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 判据 3：机型表只有"注入"这一个来源
+// ---------------------------------------------------------------------------
+
+/// **`machine_dims` 不许自己找数据。**
+///
+/// 发布物没有仓库里的 `presets/`；只要库内有任何一个"找不到就去别处找"的入口，
+/// 开发态就会替发布态把数据缺失盖住 —— 那类事故的表现是切片器只显示 `Error code: 101`，
+/// 而本地与 CI 全绿。这里把入口本身钉死：`tables()` 只能用 `install` 装进来的那一份。
+///
+/// 扫描面只取 `#[cfg(test)]` 之前的部分：判据自己的装表入口读仓库是正当的，
+/// 而它编不进任何可执行物（`#[cfg(test)]`）。禁的是运行时发现：
+/// 编译期路径、环境变量、当前目录、懒初始化。
+#[test]
+fn machine_tables_have_no_hidden_second_source() {
+    let path = repo_root().join("src/postproc/machine_dims.rs");
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("读不到 {}（{e}）—— 判据已空转", path.display()));
+
+    let production = text
+        .split_once("\n#[cfg(test)]")
+        .map(|(head, _)| head)
+        .unwrap_or(&text);
+    // 反空转：切出来的必须真的是生产那一段。
+    assert!(
+        production.contains("pub fn tables()") && production.contains("pub fn install("),
+        "切分点找错了：`#[cfg(test)]` 之前的代码里没有 tables/install，判据不成立"
+    );
+
+    let forbidden = [
+        "CARGO_MANIFEST_DIR",
+        "MKPSE_PRESETS_DIR",
+        "env::var",
+        "current_dir",
+        "get_or_init",
+    ];
+    let hits: Vec<&str> = forbidden
+        .iter()
+        .copied()
+        .filter(|p| production.contains(p))
+        .collect();
+    assert!(
+        hits.is_empty(),
+        "machine_dims 生产代码里出现了运行时发现数据的写法：{hits:?}\n\
+         机型表只能由 `install` 注入（发布物从随包 catalog 构，CLI 从 --presets 读，\
+         判据自己装）。任何备用来源都会让开发态替发布物兜底。"
     );
 }

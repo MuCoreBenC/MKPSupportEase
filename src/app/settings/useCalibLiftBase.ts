@@ -17,6 +17,7 @@ import { api } from '../../api'
 import { FIRST_LAYER_MM } from './calibLift'
 import type { CalibLiftBase } from './calibLift'
 import { useActivePreset } from '../state/appState'
+import { useSourceRevision } from '../state/deliveryState'
 
 export function useCalibLiftBase(): CalibLiftBase | null {
   const active = useActivePreset()
@@ -24,6 +25,11 @@ export function useCalibLiftBase(): CalibLiftBase | null {
   const versionId = active?.versionId ?? ''
   const origin = active?.origin ?? null
   const [base, setBase] = useState<CalibLiftBase | null>(null)
+  /*
+   * 这两个数一条来自 `getMachineParams`、一条来自 `getLocalCopyFor`，云端那条读的是
+   * 内部根那份 catalog —— 换过数据源，同一个版本的笔尖偏移可能就不是这个数了。
+   */
+  const sourceRevision = useSourceRevision()
 
   useEffect(() => {
     if (machineId === '' || versionId === '' || origin === null) {
@@ -31,6 +37,8 @@ export function useCalibLiftBase(): CalibLiftBase | null {
       return
     }
     let alive = true
+    /* 换源代次只当"该重读"的开关 —— 值本身不参与这一趟计算 */
+    void sourceRevision
 
     const penOffset =
       origin === 'local'
@@ -57,7 +65,7 @@ export function useCalibLiftBase(): CalibLiftBase | null {
     return () => {
       alive = false
     }
-  }, [machineId, versionId, origin])
+  }, [machineId, versionId, origin, sourceRevision])
 
   return base
 }

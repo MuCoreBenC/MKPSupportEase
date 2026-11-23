@@ -1,10 +1,10 @@
 //! `LineBuilder` —— 可复用的行装配缓冲（对照 line_builder.go）。
 //!
 //! 语义与自由函数 [`crate::gcode::format`] 的对应成员**字节级等价**（等价性由测试钉住，
-//! 对应旧侧 `processor.TestLineBuilderEquivalence` 的意图）。Rust 侧保留它：
+//! 对应原口径 `processor.TestLineBuilderEquivalence` 的意图）。Rust 侧保留它：
 //! pass2 有 27 个写行点，统一走一处格式化出口，杜绝「两处格式化悄悄分叉」。
 
-/// 可复用字节缓冲。非线程安全（CLI 单线程消费，与旧侧同一约束）。
+/// 可复用字节缓冲。非线程安全（CLI 单线程消费，与原口径同一约束）。
 #[derive(Default)]
 pub struct LineBuilder {
     buf: Vec<u8>,
@@ -33,7 +33,7 @@ impl LineBuilder {
         &self.buf
     }
 
-    /// 拷贝出 String（稳态下每行唯一一次分配，与旧侧 String() 同语义）。
+    /// 拷贝出 String（稳态下每行唯一一次分配，与原口径 String() 同语义）。
     pub fn to_string_lossy(&self) -> String {
         String::from_utf8_lossy(&self.buf).into_owned()
     }
@@ -139,7 +139,7 @@ mod tests {
         b.to_string_lossy()
     }
 
-    /// 与自由函数的等价性（旧侧 TestLineBuilder*EdgeCases 家族的对应面）。
+    /// 与自由函数的等价性（原口径 TestLineBuilder*EdgeCases 家族的对应面）。
     #[test]
     fn append_members_match_free_functions() {
         let mut b = LineBuilder::new();
@@ -208,7 +208,7 @@ mod tests {
     }
 
     /// AppendPseudoRandom 与 GetPseudoRandom 从同一初始 index 出发序列相同
-    /// （20 次取样覆盖回绕；对应旧侧 TestLineBuilderPseudoRandomMatchesGetPseudoRandom）。
+    /// （20 次取样覆盖回绕；对应原口径 TestLineBuilderPseudoRandomMatchesGetPseudoRandom）。
     #[test]
     fn append_pseudo_random_matches_get_pseudo_random() {
         const N: usize = 20;

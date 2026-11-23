@@ -47,6 +47,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { useLocale } from '../../i18n'
+import { useSourceRevision } from '../state/deliveryState'
 import { localizeMachines } from '../shared/dataLabel'
 import type {
   CatalogAsset,
@@ -135,6 +136,11 @@ export function useCatalog(): Catalog {
   const [cat, setCat] = useState<CatalogState>(catalogCache)
   /* 重读的拨片：`reload()` 拨一下，下面那个 effect 重跑 */
   const [nonce, setNonce] = useState(0)
+  /*
+   * **换过数据源 ⇒ 目录重读一遍**：这两趟读的都是内部根那份 catalog，
+   * 不跟着换源重读，首页 / 校准页的机型与预设清单会一直停在上一条发布线上。
+   */
+  const sourceRevision = useSourceRevision()
 
   const reload = useCallback(() => {
     /*
@@ -207,7 +213,7 @@ export function useCatalog(): Catalog {
       alive = false
       window.clearTimeout(timer)
     }
-  }, [nonce])
+  }, [nonce, sourceRevision])
 
   /*
    * 版本显示名按语言摊开（缓存里存原样：缓存在语言切换前就建好了，不能把某一册写死进去）。

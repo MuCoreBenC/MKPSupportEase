@@ -31,6 +31,8 @@
 //! 看着像 `process_with_ir` 搬错了，真因是**我自己制造的假红**。
 //! 所以每次整链前必须 reset，且两条断言要串行（并行会让两个线程交错取同一条序列）。
 
+mod common;
+
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
@@ -68,6 +70,7 @@ fn baseline_output() -> PathBuf {
 ///
 /// **调用方必须持有 [`lock_sequence`] 的锁**：里面会 reset 那条进程级伪随机序列。
 fn run_in_place(with_ir: bool) -> Vec<u8> {
+    common::install_tables();
     postprocess::gcode::reset_pseudo_random();
 
     let dir = tempfile::tempdir().expect("临时目录");

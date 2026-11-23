@@ -70,7 +70,7 @@ pub fn generate_sheath_gcode(
     bbox_min_x: f64,
     bbox_min_y: f64,
 ) -> Option<Vec<String>> {
-    let _ = sheath_wall_width; // 旧侧签名携带但生成路径未消费（逐字保持）
+    let _ = sheath_wall_width; // 签名携带但生成路径未消费（逐字保持）
     let expansion = calculate_sheath_expansion(
         layer_count,
         model_total_height,

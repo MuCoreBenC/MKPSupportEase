@@ -32,7 +32,7 @@ pub fn generate_rib_gcode(
     bbox_min_x: f64,
     bbox_min_y: f64,
 ) -> Option<Vec<String>> {
-    let _ = rib_bottom_fill_style; // 旧侧签名携带但生成路径未消费（逐字保持）
+    let _ = rib_bottom_fill_style; // 签名携带但生成路径未消费（逐字保持）
     if rib_width <= 0.0 || tower_height <= 0.0 {
         return None;
     }
@@ -325,6 +325,6 @@ fn generate_rib_paths(
         format_speed(travel_speed)
     ));
 
-    let _ = start_pt; // Go 侧 startPt 后续未再读取（保持变量存在以对照）
+    let _ = start_pt; // 后续未再读取（保持变量存在）
     Some(lines)
 }

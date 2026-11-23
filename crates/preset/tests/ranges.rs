@@ -11,6 +11,8 @@
 //! 这一轮就是被这类静默丢弃坑过（`machineMinVariants` / `machineMaxVariants` 白躺着没人读），
 //! 所以键名集合必须登记在案；出现次数刻意不钉，免得改一次数据就要改一次判据。
 
+mod common;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use preset::registry::{RangeSource, load_param_registry};
@@ -146,7 +148,7 @@ fn kr2_machine_variant_override_is_used_and_visible() {
 fn kr2b_which_overrides_actually_differ_from_global() {
     // **这条是这一轮的「行为差量清单」**：覆盖表里绝大多数值与全局逐值相同（纯冗余），
     // 只有少数几条真的不同 —— 那几条就是接上覆盖表之后**校验会变严**的地方。
-    // 收口报告要照抄这份清单，别让「换了真源」听起来像没有后果。
+    // 收口报告要沿用这份清单，别让「换了真源」听起来像没有后果。
     let reg = load_param_registry();
     let mut differs: Vec<String> = Vec::new();
     for p in &reg.params {
@@ -233,6 +235,7 @@ fn kr3_variant_lookup_is_case_insensitive() {
 
 #[test]
 fn kr1_all_presets_still_load_after_switching_the_source_of_truth() {
+    common::install_tables();
     use std::path::PathBuf;
 
     // 9 份冻结样本（仓库内，必跑）

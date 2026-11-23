@@ -1,7 +1,7 @@
 //! write 步的三个收尾 Hooks（对照 gcodesvc 的 startup_common.go /
 //! begin_stage_retract*.go / bed_glue.go 的调用面）。
 //!
-//! 偏好默认值与 Go preferences/service.go:165-180 逐字一致：
+//! 偏好默认值与既有口径 preferences/service.go:165-180 逐字一致：
 //! `SkipVibrationCalibration=true / BeginStageRetractEnabled=true /
 //! BeginStageRetractZLiftMm=20 / BedGlueEnabled=false / GlueBottomEnabled=false`。
 //! Phase 1 CLI 无 preferences 通道， hooks 恒按默认值执行。

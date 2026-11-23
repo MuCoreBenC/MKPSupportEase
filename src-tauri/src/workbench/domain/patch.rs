@@ -879,7 +879,7 @@ mod tests {
     /// 而现在这一层的真相就在 `machineVariants` 里，所以夹具也要带上它：
     /// `offset.z` 在机型层有值（`A1`），`offset.x` 在版本层有值（`A1:STANDARD`）
     ///
-    /// **数值一律写成浮点**（`4.0` / `-1.0`），照抄 `presets/registry/param_registry.toml`
+    /// **数值一律写成浮点**（`4.0` / `-1.0`），沿用 `presets/registry/param_registry.toml`
     /// 里那个样子：写成 `4` / `-1` 会让夹具里所有数字都成了整数，而界面发来的正好也是
     /// 整数 —— 两边碰巧同型，`serde_json` 那个「浮点 ≠ 整数」的坑就永远测不出来
     /// （真出过一次，见 [`normalize`]）
@@ -1301,7 +1301,7 @@ mod tests {
     /// 与声明类型不同的数字写法**（`disk` 参数说了算）。
     ///
     /// 真数据里两种写法都有：几个 float 参数的 `machineVariants` 写成整数、
-    /// 几个 int 参数的 `defaultValue` 写成 `1.0`。夹具照抄这个形状才测得到那个坑
+    /// 几个 int 参数的 `defaultValue` 写成 `1.0`。夹具沿用这个形状才测得到那个坑
     fn registry_with_offtype_disk(
         declared: &str,
         disk: serde_json::Value,

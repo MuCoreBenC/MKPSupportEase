@@ -4091,19 +4091,27 @@ export interface MkpApi {
    *
    * `onTick` 可选：给了就看过程（一次调用一路事件），不给就是原来那个"点了等结果"。
    * 数据源地址不在 catalog 里，见 [`getPresetSource`]。
+   *
+   * `place`（缺省 `true`）：切片器配置下完**顺手放进它那个切片器的每个账号目录**，
+   * 用户下完就能在切片器里选到。传 `false` = 这一次只要文件（界面「下载不放入」）；
+   * 之后仍可在「查看放入情况…」里逐账号补放。MKP 预设与它无关（它走「使用」）。
    */
   downloadCatalogFile(
     fileName: string,
     onTick?: (tick: DownloadTick) => void,
+    place?: boolean,
   ): Promise<void>
 
   /**
    * 批量下载（并发在 Rust 侧做）。**一份失败不拖累别人** —— 按份给结局，
    * 界面因此能说清楚"八份成了、两份因为什么没成"，而不是一句抹平的"下载失败"。
+   *
+   * `place` 与单份同一条口径：缺省 `true`（下完放进切片器），`false` = 只落文件。
    */
   downloadCatalogFiles(
     fileNames: string[],
     onTick?: (tick: DownloadTick) => void,
+    place?: boolean,
   ): Promise<DownloadOutcome[]>
 
   /**

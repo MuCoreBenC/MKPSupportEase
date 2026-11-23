@@ -1,7 +1,7 @@
 //! 数值格式化与伪随机序列 —— 逐字节等价的判定基础（对照 offset_fmt.go）。
 //!
-//! 这组函数是 pass1/pass2 输出的**字节面**：`FormatSpeed` 在旧侧有 71 个调用点，
-//! 这里差一个字符，G1/G2 golden 就全红。所有函数按 Go 语义逐字复刻。
+//! 这组函数是 pass1/pass2 输出的**字节面**：`FormatSpeed` 在原口径有 71 个调用点，
+//! 这里差一个字符，G1/G2 golden 就全红。所有函数按 既有语义逐字复刻。
 //!
 //! Go↔Rust 语义对照（实测锁定，见 tests）：
 //! - `strconv.FormatFloat(v,'f',-1,64)`（最短可往返十进制、定点）≡ Rust `{}`：
@@ -22,7 +22,7 @@ pub enum OffsetMode {
 }
 
 impl OffsetMode {
-    /// 与旧侧字符串值一致（日志/诊断用）。
+    /// 与原口径字符串值一致（日志/诊断用）。
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Ironing => "ironing",
@@ -91,8 +91,8 @@ pub fn format_e_value(v: f64) -> String {
     s
 }
 
-/// 伪随机序列的共享全局状态（与旧侧 `pseudoRandomIndex`/`pseudoRandomTable` 同源）。
-/// 旧侧初始 index = 1，表 = {3,7,2,8,1,5,9,4,6}，模长回绕。
+/// 伪随机序列的共享全局状态（与原口径 `pseudoRandomIndex`/`pseudoRandomTable` 同源）。
+/// 原口径初始 index = 1，表 = {3,7,2,8,1,5,9,4,6}，模长回绕。
 static PSEUDO_RANDOM_INDEX: AtomicUsize = AtomicUsize::new(1);
 const PSEUDO_RANDOM_TABLE: [u8; 9] = [3, 7, 2, 8, 1, 5, 9, 4, 6];
 
@@ -128,8 +128,8 @@ pub fn math_round(x: f64, n: i32) -> f64 {
 mod tests {
     use super::*;
 
-    /// 5.2 要求「先写格式化单元测试再写别的」——本表是 Go 侧
-    /// line_builder_test.go 各 EdgeCase 表的并集，期望值按 Go 语义手推。
+    /// 5.2 要求「先写格式化单元测试再写别的」——本表是既有 EdgeCase 表的并集，
+    /// 期望值按既有语义手推。
     #[test]
     fn format_float_table() {
         // (输入, 期望)

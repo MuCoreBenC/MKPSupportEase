@@ -1863,6 +1863,7 @@ const tickWait = (ms: number) => new Promise((r) => setTimeout(r, ms))
 async function mockDeliver(
   fileName: string,
   onTick?: (tick: DownloadTick) => void,
+  place = true,
 ): Promise<void> {
   const file = mockPresetFile(fileName)
   if (file === undefined) throw new Error(t('mock.catalog.noFile', { file: fileName }))
@@ -1910,11 +1911,14 @@ async function mockDeliver(
    * **下载即放入**（2026-11-18 作者：「就是在套餐里面一起下载的，就放入」）——
    * 与真机 `download_runtime_file` 末尾那一手同一条口径：切片器配置写进它自己那一档的
    * 每个账号目录；MKP 预设不进切片器（走「启用」），`copyToSlicerIn` 会抛，跳过就是。
+   * `place: false`（「下载不放入」）= 这一手整段不做，已经放过的那份保持原样。
    */
-  try {
-    copyToSlicerIn(fileName)
-  } catch {
-    /* 不是切片器配置 —— 与真机一样什么都不做 */
+  if (place) {
+    try {
+      copyToSlicerIn(fileName)
+    } catch {
+      /* 不是切片器配置 —— 与真机一样什么都不做 */
+    }
   }
 }
 
@@ -3180,8 +3184,8 @@ export const mockApi: MkpApi = {
    * `mockDeliver` 发水位、落下载区、洗掉 stale；删除把那份拿走。
    * 界面上「下载 / 更新 / 删除」从此在浏览器里也是**真的会变**的。
    */
-  async downloadCatalogFile(fileName, onTick) {
-    await mockDeliver(fileName, onTick)
+  async downloadCatalogFile(fileName, onTick, place) {
+    await mockDeliver(fileName, onTick, place ?? true)
   },
 
   async deleteDeliveryFile(fileName) {
@@ -3222,12 +3226,12 @@ export const mockApi: MkpApi = {
     mockStale = mockStale.filter((f) => f.fileName !== row.fileName)
   },
 
-  async downloadCatalogFiles(fileNames, onTick) {
+  async downloadCatalogFiles(fileNames, onTick, place) {
     /* 逐份走同一条 `mockDeliver`；**一份失败不拖累别人**（与真机同口径），按份给结局 */
     const outcomes: DownloadOutcome[] = []
     for (const fileName of fileNames) {
       try {
-        await mockDeliver(fileName, onTick)
+        await mockDeliver(fileName, onTick, place ?? true)
         outcomes.push({ fileName, ok: true, message: '' })
       } catch (e) {
         outcomes.push({ fileName, ok: false, message: String((e as Error)?.message ?? e) })

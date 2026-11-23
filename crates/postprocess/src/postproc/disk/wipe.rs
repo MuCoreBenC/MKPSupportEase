@@ -9,7 +9,7 @@
     clippy::collapsible_if,
     clippy::question_mark,
     clippy::ptr_arg
-)] // Go 同形结构，不改写（let-else 与 Go 的 early-return 同形）
+)] // 同形结构，不改写（let-else 与早退同形）
 
 use crate::gcode::{format_e, format_python_float, format_speed, format_speed_int, math_round};
 use crate::ir::{Ir, num_strip};
@@ -291,7 +291,7 @@ fn last_extrude_xy_in_output(lines: &[String]) -> Option<(f64, f64)> {
     None
 }
 
-// computeLastExtrudeDirInOutput（wipe.go:301）在 Go 侧无消费者，未移植。
+// computeLastExtrudeDirInOutput（wipe.go:301）在 原口径无消费者，未移植。
 
 // ---- stagger 角计算（wipe.go:129） ----
 
@@ -477,7 +477,7 @@ fn build_disk_positions(supports: &[String]) -> Option<Vec<DiskPosition>> {
 }
 
 /// `PredictDiskPlacement`（wipe.go:334）：只做选位+评分，不生成 G-code、
-/// 不追加 diskHistory（HullPoly 缓存仍会填充，与 Go 一致）。
+/// 不追加 diskHistory（HullPoly 缓存仍会填充，与既有口径 一致）。
 pub fn predict_disk_placement(
     supports: &[String],
     collision_check: &mut [CollisionLayer],
@@ -1740,7 +1740,7 @@ pub struct DiskWipeSegment {
 }
 
 /// `GenerateDiskWipeSegment`（sdk.go:175）：SDK 入口。
-/// opts 零值回退默认（wipe_distance/wipe_retract_ratio 与 Go 同样只回退不消费）。
+/// opts 零值回退默认（wipe_distance/wipe_retract_ratio 与既有口径 同样只回退不消费）。
 pub fn generate_disk_wipe_segment(
     req: DiskWipeRequest,
     opts: DiskWipeOptions,

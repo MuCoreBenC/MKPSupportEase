@@ -61,6 +61,7 @@ import {
   deliveryMutated,
   useDeliveryRevision,
   usePresetPrefsRevision,
+  useSourceRevision,
 } from '../state/deliveryState'
 import type {
   ActiveOrigin,
@@ -816,6 +817,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    */
   const [localPresets, setLocalPresets] = useState<LocalPresetFile[]>([])
   const deliveryRevision = useDeliveryRevision()
+  /*
+   * **换过数据源 ⇒ 目录重读**：机型、字段定义、页签 / 分组、MKP 文件名全来自内部根
+   * 那份 catalog。页面常驻不重挂载，不带这一条的话，参数页会把上一条发布线的
+   * 机型与字段留在屏幕上。
+   */
+  const sourceRevision = useSourceRevision()
   const [combo, setCombo] = useState<ComboData | null>(null)
   const [error, setError] = useState<Text | null>(null)
   /** 当前选的组合。catalog 到了才知道选谁，所以初值是 null */
@@ -1201,6 +1208,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
 
   useEffect(() => {
     let alive = true
+    /* 换源代次只当"该重读"的开关 —— 值本身不参与这一趟计算 */
+    void sourceRevision
     void (async () => {
       const [list, meta, world] = await Promise.all([
         api.getMachines(),
@@ -1284,16 +1293,25 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       const liveVersion = liveMachine?.versions.find((v) => v.id === live?.versionId)
       const home = liveMachine ?? list[0]
       const homeVersion = liveVersion ?? home?.versions[0]
-      if (home !== undefined && homeVersion !== undefined) {
-        setPick({ machineId: home.id, versionId: homeVersion.id })
-      }
+      setPick((prev) => {
+        /* 重读（例如换了数据源）时**留着选中的那个组合** —— 新目录里还在就不动它 */
+        if (
+          prev !== null &&
+          list.some((m) => m.id === prev.machineId && m.versions.some((v) => v.id === prev.versionId))
+        ) {
+          return prev
+        }
+        return home !== undefined && homeVersion !== undefined
+          ? { machineId: home.id, versionId: homeVersion.id }
+          : prev
+      })
     })().catch((e: unknown) => {
       if (alive) setError(errorText(e))
     })
     return () => {
       alive = false
     }
-  }, [pinnedAtMount, tr])
+  }, [pinnedAtMount, tr, sourceRevision])
 
   /*
    * 换组合就**重拉**布局、参数、文件清单 —— 不吃缓存。

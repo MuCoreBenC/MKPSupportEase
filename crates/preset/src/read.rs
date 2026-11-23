@@ -261,7 +261,7 @@ glue_z_compensation_enabled = false
         assert_eq!(err.code(), "E_TOML_PARSE_001");
     }
 
-    /// CRLF 兜底两形态，与 Go 语义逐字对齐：
+    /// CRLF 兜底两形态，与 既有语义逐字对齐：
     /// - `\r\n` 文件：首轮可解析（或归一后可解析），头注释照常命中；
     /// - 裸 `\r` 文件：TOML 归一后**能**解析，但 Go 的 bufio.Scanner 同样
     ///   不按裸 \r 分行 ⇒ machine 头提取不到 ⇒ 引擎层硬错误。Rust 在读取点

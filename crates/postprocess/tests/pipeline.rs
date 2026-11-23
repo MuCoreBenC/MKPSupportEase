@@ -22,6 +22,8 @@
 // （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
 #![allow(clippy::disallowed_methods)]
 
+mod common;
+
 use postprocess::config;
 use postprocess::diag::CancelToken;
 use postprocess::ir::{Ir, fill_defaults};
@@ -93,6 +95,7 @@ fn fixture_is_derived_from_the_ir_json() {
 
 #[test]
 fn full_pipeline_runs_and_orders_steps() {
+    common::install_tables();
     let out_path = std::env::temp_dir().join("mkpse-pp-e2e-test.gcode");
     let req = ProcessRequest {
         gcode_path: golden_input(),
@@ -153,6 +156,7 @@ fn full_pipeline_runs_and_orders_steps() {
 /// 变成机械可查的失败。
 #[test]
 fn every_executed_step_also_emits_progress() {
+    common::install_tables();
     let out_path = std::env::temp_dir().join("mkpse-pp-step-event-parity.gcode");
     let req = ProcessRequest {
         gcode_path: golden_input(),
@@ -186,6 +190,7 @@ fn every_executed_step_also_emits_progress() {
 /// `--set` 真的作用在管线上（不只是在 config 的单测里）。
 #[test]
 fn override_reaches_the_pipeline() {
+    common::install_tables();
     let out_path = std::env::temp_dir().join("mkpse-pp-override.gcode");
     let req = ProcessRequest {
         gcode_path: golden_input(),
@@ -240,6 +245,7 @@ fn broken_toml_aborts_with_code() {
 /// 机型维度全 0，输出是垃圾而退出码是 0。
 #[test]
 fn unknown_machine_type_aborts_before_pass1() {
+    common::install_tables();
     let out_path = std::env::temp_dir().join("mkpse-pp-unknown-machine-out.gcode");
     let _ = std::fs::remove_file(&out_path);
     let req = ProcessRequest {

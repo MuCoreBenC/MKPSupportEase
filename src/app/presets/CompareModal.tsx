@@ -35,6 +35,7 @@ import { api, errorText } from '../../api'
 import { msg, t, useLocale, useText, useT, type Locale, type Text, type Tr } from '../../i18n'
 import type { CatalogRegistry, ParamEdit, PresetParamValues, LocalPresetFile } from '../../api'
 import { bi } from '../shared/dataLabel'
+import { useSourceRevision } from '../state/deliveryState'
 import { FieldControl } from '../../components/field'
 import type { FieldSchema } from '../../components/field'
 import { boolOf } from '../../components/field/value'
@@ -193,10 +194,15 @@ export default function CompareModal({
     [files],
   )
 
+  /* 换过数据源 ⇒ 注册表（字段中文名 / 分组名）按新目录重读，见下面那条 effect */
+  const sourceRevision = useSourceRevision()
+
   /* 打开时读一次注册表（字段定义 + 分组名 —— 与参数页同一份来源） */
   useEffect(() => {
     if (!open) return
     let alive = true
+    /* 换源代次只当"该重读"的开关 —— 值本身不参与这一趟计算 */
+    void sourceRevision
     void api.getRuntimeCatalog().then(
       (c) => {
         if (alive) setRegistry(c.registry)
@@ -208,7 +214,7 @@ export default function CompareModal({
     return () => {
       alive = false
     }
-  }, [open])
+  }, [open, sourceRevision])
 
   /*
    * 关掉就收回编辑态与小开关。**草稿的清理在下面「打开那一下」**（`justOpened` 的 first

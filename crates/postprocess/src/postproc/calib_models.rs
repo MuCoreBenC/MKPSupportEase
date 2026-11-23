@@ -13,9 +13,9 @@
 //! 后处理那一趟（[`crate::postproc::disk::calibration`]）：尺寸校验的标称外形、
 //! 图案基准偏移、XY 模板偏移、质心旋转判据的期望，四处都从这里取。
 //!
-//! 装载由 [`crate::postproc::machine_dims`] 统一做（`load_presets_dir` 顺手读它），
-//! 读取链与机型表**同一条**：显式 `install` → `MKPSE_PRESETS_DIR` → 仓库相对
-//! `../../presets`。不另造一份路径依赖，也不另开一个进程级 `OnceLock`。
+//! 装载跟着机型表走：`load_presets_dir` 顺手读它，随
+//! [`crate::postproc::machine_dims::install`] 一起进程级装一次。不另造一份路径依赖，
+//! 也不另开一个进程级 `OnceLock`。
 //!
 //! # 坏了会怎样
 //!
@@ -312,22 +312,26 @@ pub fn decide_calibration(
 pub fn load(path: &Path) -> Result<Vec<ModelProfile>, String> {
     let raw =
         std::fs::read_to_string(path).map_err(|e| format!("读不到 {}（{e}）", path.display()))?;
-    let file: ModelsFile =
-        toml::from_str(&raw).map_err(|e| format!("{} 解析失败：{e}", path.display()))?;
+    parse(&raw, &path.display().to_string())
+}
+
+/// 从 TOML 正文解析档表；`where` 只用于报错，不参与解析。
+///
+/// 发布物把 `presets/calibration_models.toml` 编进二进制后走这一条——磁盘上没有 presets/。
+pub fn parse(raw: &str, where_: &str) -> Result<Vec<ModelProfile>, String> {
+    let file: ModelsFile = toml::from_str(raw).map_err(|e| format!("{where_} 解析失败：{e}"))?;
     if file.models.is_empty() {
         return Err(format!(
-            "{} 里一条 [[models]] 都没有 —— 这张表就是校准图案的来源，空表等于没有校准能力",
-            path.display()
+            "{where_} 里一条 [[models]] 都没有 —— 这张表就是校准图案的来源，空表等于没有校准能力"
         ));
     }
     for p in &file.models {
-        validate(p).map_err(|e| format!("{}：{e}", path.display()))?;
+        validate(p).map_err(|e| format!("{where_}：{e}"))?;
     }
     for (i, p) in file.models.iter().enumerate() {
         if file.models[..i].iter().any(|q| q.id == p.id) {
             return Err(format!(
-                "{}：档 id '{}' 撞名 —— 报错与认档都靠 id 区分",
-                path.display(),
+                "{where_}：档 id '{}' 撞名 —— 报错与认档都靠 id 区分",
                 p.id
             ));
         }

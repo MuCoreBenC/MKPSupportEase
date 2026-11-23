@@ -1,7 +1,7 @@
 //! Task 10.3 判据：printtime 数值比对（tests/reference/printtime/）。
 //!
 //! 输入 = G2 vendored 副本（与 tests/golden/42274.2.pass2.expected.gcode 字节相同），
-//! 选项 = {compute_delta:true, startup_overhead_seconds:240}（与旧侧 process.go:1104 同参）。
+//! 选项 = {compute_delta:true, startup_overhead_seconds:240}（与原口径 process.go:1104 同参）。
 //! 数值策略：**逐位相等**。原策略是「不等则退为相对误差 1e-9」，Task 8.4e 查清那唯一
 //! 一条退档（`TotalSeconds` 差 1 ULP）的真因是**参考文件的解析层**而非算法（serde_json
 //! 默认 feature 的浮点快路径），修掉解析后 5 项全部逐位相等 ⇒ 容差分支已删。
@@ -37,7 +37,7 @@ fn printtime_matches_go_reference() {
     for (key, value) in cases {
         let want = expected[key].as_f64().unwrap();
         // **Task 8.4e 判据升级（这是收紧不是放宽）**：原判据是「先逐位相等，不等则退到
-        // 相对误差 < 1e-9」，Task 10 当时实测 `TotalSeconds` 落在退档分支上（记为「与 Go
+        // 相对误差 < 1e-9」，Task 10 当时实测 `TotalSeconds` 落在退档分支上（记为「与既有口径
         // 参考差 1 ULP」）。那 1 ULP 的**真因不在算法**：`expected_result.json` 是用
         // serde_json 读的，而它默认 feature 下的浮点解析走「有效数字 as f64 ÷ 10^k」快
         // 路径，17 位有效数字上可差 1 ULP（等价复现：`11637377359379175f64 / 1e13`）。

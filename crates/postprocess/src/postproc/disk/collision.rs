@@ -1,4 +1,4 @@
-//! 碰撞检测（对照 disk/collision.go 逐行）。诊断（logInfo）在旧侧是旁路输出，
+//! 碰撞检测（对照 disk/collision.go 逐行）。诊断（logInfo）在原口径是旁路输出，
 //! Rust 侧结果结构体已经携带全部字段，调用方自取。
 
 use crate::ir::Ir;
@@ -640,7 +640,7 @@ impl ModelFootprint {
 ///
 /// 用来回答作者那一问 ——「我希望把它模型的包围盒也显示出来，就是后处理的时候碰撞检测的
 /// 那个显示的一样的，复用的」。所以它**不自己算任何几何**：床与模型都问
-/// [`model_footprint`]，禁区照抄 IR（`Machine.ForbiddenZones`，机型表填进去的）。
+/// [`model_footprint`]，禁区沿用 IR（`Machine.ForbiddenZones`，机型表填进去的）。
 ///
 /// `None` = 这份 G-code 里一个板内模型点都没有（读不动 / 空文件）—— 调用方不写这一格，
 /// 报告页就不摆图（与"没给就不摆"同一条，不画编出来的图）。
@@ -1918,6 +1918,7 @@ mod tests {
     use crate::ir::Ir;
 
     fn tower_ir() -> Ir {
+        crate::postproc::machine_dims::install_repo_tables_for_tests();
         // wiper (20,20) + brim bbox：local [2.96, 37.04]² → machine [22.96, 57.04]²
         let mut ir = Ir::default();
         ir.tower.use_towers = true;

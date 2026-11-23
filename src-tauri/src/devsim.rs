@@ -42,7 +42,7 @@ use postprocess::diag::CancelToken;
 /// **演出脚本**：`(步骤 id, 步内比例, 那一行话)`。
 ///
 /// 步骤 id 与内核的 `Step` 一一对应（界面按它换中文名，见 `src/app/postprocess/steps.ts`），
-/// 那几行话**照抄内核自己那 12 条 `timer.begin`**（`crates/postprocess/src/pipeline/mod.rs`）——
+/// 那几行话**沿用内核自己那 12 条 `timer.begin`**（`crates/postprocess/src/pipeline/mod.rs`）——
 /// 演出来的那一屏与真跑时长得一样，改样式时才对得上。
 pub fn script() -> Vec<(&'static str, f32, String)> {
     /* 两条长 pass 自己再切几刀：真跑时它们的进度条就是这么走的 */

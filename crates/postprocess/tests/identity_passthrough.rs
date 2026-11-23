@@ -28,6 +28,8 @@
 
 #![allow(clippy::disallowed_methods)]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
 use postprocess::diag::{CancelToken, PostprocError};
@@ -95,6 +97,7 @@ impl ProgressSink for NoProgress {
 /// 造一份"Z 校准按新型走"的 IR —— 只有 `z_calibration == "new"` 时
 /// `is_dynamic` 才为真、第 7 步（认档）才会跑。
 fn z_new_ir(raw: &str) -> Ir {
+    common::install_tables();
     let overrides = ["Safety.ZCalibration=new".to_string()];
     pipeline::resolve_ir(&config_a1(), &overrides, Some(raw)).expect("配置 → IR（A1 + Z 校准新型）")
 }
@@ -112,6 +115,7 @@ fn assert_passthrough(
     work: &Path,
     run: impl FnOnce(IrProcessRequest) -> Result<postprocess::pipeline::ProcessResult, PostprocError>,
 ) {
+    common::install_tables();
     let done = run(request).unwrap_or_else(|e| panic!("{label}：管线失败 {e:?}"));
 
     // ① 存档里那个"最终用的模式"（`detail.calibration.mode` 的来源）

@@ -82,7 +82,7 @@ fn extract_coord_on_real_segments() {
 
 /// 真实片段上的 E 值判定。
 ///
-/// 2026-10-19 作者裁定：旧侧的 `HasEParam` 只认 `E-` / `E数字`，把 `E.4`
+/// 2026-10-19 作者裁定：原口径的 `HasEParam` 只认 `E-` / `E数字`，把 `E.4`
 /// 漏掉是 **bug**（直接校准的 `filter_e_moves` 会漏删纯 E 行；挂载/涂胶的
 /// 「跳过带 E 的行」也会漏判）。现在 `has_e_param` 与 `get_e_value` 同口径。
 #[test]

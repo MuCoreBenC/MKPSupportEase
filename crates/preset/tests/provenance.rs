@@ -13,6 +13,8 @@
 // （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
 #![allow(clippy::disallowed_methods)]
 
+mod common;
+
 use std::path::PathBuf;
 
 use preset::model::{SourceProvenance, SourceRef};
@@ -22,6 +24,7 @@ use preset::provenance::{copy_with_provenance, parse, sha256_hex, strip};
 ///
 /// 判据要的是一批**合法预设正文**，不是「当前产物长什么样」。
 fn fixtures() -> Vec<PathBuf> {
+    common::install_tables();
     let dir =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../postprocess/tests/fixtures/ir/presets");
     let mut out: Vec<PathBuf> = std::fs::read_dir(&dir)

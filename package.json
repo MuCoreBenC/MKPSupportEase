@@ -1,7 +1,7 @@
 {
   "name": "mkp-support-ease",
   "private": true,
-  "version": "0.0.16",
+  "version": "0.0.17",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -46,6 +46,7 @@
     "check:all": "node scripts/check/run.mjs all",
     "check:i18n": "node scripts/check-i18n.mjs",
     "check:copy": "node scripts/check-copy.mjs",
+    "probe:release-hook": "node scripts/check/release-hook-probe.mjs",
     "translations:todo": "node scripts/stale-translations.mjs",
     "glue:check": "node scripts/glue-check.mjs",
     "bambu:layers": "node scripts/bambu-layers.mjs",

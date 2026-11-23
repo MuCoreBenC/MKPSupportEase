@@ -315,7 +315,11 @@ pub async fn download_runtime_file(
     app: AppHandle,
     file_name: String,
     on_tick: Channel<DownloadTick>,
+    place: Option<bool>,
 ) -> Result<String, AppError> {
+    /* `place: false` = 这一次只要文件，别往切片器目录里塞（界面「下载不放入」）。
+    缺省 / None = 老口径：切片器配置下完就放进每个账号目录。 */
+    let place = place.unwrap_or(true);
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("downloadRuntimeFile", |_| {
             let root = internal_root(&app)?;
@@ -368,8 +372,10 @@ pub async fn download_runtime_file(
             }
 
             outcome?;
-            /* 下完就能在切片器里选到它：写进每个账号目录 */
-            place_after_download(&root, file);
+            /* 下完就能在切片器里选到它：写进每个账号目录（`place: false` 这一次不写） */
+            if place {
+                place_after_download(&root, file);
+            }
             /* 预设的真实落点是 `content/<sha>`，文件名一律报目录里的名字 */
             Ok(file.file_name.clone())
         })
@@ -431,7 +437,10 @@ pub async fn download_runtime_files(
     app: AppHandle,
     file_names: Vec<String>,
     on_tick: Channel<DownloadTick>,
+    place: Option<bool>,
 ) -> Result<Vec<DownloadOutcomeDto>, AppError> {
+    /* 与单份同一条口径：`place: false` = 只要文件，不往切片器目录里塞 */
+    let place = place.unwrap_or(true);
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("downloadRuntimeFiles", |_| {
             let root = internal_root(&app)?;
@@ -494,10 +503,13 @@ pub async fn download_runtime_files(
             };
 
             let outcomes = runtime::delivery::deliver_all(&root, &wanted, &remote, &report);
-            /* 取到的那几份里，切片器配置顺手放进切片器（每个账号目录一份） */
-            for outcome in outcomes.iter().filter(|o| o.ok) {
-                if let Some(file) = wanted.iter().find(|f| f.file_name == outcome.file_name) {
-                    place_after_download(&root, file);
+            /* 取到的那几份里，切片器配置顺手放进切片器（每个账号目录一份；
+            `place: false` 这一次一份都不放） */
+            if place {
+                for outcome in outcomes.iter().filter(|o| o.ok) {
+                    if let Some(file) = wanted.iter().find(|f| f.file_name == outcome.file_name) {
+                        place_after_download(&root, file);
+                    }
                 }
             }
             Ok(outcomes

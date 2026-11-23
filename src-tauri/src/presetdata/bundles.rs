@@ -200,7 +200,7 @@ impl Bundles {
     /// [`super::Presets::check_bundle_refs`] 是同一条判据的两端。
     ///
     /// 内容变了就要盖 `updatedAt`：这一格记的就是「上一次改动日期」，
-    /// 迁移照抄旧值、真改动盖新值，两件事不冲突。
+    /// 迁移沿用旧值、真改动盖新值，两件事不冲突。
     ///
     /// `now_iso8601` 由**调用方**给：这一层不认时间源（与"根由调用方给"同一条纪律）。
     /// 只取前 10 位（`YYYY-MM-DD`）—— 那一格要的是日期，不是时刻。
@@ -741,7 +741,7 @@ mod tests {
             again.get("a1_default").expect("大小写不敏感").asset_refs,
             vec!["a1-bbs-02-010".to_owned()]
         );
-        // 迁移照抄的旧日期被真改动顶掉 —— 这是有意的，见 set_refs 的注释
+        // 迁移沿用的旧日期被真改动顶掉 —— 这是有意的，见 set_refs 的注释
         assert_ne!(
             again.get("a1_default").expect("在").updated_at.as_deref(),
             Some("2026-07-12")

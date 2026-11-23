@@ -2040,7 +2040,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *     假后端一定抛 `NotImplementedError`（自带人话 hint，A2），界面接住原样显示
    *     —— 不许整页白屏，也不许静默吞掉（吞掉就等于把「哪个口子没接」藏起来）
    */
-  const download = (row: PresetTableRow) => {
+  const download = (row: PresetTableRow, opts?: { place?: boolean }) => {
+    /*
+     * `place: false` = 只落文件、不放进切片器（右键「下载不放入」）。
+     * 它只影响切片器配置那一条路（MKP 预设的"顺手那一手"是「设为使用中」，另一格开关）。
+     */
+    const place = opts?.place ?? true
     /*
      * **连点的第二下丢掉**（见 `inflightRef`）。作者 2026-10-20：
      * 「下载的时候，我点得很快，就会出现这个情况，它好像就重复了」——
@@ -2134,27 +2139,37 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       })
       /* 过程如实说：一次调用一路水位，后端推到哪说到哪 —— 不编一个分母，也不转空圈 */
       data
-        .downloadPreset(row.fileName, (tick) =>
-          setNote({ text: tickText(tick), bad: tick.stage === 'failed' }),
+        .downloadPreset(
+          row.fileName,
+          (tick) => setNote({ text: tickText(tick), bad: tick.stage === 'failed' }),
+          place,
         )
         .then(
           (placed) => {
             leave(key)
             clearBusy(row.rowKey)
+            /*
+             * 切片器那一格按**这一手到底干了什么**说话：
+             *   · 默认这一手会放进切片器；本机没有切片器账号目录时 `placed` 是 false ——
+             *     那时照实说"得自己点「放入」"，不假装放好了。
+             *   · `place: false`（「下载不放入」）时切片器里那份原样不动：
+             *     已经在的要说"没换"，不在的要说"未放入"，都不许说成放好了。
+             *   （落点路径不印在提示条上 —— 要看文件在哪，右键有「显示我们那份的文件夹」。）
+             */
+            const slicerText =
+              place === false
+                ? placed
+                  ? msg('presets.page.download.doneKeepOld', { name: row.fileName })
+                  : msg('presets.page.download.doneNoPlace', { name: row.fileName })
+                : placed
+                  ? msg('presets.page.download.doneSlicer', { name: row.fileName })
+                  : msg('presets.page.download.doneSlicerManual', { name: row.fileName })
             setNote({
               text: updating
                 ? row.presetState === 'tampered'
                   ? msg('presets.page.download.tamperedDone', { name: row.fileName })
                   : msg('presets.page.download.archivedDone', { name: row.fileName })
-                /*
-                 * 大白话（2026-10-13 作者：**技术细节不必让用户知道**）——
-                 * 落点路径不印在提示条上（要看文件在哪，行上右键有「显示我们那份的文件夹」）。
-                 * 下载会顺手放进切片器（2026-11-18）；本机没有切片器账号目录时
-                 * `placed` 是 false —— 那时照实说"得自己点「放入」"，不假装放好了。
-                 */
-                : placed
-                  ? msg('presets.page.download.doneSlicer', { name: row.fileName })
-                  : msg('presets.page.download.doneSlicerManual', { name: row.fileName }),
+                : slicerText,
               bad: false,
             })
           },
@@ -3556,6 +3571,26 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           disabled,
           onSelect: () => download(row),
         },
+        /*
+         * **只落文件、不放进切片器**（同一个行级动作的另一种结果）。
+         * 两件事都成立才列：这一行真有下载 / 更新可点（判据与上面那项同一条
+         * `updateStatusOf`），而且这一份**本来会被放入** —— 今天只有 BBS 工艺 profile
+         * 走这一手（后端 `slicer_of_kind` 同一张表）。永远做不到的整项不列。
+         * 词跟着上面那一项走（下载 / 更新），用户不用猜这一项对应哪个动作。
+         */
+        ...(st.action !== 'none' && row.kind === 'bbs_profile'
+          ? [
+              {
+                id: 'downloadOnly',
+                label: tr(
+                  st.action === 'update'
+                    ? 'presets.page.menu.updateNoPlace'
+                    : 'presets.page.menu.downloadNoPlace',
+                ),
+                onSelect: () => download(row, { place: false }),
+              },
+            ]
+          : []),
         /* 见 `goLocal`。云端表一味只读 —— "我这一份怎么样"永远在**本地表**那一侧，
            所以这里给一条过去的路，省得先抬头去点顶上那个「本地/云端」分段。 */
         { id: 'goLocal', icon: 'swap', label: tr('presets.page.menu.goLocal'), onSelect: () => goLocal(row) },

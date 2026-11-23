@@ -1,28 +1,21 @@
-//! 机型表：尺寸 + 别名 + 禁区。**唯一来源是 `presets/`**（b04 Task 13 / M3）。
+//! 机型表：尺寸 + 别名 + 禁区。**进程级，只能由调用方显式注入**（[`install`]）。
 //!
-//! # 为什么不再是编译期快照
+//! # 数据从哪来
 //!
-//! 搬进来之前这里是 `include_str!` 嵌进二进制的两份 JSON —— 那在源仓库是合理的
-//! （那边的机型集是构建期常量，换机型集 = 出新版本）。在我们的仓库里不成立：
-//! `presets/machines/*.toml` 是**可编辑的唯一真源**，工作台就靠改它来交付。
-//! 快照与它并存的话，改完尺寸再生成，产物用的还是旧几何 —— 而且不会报错。
+//! `presets/machines/*.toml` 是**可编辑的唯一真源**，但它是开发仓库里的文件，
+//! 不是运行时可读的数据源 —— 发布物根本不含 `presets/`。所以这个模块自己不读盘：
+//! 表由进程入口在启动时装进来，来源由入口决定（发布物从随包 catalog 构；
+//! 诊断 CLI 从 `--presets` 指的树读，[`load_presets_dir`]；判据自己装）。
 //!
-//! 所以数据改成**注入**：进程启动时由调用方给一份（[`install`]），
-//! 或者从 `presets/` 目录读（[`load_presets_dir`]）。查不到仍然返回 zero-value
-//! （M017「禁止机型回退」的语义保留，与旧侧一致）。
+//! # 没有备用数据源
 //!
-//! # 为什么允许"没人装过"时自己去读 `presets/`
-//!
-//! 这个 crate 的判据有 246 条，其中相当一部分会走到这里（几何、涂胶、擦拭、标定）。
-//! 要在每条判据里插一行全局安装是不现实的，而且 `OnceLock` 只能装一次 ——
-//! 测试之间会互相依赖执行顺序。
-//!
-//! 所以默认值是一条**有顺序的逃生链**：显式装过 → 环境变量 `MKPSE_PRESETS_DIR` →
-//! 编译期记下的仓库相对路径 `../../presets`。前两条是给发布物与命令行用的，
-//! 第三条只在"在仓库里跑"时成立。三条都不成立就 **panic 并说明怎么装** ——
-//! 静默用空表会让产物在几何上悄悄错掉，那是这个文件最不能接受的失败方式。
+//! 这里**不读环境变量**，也**不按编译期路径回仓库找 `presets/`**。备用源意味着
+//! 开发态能替发布态掩盖数据缺失：同一份代码在仓库里跑得好好的，装到用户机器上
+//! 才在第一次查机型时炸掉（`Error code: 101`，切片器还不显示原因）。
+//! 没装就 panic 并说明谁来装 —— 静默用空表会让产物在几何上悄悄错掉，
+//! 那是这个文件最不能接受的失败方式。
 
-#![allow(clippy::collapsible_if)] // 机型检测四优先级循环与 Go 同形，不改写
+#![allow(clippy::collapsible_if)] // 机型检测四优先级循环保持同形，不改写
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -143,6 +136,24 @@ pub struct MachineTables {
 }
 
 impl MachineTables {
+    /// 用调用方已有的数据装一份表（发布物没有 presets/ 目录时走这条）。
+    ///
+    /// 只装数据，不解释规则；校准模型档没有就留空，由消费方自己决定怎么报。
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_catalog_parts(
+        dimensions: HashMap<String, MachineDimensions>,
+        alias_map: HashMap<String, String>,
+        forbidden_zones: HashMap<String, Vec<ZonePolygon>>,
+        calibration_models: Option<Vec<ModelProfile>>,
+    ) -> Self {
+        Self {
+            dimensions,
+            alias_map,
+            forbidden_zones,
+            calibration_models,
+        }
+    }
+
     pub fn dimensions(&self) -> &HashMap<String, MachineDimensions> {
         &self.dimensions
     }
@@ -168,10 +179,13 @@ pub fn install(tables: MachineTables) -> Result<(), String> {
         .map_err(|_| "机型表已经装过了（OnceLock 只能装一次）".to_string())
 }
 
-/// 从 `presets/` 目录读一份机型表：
+/// 把一棵 presets 树读成机型表：
 /// `machines/*.toml` 的 `[dimensions]` 与 `externalAliases`，
 /// `forbidden_zones/*.toml` 的 `[[zones]]`，以及 `calibration_models.toml`
 /// 的 `[[models]]`（最后这份**可选** —— 判据 fixtures 里没有它是正常的）。
+///
+/// 这是**给注入方用的加载器**，库内没有任何路径会自动调它：装不装、从哪读，
+/// 由入口（发布物 / 诊断 CLI / 判据）自己决定并显式 [`install`]。
 pub fn load_presets_dir(dir: &Path) -> Result<MachineTables, String> {
     let mut tables = MachineTables::default();
 
@@ -236,23 +250,33 @@ pub fn load_presets_dir(dir: &Path) -> Result<MachineTables, String> {
     Ok(tables)
 }
 
-/// 进程级的机型表：显式装过就用它，否则按模块文档那条逃生链去找 `presets/`。
+/// 进程级的机型表。**必须先 [`install`]** —— 这里没有备用数据源。
+///
+/// 没装就 panic 而不是退回空表：空表会让后处理在几何上悄悄算错，而「没人装表」
+/// 是入口接线的错误，必须在第一次用的时候就被看见，不能拖到用户机器上。
 pub fn tables() -> &'static MachineTables {
-    TABLES.get_or_init(|| {
-        if let Ok(dir) = std::env::var("MKPSE_PRESETS_DIR") {
-            return load_presets_dir(Path::new(&dir))
-                .unwrap_or_else(|e| panic!("MKPSE_PRESETS_DIR={dir} 读不出来：{e}"));
-        }
-        let repo_default = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets");
-        if repo_default.is_dir() {
-            return load_presets_dir(&repo_default)
-                .unwrap_or_else(|e| panic!("{} 读不出来：{e}", repo_default.display()));
-        }
+    TABLES.get().unwrap_or_else(|| {
         panic!(
-            "没有机型表。发布物必须在启动时调 `machine_dims::install(..)`；\
-             开发与测试可以设 MKPSE_PRESETS_DIR 指向 presets/ 目录"
-        );
+            "机型表未初始化：本进程必须先调 `machine_dims::install(..)`。\
+             这里不读环境变量、也不会去仓库目录找 `presets/`（发布物没有那个目录）。"
+        )
     })
+}
+
+/// 判据的装表入口：从这个仓库的 `presets/` 读一份装进来（进程内一次）。
+///
+/// `#[cfg(test)]` 让它**只存在于单元测试二进制里** —— 编不进客户端、钩子、诊断 CLI，
+/// 因此它不是库的兜底，而是"判据自己决定用哪棵树"。生产入口必须自己装表
+/// （发布物从随包 catalog 构，CLI 从 `--presets` 读）。
+#[cfg(test)]
+pub(crate) fn install_repo_tables_for_tests() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../presets");
+        let tables = load_presets_dir(&dir)
+            .unwrap_or_else(|e| panic!("判据读不出来 {} 的机型表：{e}", dir.display()));
+        install(tables).expect("单元测试进程里机型表只该装一次");
+    });
 }
 
 /// `presets/machines/*.toml` 里我们用到的那几个字段。
@@ -481,7 +505,7 @@ pub fn fill_machine_dims_from_toml(toml_machine: &str, ir: &mut crate::ir::Ir) {
 }
 
 /// 按 Canonical Machine ID 查维度；未命中 zero-value（M017：禁止机型回退）。
-/// 大小写不敏感兜底与旧侧 lookupCaseInsensitive 一致。
+/// 大小写不敏感兜底与原口径 lookupCaseInsensitive 一致。
 pub fn get_machine_dimensions(machine_type: &str) -> MachineDimensions {
     let map = &tables().dimensions;
     if let Some(d) = map.get(machine_type) {
@@ -524,6 +548,7 @@ mod tests {
     /// 反空转 + A1_MINI 校准坐标锚定（Task 4 参考导出实测值）。
     #[test]
     fn snapshot_has_all_machines() {
+        install_repo_tables_for_tests();
         let d = get_machine_dimensions("A1_MINI");
         assert!((d.calibration.y_line_x - 66.523).abs() < 1e-9);
         assert!((d.calibration.y_line_x_end - 76.523).abs() < 1e-9);
