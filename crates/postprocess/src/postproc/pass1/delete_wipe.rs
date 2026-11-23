@@ -1,6 +1,6 @@
 //! 擦拭段删除与特征跳转插入（对照 processor/delete_wipe.go / delete_wipe_continuous.go）。
 
-// 结构逐字对照 delete_wipe.go：嵌套 if / 手工索引循环与 Go 同形，不改写。
+// 结构逐字对照 delete_wipe.go：嵌套 if / 手工索引循环与 同形，不改写。
 #![allow(
     clippy::collapsible_if,
     clippy::needless_range_loop,
@@ -556,7 +556,7 @@ mod tests {
 
     #[test]
     fn strip_z_from_line_variants() {
-        // Go 语义：line[:zIdx] 的尾随空格 + rest[spaceIdx:] 的前导空格 = 双空格
+        // 既有语义：line[:zIdx] 的尾随空格 + rest[spaceIdx:] 的前导空格 = 双空格
         assert_eq!(strip_z_from_line("G1 X10 Y20 Z0.5 E1"), "G1 X10 Y20  E1");
         assert_eq!(strip_z_from_line("G1 X10 Z0.5"), "G1 X10");
         // Z 前无空格（词中 Z）不剥 —— Go 原样

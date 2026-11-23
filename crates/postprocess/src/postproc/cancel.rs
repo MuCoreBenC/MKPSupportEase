@@ -1,6 +1,6 @@
 //! pass 长循环内的协作取消（Task 17.2）。
 //!
-//! 旧 Go 侧规格（`processor/cancel.go`）：
+//! 原口径规格（`processor/cancel.go`）：
 //! - `cancelCheckInterval = 100ms`，注释明写「取时间而非行数，使取消延迟与
 //!   机器性能解耦」——每行都查原子量太贵，按行数节流则快慢机上延迟不可预测；
 //! - `Check`：未到间隔时只做一次时间比较即返回；到间隔才真正查取消位。
@@ -8,7 +8,7 @@
 //! 本模块逐字保持这个形态：`check` 在未到间隔时是一次 `duration_since` 比较。
 //!
 //! 间隔是**字段而非常量**（two-repo-ci-repair）：产品路径取
-//! `DEFAULT_CANCEL_CHECK_INTERVAL`（100ms，语义与 Go 逐字一致），判据路径可注入
+//! `DEFAULT_CANCEL_CHECK_INTERVAL`（100ms，语义与既有口径 逐字一致），判据路径可注入
 //! 极小值。根因是 100ms 窗把「循环内是否真查了取消位」这条判据变成了**墙钟相关**的
 //! ——在快机器上整条 pass 的墙钟远小于 100ms（CI run 32925530475 实测：同一测试
 //! 二进制 4 条用例合计 0.25s），第一次真检查根本没到点，于是取消只被下一个步骤
@@ -76,7 +76,7 @@ mod tests {
         let t0 = Instant::now();
         let token = CancelToken::new();
         let mut c = CancelChecker::with_interval(t0, DEFAULT_CANCEL_CHECK_INTERVAL);
-        // 未到 100ms：即使已取消也不触发（Go 同形——间隔内连原子读都不做）
+        // 未到 100ms：即使已取消也不触发（同形——间隔内连原子读都不做）
         token.cancel();
         assert!(c.check(&token, t0 + Duration::from_millis(50)).is_ok());
     }

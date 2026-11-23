@@ -1,4 +1,4 @@
-//! `PostprocError` —— 后处理内核的唯一错误类型，错误码保持旧 Go 侧字符串。
+//! `PostprocError` —— 后处理内核的唯一错误类型，错误码保持原口径字符串。
 //!
 //! 旧码对照（全部实测自旧仓库）：
 //! - `E_FILE_READ_001`  —— `engine/pipeline_failure.go:62`（read_gcode）与 `:132`
@@ -19,7 +19,7 @@
 //!   2026-10-11 起升成结构化码（[`PostprocError::Boundary`]）—— 那正是「外层码在说假话」
 //!   （把"模型超出打印边界"报成"配置错"）的来路。
 //!
-//! 一个诚实偏差，登记在此处而非隐瞒：`Cancelled` 在旧侧**没有**错误码
+//! 一个诚实偏差，登记在此处而非隐瞒：`Cancelled` 在原口径**没有**错误码
 //! （`StepCancelled` 是特殊分支、非 Diagnostic 路径），Rust 侧为类型统一给出
 //! `E_SYS_CANCELLED_001`，格式遵循旧词汇表但**是新造的**，不是复刻。
 //!
@@ -48,7 +48,7 @@ use crate::postproc::disk::collision::CollisionFacts;
 #[derive(Debug)]
 pub enum PostprocError {
     /// 文件 IO。错误码按 io::ErrorKind 分流：NotFound → `E_FS_NOT_FOUND_001`
-    /// （旧侧用于预设文件缺失），其余 → `E_FILE_READ_001`（旧侧 read_gcode 用）。
+    /// （原口径用于预设文件缺失），其余 → `E_FILE_READ_001`（原口径 read_gcode 用）。
     Io {
         /// 操作名（如 `read_gcode` / `read_preset`），进诊断的 operation 字段。
         op: &'static str,
@@ -58,7 +58,7 @@ pub enum PostprocError {
     /// TOML 解析失败（CRLF 归一重试后仍失败），`E_TOML_PARSE_001`。
     TomlParse {
         path: String,
-        /// 底层解析器消息（旧侧把 cause 存进 Diagnostic.Cause）。
+        /// 底层解析器消息（原口径把 cause 存进 Diagnostic.Cause）。
         message: String,
     },
 
@@ -66,7 +66,7 @@ pub enum PostprocError {
     ///
     /// **文案与来源仓库不同，是有意改的**：那边写「预设文件缺少 `# machine:` 声明」
     /// （`process.go:242` 的对位），而本项目没有预设文件、也没有头部注释 ——
-    /// 机型名是配置里的一个普通字段。照抄那句话会让用户去找一个不存在的东西。
+    /// 机型名是配置里的一个普通字段。沿用那句话会让用户去找一个不存在的东西。
     /// 错误码保持 `E_CFG_PARSE_001` 不变（对外契约）。
     MissingMachine { path: String },
 
@@ -106,10 +106,10 @@ pub enum PostprocError {
     /// pass1/pass2 等扫描处理失败，`E_GCODE_FAILED_001`。
     Processing { message: String },
 
-    /// 输出写入失败（`.part` 写入/rename），旧侧复用 `E_FILE_READ_001`。
+    /// 输出写入失败（`.part` 写入/rename），原口径复用 `E_FILE_READ_001`。
     Write { path: String, source: io::Error },
 
-    /// 用户取消。旧侧无码（见模块文档），`E_SYS_CANCELLED_001` 为新造。
+    /// 用户取消。原口径无码（见模块文档），`E_SYS_CANCELLED_001` 为新造。
     Cancelled { message: String },
 
     /// 模型越界：`E_GCODE_BOUNDARY_001`（打印边界）/ `E_GCODE_BOUNDARY_002`（涂胶范围）。
@@ -127,7 +127,7 @@ pub enum PostprocError {
 }
 
 impl PostprocError {
-    /// 稳定错误码（旧 Go 侧对外契约字符串）。
+    /// 稳定错误码（原口径对外契约字符串）。
     ///
     /// 穷尽性保障：本 match **刻意不写通配臂** —— 新增变体忘了给码是编译错误，
     /// 这就是 tasks.md 2.3 要求的「编译或测试失败」中的编译分支；
@@ -163,7 +163,7 @@ impl PostprocError {
     pub fn params(&self) -> Vec<(&'static str, String)> {
         match self {
             /* `target` 一个槽位两种来源：读侧（Io）是操作名，写侧（Write）是落点路径 ——
-            表里的模板只需要"是谁"这一格，两个变体共用同一个码（旧侧就这么复用的）。 */
+            表里的模板只需要"是谁"这一格，两个变体共用同一个码。 */
             Self::Io { op, source } => {
                 vec![("target", (*op).to_owned()), ("detail", source.to_string())]
             }
@@ -285,7 +285,7 @@ mod tests {
     }
 
     /// tasks.md 2.3 的测试分支：每个变体的码都必须非空、格式合法、互不碰撞
-    /// （Io 的两档除外——那是旧侧本来就有的复用），且三个契约码逐字保持。
+    /// （Io 的两档除外——那是原口径本来就有的复用），且三个契约码逐字保持。
     #[test]
     fn every_variant_has_unique_wellformed_code() {
         let mut seen: HashSet<&str> = HashSet::new();

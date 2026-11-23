@@ -27,7 +27,7 @@
 //!
 //! # 没有字节参考这件事
 //!
-//! 旧侧这份没有 golden 样本可比对，所以判据只能咬**结构**（该有的段在、不该有的段不在、
+//! 原口径这份没有 golden 样本可比对，所以判据只能咬**结构**（该有的段在、不该有的段不在、
 //! 温度处理对、范围检查会报），不能咬"逐字节一致"。`tests` 里那些就是这么写的。
 
 use crate::gcode::OffsetMode;
@@ -130,7 +130,7 @@ pub const BLOCK_END: &str = ";===== pre-print bed glue end ============";
 
 /// 主入口：按 `ir.prefs.bed_glue_*` 决定要不要插，插哪儿。
 ///
-/// 与旧侧 `applyPrePrintBedGlueToFile` 的差别只有一处：那边自己读文件、自己写文件；
+/// 与原口径 `applyPrePrintBedGlueToFile` 的差别只有一处：那边自己读文件、自己写文件；
 /// 这里收**行序列**、还行序列 —— 管线是内存里跑到底再一次落盘的，
 /// 中间不落盘（`pipeline/mod.rs` 的写步才是唯一写点）。
 pub fn apply_bed_glue(
@@ -290,7 +290,7 @@ fn as_travel(lines: Vec<String>) -> Vec<String> {
      *   · 路径**每行** `E0.001`           → 连成一条横穿床面的粗绿棒（作者 2026-11-05 实测）
      *
      * 校准模式只有 `G1 X100 Y100 Z10 E0.001` **那一个点**带 E，后面图案全是无 E 移动 ——
-     * 于是预览只亮一个点，路径按空驶处理。这里照抄：锚点那一下带 E（在 `build_block` 里），
+     * 于是预览只亮一个点，路径按空驶处理。这里沿用：锚点那一下带 E（在 `build_block` 里），
      * 路径本身一律 `G0`。
      */
     lines
@@ -330,7 +330,7 @@ fn last_xy_before(lines: &[String], end: usize) -> Option<(f64, f64)> {
 /// `extrude cali test` 之前。
 ///
 /// ★ 只在可执行块里找：`CONFIG_BLOCK` 里的 `machine_start_gcode` 注释内嵌着
-/// 一整套 G-code 字符串，在那儿匹配会插进注释里（旧侧注释点明了这件事）。
+/// 一整套 G-code 字符串，在那儿匹配会插进注释里（原口径注释点明了这件事）。
 fn find_insertion_point(lines: &[String]) -> Option<usize> {
     let exec_start = lines
         .iter()
@@ -353,7 +353,7 @@ fn find_insertion_point(lines: &[String]) -> Option<usize> {
     })
 }
 
-/// 从可执行块里的 `M190 S<temp>` 取原始热床目标温度。取不到按 70（旧侧同一条兜底）。
+/// 从可执行块里的 `M190 S<temp>` 取原始热床目标温度。取不到按 70（原口径同一条兜底）。
 fn extract_original_bed_temp(lines: &[String]) -> i64 {
     const FALLBACK: i64 = 70;
     let Some(exec_start) = lines

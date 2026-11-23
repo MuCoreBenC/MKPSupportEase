@@ -8,8 +8,8 @@
 //!
 //! 末尾那个 `--Gcode` **故意不带值**：切片器把 G-code 路径追加在末尾，所以真实 argv 是
 //! `… --Toml <预设> --Gcode <gcode>`。这一行的形态不是我们挑的，是切片器那一侧说了算 ——
-//! 旧世代 `mkp-ssr` 与成熟版 `mkpsupporte`（`internal/cli/runner_windows.go::parseGcodeArg`）
-//! 认的是同一套，这里照抄它的三条取值形态。
+//! 原口径 `mkp-ssr` 与成熟版 `mkpsupporte`（`internal/cli/runner_windows.go::parseGcodeArg`）
+//! 认的是同一套，这里沿用它的三条取值形态。
 //!
 //! # 三条取值形态都要认
 //!
@@ -66,7 +66,7 @@ pub enum ArgError {
     GcodeUnparsable { argv: String },
 }
 
-/// 认得出"这看起来是个路径"就行。判据与旧世代逐字一致：
+/// 认得出"这看起来是个路径"就行。判据与原口径逐字一致：
 /// 以 `-` 开头的不是路径（那是开关）；有短扩展名（≤6 字）的算路径；
 /// 其余要求"够长且带 `.` 或 `_`"—— 放宽到"任何不含空格的字"会把开关也吃进来。
 fn looks_like_path(s: &OsStr) -> bool {

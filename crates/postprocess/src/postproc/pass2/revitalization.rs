@@ -190,7 +190,7 @@ fn check_tower_path_range(
 
     for v in violations {
         let msg = format_range_warning_message(&v, source_label);
-        /* 诊断通道是给日志/排查的（旧 Go 口径），要现在这一份文字；
+        /* 诊断通道是给日志/排查的，要现在这一份文字；
         记录里存的是上面那条指代，语言到读的时候再定 */
         ir_data
             .warning_diagnostics
@@ -219,7 +219,7 @@ fn format_range_warning_message(
         "postproc.range_violation",
         &[
             ("dir", dir),
-            /* 坐标量级下 Rust `{}` 与 Go `%g` 输出一致（最短往返表示、无尾零） */
+            /* 坐标量级下 Rust `{}` 与既有口径 `%g` 输出一致（最短往返表示、无尾零） */
             ("actual", &v.actual_value.to_string()),
             ("bound", &v.machine_limit.to_string()),
         ],

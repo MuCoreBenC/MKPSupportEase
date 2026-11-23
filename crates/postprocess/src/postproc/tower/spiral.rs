@@ -3,7 +3,7 @@
 use super::constants::*;
 use crate::gcode::{format_float, format_speed, format_z};
 
-/// 4 个象限的局部坐标边界 [minX, minY, maxX, maxY]（与旧侧常量表同式计算）。
+/// 4 个象限的局部坐标边界 [minX, minY, maxX, maxY]（与原口径常量表同式计算）。
 fn mini_spiral_quadrant_bounds() -> [[f64; 4]; 4] {
     let gap = (TOWER_OUTER_BOUND - TOWER_INNER_BOUND - MINI_SPIRAL_QUADRANT_SIZE * 2.0) / 2.0;
     [

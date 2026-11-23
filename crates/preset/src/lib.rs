@@ -94,7 +94,7 @@ include!(concat!(env!("OUT_DIR"), "/builtin_presets.rs"));
 ///
 /// 这是本 crate 对外的唯一入口；`build()` 等零件仍是公开的，但产品路径只走这一条。
 ///
-/// # 顺序照抄，不许重排
+/// # 顺序沿用，不许重排
 ///
 /// 逐步对应 `mkp-sr/crates/engine/src/lib.rs:187..215`（那 11 行是行为规格）：
 ///

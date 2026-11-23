@@ -40,7 +40,7 @@ pub fn assets_dir() -> PathBuf {
 /// 机型 id 不动（`A1_MINI` 保持原样，它的下划线是身份的一部分）。
 ///
 /// **刻意不沿用云端那批文件名**（`A1MF_260628.toml` 之类）：那些名字是另一套系统的，
-/// 照抄只会在用户目录里制造同名混淆。旧名到新身份的映射是一次性的迁移输入。
+/// 沿用只会在用户目录里制造同名混淆。旧名到新身份的映射是一次性的迁移输入。
 pub fn file_name(machine: &str, variant: &str) -> String {
     format!("{machine}-{}.toml", variant.to_lowercase())
 }

@@ -1,4 +1,4 @@
-//! 旧世代（`mkp-ssr`）数据根 —— `<系统文稿目录>/MKPSupportSSR`。
+//! 原口径（`mkp-ssr`）数据根 —— `<系统文稿目录>/MKPSupportSSR`。
 //!
 //! # 为什么这一个模块还留着
 //!
@@ -35,7 +35,7 @@ const ROOT_DIR_NAME: &str = "MKPSupportSSR";
 /// 覆盖数据根位置的环境变量（与 mkp-ssr 同名同义）
 const ROOT_ENV: &str = "MKP_SSR_DATA";
 
-/// 旧世代数据根。`None` = 这台机器上还没有这一棵树（没装 / 没跑过钩子）。
+/// 原口径数据根。`None` = 这台机器上还没有这一棵树（没装 / 没跑过钩子）。
 ///
 /// 环境变量优先（`MKP_SSR_DATA`）；没设就去系统文稿目录下找 `MKPSupportSSR`。
 /// 文稿目录本身解不出来（极少数精简环境）也返回 `None` —— 与"没有数据根"同一个答案，

@@ -58,7 +58,7 @@ pub fn read_golden(name: &str) -> String {
     text
 }
 
-/// `UPDATE_GOLDEN=1` 再生开关（与旧侧同名同值）。
+/// `UPDATE_GOLDEN=1` 再生开关（与原口径同名同值）。
 pub fn update_golden_requested() -> bool {
     std::env::var("UPDATE_GOLDEN").ok().as_deref() == Some("1")
 }
@@ -191,7 +191,7 @@ pub fn parse_case_blocks(text: &str) -> BTreeMap<String, Vec<String>> {
 }
 
 /// 渲染一个 CASE 块。`None` → `<nil>`，`Some(vec![])` → `<empty>`，
-/// 其余逐行原样 —— 与旧侧 `renderCaseBlock` 逐字一致。
+/// 其余逐行原样 —— 与原口径 `renderCaseBlock` 逐字一致。
 pub fn render_case_block(name: &str, lines: Option<&[String]>) -> String {
     let mut out = String::new();
     let _ = writeln!(out, "{CASE_PREFIX}{name} ===");

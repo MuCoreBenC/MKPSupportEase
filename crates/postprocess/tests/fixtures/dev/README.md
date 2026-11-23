@@ -13,6 +13,7 @@
 | `collide-tower.gcode` | 挪塔碰撞 | `; FEATURE: Support`（让擦料决策走 tower）+ 模型点落在塔框 22.96..57.04 里（X30 Y30）⇒ 第 6 步碰撞问句 |
 | `broken-preset.toml` | 硬失败 | 故意不是 TOML ⇒ 加载预设那一步真失败（实测退出码 2 + `E_TOML_PARSE_001`） |
 | `calib-zoffset-ext.gcode` | 校准件（跑完 / 问了没答） | **由仓库里那份 3MF 真切片而来**，挤出包围盒 119.511 × 16.063 ⇒ 命中 `zoffset-ext` 档；配合临时根里的 `origin.txt` 才认得出身份 |
+| `calib-combined.gcode` | 二合一校准件（回归现场） | 2026-11-23 真机那份 `15120.0` 切片产物。身份靠 `origin.txt` 指向 `Calibration_Combined.3mf`（metadata=`Combined`）认出，**必须靠随包校准档表按外形定档**；档表缺了就会报「不是校准件」 |
 
 **大文件成功**与**机型不匹配**不另放夹具：
 

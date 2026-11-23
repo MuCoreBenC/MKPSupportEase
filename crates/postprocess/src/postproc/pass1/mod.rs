@@ -7,7 +7,7 @@
 //! 行为规格：pass1.go 的单循环状态机（熨平移除 / 支撑面收集 / 涂胶块发射 /
 //! 元数据提取 / 风扇状态跟踪）。字节判据 G1（21,837 行）。
 
-// 状态机逐字对照 pass1.go：嵌套 if 与手工索引保持与 Go 同形，便于逐段核对。
+// 状态机逐字对照 pass1.go：嵌套 if 与手工索引保持与 同形，便于逐段核对。
 #![allow(
     clippy::collapsible_if,
     clippy::needless_range_loop,
@@ -81,7 +81,7 @@ impl LineSink {
     }
 }
 
-/// f64 键的哈希包装（Go 侧是 map[float64]；Rust 的 f64 无 Eq 不能直接作键）。
+/// f64 键的哈希包装（原口径是 map[float64]；Rust 的 f64 无 Eq 不能直接作键）。
 /// -0.0 归一为 0.0，保证 Hash 与 Eq 一致；层高域不出现 NaN。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ZKey(pub f64);
@@ -207,7 +207,7 @@ fn step_pen(
 /// `FirstPass`：第一遍扫描（pass1.go:41）。
 ///
 /// `ir_data` 会被就地修改（机型维度填充 / 元数据提取 / State 运行态 /
-/// FillDefaults）——与 Go 共享单个 `*ir.IR` 的语义一致。
+/// FillDefaults）——与既有口径 共享单个 `*ir.IR` 的语义一致。
 /// `progress` 收到 (0..100 百分比, 消息)，Go 每 500 行且整数百分比变化时触发。
 /// `cancel` 协作取消：主循环顶部时间基检查（Task 17.2，对照
 /// pass1.go:167-180 每轮调 cancelChecker.Check），未取消路径零行为变化。
@@ -1546,7 +1546,7 @@ fn layer_key(z: f64) -> String {
 
 /// Go `strconv.FormatFloat(v, 'g', -1, 64)` 的等价输出（覆盖层高量级）。
 fn format_g_shortest(v: f64) -> String {
-    // Rust {} 对 f64 就是最短往返表示；'g' 风格的指数阈值与 Go 不同
+    // Rust {} 对 f64 就是最短往返表示；'g' 风格的指数阈值与既有口径 不同
     // （Go：exponent < -4 || exponent >= 21 才用科学计数法），层高量级
     // （0~1000）两种表示一致，直接用十进制最短表示。
     let s = format!("{v}");

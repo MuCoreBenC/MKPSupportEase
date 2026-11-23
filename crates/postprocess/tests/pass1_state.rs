@@ -1,7 +1,7 @@
 //! pass1 状态机行为测试（对照 processor/pass1_state_test.go 逐条移植）。
 //!
 //! 这些测试是「行为规格」而非字节判据：钉住熨平移除标志的置位/清除/泄漏/残留、
-//! copyFlag/actFlag 闭环、风扇状态跟踪与恢复。含 4 个 Go 侧已登记的 KNOWN BUG
+//! copyFlag/actFlag 闭环、风扇状态跟踪与恢复。含 4 个 原口径已登记的 KNOWN BUG
 //! （RISK-003/004/005/011）——Rust 逐字复刻，同样以测试钉住其行为。
 //!
 //! helper 直测的 3 条（findPrevPositionCmd 索引 0、stripSkippableBlocks 两形态）

@@ -1095,7 +1095,7 @@ fn generate_xy_calibration_new(
 /// 其余（`z_accumulate` 每轮 −0.1、A1 家族的 Floating Z、每轮尾部停留）逐行一致。
 ///
 /// `loadCalibrationTemplate(template_dir, "z_offset_path_new.gcode")` 无 Rust 对位：
-/// 本项目没有运行时模板目录，Go 侧 `template_dir` 为空时也回落到内嵌 `zOffsetSingLines`，
+/// 本项目没有运行时模板目录，原口径 `template_dir` 为空时也回落到内嵌 `zOffsetSingLines`，
 /// 所以这里直接用 `Z_OFFSET_SING_LINES`，与经典分支同源。
 #[allow(clippy::too_many_arguments)]
 fn generate_z_offset_calibration_new(
@@ -1231,7 +1231,7 @@ fn generate_z_offset_calibration_new(
 /// 长条 180°、正方形 90°。把「放过」挪到后面会让退化输入走进除法；把 90° 挪到
 /// 180° 前面会把双轴反向误报成 90°。
 ///
-/// Go 侧用 `errdiag.WithContext` 挂了 ~20 个结构化字段。Rust 侧没有 errdiag 这一层，
+/// 原口径用 `errdiag.WithContext` 挂了 ~20 个结构化字段。Rust 侧没有 errdiag 这一层，
 /// **登记偏差**：上下文拼进 message 文本 —— 消费方只有弹窗一行和日志一行，
 /// 没有读结构化字段的人。
 #[allow(clippy::too_many_arguments)]
@@ -1244,7 +1244,7 @@ fn check_rotation_by_centroid(
     min_offset_ratio: f64,
     error_source: &str,
     is_square_model: bool,
-    // Go 侧两个调用方都传 0，此时 `magnitude_ok` 恒为 true。参数保留是为了与
+    // 原口径两个调用方都传 0，此时 `magnitude_ok` 恒为 true。参数保留是为了与
     // 参考实现同形，不是为了将来某个假想需求。
     expected_relative_magnitude: i32,
 ) -> Result<(), PostprocError> {

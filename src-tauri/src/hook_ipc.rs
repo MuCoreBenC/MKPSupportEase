@@ -1,6 +1,6 @@
 //! 钩子 ↔ 界面 的那条通道（一行一个 JSON，走 127.0.0.1）。
 //!
-//! # 为什么要有它（照旧世代 `mkp-ssr` 的 `progress_ipc.rs`）
+//! # 为什么要有它（照原口径 `mkp-ssr` 的 `progress_ipc.rs`）
 //!
 //! 切片器调我们的方式是「起一个子进程，**等它退出**，看退出码」。所以窗口**不能住在钩子
 //! 进程里**：那样"跑完不自动关"就等于"切片器一直卡着"，"下次复用同一扇窗"更是做不到
@@ -19,9 +19,9 @@
 //!
 //! 窗口留着、下次复用 —— **只有两个进程才同时做得到**这两件与"钩子跑完立刻退"。
 //!
-//! # 传输层**刻意换掉**了（与旧世代唯一不同的地方）
+//! # 传输层**刻意换掉**了（与原口径唯一不同的地方）
 //!
-//! 旧世代用 Unix domain socket，但它自己的 Windows 分支是**占位实现**（`connect` / `bind`
+//! 原口径用 Unix domain socket，但它自己的 Windows 分支是**占位实现**（`connect` / `bind`
 //! 恒返回 `Unsupported`，边界登记在它仓库的 `docs/handoff-windows-round.md`）。Windows 是
 //! 我们的主场，所以这里用 `std::net` 的 **TCP + 一行一个 JSON**：同样零新依赖，同样四条纪律：
 //!
@@ -60,7 +60,7 @@ pub const PORT_FILE: &str = "run/hook.port";
 /// 连不上界面时，自己起一个并等它把端点挂出来 —— 上限。
 ///
 /// ★★ 2026-11-18 真机（作者截图 + 钩子日志 `W_CALIB_MODE_001`，2026-11-18T12:18）：
-/// 原来是 **1500ms**（旧世代同值），而绿色版**冷启动实测要 1.05s** —— 空载时刚够，
+/// 原来是 **1500ms**（原口径同值），而绿色版**冷启动实测要 1.05s** —— 空载时刚够，
 /// Bambu 正在切片、机器一忙就超一两百毫秒。于是"界面正在启动"被判成"没有界面"，
 /// 校准件那一问**永远问不到人**，最后只看到 Bambu 那句 `Error code: 1`。
 /// 用户的期望是"软件没开也要自己起来"，那就得真的等它起来 —— 15 秒足够冷启动
@@ -69,7 +69,7 @@ pub const PORT_FILE: &str = "run/hook.port";
 /// 代价只在"界面真的起不来"时才付：已经开着的那扇窗，第一次探测就连上了（毫秒级）。
 pub const SPAWN_WAIT: Duration = Duration::from_secs(15);
 
-/// 等用户答一句的上限（旧世代 180s；我们问的只有"机型不匹配还跑不跑"）。
+/// 等用户答一句的上限（原口径 180s；我们问的只有"机型不匹配还跑不跑"）。
 pub const ANSWER_TIMEOUT: Duration = Duration::from_secs(120);
 /// 等界面露面的宽限期（见 [`Client::ask`] 里那段两段倒计时）。
 /// 起间：钩子第一次连不上就会把界面拉起来（[`SPAWN_WAIT`]），而那扇窗要冷启动 webview
@@ -253,7 +253,7 @@ pub struct FactsPayload {
     pub file_size_bytes: u64,
     /// 喷嘴直径（mm）
     pub nozzle_diameter: f64,
-    /// 层高（mm）—— 取常规层高那一档（旧世代那张表摆的就是「喷嘴直径 / 层高」）
+    /// 层高（mm）—— 取常规层高那一档（原口径那张表摆的就是「喷嘴直径 / 层高」）
     pub layer_height: f64,
     /// 涂胶速度（mm/s）——「切片与预估」那一格（跑着的时候就摆）。
     ///
@@ -573,7 +573,7 @@ impl Client {
     /// 连界面；连不上就自己起一个（无参数的界面进程），最多等 [`SPAWN_WAIT`]。
     ///
     /// 起不来 / 等不到 ⇒ 返回一条"没有界面"的线：钩子照常干活，只是没人看进度
-    /// （旧世代同一条取舍：头几步可能没人看见，产物不会少一个字节）。
+    /// （原口径同一条取舍：头几步可能没人看见，产物不会少一个字节）。
     pub fn connect_or_spawn(internal_root: &Path, cancel: &CancelToken) -> Self {
         let started = Instant::now();
 
@@ -797,7 +797,7 @@ impl Client {
             conn.flush().ok()
         });
         if wrote.is_none() {
-            /* 对端卡住 / 关了：放弃这条通道（旧世代同一条：写超时即弃） */
+            /* 对端卡住 / 关了：放弃这条通道（原口径同一条：写超时即弃） */
             *guard = None;
             *self.answers.lock().expect("锁没坏") = None;
         }
@@ -1055,7 +1055,7 @@ pub struct Listener {
 
 /// 界面能不能当"那扇窗"：已经有人在做显示时给 `None`。
 ///
-/// 判据与旧世代的 `bind_single_instance` 同形：**先连一下**，连得上 = 已经有一扇窗，
+/// 判据与原口径的 `bind_single_instance` 同形：**先连一下**，连得上 = 已经有一扇窗，
 /// 那就不抢（`None`）；连不上 = 端点文件过期或没人在听，自己 bind 一个并把端口写下。
 pub fn bind_for_display(internal_root: &Path) -> Option<Listener> {
     if connect(internal_root).is_some() {

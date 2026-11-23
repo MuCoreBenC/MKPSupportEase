@@ -7,12 +7,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ChoiceEntry {
-    /// Go 侧是 any：字符串/布尔/数字都真实存在（快照实测：true / 0.0 / 50.0 / 90.0）。
+    /// 原口径是 any：字符串/布尔/数字都真实存在（快照实测：true / 0.0 / 50.0 / 90.0）。
     #[serde(default = "choice_value_default")]
     pub value: toml::Value,
     #[serde(default)]
     pub deprecated: bool,
-    /// 选项显示名（UI segmented 控件的文案；旧侧有则带上）。
+    /// 选项显示名（UI segmented 控件的文案；原口径有则带上）。
     #[serde(default)]
     pub label: String,
     /// 英文显示名（2026-10-26 双语注册表）。空 = 这条还没译，界面回落 `label`。

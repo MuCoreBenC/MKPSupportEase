@@ -7,7 +7,7 @@
 //! 退出码退 —— 切片器按退出码决定这一盘能不能继续（弹窗里那句 `Error code: N` 就是这个 N）。
 //! 可执行物**就是主程序自己**（首页「复制后处理脚本」那一整条命令由
 //! [`crate::ipc::get_post_process_command`] 现拼 —— 可执行物与预设两段都是本机真值）
-//! —— 成熟版 `mkpsupporte` 与旧世代 `mkp-ssr` 都是这个形状。
+//! —— 成熟版 `mkpsupporte` 与原口径 `mkp-ssr` 都是这个形状。
 //!
 //! # 这一层管什么（**钩子进程里没有窗口**）
 //!
@@ -36,7 +36,7 @@
 //!
 //! 切片器只看得见**退出码**与 **stderr**：成功 `0`、处理失败或用户取消 `1`、
 //! 输入/预设错 `2`。stderr **只写结论**：切片器把整段塞进它的错误对话框，
-//! 多写一行就是把唯一有用的那行往下推（旧世代实测过 30 行 INFO 埋掉真正原因）。
+//! 多写一行就是把唯一有用的那行往下推（原口径实测过 30 行 INFO 埋掉真正原因）。
 //!
 //! ★ **切片器那一框到底吃什么**（2026-10-11 查了它的源码，见
 //! `docs/HOOK-ERRORS-AND-MESSAGES.md`）：macOS 上它把钩子的 **stderr 整段**摆在
@@ -908,7 +908,7 @@ pub fn run(
      * （2026-10-14 起并成一条：界面上框一出现就是完整形态，值不会在眼前换一轮）。
      *
      * ★ 位置就在**机型核对之前**：这一刻两个机型都在手上，而下面那一问正是拿它俩比 ——
-     *   用户看着表上那两行答"要不要继续"才答得明白（旧世代那屏也是这么摆的）。
+     *   用户看着表上那两行答"要不要继续"才答得明白（原口径那屏也是这么摆的）。
      */
     let opening = facts_from(&ir, &raw, raw.len() as u64);
     /*
@@ -942,7 +942,7 @@ pub fn run(
     let identity_probe = postprocess::gcode::probe_model_identity(&job.gcode);
 
     // 机型核对：预设说一台、切片器那份自报另一台 —— 维度与边界全按预设算，
-    // 闷头跑出来的是垃圾（旧世代那次实测：A1 的图 + A1 mini 的预设，
+    // 闷头跑出来的是垃圾（原口径那次实测：A1 的图 + A1 mini 的预设，
     // 报的是"模型超出打印边界 X：185.9mm"，把真正的原因埋在了一句听不懂的话里）。
     let preset_machine = ir.machine.machine_type.clone();
     let gcode_machine = ir.machine.gcode_machine_type.clone();
@@ -2410,7 +2410,7 @@ impl StepRecorder<'_> {
 impl ProgressSink for StepRecorder<'_> {
     fn emit(&mut self, event: ProgressEvent) {
         /* 新一步的入口事件 = `fraction_in_step: None`（步内进度是 `Some`，且步号不变）。
-        内核的 `StepTimer` 就是这个语义，这里照抄同一份判据 —— 不认它就会把
+        内核的 `StepTimer` 就是这个语义，这里沿用同一份判据 —— 不认它就会把
         pass1 的 0% / 2% / … 进度帧错当成一步一个。 */
         if event.fraction_in_step.is_none()
             && self
@@ -2864,7 +2864,7 @@ fn finished_payload(
 }
 
 /// 结论 → **stderr 那一行** + 退出码。**有界面与没界面两条路共用这一处**：
-/// 两处各写一份的话，迟早有一处少一行（旧世代就是这么丢过失败原因的）。
+/// 两处各写一份的话，迟早有一处少一行（原口径就是这么丢过失败原因的）。
 ///
 /// `log`：这一趟的后处理日志落点（装不上时是 `None`）。失败/取消时在结论后面补一行
 /// 「完整日志：<路径>」—— 用户报问题时把那一段发给我们，比复述症状有用得多。
@@ -3310,7 +3310,7 @@ mod tests {
     }
 
     /// **机型不匹配**：预设是 A1、G-code 自报 A1 mini ⇒ 没界面时**不猜**，
-    /// 报错要同时点名两边（旧世代那句"模型超出打印边界"就是这条缺位的代价）
+    /// 报错要同时点名两边（原口径那句"模型超出打印边界"就是这条缺位的代价）
     #[test]
     fn a_machine_mismatch_refuses_and_names_both_sides() {
         let d = tempfile::tempdir().expect("临时目录");

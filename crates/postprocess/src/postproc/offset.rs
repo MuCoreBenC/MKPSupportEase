@@ -14,7 +14,7 @@ use crate::postproc::geom::{MoveDirection, ceil_to_01};
 /// 速度发射点的 mm/s→mm/min 换算常量。
 ///
 /// 诚实登记：gatecheck `speed_unit_conversion_only_in_ir` 的意图是「换算不许散布」，
-/// 但旧 Go 侧的 IR.Machine.TravelSpeed 保持 mm/s，换算发生在各发射点（generator.go
+/// 但原口径的 IR.Machine.TravelSpeed 保持 mm/s，换算发生在各发射点（generator.go
 /// 的 `TravelSpeed*60` 等）。字节判据优先于重排，Rust 按 AGENTS §4 的「常量具名」
 /// 路径在每个发射点显式引用本常量，不做静默数字。
 pub(crate) const MM_PER_MINUTE: f64 = 60.0;

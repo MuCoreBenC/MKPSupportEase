@@ -67,7 +67,7 @@ pub struct BbsPresetEntry {
     /// 文件名里写的那个名字（读不出来就是去掉 `.json` 的文件名）
     pub name: String,
     pub inherits: Option<String>,
-    /// BBS 自己的写法就有两种（字符串 `"false"` 与布尔 `false` 都出现过）—— 照抄，不归一
+    /// BBS 自己的写法就有两种（字符串 `"false"` 与布尔 `false` 都出现过）—— 沿用，不归一
     pub instantiation: Option<serde_json::Value>,
     pub compatible_printers: Option<Vec<String>>,
     pub from: Option<String>,

@@ -91,7 +91,7 @@ pub struct BundleView {
     pub display: String,
     pub machine_id: String,
     pub asset_refs: Vec<BundleRefView>,
-    /// 上一次改动日期（迁移照抄旧值；真改动由 `set_refs` 盖新值）
+    /// 上一次改动日期（迁移沿用旧值；真改动由 `set_refs` 盖新值）
     pub updated_at: Option<String>,
     /// **一版一套**：`recommendedBundle` 指着这份套餐的版本
     pub users: Vec<BundleUserView>,
@@ -370,7 +370,7 @@ pub fn wb_rename_bundle(
     })
 }
 
-/// 复制一条套餐：内容照抄、id 必须是新的；复制出来的那份没人指着
+/// 复制一条套餐：内容沿用、id 必须是新的；复制出来的那份没人指着
 #[tauri::command]
 pub fn wb_copy_bundle(
     bundle_id: String,

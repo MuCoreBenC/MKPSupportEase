@@ -1,7 +1,6 @@
-//! 切片器头部注释的刮取（纯函数，行为规格 = 旧 Go `engine/process.go` 与
-//! `engine/helpers.go`）。
+//! 切片器头部注释的刮取（纯函数）。
 //!
-//! 这四条在 Go 侧都发生在 `machine-detect` / `parse` 之间、纯读 `content`，与
+//! 这四条都发生在 `machine-detect` / `parse` 之间、纯读 `content`，与
 //! MKP 预设无关，故落在 rank 0 而不是 engine 里内联——engine 只编排。
 //!
 //! 移植对照：
@@ -22,7 +21,7 @@ const PREFIX_DEFAULT_PRINT_PROFILE: &str = "; default_print_profile = ";
 const PREFIX_ENABLE_SUPPORT_IRONING: &str = "; enable_support_ironing = ";
 const MARKER_FILENAME_FORMAT: &str = "; filename_format";
 
-/// 按 Go 的「Contains 判定 + TrimPrefix 取值 + 不 break」刮一个头部键。
+/// 按既有口径 的「Contains 判定 + TrimPrefix 取值 + 不 break」刮一个头部键。
 fn scrape_last(content: &[String], prefix: &str) -> String {
     let mut found = String::new();
     for line in content {
@@ -65,7 +64,7 @@ pub fn slicer_ironing_enabled(content: &[String]) -> bool {
     enabled
 }
 
-/// `NumStrip` 的首元素：按 Go `ir.NumStrip`（build.go:816）的扫描规则取第一个数。
+/// `NumStrip` 的首元素：按既有口径 `ir.NumStrip`（build.go:816）的扫描规则取第一个数。
 fn first_number(line: &str) -> Option<f64> {
     let mut buf = String::new();
     let mut has_dot = false;
@@ -78,7 +77,7 @@ fn first_number(line: &str) -> Option<f64> {
             buf.push('.');
             has_dot = true;
         } else {
-            // Go 侧遇到分隔符时才收束一个数；只有 "-" 不算数。
+            // 原口径遇到分隔符时才收束一个数；只有 "-" 不算数。
             if buf.len() > 1 || (buf.len() == 1 && buf != "-") {
                 return buf.parse().ok();
             }
@@ -94,8 +93,8 @@ fn first_number(line: &str) -> Option<f64> {
 
 /// 从 `; filename_format = ...` 推 3MF 文件名；没有该行时退回「输入名 + .3mf」。
 ///
-/// Go 侧占位符只处理三个（`{input_filename_base}` / `{filament_type[0]}` /
-/// `{print_time}`），其余占位符**原样留在结果里**——这是 Go 的现状，照抄。
+/// 原口径占位符只处理三个（`{input_filename_base}` / `{filament_type[0]}` /
+/// `{print_time}`），其余占位符**原样留在结果里**——这是 Go 的现状，沿用。
 ///
 /// 边界（Go 用 `filepath.Ext` + `TrimSuffix`，这里用 `file_stem`）：对
 /// `".gcode"` 这种纯扩展名文件，Go 得 `""` 而 `file_stem` 得 `".gcode"`。
@@ -182,7 +181,7 @@ mod tests {
         assert_eq!(first_number("; a = 1"), Some(1.0));
         assert_eq!(first_number("x-2.5y3"), Some(-2.5));
         assert_eq!(first_number("no digits"), None);
-        // Go 侧第二个 '-' 落进 else 分支 ⇒ 只含 "-" 的 buf 被丢弃后重新起数 ⇒ 是 7 不是 -7。
+        // 原口径第二个 '-' 落进 else 分支 ⇒ 只含 "-" 的 buf 被丢弃后重新起数 ⇒ 是 7 不是 -7。
         assert_eq!(first_number("--7"), Some(7.0));
     }
 }

@@ -20,7 +20,7 @@
 //!   （与 `src-tauri/src/workbench/upstream/mod.rs` 那条既有判据同一口径；
 //!   测试写临时文件是正当的，纪律管生产代码）；
 //! - **递归**扫（`crates/preset/src/bin/` 就在子目录里，上面那条既有判据只扫一层，
-//!   照抄会漏）；
+//!   沿用会漏）；
 //! - 路径用 `CARGO_MANIFEST_DIR` 拼，**不用 `file!()`** —— 建了 workspace 之后
 //!   `file!()` 的基准从 crate 根变成仓库根，用它拼路径的判据会以"报错"的形式失效
 //!   （那段血泪写在 `upstream/mod.rs` 的注释里）。
@@ -91,7 +91,7 @@ fn crates_root() -> PathBuf {
 ///
 /// # 为什么不是"第一个 `#[cfg(test)]` 之前"
 ///
-/// 第一版就是那么写的（照抄 `upstream/mod.rs` 那条既有判据），而 Task 5 的探针立刻
+/// 第一版就是那么写的（沿用 `upstream/mod.rs` 那条既有判据），而 Task 5 的探针立刻
 /// 打穿了它：往 `preset/src/read.rs` **末尾**加一个直接 `fs::write` 的函数，
 /// 判据**没红** —— 那个文件的 `mod tests` 在第 165 行、全文 400 行，末尾那段被整体切掉了。
 /// Rust 语法允许在 `mod tests` 之后继续写生产代码，所以那是判据的真盲区，

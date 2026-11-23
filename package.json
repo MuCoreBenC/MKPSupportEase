@@ -46,6 +46,7 @@
     "check:all": "node scripts/check/run.mjs all",
     "check:i18n": "node scripts/check-i18n.mjs",
     "check:copy": "node scripts/check-copy.mjs",
+    "probe:release-hook": "node scripts/check/release-hook-probe.mjs",
     "translations:todo": "node scripts/stale-translations.mjs",
     "glue:check": "node scripts/glue-check.mjs",
     "bambu:layers": "node scripts/bambu-layers.mjs",

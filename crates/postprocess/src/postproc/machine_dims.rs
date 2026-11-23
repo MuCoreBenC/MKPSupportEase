@@ -9,7 +9,7 @@
 //!
 //! 所以数据改成**注入**：进程启动时由调用方给一份（[`install`]），
 //! 或者从 `presets/` 目录读（[`load_presets_dir`]）。查不到仍然返回 zero-value
-//! （M017「禁止机型回退」的语义保留，与旧侧一致）。
+//! （M017「禁止机型回退」的语义保留，与原口径一致）。
 //!
 //! # 为什么允许"没人装过"时自己去读 `presets/`
 //!
@@ -22,7 +22,7 @@
 //! 第三条只在"在仓库里跑"时成立。三条都不成立就 **panic 并说明怎么装** ——
 //! 静默用空表会让产物在几何上悄悄错掉，那是这个文件最不能接受的失败方式。
 
-#![allow(clippy::collapsible_if)] // 机型检测四优先级循环与 Go 同形，不改写
+#![allow(clippy::collapsible_if)] // 机型检测四优先级循环保持同形，不改写
 
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -143,6 +143,24 @@ pub struct MachineTables {
 }
 
 impl MachineTables {
+    /// 用调用方已有的数据装一份表（发布物没有 presets/ 目录时走这条）。
+    ///
+    /// 只装数据，不解释规则；校准模型档没有就留空，由消费方自己决定怎么报。
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_catalog_parts(
+        dimensions: HashMap<String, MachineDimensions>,
+        alias_map: HashMap<String, String>,
+        forbidden_zones: HashMap<String, Vec<ZonePolygon>>,
+        calibration_models: Option<Vec<ModelProfile>>,
+    ) -> Self {
+        Self {
+            dimensions,
+            alias_map,
+            forbidden_zones,
+            calibration_models,
+        }
+    }
+
     pub fn dimensions(&self) -> &HashMap<String, MachineDimensions> {
         &self.dimensions
     }
@@ -481,7 +499,7 @@ pub fn fill_machine_dims_from_toml(toml_machine: &str, ir: &mut crate::ir::Ir) {
 }
 
 /// 按 Canonical Machine ID 查维度；未命中 zero-value（M017：禁止机型回退）。
-/// 大小写不敏感兜底与旧侧 lookupCaseInsensitive 一致。
+/// 大小写不敏感兜底与原口径 lookupCaseInsensitive 一致。
 pub fn get_machine_dimensions(machine_type: &str) -> MachineDimensions {
     let map = &tables().dimensions;
     if let Some(d) = map.get(machine_type) {

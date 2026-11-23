@@ -68,6 +68,10 @@ fn main() -> ExitCode {
     #[cfg(windows)]
     hide_own_console();
 
+    /* 机型表必须早于任何 postprocess 调用：发布物没有仓库里的 presets/ 目录，
+     * 不装就会在 `machine_dims::tables()` 里 panic（切片器只显示 Error code: 101）。 */
+    mkp_support_ease_lib::runtime::install_machine_tables_from_catalog();
+
     match mkp_support_ease_lib::args::parse(std::env::args_os()) {
         Ok(mkp_support_ease_lib::args::Mode::Hook(job)) => {
             /* 钩子这一趟也要按用户的界面语言说话：切片器那一框里显示的就是 stderr，

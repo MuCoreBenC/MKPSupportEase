@@ -298,7 +298,7 @@ pub fn remove_param_from_line(line: &str, param: &str) -> String {
 mod tests {
     use super::*;
 
-    /// 旧侧 get_evalue_test.go 全表移植。
+    /// 原口径 get_evalue_test.go 全表移植。
     #[test]
     fn get_e_value_table() {
         let cases: &[(&str, Option<f64>)] = &[
@@ -326,7 +326,7 @@ mod tests {
         }
     }
 
-    /// 旧侧 replace_e_value_test.go 全表移植。
+    /// 原口径 replace_e_value_test.go 全表移植。
     #[test]
     fn replace_e_value_table() {
         let cases: &[(&str, f64, &str)] = &[
@@ -388,7 +388,7 @@ mod tests {
         );
     }
 
-    /// 旧侧 postprocess.go RemoveFinalLowerZ 的关键分支（home 行 100,100 容差 ±1）。
+    /// 原口径 postprocess.go RemoveFinalLowerZ 的关键分支（home 行 100,100 容差 ±1）。
     #[test]
     fn remove_final_lower_z_drops_lower_moves_after_home() {
         let lines: Vec<String> = [
@@ -430,7 +430,7 @@ mod tests {
             remove_param_from_line("G1 X1 Y2 Z0.2 ; c", "Z"),
             "G1 X1 Y2 ; c"
         );
-        // Go 语义：字段级剔除，指令码 "G1" 保留
+        // 既有语义：字段级剔除，指令码 "G1" 保留
         assert_eq!(remove_param_from_line("G1 Z0.2", "Z"), "G1");
     }
 }
