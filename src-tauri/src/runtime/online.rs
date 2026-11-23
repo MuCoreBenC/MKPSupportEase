@@ -41,10 +41,7 @@ pub fn require(root: &Path) -> Result<(), AppError> {
     if is_on(root)? {
         return Ok(());
     }
-    Err(
-        AppError::permission_denied(messages::text(OFF_MESSAGE, &[]))
-            .with_message_code(OFF_CODE),
-    )
+    Err(AppError::permission_denied(messages::text(OFF_MESSAGE, &[])).with_message_code(OFF_CODE))
 }
 
 #[cfg(test)]

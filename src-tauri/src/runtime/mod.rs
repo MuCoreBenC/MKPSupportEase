@@ -60,6 +60,9 @@ pub mod local;
 /// **一次性存储迁移**（2026-10-29）：旧 delivery/baseline → content + 索引
 pub mod migrate;
 pub mod net;
+/// **「联网功能」那道闸**：关着时这个程序一个字节都不出网（预设 / 模型下载、
+/// 检查更新、匿名统计全停）。判据只有一条 —— [`app_state::online`]。
+pub mod online;
 /// **逐参数「云端更新」的比对**（2026-10-09）：我这份 / 云端旧值 / 云端新值三方账。
 /// 纯算法（不读盘），落点是 `ipc::param_sync` 的两条命令。
 pub mod param_sync;
@@ -98,9 +101,6 @@ pub mod update;
 /// `release.json`，有新版就推一个事件给右上角通知。本会话去重、失败静默、
 /// 不进启动/首屏路径（铁律 2）。版本比较不重写，复用 [`release_info`]。
 pub mod update_check;
-/// **「联网功能」那道闸**：关着时这个程序一个字节都不出网（预设 / 模型下载、
-/// 检查更新、匿名统计全停）。判据只有一条 —— [`app_state::online`]。
-pub mod online;
 pub mod update_state;
 /// **应用内更新**（2026-10-05 第五刀）：下载 / 进度 / 暂停取消 / 解压 / 替换重启。
 /// 与 `release_info` 分开：那份是"信息"，这份是"动作"

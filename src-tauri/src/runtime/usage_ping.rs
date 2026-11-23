@@ -156,7 +156,10 @@ mod tests {
     #[test]
     fn referer_carries_day_version_and_platform() {
         let r = referer_for("2026-11-23", "0.0.18-preview.2", "macos");
-        assert_eq!(r, "https://mkp-usage-v2.test/2026-11-23/0.0.18-preview.2/macos");
+        assert_eq!(
+            r,
+            "https://mkp-usage-v2.test/2026-11-23/0.0.18-preview.2/macos"
+        );
     }
 
     /// 一天一个 path 段：换一天必须换桶（不蒜子只认主域名 + path，子域不算）
