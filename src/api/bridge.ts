@@ -4,7 +4,13 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { armedFaultFor } from '../app/dev/fault'
 import { track } from '../app/log/track'
 import { t } from '../i18n'
-import { isAppError, type AppError, type MkpApi, type MkpApiMethod } from './contract'
+import {
+  isAppError,
+  type AppError,
+  type DownloadReceipt,
+  type MkpApi,
+  type MkpApiMethod,
+} from './contract'
 
 /**
  * IPC 桥：把契约里的方法映射到 Rust 侧的 command。
@@ -351,7 +357,7 @@ export const bridgeApi: MkpApi = {
   /* `place` 一律显式发一个布尔（缺省 true）：Rust 侧是 `Option<bool>`，
      不发的老口径与"下完就放进切片器"是同一件事，但显式说清免得两处各记一份默认 */
   downloadCatalogFile: (fileName, onTick, place) =>
-    call<void>(
+    call<DownloadReceipt>(
       'downloadCatalogFile',
       'download_runtime_file',
       withTick({ fileName, place: place ?? true }, onTick),

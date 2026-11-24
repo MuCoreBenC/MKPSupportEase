@@ -1404,6 +1404,8 @@ export const zhTW: Record<StringKey, string> = {
   'presets.page.download.doneSlicerManual': '已下載 {name}。沒找到切片器目錄，點「放入」自己選。',
   'presets.page.download.doneNoPlace': '已下載 {name} · 未放入切片器',
   'presets.page.download.doneKeepOld': '已下載 {name} · 切片器裡那份沒換',
+  'presets.page.download.doneUnverified': '已下載 {name} · 目錄未登錄校驗值',
+  'presets.page.download.placePartial': '已下載 {name} · {n} 個帳號沒放進去',
   'presets.page.download.failed': '下載失敗：{detail}',
   'presets.page.download.tamperedDone': '已更新 {name}，換成雲端目前版本',
   'presets.page.download.archivedDone': '已更新 {name}，舊版已移到「舊版本」',

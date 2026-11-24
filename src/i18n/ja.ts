@@ -1378,6 +1378,8 @@ export const ja: Record<StringKey, string> = {
   'presets.page.download.doneSlicerManual': '{name} をダウンロードしました。スライサーのフォルダが見つからないので「入れる」から選んでください。',
   'presets.page.download.doneNoPlace': '{name} をダウンロードしました · スライサーには入れていません',
   'presets.page.download.doneKeepOld': '{name} をダウンロードしました · スライサー内のファイルはそのままです',
+  'presets.page.download.doneUnverified': '{name} をダウンロードしました · 検証値の登録なし',
+  'presets.page.download.placePartial': '{name} をダウンロードしました · {n} 件のアカウントに置けません',
   'presets.page.download.failed': 'ダウンロードに失敗：{detail}',
   'presets.page.download.tamperedDone': '{name} を更新しました。クラウドの現在版に置き換えました',
   'presets.page.download.archivedDone': '{name} を更新しました。旧版は「旧バージョン」へ移動',

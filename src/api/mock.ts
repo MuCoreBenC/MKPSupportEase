@@ -580,6 +580,7 @@ import type {
   MkpApi,
   CloudVersion,
   DownloadOutcome,
+  DownloadReceipt,
   DownloadTick,
   GuideTarget,
   LocalePref,
@@ -1861,6 +1862,40 @@ const tickWait = (ms: number) => new Promise((r) => setTimeout(r, ms))
  *   MKP toml 顺手种一份演示正文（`readDownloadedText` 读它）。
  * `onTick` 不给就不发（与真机 Channel 可选同一个口径）。
  */
+/**
+ * 演示用的下载回执：形状与真机逐字段一致。
+ *
+ * 浏览器里没有真字节，摘要是固定的展示值；身份用演示源（Gitee / main），
+ * 完整性按类型分档 —— `.toml`（MKP 预设）视为目录登记过，其余如实标「未登记」。
+ */
+function mockDownloadReceipt(fileName: string): DownloadReceipt {
+  const preset = fileName.toLowerCase().endsWith('.toml')
+  return {
+    fileName,
+    path: preset ? `delivery/mkp/presets/${fileName}` : `assets/bbs/${fileName}`,
+    sha256: '0'.repeat(64),
+    integrity: preset ? 'verified' : 'notRecorded',
+    context: {
+      source: { platform: 'gitee', repo: 'mucorebenc/mkpsupportease', gitRef: 'main' },
+      release: { catalogId: 'support-ease', serial: 0, publishedAt: null },
+      catalogRevision: 'demo',
+    },
+    indexed: true,
+    /* 切片器配置在演示里也走「下完就放入」那一手：一个账号目录，全部成功 */
+    ...(preset
+      ? {}
+      : {
+          placed: {
+            fileName,
+            targets: 1,
+            written: 1,
+            replaced: false,
+            failed: [],
+          },
+        }),
+  }
+}
+
 async function mockDeliver(
   fileName: string,
   onTick?: (tick: DownloadTick) => void,
@@ -3187,6 +3222,7 @@ export const mockApi: MkpApi = {
    */
   async downloadCatalogFile(fileName, onTick, place) {
     await mockDeliver(fileName, onTick, place ?? true)
+    return mockDownloadReceipt(fileName)
   },
 
   async deleteDeliveryFile(fileName) {
@@ -3233,7 +3269,12 @@ export const mockApi: MkpApi = {
     for (const fileName of fileNames) {
       try {
         await mockDeliver(fileName, onTick, place ?? true)
-        outcomes.push({ fileName, ok: true, message: '' })
+        outcomes.push({
+          fileName,
+          ok: true,
+          message: '',
+          receipt: mockDownloadReceipt(fileName),
+        })
       } catch (e) {
         outcomes.push({ fileName, ok: false, message: String((e as Error)?.message ?? e) })
       }
@@ -3948,7 +3989,9 @@ export const mockApi: MkpApi = {
      * 默认不动它（把"谁占了 + 会改成什么"交给界面问）；用户同意后的那次调用按
      * 没被占的名字再落一份新的，原来那份一个字节不动。
      */
-    if (created) return { fetched: false, created, fileName, path }
+    if (created) {
+      return { fetched: false, created, fileName, path, receipt: mockDownloadReceipt(fileName) }
+    }
     if (renameIfTaken) {
       const name = mockUntakenName(fileName)
       const newPath = `presets-local/${name}`
@@ -3988,7 +4031,13 @@ export const mockApi: MkpApi = {
             ?.publishedAt ?? null,
         obtainedUnix: nowSec(),
       })
-      return { fetched: false, created: true, fileName: name, path: newPath }
+      return {
+        fetched: false,
+        created: true,
+        fileName: name,
+        path: newPath,
+        receipt: mockDownloadReceipt(fileName),
+      }
     }
     return {
       fetched: false,
@@ -3997,6 +4046,7 @@ export const mockApi: MkpApi = {
       path,
       takenBy: path,
       suggestedName: mockUntakenName(fileName),
+      receipt: mockDownloadReceipt(fileName),
     }
   },
 

@@ -70,6 +70,7 @@ import type {
   ArchivedFile,
   CommittedDraft,
   DownloadOutcome,
+  DownloadReceipt,
   DownloadTick,
   Machine,
   CloudVersion,
@@ -326,7 +327,7 @@ export interface PresetData {
     fileName: string,
     onTick?: (tick: DownloadTick) => void,
     place?: boolean,
-  ) => Promise<boolean>
+  ) => Promise<DownloadReceipt>
   /**
    * **一次处理多份**（批量补齐 / 批量更新）。
    *
@@ -1262,19 +1263,16 @@ export function usePresetData(importRevision = 0): PresetData {
       fileName: string,
       onTick?: (tick: DownloadTick) => void,
       place = true,
-    ): Promise<boolean> => {
-      let placed = false
+    ): Promise<DownloadReceipt> => {
       try {
-        await api.downloadCatalogFile(fileName, onTick, place)
+        return await api.downloadCatalogFile(fileName, onTick, place)
       } finally {
         /* 成没成都广播：`deliver` 是"先归档旧份、再换新"，失败也可能动过盘 ——
            宁可多读一次，不赌"失败 = 没变"（与首页 `applyCurrent` 同一条） */
         deliveryMutated()
         const copied = await api.getSlicerCopied().catch(() => null)
         if (copied !== null) setSlicerCopied(copied)
-        placed = copied?.includes(fileName) ?? false
       }
-      return placed
     },
     [],
   )

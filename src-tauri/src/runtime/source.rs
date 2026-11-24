@@ -66,6 +66,7 @@ use crate::error::AppError;
 
 use super::paths::SOURCE_FILE;
 use super::resolver::{ResourceRef, SourceResolver};
+use super::source_identity::SourceIdentity;
 
 /// 设置格式的代次。加字段不升号，改语义才升（与 catalog / active-preset 同一条）。
 ///
@@ -715,6 +716,24 @@ pub fn current_entry(root: &Path) -> Result<Option<SourceEntry>, AppError> {
     }))
 }
 
+/// **当前生效的源身份**（`平台#仓库@分支` 那个结构的原身）。
+///
+/// 唯一出口：与 [`current_entry`] 走同一套判据（没配过 = 出厂默认，
+/// 开发期覆盖排最前），不在别处另读 `preset_source` —— 那会让"真正联网用的源"
+/// 与"写进来源记录 / 判定里比对的源"分叉。
+///
+/// 认不出就是 `None`：内置地址一个都没注入（开发构建）、自定义没填地址 —— 不编。
+pub fn current_identity(root: &Path) -> Result<Option<SourceIdentity>, AppError> {
+    let Some(entry) = current_entry(root)? else {
+        return Ok(None);
+    };
+    let url = match entry {
+        SourceEntry::Bootstrap { url } => url,
+        SourceEntry::Custom { url, resolved, .. } => resolved.unwrap_or(url),
+    };
+    Ok(super::source_identity::parse_identity(&url))
+}
+
 /// 把入口解析成"远端在哪"。
 ///
 /// - 自定义（[`SourceEntry::Custom`]）：**探通时记下的那一份优先**
@@ -1188,6 +1207,33 @@ mod tests {
 
     fn root() -> tempfile::TempDir {
         tempfile::tempdir().expect("临时目录建不出来")
+    }
+
+    /// **源身份只有一个出口**：`current_identity` 走 `current_entry`，所以
+    /// 「没在设置页选过源」时拿到的是出厂默认那一份，而不是 `None`。
+    ///
+    /// 空状态那一档只断言"读得出来"：有没有身份取决于这一份构建注入了哪个内置地址
+    /// （测试构建可能一个都没注入），两种都合法 —— 不编。
+    #[test]
+    fn current_identity_follows_the_effective_entry() {
+        let dir = root();
+        assert!(
+            current_identity(dir.path()).is_ok(),
+            "空状态也要读得出来，不许报错"
+        );
+
+        let source = make_source(
+            SourceMode::Custom,
+            Some("https://gitee.com/o/r/raw/main/presets/delivery/source.json"),
+            CustomShape::Unset,
+        )
+        .expect("写设置");
+        app_state::set_preset_source(dir.path(), source).expect("落盘");
+        assert_eq!(
+            current_identity(dir.path()).unwrap().map(|i| i.key()),
+            Some("gitee#o/r@main".to_owned()),
+            "选了哪个源就认哪个，不另读一处"
+        );
     }
 
     /// 存进去再读出来必须还是那份——这条看着弱，但它钉的是"写的那套格式就是读的那套"

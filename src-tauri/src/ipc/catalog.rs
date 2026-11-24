@@ -19,7 +19,6 @@ use postprocess::diag::messages;
 use std::path::Path;
 
 use serde::Serialize;
-use sha2::Digest;
 use tauri::ipc::Channel;
 use tauri::AppHandle;
 
@@ -104,12 +103,7 @@ fn source_dto(root: &Path) -> Result<Option<PresetSourceDto>, AppError> {
         // **不静默回落到内置源** —— 那会让界面显示"自定义"、实际连着别的地方。
         None => (String::new(), true),
     };
-    let identity = runtime::app_state::preset_source(root)
-        .ok()
-        .flatten()
-        .as_ref()
-        .and_then(runtime::source_identity::identity_of)
-        .map(|id| id.key());
+    let identity = runtime::source::current_identity(root)?.map(|id| id.key());
     Ok(Some(PresetSourceDto {
         mode: mode_wire(mode),
         label: mode.label().to_owned(),
@@ -278,14 +272,13 @@ pub async fn read_downloaded_text(app: AppHandle, file_name: String) -> Result<S
 /// 下载与「放入」在界面上本来是两步；作者 2026-11-18 定了口径：「在套餐里一起下载的，
 /// 就放入」—— 下到本机却没进切片器，用户还得再点一次，而那份副本躺在切片器看不见的地方。
 /// 写盘那一段在 [`crate::ipc::presets::place_copies`]，这里只负责把字节取出来。
-fn place_after_download(root: &Path, file: &runtime::catalog::CatalogFile) {
-    let Some(slicer) = crate::ipc::presets::slicer_of_kind(&file.kind) else {
-        return;
-    };
-    let Some(bytes) = runtime::delivery::stored_bytes(root, file) else {
-        return;
-    };
-    crate::ipc::presets::place_copies(slicer, &file.file_name, &bytes);
+fn place_after_download(
+    root: &Path,
+    file: &runtime::catalog::CatalogFile,
+) -> Option<runtime::install::InstallReceipt> {
+    let slicer = crate::ipc::presets::slicer_of_kind(&file.kind)?;
+    let bytes = runtime::delivery::stored_bytes(root, file)?;
+    crate::ipc::presets::place_copies(slicer, &file.file_name, &bytes)
 }
 
 /// **跟着换**：这一份本机换版之后（用回归档那一版），把切片器目录里那份也换掉。
@@ -316,7 +309,7 @@ pub async fn download_runtime_file(
     file_name: String,
     on_tick: Channel<DownloadTick>,
     place: Option<bool>,
-) -> Result<String, AppError> {
+) -> Result<runtime::download::DownloadReceipt, AppError> {
     /* `place: false` = 这一次只要文件，别往切片器目录里塞（界面「下载不放入」）。
     缺省 / None = 老口径：切片器配置下完就放进每个账号目录。 */
     let place = place.unwrap_or(true);
@@ -326,6 +319,8 @@ pub async fn download_runtime_file(
             /* 联网功能关着 ⇒ 一个字节都不出网（见 runtime::online） */
             runtime::online::require(&root)?;
             let catalog = runtime::load_released_catalog(&root)?;
+            /* 事务开始时固定身份：取字节与发回执用同一份快照 */
+            let context = runtime::download::context_of(&root, &catalog)?;
             let file = catalog
                 .files
                 .iter()
@@ -374,12 +369,16 @@ pub async fn download_runtime_file(
             }
 
             outcome?;
-            /* 下完就能在切片器里选到它：写进每个账号目录（`place: false` 这一次不写） */
-            if place {
-                place_after_download(&root, file);
-            }
-            /* 预设的真实落点是 `content/<sha>`，文件名一律报目录里的名字 */
-            Ok(file.file_name.clone())
+            /* 回执只在字节真的落到落点、且能读回来之后才产生 */
+            let receipt = runtime::download::receipt_of(&root, file, &context, false)?;
+            /* 下完就能在切片器里选到它（`place: false` 这一次不写）——
+             * 这是另一个事务，结果单独带在回执里，不合并成一句"下载成功" */
+            let placed = if place {
+                place_after_download(&root, file)
+            } else {
+                None
+            };
+            Ok(runtime::download::DownloadReceipt { placed, ..receipt })
         })
     });
     task.await.map_err(|e| {
@@ -428,6 +427,9 @@ pub struct DownloadOutcomeDto {
     pub file_name: String,
     pub ok: bool,
     pub message: String,
+    /// 成功那一份的回执（身份 / 摘要 / 有没有校验）；失败 ⇒ `None`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt: Option<runtime::download::DownloadReceipt>,
 }
 
 /// 一次取多份：**并发在 Rust 侧**（上层 = 界面，不该自己发明并发与汇总口径）。
@@ -449,6 +451,8 @@ pub async fn download_runtime_files(
             /* 联网功能关着 ⇒ 一个字节都不出网（见 runtime::online） */
             runtime::online::require(&root)?;
             let catalog = runtime::load_released_catalog(&root)?;
+            /* 一批共用同一份身份快照：中途换源不影响这一批 */
+            let context = runtime::download::context_of(&root, &catalog)?;
 
             // 先对一遍清单：**目录里没有的那份是调用方的错**，整次拒绝 ——
             // 否则会变成"看起来下了七份，其中两份其实没人听说过"
@@ -507,21 +511,43 @@ pub async fn download_runtime_files(
             };
 
             let outcomes = runtime::delivery::deliver_all(&root, &wanted, &remote, &report);
-            /* 取到的那几份里，切片器配置顺手放进切片器（每个账号目录一份；
-            `place: false` 这一次一份都不放） */
-            if place {
-                for outcome in outcomes.iter().filter(|o| o.ok) {
-                    if let Some(file) = wanted.iter().find(|f| f.file_name == outcome.file_name) {
-                        place_after_download(&root, file);
-                    }
-                }
-            }
             Ok(outcomes
                 .into_iter()
-                .map(|o| DownloadOutcomeDto {
-                    file_name: o.file_name,
-                    ok: o.ok,
-                    message: o.message,
+                .map(|o| {
+                    /*
+                     * 成功项才有回执：字节刚落到落点，这里读回来算摘要。
+                     * 读不回来只影响这一格的回执 —— 不把已经成功的下载改判成失败。
+                     */
+                    let receipt = if o.ok {
+                        wanted
+                            .iter()
+                            .find(|f| f.file_name == o.file_name)
+                            .and_then(|f| {
+                                let mut got =
+                                    match runtime::download::receipt_of(&root, f, &context, false) {
+                                        Ok(got) => got,
+                                        Err(_) => {
+                                            tracing::warn!(
+                                                file = %o.file_name,
+                                                "下载成功但回执读不回来"
+                                            );
+                                            return None;
+                                        }
+                                    };
+                                if place {
+                                    got.placed = place_after_download(&root, f);
+                                }
+                                Some(got)
+                            })
+                    } else {
+                        None
+                    };
+                    DownloadOutcomeDto {
+                        file_name: o.file_name,
+                        ok: o.ok,
+                        message: o.message,
+                        receipt,
+                    }
                 })
                 .collect())
         })
@@ -552,6 +578,8 @@ pub struct FetchCloudDto {
     pub taken_by: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suggested_name: Option<String>,
+    /// 这次下载的回执：三段身份 + 实际字节摘要 + 有没有校验 + 索引记没记上
+    pub receipt: runtime::download::DownloadReceipt,
 }
 
 /// **一个没被占的名字**：`<原名>-2<后缀>`、`<原名>-3<后缀>`……（2026-10-10 撞名复试采用）。
@@ -653,10 +681,7 @@ pub async fn fetch_cloud_preset(
              * 目录四格（id / 序号 / revision / 发布时间）与云端原文 SHA 一起定格：
              * 云端后来换代，这一格一个字都不改（= 界面的「本地版本时间」）。
              */
-            let identity = runtime::app_state::preset_source(&root)
-                .ok()
-                .flatten()
-                .and_then(|s| runtime::source_identity::identity_of(&s));
+            let identity = runtime::source::current_identity(&root)?;
             let stamp = runtime::source_ledger::CatalogStamp {
                 catalog_id: catalog.catalog_id.as_deref(),
                 serial: catalog.publish_serial,
@@ -664,6 +689,21 @@ pub async fn fetch_cloud_preset(
                 published_at: catalog.published_at.as_deref(),
             };
             let source_sha = file.expected_sha();
+            /*
+             * 事务开始时固定身份：后面写文件尾记录、落分支目录、发回执都用这一份，
+             * 不再各读一次盘（当年就是各读一次、两处的根还不一样）。
+             */
+            let context = runtime::download::DownloadContext {
+                source: identity.clone(),
+                release: catalog.catalog_id.as_ref().map(|id| {
+                    runtime::download::ReleaseIdentity {
+                        catalog_id: id.clone(),
+                        serial: catalog.publish_serial,
+                        published_at: catalog.published_at.clone(),
+                    }
+                }),
+                catalog_revision: catalog.revision.clone(),
+            };
             /*
              * 落哪个文件夹：显式下载只跟**当前分支**有关（分支隔离）。
              * 自建源没有 ref ⇒ `None` ⇒ 保持平铺布局。
@@ -681,7 +721,7 @@ pub async fn fetch_cloud_preset(
             };
             let target = crate::fsx::paths::resolve_in(&user, &rel)?;
             let created = !target.is_file();
-            let (file_name_here, path_here, taken_by, suggested_name) = if created {
+            let (file_name_here, path_here, taken_by, suggested_name, indexed) = if created {
                 let text = runtime::delivery::cloud_text(&root, file)?;
                 runtime::local::save_cloud_as_new_in(
                     &user,
@@ -689,21 +729,23 @@ pub async fn fetch_cloud_preset(
                     file,
                     &text,
                     &file.file_name,
+                    identity.as_ref(),
                     line.as_ref(),
                 )?;
                 /* ★ 原文镜像：下载**落盘之后**覆盖一份 —— 文件此刻就是云端那一版的原样，
                 「恢复默认值」退的就是它（见 `runtime::baseline` 模块头） */
                 let _ = runtime::baseline::refresh_origin_copy(&root, &user, &rel);
-                /* 来路账：记不上不影响下载本身（附加信息，与原文镜像同一条口径） */
-                let _ = runtime::source_ledger::record_download(
+                /* 来路账：记不上不影响下载本身，但回执里要如实说这一格没记上 */
+                let indexed = runtime::source_ledger::record_download(
                     &root,
                     &rel,
                     identity.as_ref(),
                     &file.file_name,
                     &stamp,
                     source_sha,
-                );
-                (file.file_name.clone(), rel, None, None)
+                )
+                .is_ok();
+                (file.file_name.clone(), rel, None, None, indexed)
             } else if rename_if_taken == Some(true) {
                 /*
                  * 用户已经点了"导入"：自动改一个**没被占的**名字落一份新的。
@@ -722,20 +764,22 @@ pub async fn fetch_cloud_preset(
                     file,
                     &text,
                     &name,
+                    identity.as_ref(),
                     line.as_ref(),
                 )?;
                 /* 原文镜像同上一支 */
                 let _ = runtime::baseline::refresh_origin_copy(&root, &user, &rel);
                 /* 撞名另存也是从云端下载来的，照样记（用户看到的仍不是"拷贝"） */
-                let _ = runtime::source_ledger::record_download(
+                let indexed = runtime::source_ledger::record_download(
                     &root,
                     &rel,
                     identity.as_ref(),
                     &file.file_name,
                     &stamp,
                     source_sha,
-                );
-                (name, rel, None, None)
+                )
+                .is_ok();
+                (name, rel, None, None, indexed)
             } else {
                 /* 默认：不动它 —— 把"谁占了 + 会改成什么"交给界面问 */
                 (
@@ -743,6 +787,7 @@ pub async fn fetch_cloud_preset(
                     rel.clone(),
                     Some(rel),
                     Some(untaken_name(&user, branch_dir.as_deref(), &file.file_name)),
+                    false,
                 )
             };
             Ok(FetchCloudDto {
@@ -752,6 +797,7 @@ pub async fn fetch_cloud_preset(
                 path: path_here,
                 taken_by,
                 suggested_name,
+                receipt: runtime::download::receipt_of(&root, file, &context, indexed)?,
             })
         })
     });
@@ -1224,63 +1270,26 @@ pub async fn apply_active_preset(
          * ★ 这里**不记学习账**（2026-10-17 晚改口径）：作者的原话是「不是使用就增加，
          *   是后处理才加」—— 计数点在钩子那一趟（`hook.rs` 载入 IR 之后）。
          *   "应用了一份"只是把它设成当前预设，不等于拿它跑过后处理。
+         *
+         * 校验与落指针都在 `runtime::apply`（应用事务）里，这一层只做参数转换。
          */
-        let state = match origin.unwrap_or_default() {
-            ActiveOrigin::Preset => {
-                let file = catalog
-                    .files
-                    .iter()
-                    .find(|f| f.file_name == file_name)
-                    .ok_or_else(|| {
-                        AppError::not_found(messages::text(
-                            "ui.ipc.catalog.072",
-                            &[("file_name", &file_name.to_string())],
-                        ))
-                    })?;
-
-                // 应用的是盘上那份：字节得真的在；**目录给了期望值**的还要与它对得上
-                // （没下载/被删/漂了都不许应用）。随包 bootstrap 目录没登记 SHA ——
-                // 那种情况下盘上有就允许应用（字节的权威判定归 OTA 目录生效后那次下载）
-                let bytes = runtime::delivery::stored_bytes(&root, file).ok_or_else(|| {
-                    AppError::not_found(messages::text(
-                        "ui.ipc.catalog.073",
-                        &[("file_name", &file_name.to_string())],
-                    ))
-                })?;
-                if let Some(want) = file.expected_sha() {
-                    let digest = runtime::catalog::hex(&sha2::Sha256::digest(&bytes));
-                    if digest != want {
-                        return Err(AppError::sha_mismatch(messages::text(
-                            "ui.ipc.catalog.074",
-                            &[("file_name", &file_name.to_string())],
-                        )));
-                    }
-                }
-                runtime::app_state::set_active_preset(&root, file)?
-            }
+        let target = match origin.unwrap_or_default() {
+            ActiveOrigin::Preset => runtime::apply::ApplyTarget::Preset {
+                file_name: &file_name,
+            },
             ActiveOrigin::Local => {
-                let rel = path.ok_or_else(|| {
+                let rel = path.as_deref().ok_or_else(|| {
                     AppError::invalid_argument(messages::text("ui.ipc.catalog.075", &[]))
                 })?;
-                /* 两道闸都在读盘之前：只认用户根那一格，而且得是一份 MKP 预设（.toml） */
-                runtime::local::check_local_prefix(&rel)?;
-                if runtime::local::kind_of(&file_name) != Some(runtime::catalog::kind::PRESET) {
-                    return Err(AppError::invalid_argument(messages::text(
-                        "ui.ipc.catalog.076",
-                        &[("file_name", &file_name.to_string())],
-                    )));
+                runtime::apply::ApplyTarget::Local {
+                    file_name: &file_name,
+                    rel,
                 }
-                /*
-                 * 第九层的文件级检查在读的那一步里（能读 + UTF-8 + TOML 语法）——
-                 * 外部改过但仍是能读的 TOML 照常能用，**这里不比 SHA**（那是云端线的规矩）。
-                 */
-                let text = runtime::local::read_preset_text(&user, &rel)?;
-                let digest = runtime::catalog::hex(&sha2::Sha256::digest(text.as_bytes()));
-                runtime::app_state::set_active_local(&root, &rel, &digest)?
             }
         };
+        let receipt = runtime::apply::apply(&root, &user, &catalog, target)?;
 
-        Ok(active_dto(&root, &user, &catalog, state))
+        Ok(active_dto(&root, &user, &catalog, receipt.active))
     })?;
     /* AppState 的写命令成功 → 广播（docs/APP-STATE.md §3.5），订阅者据此刷新 */
     super::notify_app_state(&app);

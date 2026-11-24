@@ -1489,33 +1489,26 @@ pub(crate) fn replace_placed_copies(slicer: &str, file_name: &str, bytes: &[u8])
 ///
 /// 写失败**只记日志、不拦调用方**：下载本身已经成功了，用户可以再点「放入」重来
 /// （那条路会把失败原样说给用户听）。
-pub(crate) fn place_copies(slicer: &str, file_name: &str, bytes: &[u8]) {
-    let Some(dirs) = process_dirs_of(slicer) else {
-        return;
-    };
-    let written = place_in(&dirs, file_name, bytes);
-    if written > 0 {
-        tracing::info!(file = %file_name, targets = written, "下载完已放进切片器");
+pub(crate) fn place_copies(
+    slicer: &str,
+    file_name: &str,
+    bytes: &[u8],
+) -> Option<crate::runtime::install::InstallReceipt> {
+    let dirs = process_dirs_of(slicer)?;
+    let targets: Vec<(String, PathBuf)> = dirs
+        .iter()
+        .map(|dir| (account_of(dir), dir.clone()))
+        .collect();
+    let receipt = crate::runtime::install::install_into(&targets, file_name, bytes);
+    if receipt.written > 0 {
+        tracing::info!(
+            file = %file_name,
+            targets = receipt.written,
+            failed = receipt.failed.len(),
+            "下载完已放进切片器"
+        );
     }
-}
-
-/// [`place_copies`] 的判据本体：**每个目录都写**（缺的新建，已有的换成这一版）。
-///
-/// 目录从外面递进来（真机上由 `process_dirs_of` 枚举），判据因此能被单测钉住。
-fn place_in(dirs: &[PathBuf], file_name: &str, bytes: &[u8]) -> usize {
-    let mut written = 0usize;
-    for dir in dirs {
-        match crate::fsx::atomic::atomic_write(&dir.join(file_name), bytes) {
-            Ok(()) => written += 1,
-            Err(e) => tracing::warn!(
-                file = %file_name,
-                at = %dir.display(),
-                "下载完没能放进切片器：{}",
-                e.message
-            ),
-        }
-    }
-    written
+    Some(receipt)
 }
 
 /// [`replace_placed_copies`] 的判据本体：**只换已经存在的那几份，一份都不新建**。
@@ -2032,9 +2025,14 @@ mod tests {
         std::fs::create_dir_all(&old).unwrap();
         std::fs::write(old.join("A.json"), b"old").unwrap();
 
-        let written = place_in(&[fresh.clone(), old.clone()], "A.json", b"new");
+        let targets = vec![
+            ("default".to_owned(), fresh.clone()),
+            ("BBL".to_owned(), old.clone()),
+        ];
+        let receipt = crate::runtime::install::install_into(&targets, "A.json", b"new");
 
-        assert_eq!(written, 2);
+        assert_eq!(receipt.written, 2);
+        assert!(receipt.replaced, "old 里已有同名那份");
         assert_eq!(std::fs::read(fresh.join("A.json")).unwrap(), b"new");
         assert_eq!(std::fs::read(old.join("A.json")).unwrap(), b"new");
     }

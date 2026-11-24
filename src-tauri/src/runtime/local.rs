@@ -1411,9 +1411,10 @@ pub fn save_cloud_as_new(
     file: &CatalogFile,
     cloud_text: &str,
     new_name: &str,
+    identity: Option<&SourceIdentity>,
     line: Option<&CatalogLine>,
 ) -> Result<FileIdentity, AppError> {
-    save_cloud_as_new_in(user_root, None, file, cloud_text, new_name, line)
+    save_cloud_as_new_in(user_root, None, file, cloud_text, new_name, identity, line)
 }
 
 /// 同 [`save_cloud_as_new`]，但可以落到**分支文件夹**里（`presets-local/<subdir>/`）。
@@ -1426,6 +1427,7 @@ pub fn save_cloud_as_new_in(
     file: &CatalogFile,
     cloud_text: &str,
     new_name: &str,
+    identity: Option<&SourceIdentity>,
     line: Option<&CatalogLine>,
 ) -> Result<FileIdentity, AppError> {
     if file.kind != PRESET {
@@ -1447,8 +1449,7 @@ pub fn save_cloud_as_new_in(
             &[("name", &name.to_string())],
         )));
     }
-    /* 来源身份（平台 / 仓库 / 分支）从当前生效的源取；没配置源就不写 —— 不编 */
-    let identity = identity_here(user_root);
+    /* 来源身份（平台 / 仓库 / 分支）由调用方在事务开始时固定；没配置源就不写 —— 不编 */
     let source_ref = SourceRef {
         file: Some(file.path.clone()),
         platform: identity.as_ref().map(|i| i.platform.clone()),
@@ -1503,15 +1504,6 @@ fn origin_kind_of(raw: Option<&str>) -> Option<OriginKind> {
         "builtin" => OriginKind::Download,
         _ => return None,
     })
-}
-
-/// 当前生效的源身份（`平台#仓库@分支` 那个结构的原身）。没配置源 / 内置地址未注入
-/// ⇒ `None`：来源记录里那几格就**不写**，不编一个"大概是官方"。
-fn identity_here(root: &Path) -> Option<SourceIdentity> {
-    crate::runtime::app_state::preset_source(root)
-        .ok()
-        .flatten()
-        .and_then(|s| crate::runtime::source_identity::identity_of(&s))
 }
 
 /// **一份目录自报的发布身份**（`catalogId` + `publishSerial` + 发布时刻），
@@ -3091,6 +3083,7 @@ mod tests {
             "涂胶宽度 = 1.0\n",
             "本地 A1 标准版.toml",
             None,
+            None,
         )
         .unwrap();
         assert_eq!(done.path, "presets-local/本地 A1 标准版.toml");
@@ -3126,6 +3119,7 @@ mod tests {
             "涂胶宽度 = 1.0\n",
             "已经在了.toml",
             None,
+            None,
         )
         .unwrap_err();
         assert!(e.message.contains("换个名字"), "{}", e.message);
@@ -3147,14 +3141,18 @@ mod tests {
     fn saving_official_as_new_checks_the_new_name() {
         let user = tempfile::tempdir().unwrap();
         let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
-        assert!(save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "  ", None).is_err());
         assert!(
-            save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "别的.txt", None).is_err(),
+            save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "  ", None, None).is_err()
+        );
+        assert!(
+            save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "别的.txt", None, None)
+                .is_err(),
             "后缀不许换"
         );
         /* 路径分隔符剔掉照落 —— 落点仍在 presets-local/ 里（那些字符不是目录） */
-        let done = save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "../外面.toml", None)
-            .unwrap();
+        let done =
+            save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "../外面.toml", None, None)
+                .unwrap();
         assert_eq!(done.file_name, "..外面.toml", "剔掉那两个分隔符");
         assert!(done.adjusted);
     }
@@ -3173,6 +3171,7 @@ mod tests {
             "涂胶宽度 = 1.0\n",
             "A1-standard.toml",
             None,
+            None,
         )
         .unwrap();
         assert_eq!(main.path, "presets-local/main/A1-standard.toml");
@@ -3185,6 +3184,7 @@ mod tests {
             &file,
             "涂胶宽度 = 1.0\n",
             "A1-standard.toml",
+            None,
             None,
         )
         .unwrap();
@@ -3199,8 +3199,58 @@ mod tests {
             "涂胶宽度 = 1.0\n",
             "A1-standard.toml",
             None,
+            None,
         )
         .is_err());
+    }
+
+    /// **身份由调用方给，写入侧不再自己读一次状态**。
+    ///
+    /// 这条钉的就是当年那个坏法：拿用户根去读 `<root>/run/app-state.json`，
+    /// 永远读不到 ⇒ 记录里永远缺分支。现在同一个用户根、同一份字节：
+    /// 传 `Some` 三格都在，传 `None` 一格都不写，与数据根里有没有配置无关。
+    #[test]
+    fn the_source_identity_is_given_by_the_caller() {
+        let user = tempfile::tempdir().unwrap();
+        let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
+        let id = crate::runtime::source_identity::parse_identity(
+            "https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/source.json",
+        )
+        .unwrap();
+
+        let with = save_cloud_as_new_in(
+            user.path(),
+            Some("main"),
+            &file,
+            "涂胶宽度 = 1.0\n",
+            "有身份.toml",
+            Some(&id),
+            None,
+        )
+        .unwrap();
+        let text = String::from_utf8(std::fs::read(user.path().join(&with.path)).unwrap()).unwrap();
+        let origin = source_record::parse(&text).unwrap().origin.unwrap();
+        assert_eq!(origin.platform.as_deref(), Some("gitee"));
+        assert_eq!(origin.repo.as_deref(), Some("mucorebenc/mkpsupportease"));
+        assert_eq!(origin.branch.as_deref(), Some("main"));
+
+        let without = save_cloud_as_new_in(
+            user.path(),
+            None,
+            &file,
+            "涂胶宽度 = 1.0\n",
+            "无身份.toml",
+            None,
+            None,
+        )
+        .unwrap();
+        let text = String::from_utf8(std::fs::read(user.path().join(&without.path)).unwrap()).unwrap();
+        let origin = source_record::parse(&text).unwrap().origin.unwrap();
+        assert_eq!(
+            (origin.platform, origin.repo, origin.branch),
+            (None, None, None),
+            "没有身份就一格都不许编"
+        );
     }
 
     /// 只有 MKP 预设能另存成本地这份：切片器 profile（json）那类拒
@@ -3211,7 +3261,8 @@ mod tests {
             kind: "bbs_profile".to_owned(),
             ..entry_bytes("MKPProcess.json", "{}")
         };
-        let e = save_cloud_as_new(user.path(), &file, "{}", "本地.json", None).unwrap_err();
+        let e = save_cloud_as_new(user.path(), &file, "{}", "本地.json", None, None)
+            .unwrap_err();
         assert!(e.message.contains("不是 MKP 预设"), "{}", e.message);
     }
 
@@ -3232,6 +3283,7 @@ mod tests {
             &file,
             "涂胶宽度 = 1.0\n",
             "新的一份.toml",
+            None,
             None,
         )
         .unwrap();

@@ -1380,6 +1380,8 @@ export const en: Record<StringKey, string> = {
   'presets.page.download.doneSlicerManual': 'Downloaded {name}. No slicer folder found; click Add to slicer to pick one.',
   'presets.page.download.doneNoPlace': 'Downloaded {name} · not added to the slicer',
   'presets.page.download.doneKeepOld': 'Downloaded {name} · the slicer copy is unchanged',
+  'presets.page.download.doneUnverified': 'Downloaded {name} · no checksum registered',
+  'presets.page.download.placePartial': 'Downloaded {name} · {n} accounts not placed',
   'presets.page.download.failed': 'Download failed: {detail}',
   'presets.page.download.tamperedDone': 'Updated {name} to the current cloud version',
   'presets.page.download.archivedDone': 'Updated {name}; the old version is kept under Older versions',

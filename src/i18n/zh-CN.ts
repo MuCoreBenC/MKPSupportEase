@@ -1434,6 +1434,8 @@ export const zhCN = {
   'presets.page.download.doneSlicerManual': '已下载 {name}。没找到切片器目录，点「放入」自己选。',
   'presets.page.download.doneNoPlace': '已下载 {name} · 未放入切片器',
   'presets.page.download.doneKeepOld': '已下载 {name} · 切片器里那份没换',
+  'presets.page.download.doneUnverified': '已下载 {name} · 目录未登记校验值',
+  'presets.page.download.placePartial': '已下载 {name} · {n} 个账号没放进去',
   'presets.page.download.failed': '下载失败：{detail}',
   'presets.page.download.tamperedDone': '已更新 {name}，换成了云端当前版本',
   'presets.page.download.archivedDone': '已更新 {name}，旧版已移到「旧版本」',

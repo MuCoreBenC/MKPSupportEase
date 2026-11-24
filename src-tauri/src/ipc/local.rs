@@ -152,10 +152,7 @@ pub async fn get_local_preset_files(app: AppHandle) -> Result<Vec<LocalPresetFil
          * **源身份**（2026-10-27）：当前这个源是谁 + 账上见过它什么样 + 每份副本建的时候
          * 哪个源在生效。三样都是一次读、整批复用 —— 别在每份文件里各读一遍账。
          */
-        let current_source = runtime::app_state::preset_source(&internal).ok().flatten();
-        let cloud = current_source
-            .as_ref()
-            .and_then(runtime::source_identity::identity_of);
+        let cloud = runtime::source::current_identity(&internal)?;
         let notes = runtime::source_ledger::load_notes(&internal);
         /*
          * 目录变了就补一笔（同一个源、同一份目录不重复写）：账本要能回答
@@ -1277,10 +1274,7 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
                  * 这一份是从**当前源**派生的 ⇒ 落进当前分支的文件夹。
                  * 自建源没有 ref ⇒ `None` ⇒ 保持平铺。
                  */
-                let identity = runtime::app_state::preset_source(&root)
-                    .ok()
-                    .flatten()
-                    .and_then(|s| runtime::source_identity::identity_of(&s));
+                let identity = runtime::source::current_identity(&root)?;
                 let branch_dir = identity
                     .as_ref()
                     .map(|id| runtime::branch_dir::folder_for(&root, id))

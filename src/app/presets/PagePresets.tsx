@@ -2148,32 +2148,41 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           place,
         )
         .then(
-          (placed) => {
+          (receipt) => {
             leave(key)
             clearBusy(row.rowKey)
             /*
-             * 切片器那一格按**这一手到底干了什么**说话：
-             *   · 默认这一手会放进切片器；本机没有切片器账号目录时 `placed` 是 false ——
-             *     那时照实说"得自己点「放入」"，不假装放好了。
-             *   · `place: false`（「下载不放入」）时切片器里那份原样不动：
-             *     已经在的要说"没换"，不在的要说"未放入"，都不许说成放好了。
-             *   （落点路径不印在提示条上 —— 要看文件在哪，右键有「显示我们那份的文件夹」。）
+             * 回执把两件事分开说：**取回来 / 校验过没有**、**放进切片器成没成**。
+             *   · `placed` 缺席 = 这次没做放入（MKP 预设 / 「下载不放入」）；
+             *   · `failed` 非空 = 哪几个账号没写进去 —— 不许用一句"下载成功"盖过去；
+             *   · `integrity = notRecorded` = 目录没登记校验值，照实说，不称"已校验"。
              */
+            const install = receipt.placed
+            const failed = install?.failed?.length ?? 0
+            const placedOk = install !== undefined && install.written > 0 && failed === 0
             const slicerText =
               place === false
-                ? placed
-                  ? msg('presets.page.download.doneKeepOld', { name: row.fileName })
-                  : msg('presets.page.download.doneNoPlace', { name: row.fileName })
-                : placed
-                  ? msg('presets.page.download.doneSlicer', { name: row.fileName })
-                  : msg('presets.page.download.doneSlicerManual', { name: row.fileName })
+                ? msg('presets.page.download.doneNoPlace', { name: row.fileName })
+                : failed > 0
+                  ? msg('presets.page.download.placePartial', {
+                      name: row.fileName,
+                      n: String(failed),
+                    })
+                  : placedOk
+                    ? msg('presets.page.download.doneSlicer', { name: row.fileName })
+                    : msg('presets.page.download.doneSlicerManual', { name: row.fileName })
+            const text =
+              !updating && receipt.integrity === 'notRecorded'
+                ? msg('presets.page.download.doneUnverified', { name: row.fileName })
+                : updating
+                  ? row.presetState === 'tampered'
+                    ? msg('presets.page.download.tamperedDone', { name: row.fileName })
+                    : msg('presets.page.download.archivedDone', { name: row.fileName })
+                  : slicerText
             setNote({
-              text: updating
-                ? row.presetState === 'tampered'
-                  ? msg('presets.page.download.tamperedDone', { name: row.fileName })
-                  : msg('presets.page.download.archivedDone', { name: row.fileName })
-                : slicerText,
-              bad: false,
+              text,
+              /* 有账号没放进去是"部分失败"，语气按坏的说 */
+              bad: failed > 0,
             })
           },
           (e: unknown) => {

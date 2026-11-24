@@ -156,8 +156,10 @@ fn write_lock() -> std::sync::MutexGuard<'static, ()> {
 /// 认不出来（开发构建没注入地址 / 老状态文件）= `None`：那种情况拿不出反证，
 /// [`sync_for_source`] 按"同一条线"处理。
 fn current_source(root: &Path) -> Option<String> {
-    let source = super::app_state::preset_source(root).ok().flatten()?;
-    super::source_identity::identity_of(&source).map(|i| i.key())
+    super::source::current_identity(root)
+        .ok()
+        .flatten()
+        .map(|i| i.key())
 }
 
 /// 按**当前目录**收口索引：更新身份四格、补上内容已在的条目（**只在同一条线同一代**，

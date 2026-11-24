@@ -2192,6 +2192,11 @@ export interface FetchCloudResult {
    * （`A1-fast-2.toml` 这种）—— 弹框里直接显示给用户看，不用他自己猜。
    */
   suggestedName?: string
+  /**
+   * 这次下载的回执（三段身份 + 实际字节摘要 + 完整性分档）。
+   * **撞名未导入**那一档也带着：取回原件这件事本身发生了。
+   */
+  receipt: DownloadReceipt
 }
 
 /**
@@ -2365,12 +2370,76 @@ export interface DownloadTick {
   message?: string
 }
 
+/** 下载回执里的发布身份（目录自报；随包目录没有 ⇒ `null`，不从数据源推导） */
+export interface ReleaseIdentity {
+  catalogId: string
+  serial: number | null
+  publishedAt: string | null
+}
+
+/**
+ * 这一次字节有没有被校验过。
+ *
+ * - `verified`：目录登记了期望 SHA，落盘前比对通过（今天只有 MKP 预设）
+ * - `notRecorded`：目录没登记期望值（`bbs_config` / `model` / `icon`）—— **没有校验**，
+ *   界面不许说成"已校验"
+ */
+export type DownloadIntegrity = 'verified' | 'notRecorded'
+
+/** 一次下载开始时固定的三段身份（数据源 / 发布 / 目录代次） */
+export interface DownloadContext {
+  /** `platform#repo@ref` 的原来那份；认不出 ⇒ `null` */
+  source: { platform: string; repo: string; gitRef: string } | null
+  release: ReleaseIdentity | null
+  /** 目录内容指纹（对照用，不是身份） */
+  catalogRevision: string
+}
+
+/** 某一个切片器账号目录没写进去的原因 */
+export interface AccountFailure {
+  account: string
+  message: string
+}
+
+/**
+ * 放入事务的回执：这次往哪几个账号目录写了、成了几份、哪几个没成。
+ *
+ * `failed` 为空 ⇒ 全部成功；有内容 ⇒ 界面必须把失败的那几个说出来，
+ * 不许用一句「下载成功」盖过去。
+ */
+export interface InstallReceipt {
+  fileName: string
+  targets: number
+  written: number
+  replaced: boolean
+  failed?: AccountFailure[]
+}
+
+/**
+ * 一次下载的回执。**只在提交路径全部走完之后产生**：
+ * 字节已经落到落点、来源记录已经写进文件尾、运行索引的结果如实带在这一格里。
+ */
+export interface DownloadReceipt {
+  fileName: string
+  /** 落点（相对内部根） */
+  path: string
+  sha256: string
+  integrity: DownloadIntegrity
+  context: DownloadContext
+  /** 运行索引（`run/provenance.json`）写成没有；没写不等于下载失败 */
+  indexed: boolean
+  /** 顺带放入切片器的结果（另一件事）；没做 ⇒ 没有这一格 */
+  placed?: InstallReceipt
+}
+
 /** 批量下载里每一份的结局。**一份出错不拖累别人**，所以按份返回，不是一次总的结果 */
 export interface DownloadOutcome {
   fileName: string
   ok: boolean
   /** 失败原因同样来自后端 */
   message: string
+  /** 成功那一份的回执；失败 ⇒ 没有 */
+  receipt?: DownloadReceipt
 }
 
 /**
@@ -4135,7 +4204,7 @@ export interface MkpApi {
     fileName: string,
     onTick?: (tick: DownloadTick) => void,
     place?: boolean,
-  ): Promise<void>
+  ): Promise<DownloadReceipt>
 
   /**
    * 批量下载（并发在 Rust 侧做）。**一份失败不拖累别人** —— 按份给结局，

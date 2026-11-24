@@ -46,6 +46,12 @@ pub mod client_defaults;
 pub mod content;
 pub mod delivery;
 pub mod delivery_index;
+/// **下载事务**：一次下载固定一份身份快照，走完一条提交路径才发回执
+pub mod download;
+/// **应用事务**：已存在的本地资源 → 当前使用（校验不过不落指针）
+pub mod apply;
+/// **放入事务**：已存在的本地资源 → 切片器账号目录（失败账号可见）
+pub mod install;
 /// **修改历史账本**（2026-10-17）：一份文件一本，git 式 —— 不清空、重开软件还在
 /// （用户线按相对路径、云端线按文件名认文件，于是导入的 toml 也有自己的一本）。
 /// 见 [`history`] 的模块头。
