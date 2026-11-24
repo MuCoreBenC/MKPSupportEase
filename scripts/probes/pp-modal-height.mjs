@@ -89,11 +89,10 @@ for (const env of THEMES) {
     const dragHit = await page.evaluate(() => {
       const x = Math.round(window.innerWidth / 2)
       const el = document.elementFromPoint(x, 10)
-      /* 两种合法把手：标题栏本身（`<header>`，`useTitlebarDrag` 挂在它上面），
-         或「跑着 / 问句」那一态接管标题栏的 `data-drag-handle` 拖窗带 */
+      /* 唯一把手：标题栏本身（`<header>`，`useTitlebarDrag` 挂在它上面）。
+         它现在是 99999，任何层都不许盖住它 */
       const inHeader = el?.closest('header') != null
-      const inShield = el?.closest('[data-drag-handle="true"]') != null
-      return { tag: el?.tagName ?? null, dragOk: inHeader || inShield }
+      return { tag: el?.tagName ?? null, dragOk: inHeader }
     })
     drags.push({ env: env.name, name: s.name, ...dragHit })
     await page.screenshot({ path: `${SHOTS}/pp-${env.name}-${s.name}.png` })

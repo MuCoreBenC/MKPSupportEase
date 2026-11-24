@@ -41,3 +41,17 @@ export function useModalHeadSlot(): HTMLElement | null {
 export function useModalHeadNoteSlot(): HTMLElement | null {
   return useContext(ModalHeadNoteSlotContext)
 }
+
+/**
+ * **这块内容是不是住在一扇打开的 Modal 里**（2026-11-24）。
+ *
+ * 判据只有这一处：`CollisionMap` 点开俯视图时拿它决定放大层的档位 ——
+ *   · 框里点开的图：**要盖过那扇框**（后处理结果 / 问句那两屏都走这条）；
+ *   · 页面里（报告页）点开的图：低于后处理那一屏，不许反过来压住进度框。
+ */
+export const InsideModalContext = createContext(false)
+
+/** 当前组件在不在打开的 Modal 里 */
+export function useInsideModal(): boolean {
+  return useContext(InsideModalContext)
+}

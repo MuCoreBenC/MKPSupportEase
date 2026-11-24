@@ -50,6 +50,7 @@ export default function ZoomLayer({
   onGone,
   label = t('zoom.closeDefault'),
   hint = t('zoom.hintDefault'),
+  elevated = false,
 }: {
   /** 要看大的那块内容（`<img>` / canvas / SVG …… 任意节点） */
   children: ReactNode
@@ -63,6 +64,13 @@ export default function ZoomLayer({
   label?: string
   /** 遮罩上那句提示；`''` = 不摆（原作者定的：默认其实不提示更好，能点靠光标自己说） */
   hint?: string
+  /**
+   * **从模态框里点开**（`CollisionMap` 读 `InsideModalContext` 传进来）。
+   *
+   * `true` ⇒ 层高抬到 95，盖过那扇框（后处理那一屏是 92）；默认 91，低于后处理那一屏，
+   * 报告页点开的图压不住进度框。通知与提示气泡（96）两种情况都在上面。
+   */
+  elevated?: boolean
 }) {
   const layerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -365,6 +373,7 @@ export default function ZoomLayer({
     <div
       ref={layerRef}
       className={s.layer}
+      data-elevated={elevated ? 'true' : undefined}
       onMouseDown={(e) => {
         /* 只认落在这一层自己身上的那一下（从内容上拖到外面松手不算）；
            刚捏合 / 拖过的那一下也不认 —— 那是同一个手势的尾巴 */

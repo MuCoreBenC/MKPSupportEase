@@ -28,6 +28,7 @@ import { api } from '../../api'
 import type { Machine, Plate, ReportBoundaryPiece, ReportBox4, ReportCollision } from '../../api'
 import { useT } from '../../i18n'
 import ZoomLayer from '../../components/zoom/ZoomLayer'
+import { useInsideModal } from '../../components/modal/modalHeadSlot'
 import { useSourceRevision } from '../state/deliveryState'
 import { arrowPathOf, minArrowLength } from './arrowGeometry'
 import { boundaryNumbering } from './boundaryNumbering'
@@ -226,7 +227,10 @@ export default function CollisionMap({
   }, [machineType, sourceRevision])
 
   /* 点图 = 浮起来看大的（通用放大层 `components/zoom/ZoomLayer`，内容是这份 SVG 俯视图）。
-     报告页不在模态框里 ⇒ 放大层 portal 到 body。`fromRef` 记点的那一下小图在哪（FLIP First） */
+     放大层一律 portal 到 body；档位看这块图住在哪：模态框里点开 ⇒ 盖过那扇框，
+     报告页点开 ⇒ 低于后处理那一屏（见 `ZoomLayer` 的 `elevated`）。
+     `fromRef` 记点的那一下小图在哪（FLIP First） */
+  const insideModal = useInsideModal()
   const [zoom, setZoom] = useState(false)
   const fromRef = useRef<DOMRect | null>(null)
   const mapBtnRef = useRef<HTMLButtonElement>(null)
@@ -1015,6 +1019,7 @@ export default function CollisionMap({
             }
             onGone={() => setZoom(false)}
             label={tr('report.map.zoomClose')}
+            elevated={insideModal}
           >
             <div
               className={s.zoomed}

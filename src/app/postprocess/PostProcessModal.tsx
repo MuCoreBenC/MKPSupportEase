@@ -50,10 +50,8 @@ import type {
 } from '../../api/contract'
 import BoundaryPlate from '../report/BoundaryPlate'
 import { boundaryNumbering, moveDistanceMm } from '../report/boundaryNumbering'
-import { detectPlatform } from '../../hooks/usePlatform'
 import { Btn } from '../ui/Controls'
 import { HeadNote, Modal, NoticeHero, PageToggle } from '../../components/modal'
-import { useTitlebarDrag } from '../useTitlebarDrag'
 import { questionUiState } from './questionUi'
 import { estimatedPrintTimeSeconds } from './facts'
 import { FAIL_FIX_TARGETS, SETTINGS_TARGET_TOWER } from '../settings/targets'
@@ -63,9 +61,6 @@ import { SETTLE_MS, useSmoothPercent } from './useSmoothPercent'
 import type { PostProcessRunView } from './usePostProcessRun'
 import { RelocateMaps, RelocateNote } from './RelocatePanel'
 import s from './PostProcessModal.module.css'
-
-/* 顶栏那一条的高度按平台来（与 `TopTabs` 同一对 token）：拖窗带要正好铺在它上面 */
-const PLATFORM = detectPlatform()
 
 /**
  * 这一屏"整段演示"的最短时长（ms）—— **从窗口打开算**（`view.sinceMs`）。
@@ -139,11 +134,12 @@ const FADE_KEYS: Keyframe[] = [{ opacity: 0 }, { opacity: 1 }]
  * 哪怕系统开关看着是关的，WKWebView 自己读到的未必一样）。
  * 换 `element.animate()`：它是 JS 调用，**不过 CSS 级联**，那条降级规则管不到它。
  *
- * 三件事：
- *   ① **按住中**：`pointerdown` 起一个 130ms 的 WAAPI 动画压到 scale 0.972 + 暗 0.97，
- *      `fill: 'forwards'` 保持住；松手（`pointerup` / `cancel` / 离开）再起一个回到原状的。
- *   ② **弹一下**：`onClick` 起一个三段动画（1 → 0.975 → 1）。连击每次都重放（先 cancel 旧的）。
- *   ③ **双击**：自己数（`DOUBLE_TAP_MS` / `DOUBLE_TAP_SLOP`），`pointerup` 里判。
+ * 两件事：
+ *   ① **按住 → 松手回弹**：`pointerdown` 起一个 130ms 的 WAAPI 动画压到 scale 0.972
+ *      + 暗 0.97（`fill: 'forwards'` 保持住）；松手（`pointerup` / `cancel` / 离开）
+ *      从当前这一档起一段 110ms 回弹。**一次点击只播这一条** —— 不再在 `click` 上
+ *      另加一段，否则单击看着像连点两三次。
+ *   ② **双击**：自己数（`DOUBLE_TAP_MS` / `DOUBLE_TAP_SLOP`），`pointerup` 里判。
  *
  * 纯观感：不碰任何状态、不拦点击。
  */
@@ -160,6 +156,8 @@ function usePressFlash<T extends HTMLElement>(onDoubleTap?: () => void) {
     const el = ref.current
     /* 老引擎没有 WAAPI 就什么都不做（宁可没动效，也不能抛错挡了点击） */
     if (el === null || typeof el.animate !== 'function') return null
+    /* 同一元素上只留一条按压 / 回弹：连击时先把上一轮撤掉，别让几条动画叠着播 */
+    el.getAnimations().forEach((a) => a.cancel())
     return el.animate(keyframes, options)
   }
 
@@ -202,16 +200,14 @@ function usePressFlash<T extends HTMLElement>(onDoubleTap?: () => void) {
   }
   const onPointerCancel = endPress
   const onPointerLeave = endPress
-  /** 弹一下：挂在 `onClick` 上（不是 pointerdown —— 那样按着不放会先弹一次，重复） */
+  /**
+   * 收尾只走「按住 → 松手回弹」这一条路（见 `endPress`）。
+   *
+   * `click` 不再另起一段动画 —— 原来 pointerdown / pointerup / click 各播一段，
+   * 一次点击看着像连点两三次。这里只补一种漏网：pointerup 没送达（焦点被别的层拿走）。
+   */
   const onClick = () => {
-    animate(
-      [
-        { transform: 'scale(1)', filter: 'none' },
-        { transform: 'scale(0.975)', filter: 'brightness(0.97)', offset: 0.35 },
-        { transform: 'scale(1)', filter: 'none' },
-      ],
-      { duration: 190, easing: 'ease' },
-    )
+    if (holdRef.current !== null) endPress()
   }
   return { ref, onPointerDown, onPointerUp, onPointerCancel, onPointerLeave, onClick }
 }
@@ -1132,8 +1128,6 @@ export default function PostProcessModal({
   const [err, setErr] = useState<string | null>(null)
   /* 「预计还需」每秒重算一次（这个表只在跑着的时候挂着） */
   const [, setTick] = useState(0)
-  /* 跑着的时候顶上那条拖窗带用它（与标题栏同一条动作，见文件头第 1 条下面那段） */
-  const drag = useTitlebarDrag()
 
   /*
    * ★★ 2026-10-19：**撤掉两处开发台钩子**（作者：「把预览全部取消吧」）。
@@ -2226,41 +2220,12 @@ export default function PostProcessModal({
   )
 
   /*
-   * 跑着的那一态：**内容区全归这一屏**，标题栏交给一条拖窗带。
+   * 这一屏只铺**内容区**（`.stage`），标题栏不归它管 —— 标题栏是 99999，永远最上，
+   * 拖窗 / 页签 / 窗控键都照旧。
    *
-   * 通用模态框的遮罩是 `z-index: 40`，而这一层跑着的时候抬到 92（标题栏之下、
-   * 拖窗带之上）—— 于是"框开着、标题栏照样能拖"。
-   *
-   * 顶上那条拖窗带是这一层的**兄弟**（不在里面）：它要压过窗口内侧那圈 resize
-   * 命中条（93）里落在标题栏上的那几条，标题栏才整条都是窗口把手。
-   * ★ Windows 上它**只铺到窗控键左边**（右边让出三颗键那一格）：作者 2026-11-18
-   *   「后处理的时候这三个按钮还是能按的好吧，因为我在 macOS 上都可以按」——
-   *   macOS 那三颗在系统图层上，DOM 盖不着；Windows 这三颗是标题栏里的按钮，
-   *   压在拖窗带下面就点不着了。于是现在两边观感一致：能拖窗，也能按那三颗键。
-   *
-   * **窗口大小仍然改得动**（作者 2026-10-11 明确要的）：左右两条边（标题栏以下）、
-   * 下边一条与下面两个角那几块命中条（93）都在拖窗带之外，跑着的时候照旧能拖。
-   *
-   * 不跑的那一态（结论留在屏上）**层高不降**（2026-10-18：结果框要压过参数弹窗，
-   * 它是这一屏的头等事），但仍低于窗控键（94）—— 看完结果顺手关窗照旧。
+   * 内容区这一层两态都是 92：压过普通模态框（40）、参数弹窗（70）与页面里点开的
+   * 放大层（91）；模态框里点开的放大层（95）压过它，但同样盖不到标题栏。
+   * 窗口四边那圈命中条（93）在它之上，跑着的时候窗口大小照旧改得动。
    */
-  return (
-    <>
-      <div className={s.layer}>
-        {screen}
-      </div>
-      {running && (
-        <div
-          className={s.dragShield}
-          data-platform={PLATFORM}
-          /* 探针认它：标题栏被这一层接管时，**它就是窗口把手**（拖窗照旧）
-             —— `scripts/probes/pp-modal-height.mjs` 的命中测试认这两个之一 */
-          data-drag-handle="true"
-          aria-hidden="true"
-          onMouseDown={drag.onMouseDown}
-          onDoubleClick={drag.onDoubleClick}
-        />
-      )}
-    </>
-  )
+  return <div className={s.layer}>{screen}</div>
 }

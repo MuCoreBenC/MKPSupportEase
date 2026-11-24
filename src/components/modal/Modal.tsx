@@ -38,7 +38,11 @@ import { createPortal } from 'react-dom'
 import Icon from '../Icon'
 import { useT } from '../../i18n'
 import { track } from '../../app/log/track'
-import { ModalHeadNoteSlotContext, ModalHeadSlotContext } from './modalHeadSlot'
+import {
+  InsideModalContext,
+  ModalHeadNoteSlotContext,
+  ModalHeadSlotContext,
+} from './modalHeadSlot'
 import s from './Modal.module.css'
 
 /*
@@ -312,13 +316,16 @@ export default function Modal({
     </div>
   )
 
-  /* 两个槽的 context 要罩住**框里的内容**（`children` 就在 `scrim` 里），才找得到落点 */
+  /* 两个槽的 context 要罩住**框里的内容**（`children` 就在 `scrim` 里），才找得到落点；
+     `InsideModalContext` 一起罩住 —— 框里点开的放大层要据此盖过这扇框 */
   const tree = (
-    <ModalHeadSlotContext.Provider value={headSlot}>
-      <ModalHeadNoteSlotContext.Provider value={headNoteSlot}>
-        {scrim}
-      </ModalHeadNoteSlotContext.Provider>
-    </ModalHeadSlotContext.Provider>
+    <InsideModalContext.Provider value={true}>
+      <ModalHeadSlotContext.Provider value={headSlot}>
+        <ModalHeadNoteSlotContext.Provider value={headNoteSlot}>
+          {scrim}
+        </ModalHeadNoteSlotContext.Provider>
+      </ModalHeadSlotContext.Provider>
+    </InsideModalContext.Provider>
   )
   return host !== null ? createPortal(tree, host) : tree
 }
