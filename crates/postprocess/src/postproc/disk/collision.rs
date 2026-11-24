@@ -927,88 +927,93 @@ pub fn model_footprint(content: &[String], ir_data: &Ir) -> ModelFootprint {
 
 /// 走线投影的栅格化器（见 [`ModelRaster`]）。
 ///
-/// 一次扫描里顺手画：每段挤出按 Bresenham 落格，每个格补一圈 3×3 —— 0.2mm 的线在
-/// 132px 缩略图上只有 0.1px，不补这一圈就被缩没了。
+/// 一次扫描里顺手画：每段挤出按 Bresenham 落格。
+///
+/// **画什么、画多重**（2026-11-25 定）：
+/// - 墙线（外/内墙等）与支撑**每一层都画**：支撑段本来就少，按层抽会漏掉只在某几层
+///   出现的支撑块；墙线是模型的形状，叠多少层都不会糊；
+/// - 填充按 [`RASTER_FILL_LAYER_STEP`] 抽层（层内全画，线距才会和真实打印一致）；
+/// - 每个像素另记模型 / 支撑的**最高 Z**：支撑不高于模型时它在下面，只留很淡的底纹。
 struct RasterBuilder {
     cell: f64,
     x_min: f64,
     y_min: f64,
     width: u32,
     height: u32,
-    /// 每个像素被模型线 / 支撑线各压过几次（**密度**，不是 alpha 叠加）——
-    /// alpha 叠加叠几十次就饱和成一块实心，密度才能分出深浅
-    model: Vec<u16>,
+    /// 每个像素被墙线 / 填充 / 支撑各压过几次（**密度**，不是 alpha 叠加）
+    wall: Vec<u16>,
+    fill: Vec<u16>,
     support: Vec<u16>,
-    /// 看到第几层了（Z 每变一次 +1）—— 只画抽样层，全量叠加会糊成一块
+    /// 模型（墙 + 填充）/ 支撑各自在这个像素上的最高 Z；`-1` = 没有
+    model_z: Vec<f32>,
+    support_z: Vec<f32>,
+    /// 第几层（遇到切片器的层标记才 +1；没有标记的文件退回“Z 变就 +1”）
     layer_index: i64,
+    /// 这份 G-code 没有层标记 ⇒ 按 Z 变化分层
+    use_z_layers: bool,
     last_z: f64,
 }
 
-/// 一段走线属于哪一类（模型灰 / 支撑绿）
+/// 一段走线属于哪一类（墙 / 填充 / 支撑）
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RasterKind {
-    Model,
+    Wall,
+    Fill,
     Support,
 }
 
-/// 一格多少毫米（板子小到这个格够用时就用它）
-const RASTER_CELL_MM: f64 = 0.3;
+/// 一格多少毫米（0.4mm 的走线在 0.15mm 格里才分得开，0.3 会把两条并成一条粗线）
+const RASTER_CELL_MM: f64 = 0.15;
 /// 一张图最多多少像素（板再大就放大格距，不许把 meta 撑爆）
 const RASTER_MAX_PX: u32 = 1280;
-/// 隔几层画一层（1/10 的层已经能看出纹理）
-const RASTER_LAYER_STEP: i64 = 10;
-/// 填充隔几条画一条（纹理密度）
-const RASTER_INFILL_STEP: u64 = 16;
-/// 模型灰与支撑绿（密度 → alpha 的系数：压过 N 次的像素，N×系数 就是它的不透明度）
-const RASTER_MODEL_RGBA: [u8; 3] = [96, 105, 120];
+/// 填充隔几层画一层（墙与支撑每层都画；层内不再抽段，否则线距不均）
+const RASTER_FILL_LAYER_STEP: i64 = 2;
+/// 墙 / 填充 / 支撑三档颜色
+const RASTER_WALL_RGBA: [u8; 3] = [58, 68, 84];
+const RASTER_FILL_RGBA: [u8; 3] = [140, 150, 165];
 const RASTER_SUPPORT_RGBA: [u8; 3] = [16, 185, 129];
-/// 归一化后的淡/浓：最疏的地方 24%，最密的地方 76%
-const RASTER_ALPHA_FLOOR: f32 = 0.24;
-const RASTER_ALPHA_GAIN: f32 = 0.52;
 
 impl RasterBuilder {
-    fn new(bed: &Box4) -> Self {
+    fn new(bed: &Box4, use_z_layers: bool) -> Self {
         let span = (bed.x_max - bed.x_min).max(bed.y_max - bed.y_min);
         let cell = (span / RASTER_MAX_PX as f64).max(RASTER_CELL_MM);
         let width = (((bed.x_max - bed.x_min) / cell).ceil() as u32).clamp(1, RASTER_MAX_PX);
         let height = (((bed.y_max - bed.y_min) / cell).ceil() as u32).clamp(1, RASTER_MAX_PX);
+        let n = (width * height) as usize;
         Self {
             cell,
             x_min: bed.x_min,
             y_min: bed.y_min,
             width,
             height,
-            model: vec![0; (width * height) as usize],
-            support: vec![0; (width * height) as usize],
-            layer_index: -1,
+            wall: vec![0; n],
+            fill: vec![0; n],
+            support: vec![0; n],
+            model_z: vec![-1.0; n],
+            support_z: vec![-1.0; n],
+            /* 有层标记：第一段内容（裙边 / 首层）属于第 0 层；
+            没标记：第一次 Z 变化才把层号推到 0 */
+            layer_index: if use_z_layers { -1 } else { 0 },
+            use_z_layers,
             last_z: f64::NAN,
         }
     }
 
-    /// 这一像素又被压过一次
-    fn bump(&mut self, px: i32, py: i32, kind: RasterKind) {
-        if px < 0 || py < 0 || px >= self.width as i32 || py >= self.height as i32 {
-            return;
-        }
-        let i = (py as u32 * self.width + px as u32) as usize;
-        let arr = match kind {
-            RasterKind::Model => &mut self.model,
-            RasterKind::Support => &mut self.support,
-        };
-        arr[i] = arr[i].saturating_add(1);
+    /// 切片器写下一条层标记（`; CHANGE_LAYER` / `;LAYER_CHANGE` / `;LAYER:`）
+    fn next_layer(&mut self) {
+        self.layer_index += 1;
     }
 
     /// 一段挤出线（机器坐标 → 格坐标，Bresenham 步进）。
-    ///
-    /// 只在**抽样层**上画（[`RASTER_LAYER_STEP`]）：整盘每层都画会糊成一块实心。
     fn line(&mut self, from: (f64, f64), to: (f64, f64), z: f64, kind: RasterKind) {
-        if z.is_finite() && (self.last_z.is_nan() || (z - self.last_z).abs() > 0.01) {
+        if self.use_z_layers
+            && z.is_finite()
+            && (self.last_z.is_nan() || (z - self.last_z).abs() > 0.01)
+        {
             self.layer_index += 1;
             self.last_z = z;
         }
-        if self.layer_index < 0 || self.layer_index % RASTER_LAYER_STEP != 0 {
-            return;
-        }
+        let draw_fill = self.layer_index % RASTER_FILL_LAYER_STEP == 0;
         let ax = ((from.0 - self.x_min) / self.cell).floor() as i32;
         let ay = ((from.1 - self.y_min) / self.cell).floor() as i32;
         let bx = ((to.0 - self.x_min) / self.cell).floor() as i32;
@@ -1020,7 +1025,26 @@ impl RasterBuilder {
         let mut err = dx + dy;
         let (mut x, mut y) = (ax, ay);
         loop {
-            self.bump(x, y, kind);
+            if x >= 0 && y >= 0 && x < self.width as i32 && y < self.height as i32 {
+                let i = (y as u32 * self.width + x as u32) as usize;
+                /* 最高 Z 永远记：填充不画的那一层，也要参与“谁在上面”的判断 */
+                match kind {
+                    RasterKind::Wall => {
+                        self.wall[i] = self.wall[i].saturating_add(1);
+                        self.model_z[i] = self.model_z[i].max(z as f32);
+                    }
+                    RasterKind::Fill => {
+                        if draw_fill {
+                            self.fill[i] = self.fill[i].saturating_add(1);
+                        }
+                        self.model_z[i] = self.model_z[i].max(z as f32);
+                    }
+                    RasterKind::Support => {
+                        self.support[i] = self.support[i].saturating_add(1);
+                        self.support_z[i] = self.support_z[i].max(z as f32);
+                    }
+                }
+            }
             if x == bx && y == by {
                 break;
             }
@@ -1038,13 +1062,12 @@ impl RasterBuilder {
 
     /// 编成 PNG + base64；一个像素都没画到 ⇒ `None`（不写一张空白图）
     fn finish(self) -> Option<ModelRaster> {
-        /* 整板 1280² 里模型只占一角：先找有内容的范围，裁掉空白再编码 ——
-        不裁的话一张 1280² 的稀疏线图 PNG 要一两百 KB */
+        /* 整板 1280² 里模型只占一角：先找有内容的范围，裁掉空白再编码 */
         let (mut x0, mut x1, mut y0, mut y1) = (u32::MAX, 0u32, u32::MAX, 0u32);
         for y in 0..self.height {
             for x in 0..self.width {
                 let i = (y * self.width + x) as usize;
-                if self.model[i] != 0 || self.support[i] != 0 {
+                if self.wall[i] != 0 || self.fill[i] != 0 || self.support[i] != 0 {
                     x0 = x0.min(x);
                     x1 = x1.max(x);
                     y0 = y0.min(y);
@@ -1057,36 +1080,63 @@ impl RasterBuilder {
         }
         let width = x1 - x0 + 1;
         let height = y1 - y0 + 1;
-        /* 密度归一化：压得最多的地方最深、边缘浅 —— 不归一化的话整块都顶到上限，
-        出来就是一块实心灰（深浅只能靠归一化后的曲线分） */
-        let model_max = self.model.iter().copied().max().unwrap_or(0) as f32;
-        let support_max = self.support.iter().copied().max().unwrap_or(0) as f32;
+        /* 密度归一化：压得最多的地方最深、边缘浅 */
+        let wall_max = self.wall.iter().copied().max().unwrap_or(0) as f32;
+        let fill_max = self.fill.iter().copied().max().unwrap_or(0) as f32;
+        let sup_max = self.support.iter().copied().max().unwrap_or(0) as f32;
         let mut img = image::RgbaImage::new(width, height);
         for y in y0..=y1 {
             for x in x0..=x1 {
                 let i = (y * self.width + x) as usize;
-                /* 模型盖住支撑（Bambu 那个关系） */
-                let (rgb, t) = if self.model[i] > 0 {
-                    (
-                        RASTER_MODEL_RGBA,
-                        (self.model[i] as f32 / model_max.max(1.0)).sqrt(),
-                    )
-                } else if self.support[i] > 0 {
-                    (
-                        RASTER_SUPPORT_RGBA,
-                        (self.support[i] as f32 / support_max.max(1.0)).sqrt(),
-                    )
-                } else {
+                if self.wall[i] == 0 && self.fill[i] == 0 && self.support[i] == 0 {
                     continue;
-                };
-                /* 8 档量化：alpha 连续变化会让 PNG 几乎压不动，分档后体积能小一半 */
-                let alpha = (RASTER_ALPHA_FLOOR + RASTER_ALPHA_GAIN * t).min(1.0);
-                let alpha = (alpha * 8.0).round() / 8.0;
+                }
+                /* 从下往上叠：支撑 → 填充 → 墙。支撑被模型盖住时只留很淡的底纹；
+                支撑高过模型（露出模型边缘的那圈）才算“在上面”。 */
+                let mut pm = [0.0f32; 3];
+                let mut a = 0.0f32;
+                if self.support[i] > 0 {
+                    let t = (self.support[i] as f32 / sup_max.max(1.0)).sqrt();
+                    let under = self.model_z[i] >= 0.0 && self.support_z[i] <= self.model_z[i];
+                    let alpha = if under {
+                        0.10 + 0.06 * t
+                    } else {
+                        0.26 + 0.30 * t
+                    };
+                    over(&mut pm, &mut a, RASTER_SUPPORT_RGBA, quantize_alpha(alpha));
+                }
+                if self.fill[i] > 0 {
+                    let t = (self.fill[i] as f32 / fill_max.max(1.0)).sqrt();
+                    over(
+                        &mut pm,
+                        &mut a,
+                        RASTER_FILL_RGBA,
+                        quantize_alpha(0.10 + 0.14 * t),
+                    );
+                }
+                if self.wall[i] > 0 {
+                    let t = (self.wall[i] as f32 / wall_max.max(1.0)).sqrt();
+                    over(
+                        &mut pm,
+                        &mut a,
+                        RASTER_WALL_RGBA,
+                        quantize_alpha(0.34 + 0.44 * t),
+                    );
+                }
+                if a <= 0.0 {
+                    continue;
+                }
+                /* 未预乘的颜色 = 累积色 ÷ 累积 alpha */
+                let rgb = [
+                    (pm[0] / a).clamp(0.0, 255.0) as u8,
+                    (pm[1] / a).clamp(0.0, 255.0) as u8,
+                    (pm[2] / a).clamp(0.0, 255.0) as u8,
+                ];
                 /* PNG 第 0 行在顶部，位图第 0 行是机器 y_min（底部）—— 写的时候翻过来 */
                 img.put_pixel(
                     x - x0,
                     height - 1 - (y - y0),
-                    image::Rgba([rgb[0], rgb[1], rgb[2], (alpha * 255.0).round() as u8]),
+                    image::Rgba([rgb[0], rgb[1], rgb[2], (a * 255.0).round() as u8]),
                 );
             }
         }
@@ -1111,6 +1161,29 @@ impl RasterBuilder {
     }
 }
 
+/// 8 档量化：alpha 连续变化会让 PNG 几乎压不动，分档后体积能小一半
+fn quantize_alpha(a: f32) -> f32 {
+    (a.clamp(0.0, 1.0) * 8.0).round() / 8.0
+}
+
+/// 把一图层叠到已累积的（预乘色, 总 alpha）上；`a` 是这一层的不透明度
+fn over(pm: &mut [f32; 3], out_a: &mut f32, color: [u8; 3], a: f32) {
+    if a <= 0.0 {
+        return;
+    }
+    for c in 0..3 {
+        pm[c] = color[c] as f32 * a + pm[c] * (1.0 - a);
+    }
+    *out_a = a + *out_a * (1.0 - a);
+}
+
+/// 切片器的层标记（Bambu / Orca：`; CHANGE_LAYER`；Prusa：`;LAYER_CHANGE`；Cura：`;LAYER:`）
+fn is_layer_mark(line: &str) -> bool {
+    crate::gcode::has_slicer_comment_prefix(line, "CHANGE_LAYER")
+        || crate::gcode::has_slicer_comment_prefix(line, "LAYER_CHANGE")
+        || crate::gcode::has_slicer_comment_prefix(line, "LAYER:")
+}
+
 /// 同 [`model_footprint`]，但床由调用方给（碰撞检测那一趟手里已经有一份可打印区，
 /// 不必再解析一遍 `; printable_area`）。
 fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
@@ -1118,8 +1191,10 @@ fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
     let mut occ = Occupancy::new(bed, 2.0);
     /* 报告页轮廓那一份：0.5mm 格 + 按线段采样，出来的才是 G-code 的真实投影 */
     let mut outline_occ = Occupancy::new(bed, OUTLINE_CELL_MM);
-    /* 报告页贴的那张走线图：同一遍扫描里顺手画 */
-    let mut raster = RasterBuilder::new(bed);
+    /* 报告页贴的那张走线图：同一遍扫描里顺手画。
+    没有层标记的文件（少见）才退回按 Z 变化分层 */
+    let has_layer_marks = content.iter().any(|l| is_layer_mark(l));
+    let mut raster = RasterBuilder::new(bed, !has_layer_marks);
     let mut bbox: Option<GBBox> = None;
     let mut in_prime_tower = false;
     /* 上一段挤出的终点（细格按线段采样用）；被跳过的点也要更新，下一段不能从更早的位置连过来 */
@@ -1128,9 +1203,12 @@ fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
     let mut cur_z = 0.0;
     /* 当前 feature（小写）：位图要分开支撑（绿）与填充（抽样） */
     let mut feature = String::new();
-    let mut fill_count: u64 = 0;
     for line in content {
         let trimmed = line.trim();
+        if has_layer_marks && is_layer_mark(trimmed) {
+            raster.next_layer();
+            continue;
+        }
         if crate::gcode::has_slicer_comment_prefix(trimmed, "FEATURE") {
             in_prime_tower =
                 crate::gcode::has_slicer_comment_prefix(trimmed, "FEATURE: Prime tower");
@@ -1168,27 +1246,21 @@ fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
         }
         let from = prev.unwrap_or((x, y));
         outline_occ.mark_line(from, (x, y));
-        /* 支撑单独上绿；填充按 1/N 抽样（全画出来是一块实心灰）。
+        /* 支撑单独上绿；填充按层抽样（层内全画，线距才是真实打印的线距）。
         塔的走线不单列一档：塔框按塔位放宽一圈，与塔重叠的模型走线会一起落进框内
         （撞塔那一趟正是这种情况），整块模型就被染成了塔的颜色。 */
         let kind = if feature.contains("support") {
             RasterKind::Support
+        } else if feature.contains("infill")
+            || feature.contains("surface")
+            || feature.contains("bridge")
+            || feature.contains("skin")
+        {
+            RasterKind::Fill
         } else {
-            RasterKind::Model
+            RasterKind::Wall
         };
-        let thin = kind == RasterKind::Model
-            && (feature.contains("infill")
-                || feature.contains("surface")
-                || feature.contains("bridge")
-                || feature.contains("skin"));
-        let mut draw = true;
-        if thin {
-            fill_count += 1;
-            draw = fill_count.is_multiple_of(RASTER_INFILL_STEP);
-        }
-        if draw {
-            raster.line(from, (x, y), cur_z, kind);
-        }
+        raster.line(from, (x, y), cur_z, kind);
         prev = Some((x, y));
         occ.mark(x, y);
         bbox = Some(match bbox {
@@ -3307,8 +3379,8 @@ mod tests {
     }
 
     /// **塔位那一块不许把模型染成塔色**（2026-11-24 作者：「这个模型不要被染黄色」）：
-    /// 塔框按塔位放宽一圈，与塔重叠的模型走线会整块落进框内。走线图上只有模型灰 /
-    /// 支撑绿两种颜色，塔由塔图自己画。
+    /// 塔框按塔位放宽一圈，与塔重叠的模型走线会整块落进框内。走线图上只有墙线灰 /
+    /// 填充灰 / 支撑绿，塔由塔图自己画 —— 三种颜色都是冷色（G ≥ R），塔色是暖色。
     #[test]
     fn the_raster_never_paints_the_model_in_the_tower_colour() {
         let ir = tower_ir();
@@ -3337,22 +3409,25 @@ mod tests {
             painted += 1;
             let rgb = [p[0], p[1], p[2]];
             assert!(
-                rgb == RASTER_MODEL_RGBA || rgb == RASTER_SUPPORT_RGBA,
-                "走线只许模型灰 / 支撑绿，画出了 {rgb:?}"
+                rgb[1] >= rgb[0] && rgb[2] >= rgb[0],
+                "走线画成了暖色（塔色）：{rgb:?}"
             );
         }
         assert!(painted > 0, "这段走线该画出东西来");
     }
 
-    /// **只画抽样层**：整盘叠起来会糊成一块实心灰；没被抽中的层不许混进图里。
+    /// **填充只画抽样层**：墙线与支撑每层都画，填充隔一层画一次（层内全画，
+    /// 线距才和真实打印一致）。没被抽中的那层填充不许混进图里。
     #[test]
-    fn the_raster_keeps_only_sampled_layers() {
+    fn the_raster_draws_fill_only_on_sampled_layers() {
         let ir = tower_ir();
         let content = lines(&[
             "; printable_area = 0x0,180x0,180x180,0x180",
+            "; FEATURE: Outer wall",
             "G1 Z0.2",
             "G1 X10 Y10 E0.5",
             "G1 X20 Y10 E0.6",
+            "; FEATURE: Sparse infill",
             "G1 Z0.4",
             "G1 X100 Y100 E0.7",
             "G1 X110 Y100 E0.8",
@@ -3361,8 +3436,64 @@ mod tests {
         let r = facts.model_raster.expect("有模型就该有走线图");
         let right = r.x_min + r.width as f64 * r.cell_mm;
         let top = r.y_min + r.height as f64 * r.cell_mm;
-        assert!(right < 50.0, "第二层混进图里了：右沿 {right}");
-        assert!(top < 50.0, "第二层混进图里了：上沿 {top}");
+        assert!(right < 50.0, "第二层的填充混进图里了：右沿 {right}");
+        assert!(top < 50.0, "第二层的填充混进图里了：上沿 {top}");
+    }
+
+    /// **支撑被模型盖住时要淡下去**：同一位置，支撑在下（模型 Z 更高）的那一份
+    /// 平均 alpha 必须比支撑在上（支撑 Z 更高）低一截 —— 这就是“谁在上面”的遮挡。
+    #[test]
+    fn support_under_the_model_is_fainter() {
+        fn mean_alpha(content: &[String]) -> f64 {
+            let ir = tower_ir();
+            let facts = model_map_facts(content, &ir).expect("有模型就得给几何");
+            let r = facts.model_raster.expect("有模型就该有走线图");
+            use base64::Engine as _;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(&r.png_base64)
+                .expect("base64 能解");
+            let img = image::load_from_memory(&bytes)
+                .expect("PNG 能解码")
+                .to_rgba8();
+            let mut sum = 0u64;
+            let mut n = 0u64;
+            for p in img.pixels() {
+                if p[3] > 0 {
+                    sum += u64::from(p[3]);
+                    n += 1;
+                }
+            }
+            assert!(n > 0, "这段走线该画出东西来");
+            sum as f64 / n as f64
+        }
+
+        /* 支撑在下：第 0 层支撑，第 1 层墙把同一位置盖住 */
+        let under = lines(&[
+            "; printable_area = 0x0,180x0,180x180,0x180",
+            "; FEATURE: Support",
+            "G1 Z0.2",
+            "G1 X40 Y40 E0.5",
+            "G1 X60 Y40 E0.6",
+            "; FEATURE: Outer wall",
+            "G1 Z0.4",
+            "G1 X40 Y40 E0.7",
+            "G1 X60 Y40 E0.8",
+        ]);
+        /* 支撑在上：墙在下，支撑画在它上面 */
+        let above = lines(&[
+            "; printable_area = 0x0,180x0,180x180,0x180",
+            "; FEATURE: Outer wall",
+            "G1 Z0.2",
+            "G1 X40 Y40 E0.5",
+            "G1 X60 Y40 E0.6",
+            "; FEATURE: Support",
+            "G1 Z0.4",
+            "G1 X40 Y40 E0.7",
+            "G1 X60 Y40 E0.8",
+        ]);
+        let a = mean_alpha(&under);
+        let b = mean_alpha(&above);
+        assert!(a + 5.0 < b, "支撑在下应该更淡：under={a:.1} above={b:.1}");
     }
 
     /// **虚拟挤出不上图**：E0.001 那条是给 BBS 撑包围盒的假移动，不是走线。

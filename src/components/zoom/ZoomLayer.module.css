@@ -4,9 +4,13 @@
  */
 
 /*
- * 那一层自己 = 舞台：铺满视口。挂 `Modal` 的 `overlay` 里时，遮罩就是同一块几何
- * （`.overlayLayer` 铺在 fixed 的遮罩内）；不在模态框里的（报告页）由调用方
- * `createPortal` 到 `body` —— `fixed` 两种场合都落在视口上。
+ * 那一层自己 = 舞台：**标题栏以下那一整块**（内容区 `.stage` 的几何）。
+ *
+ * `fixed` 的坐标原点在整扇窗顶部，而自绘标题栏（`--titlebar-h`）也是 webview 里的
+ * 一条流内装饰 —— `inset: 0` 会把标题栏一起算进居中高度，图就高出一截（上面贴着
+ * 标题栏、下面多出空白）。所以上沿让出标题栏：舞台与 `.stage` 同几何，居中不用另减。
+ * 挂 `Modal` 的 `overlay` 里时（`.overlayLayer` 本来就在内容区里）同样落在这条上沿。
+ *
  * 两档（全站层表见 `app/App.module.css` 头注释）：
  *   · 默认 91 —— 页面里点开的图（报告页）：低于后处理那一屏（92），
  *     跑着 / 结果框摆着时不许反过来盖住它；
@@ -15,13 +19,11 @@
  */
 .layer {
   position: fixed;
-  inset: 0;
+  inset: var(--titlebar-h) 0 0 0;
   z-index: 91;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
   padding: clamp(8px, 2.4vw, 40px);
   cursor: zoom-out;
   /* 自己接管捏合 / 拖动：别让浏览器拿触摸手势去滚页面 / 缩整页（触摸屏那一路要用） */
@@ -56,14 +58,10 @@
   background: rgb(0 0 0 / 52%);
 }
 
-/* 内容与那句提示要浮在底之上（`::before` 不带 z-index，会被后画的兄弟盖住） */
-.hit,
-.hint {
-  position: relative;
-}
-
-/* 收起按钮 = "点一下就收"的靶子；皮扒干净，只留"能点"这件事 */
+/* 收起按钮 = "点一下就收"的靶子；皮扒干净，只留"能点"这件事。
+   要浮在底之上：`::before` 不带 z-index，会被后画的兄弟盖住 */
 .hit {
+  position: relative;
   display: block;
   max-width: 100%;
   padding: 0;
@@ -88,10 +86,21 @@
   -webkit-user-drag: none;
 }
 
-/* 遮罩上的字：两套主题的 `--scrim` 都是深色 ⇒ 固定白 */
+/*
+ * 遮罩上那句提示：两套主题的 `--scrim` 都是深色 ⇒ 固定白。
+ *
+ * **贴着舞台底边，不参与居中**：它在流里时，"内容 + 提示"整体居中，图就被往上顶了
+ * 半个提示高（图越大越明显）。提示只是注解，图才是这一层要看的东西。
+ */
 .hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: clamp(8px, 2.4vw, 40px);
+  text-align: center;
   font-size: var(--fs-label);
   line-height: 1.5;
   color: #fff;
   opacity: 0.8;
+  pointer-events: none;
 }

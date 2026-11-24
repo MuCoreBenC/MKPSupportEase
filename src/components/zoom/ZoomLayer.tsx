@@ -16,14 +16,17 @@
  *   - 渐隐只动**内容与那一层底**（`::before`），不动层自己 —— 动父级 opacity 会在透明
  *     那一帧把背后整块界面透出来（就是"闪"）。
  *   - Esc **捕获阶段**抢先收这一层，不连模态框一起关。
+ *   - **跟页面走**：外壳切页时由 `zoomPreview` 统一收（立即卸、不播倒放）——
+ *     这一层 portal 到 body，页面 `hidden` 不会把它带走。
  *
  * 放哪：调用方说了算 —— 模态框里走 `Modal` 的 `overlay` 槽（同一个遮罩、压在框之上）；
  * 不在模态框里的（报告页整页）走 `createPortal(…, document.body)`。两层都是
- * `position: fixed` 铺满视口，几何一致。
+ * `position: fixed`，舞台从**标题栏下沿**开始（见 CSS 的 `inset`）—— 内容区的几何。
  */
 import { useCallback, useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
 import { t } from '../../i18n'
+import { useCloseOnPageChange } from './zoomPreview'
 import s from './ZoomLayer.module.css'
 
 /** 缩放范围。大图本身已放大一档，再放到 4 倍足够看清细节 */
@@ -315,9 +318,17 @@ export default function ZoomLayer({
    * 收起：内容缩回小图现在的落点，**顺带自己渐隐**，放完才卸这一层。
    * 渐隐加在内容上、不加在这一层自己身上（见模块头注）；`fill: 'forwards'`
    * 让卸层那帧之前内容已经几乎不可见 —— 接缝那帧不会被看见。
+   *
+   * `immediate` = 切页那种"这一层已经不属于当前页"的收法：直接卸，不播倒放
+   * （旧页面已经不在了，200ms 的缩回只会留在新页上播）。
    */
-  const close = () => {
+  const close = (immediate = false) => {
     if (closing.current) return
+    if (immediate) {
+      closing.current = true
+      onGone()
+      return
+    }
     const el = contentRef.current
     const back = returnTo()
     const base = baseRef.current
@@ -368,6 +379,9 @@ export default function ZoomLayer({
     document.addEventListener('keydown', onKey, true)
     return () => document.removeEventListener('keydown', onKey, true)
   }, [])
+
+  /* 切页 = 这一层不该还在新页上：外壳叫收时立即卸（见 `zoomPreview` 那份事务） */
+  useCloseOnPageChange(() => closeRef.current(true))
 
   return (
     <div
