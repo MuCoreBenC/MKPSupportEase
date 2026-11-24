@@ -114,6 +114,11 @@ import type {
   ReportCalibrationFacts,
   ReportDebugFacts,
   ReportSlicerFacts,
+  ReportTowerFacts,
+  ReportSlicerTowerFacts,
+  ReportModelMap,
+  ReportCollision,
+  ReportBox4,
   ReportSnapshot,
   ReportSummary,
 } from '../../api'
@@ -131,6 +136,7 @@ import CollisionMap from './CollisionMap'
 import BoundaryPlate from './BoundaryPlate'
 import CalibrationPlate from './CalibrationPlate'
 import { boundaryNumbering, moveDistanceMm } from './boundaryNumbering'
+import { showsTowerGroup } from './towerVisibility'
 import RelocationBoards from './RelocationBoards'
 import { SETTINGS_TARGET_TOWER } from '../settings/targets'
 import type { SettingsTargetId } from '../settings/targets'
@@ -821,14 +827,103 @@ function ironingGroup(
   return { id: 'ironing', title: tr('report.ironing.title'), sum, cells }
 }
 
-/*
- * 擦料塔那一组**不再摆**（2026-11-23 作者：「反正擦料塔不用显示了，你就把这个什么画布
- * 放到结论页」）。它原来那张板子图让位给「结论」里的校准件画布（`CalibrationPlate`）——
- * 画法还是同一块 `CollisionMap`，只是不再单独成组。
+/**
+ * 擦料塔组（键与 `detail.tower` 同名）。
  *
- * 后端 `detail.tower` 字段保留不删：它是执行记录的一部分（旧记录也带着），
- * 以后要回来只是把这一段渲染加回去，不用重跑归档。
+ * 两节：MKP 自己的擦料塔（层数/高度、挤出比、抬笔/安全 Z、移动速度/模式）与切片软件
+ * 自己的 prime tower（开关、层数/高度、耗材、位置）。两节说的不是一件事，所以分开摆。
+ *
+ * 四格全是 `—` 且没有 `slicerTower` ⇒ 整组不摆（旧记录 / 没跑出塔的那一趟）。
+ * ★ 校准件那一趟不摆这一组 —— 判据在 `showsTowerGroup`，那一趟的板子图让给结论里的
+ *   校准件位置图。
  */
+function towerGroup(tr: Tr, tower: ReportTowerFacts): Group | null {
+  const cells: [string, string][] = [
+    [
+      tr('report.tower.layersHeight'),
+      tower.towerLayers === undefined && tower.towerHeight === undefined
+        ? '—'
+        : `${
+            tower.towerLayers === undefined
+              ? '—'
+              : tr('report.glue.unit.layers', { n: fmtNum(tower.towerLayers) })
+          } · ${tower.towerHeight === undefined ? '—' : `${fmtNum(tower.towerHeight)} mm`}`,
+    ],
+    [
+      tr('report.tower.ratio'),
+      tower.towerExtrudeRatio === undefined ? '—' : fmtNum(tower.towerExtrudeRatio),
+    ],
+    [
+      tr('report.tower.liftSafe'),
+      tower.towerZLift === undefined && tower.towerSafeZOffset === undefined
+        ? '—'
+        : `${tower.towerZLift === undefined ? '—' : fmtNum(tower.towerZLift)} / ${
+            tower.towerSafeZOffset === undefined ? '—' : fmtNum(tower.towerSafeZOffset)
+          } mm`,
+    ],
+    [
+      tr('report.tower.travel'),
+      tower.towerTravelSpeed === undefined && tower.fastTowerMode === undefined
+        ? '—'
+        : `${numCell(tower.towerTravelSpeed, ' mm/s')} · ${tower.fastTowerMode ?? '—'}`,
+    ],
+  ]
+  /*
+   * 切片软件自己的擦料塔：开关 / 层数 / 高度 / 耗材 / 位置。
+   * `slicerTower` 缺（老记录）⇒ 只留 MKP 那一节；`enabled=false` 时也只显示「关」，
+   * 不摆一排空数字。
+   */
+  const slicer = tower.slicerTower
+  const onOff = (v: boolean | undefined): string =>
+    v === undefined ? '—' : tr(v ? 'report.slicer.on' : 'report.slicer.off')
+  const sbox = slicer?.bbox ?? null
+  const slicerCells: [string, string][] = [
+    [tr('report.tower.slicerOnOff'), onOff(slicer?.enabled)],
+    [
+      tr('report.tower.layersHeight'),
+      slicer?.layers === undefined && slicer?.height === undefined
+        ? '—'
+        : `${
+            slicer?.layers === undefined
+              ? '—'
+              : tr('report.glue.unit.layers', { n: fmtNum(slicer.layers) })
+          } · ${slicer?.height === undefined ? '—' : `${fmtNum(slicer.height)} mm`}`,
+    ],
+    [
+      tr('report.tower.slicerFilament'),
+      slicer?.filamentGrams === undefined ? '—' : `${fmtNum(slicer.filamentGrams)} g`,
+    ],
+    [
+      tr('report.tower.slicerPosition'),
+      sbox === null ||
+      sbox.minX === undefined ||
+      sbox.maxX === undefined ||
+      sbox.minY === undefined ||
+      sbox.maxY === undefined
+        ? '—'
+        : `X ${fmtNum(sbox.minX)}–${fmtNum(sbox.maxX)} · Y ${fmtNum(sbox.minY)}–${fmtNum(sbox.maxY)}`,
+    ],
+  ]
+  if (!hasAnyValue(cells) && slicer === undefined) return null
+  const sum = [
+    tower.towerLayers === undefined
+      ? null
+      : tr('report.glue.unit.layers', { n: fmtNum(tower.towerLayers) }),
+    tower.towerHeight === undefined ? null : `${fmtNum(tower.towerHeight)} mm`,
+  ]
+    .filter((x): x is string => x !== null)
+    .join(' · ')
+  return {
+    id: 'tower',
+    title: tr('report.tower.title'),
+    sum,
+    cells,
+    sections: [
+      { title: tr('report.tower.mkpSection'), cells },
+      { title: tr('report.tower.slicerSection'), cells: slicerCells },
+    ],
+  }
+}
 
 /** 切片工艺组（键与 `detail.slicer` 同名） */
 function slicerGroup(tr: Tr, slicer: ReportSlicerFacts): Group | null {
@@ -916,14 +1011,17 @@ function calibrationGroup(tr: Tr, c: ReportCalibrationFacts): Group | null {
     const extra = [nominal, tol].filter((x): x is string => x !== null).join('，')
     cells.push([tr('report.calib.profile'), extra === '' ? c.profileId : `${c.profileId}（${extra}）`])
   }
-  if (c.mode != null && c.mode !== '') cells.push([tr('report.calib.modeLabel'), c.mode])
+  /*
+   * 模式只在「结论」那一行说。这一组回答的是**证据链**（哪个模型、标记写了什么、
+   * 判读结果、实测多大、命中哪一档），不再重复结论里已经写着的那句。
+   */
 
   /* 只有"没有标记 + 也没认到档"才是真的一无所有（普通模型本不该进这里） */
   if (!hasAnyValue(cells)) return null
   return {
     id: 'calibration',
     title: tr('report.calib.title'),
-    sum: c.mode ?? verdict,
+    sum: c.profileId ?? verdict,
     cells,
   }
 }
@@ -1016,6 +1114,21 @@ function buildGroups(
         : (st.gcodeName ?? '—'),
     ],
   ]
+  /*
+   * 校准那一趟：结论里直接写"识别到的是什么" —— 用户要在一眼看得见的地方看到它，
+   * 不靠翻「校准身份」组的证据链。模式缺（没认到档那段）时退回身份结论。
+   * 普通模型没有 `calibration` 这一格 ⇒ 结论不多这一行。
+   */
+  if (detail.calibration != null) {
+    const c = detail.calibration
+    const what =
+      c.mode != null && c.mode !== ''
+        ? c.mode
+        : c.verdict === 'from_3mf'
+          ? tr('report.calib.verdict3mf')
+          : tr('report.calib.verdictAbsent')
+    resultCells.push([tr('report.calib.modeLabel'), what])
+  }
   if (st.error !== null) resultCells.push([tr('report.cell.reason'), st.error])
   groups.push({
     id: 'result',
@@ -1078,6 +1191,14 @@ function buildGroups(
   /* 熨烫：判据的事后事实（块 / 判掉 / 最大一块 / 路径层数）。上限借切片工艺组那一格 */
   if (detail.ironing !== undefined && detail.ironing !== null) {
     const g = ironingGroup(tr, detail.ironing, detail.slicer?.ironingThreshold)
+    if (g !== null) groups.push(g)
+  }
+  /*
+   * 擦料塔：普通记录照摆（字段 + 下方画布）；校准件那一趟不摆 ——
+   * 那一趟没有塔，板子图让给「结论」里的校准件位置图。
+   */
+  if (showsTowerGroup(detail) && detail.tower != null) {
+    const g = towerGroup(tr, detail.tower)
     if (g !== null) groups.push(g)
   }
   if (detail.slicer !== undefined && detail.slicer !== null) {
@@ -1328,6 +1449,16 @@ function buildGroups(
 
 /* ---------- 参数快照（2026-10-21） ---------- */
 
+/** IR 的 JSON 里取一个对象（不是对象就给空表，绝不抛） */
+function objOf(v: unknown): Record<string, unknown> {
+  return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {}
+}
+
+/** IR 的 JSON 里取一个数（不是有限数就是 `null`） */
+function numOf(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
 /** 参数快照里的一行 */
 interface SnapRow {
   key: string
@@ -1479,6 +1610,165 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
         <summary>{tr('report.snapshot.irTitle')}</summary>
         <pre className={s.snapJson}>{JSON.stringify(snap.ir, null, 2)}</pre>
       </details>
+    </div>
+  )
+}
+
+/**
+ * **擦料塔俯视图**：同一块 `CollisionMap`，与「塔位变化」那两幅同一块板
+ * （真板轮廓 + 网格）、同一个塔长相、同一个放大层（点图看大、Esc 收起）。
+ *
+ * 三种标记：
+ *   · **判据框**（红虚线；塔框）= 这一盘**实际跑的**那个位置 —— IR 的
+ *     `Wiping.WiperX/WiperY` 优先，只有预设坐标时退回预设；
+ *   · **目标虚框**（灰虚线）= 预设 TOML 里写的那个位置（`params` 的
+ *     `wiping.wiper_x/wiper_y`）—— 两处一致时只有一个；
+ *   · 不一致时补一支箭头（预设 → 实际）；位移小到看不见就不画（`CollisionMap` 自己判）。
+ *
+ * 塔身 19.58mm 与内核 `TOWER_OUTER_BOUND - TOWER_INNER_BOUND`（29.79 - 10.21）同一个数；
+ * 判据框每边再让一圈给外围结构（brim 那几圈 / 斜肋伸出去的那截）—— 快照里没有内核算的
+ * 那份框（成功那趟不产 `collision`），这里按同一套常量估。外围结构种类 / 参数照 IR 的
+ * `Wiping` / `Rib` / `Sheath` 原值给，形状与参数页是同一套算法。
+ *
+ * ★ **可打印区不在这里给**：`CollisionMap` 拿不到事实里的 `printable` 时会用板规格的
+ *   可打印区（原点 = 机器坐标原点）。机型的 `Machine.MinX..MaxX` 是**运动范围**
+ *   （A1 mini 的 -10..180），比板宽一圈，拿来映射会把塔推出板外。
+ */
+function TowerPlate({
+  snap,
+  machineType,
+  modelMap,
+  slicerTower,
+}: {
+  snap: ReportSnapshot
+  /** 报告行的机型 —— `CollisionMap` 按它查板规格（`A1_MINI` 这种） */
+  machineType: string | null
+  /**
+   * **模型俯视几何**：给了就画上（同一块板、同一套几何 —— 内核一个出口算出来）；
+   * `null` / 旧记录 ⇒ 只画塔。
+   */
+  modelMap: ReportModelMap | null | undefined
+  /**
+   * **切片软件自己的擦料塔**：给了包围盒就在同一张俯视图上多画一个绿框 ——
+   * 形状按实测走线并集来，不是 MKP 塔那个固定长相。
+   */
+  slicerTower: ReportSlicerTowerFacts | null | undefined
+}) {
+  const tr = useT()
+  const ir = snap.ir
+  const wiping = objOf(ir.Wiping)
+  const rib = objOf(ir.Rib)
+  const sheath = objOf(ir.Sheath)
+  const presetX = Number(snap.params['wiping.wiper_x'])
+  const presetY = Number(snap.params['wiping.wiper_y'])
+  const irX = numOf(wiping.WiperX)
+  const irY = numOf(wiping.WiperY)
+
+  const hasPreset = Number.isFinite(presetX) && Number.isFinite(presetY)
+  const hasIr = irX !== null && irY !== null
+  if (!hasPreset && !hasIr) return null
+
+  /* 塔身 19.58mm（内核的 TOWER_OUTER_BOUND - TOWER_INNER_BOUND）。
+     判据框 = 塔身 + **外围结构那一圈**：brim 是 5 圈 × 0.8mm，斜肋按伸出的那截，
+     护套按 IR 的 `Sheath.BaseExpand`。★ 框给足（塔位变化那张就是这么个大框）——
+     给少了，`TowerCoreSvg` 画在框沿上的外围结构会被 viewBox 裁掉。 */
+  const BODY_MM = 19.58
+  const outer =
+    typeof wiping.OuterStructure === 'string' && wiping.OuterStructure !== ''
+      ? wiping.OuterStructure
+      : 'brim'
+  const padMm =
+    outer === 'sheath'
+      ? Math.max(4, numOf(sheath.BaseExpand) ?? 0)
+      : outer === 'rib'
+        ? 6
+        : 4
+  const BOX_MM = BODY_MM + padMm * 2
+
+  /** 以塔左下角为角的判据框（机器坐标；内核同一个约定） */
+  const boxAt = (x: number, y: number): ReportBox4 => ({
+    xMin: x,
+    xMax: x + BOX_MM,
+    yMin: y,
+    yMax: y + BOX_MM,
+  })
+
+  const same =
+    hasPreset && hasIr && Math.abs(presetX - irX) < 0.01 && Math.abs(presetY - irY) < 0.01
+  /* 实际用的那个位置：程序认到的优先 */
+  const at = hasIr
+    ? { x: irX as number, y: irY as number }
+    : { x: presetX, y: presetY }
+
+  /* 一份"只有塔、没有碰撞"的事实：`CollisionMap` 拿到它就照常画板轮廓 / 网格 /
+     塔形状 / 判据框 / 放大层 —— 擦料塔这一栏不另写一套画法。
+     `printable` 故意不给：让画布按板规格的可打印区定（理由见上面那条）。 */
+  /* 切片器擦料塔的矩形（实测包围盒直接换算，不做任何"补一圈"） */
+  const stb = slicerTower?.bbox ?? null
+  const slicerBox: ReportBox4 | null =
+    stb !== null &&
+    stb.minX !== undefined &&
+    stb.maxX !== undefined &&
+    stb.minY !== undefined &&
+    stb.maxY !== undefined
+      ? { xMin: stb.minX, xMax: stb.maxX, yMin: stb.minY, yMax: stb.maxY }
+      : null
+
+  const collision: ReportCollision = {
+    towerBbox: boxAt(at.x, at.y),
+    ...(slicerBox !== null ? { slicerTowerBbox: slicerBox } : null),
+    /* 模型几何照抄后端那一格（同一个内核出口算的，不在这里推算）—— `null` 就什么都不加 */
+    ...(modelMap != null
+      ? {
+          printable: modelMap.printable,
+          modelBoxes: modelMap.modelBoxes,
+          modelPolygons: modelMap.modelPolygons,
+          forbiddenZones: modelMap.forbiddenZones,
+        }
+      : null),
+    tower: {
+      outerStructure: outer,
+      bodyMm: BODY_MM,
+      ribWidth: numOf(rib.Width) ?? 0,
+      ribExtraLength: numOf(rib.ExtraLength) ?? 0,
+      ribFilletWall: rib.FilletWall === true,
+      sheathBaseExpand: numOf(sheath.BaseExpand) ?? 0,
+    },
+  }
+  /* 预设写的位置单独画一个虚框（两处一致时只有一个） */
+  const ghost = hasPreset && !same ? boxAt(presetX, presetY) : null
+  /* 不一致时：从预设那个位置指到实际这个位置（塔框中心之间，与「塔位变化」同一支箭头） */
+  const arrow =
+    ghost !== null
+      ? {
+          from: [presetX + BOX_MM / 2, presetY + BOX_MM / 2] as [number, number],
+          vec: [at.x - presetX, at.y - presetY] as [number, number],
+        }
+      : null
+
+  return (
+    <div className={s.plate}>
+      <CollisionMap
+        collision={collision}
+        machineType={machineType}
+        arrow={arrow}
+        ghost={ghost}
+        hideLegend
+        height={132}
+        label={tr('report.towerPlate.label')}
+      />
+      {/*
+        ── 这一行只有一句话的分量：`预设 (20, 20) ≠ 实际 (18.19, 67.3)，按实际的跑`。
+        **关系用 `=` / `≠` 说**（符号一眼就懂）；坐标本身也各自短一格
+        （「预设写」→「预设」、「程序认到」→「实际」），只剩"按哪个跑"这一句尾音。
+        一致时只留 `预设 (20, 20) = 实际 (20, 20)`，不再缀「—— 一致」（等于号就是）。
+      */}
+      <p className={same || !hasIr ? s.plateNote : `${s.plateNote} ${s.plateBad}`}>
+        {hasPreset && tr('report.towerPlate.preset', { x: fmtNum(presetX), y: fmtNum(presetY) })}
+        {hasPreset && hasIr && (same ? ' = ' : ' ≠ ')}
+        {hasIr && tr('report.towerPlate.ir', { x: fmtNum(irX as number), y: fmtNum(irY as number) })}
+        {hasPreset && hasIr && !same && tr('report.towerPlate.diff')}
+      </p>
     </div>
   )
 }
@@ -2445,7 +2735,17 @@ export default function PageReport({
                                     ],
                                   )}
                                 </dl>
-                                {/* 校准件：同一块画布，画真实外形与实测包围盒（2026-11-23） */}
+                                {/* 擦料塔：同一块板，画塔位与模型在板上占哪一块
+                                    （校准件那一趟没有这一组，判据在 showsTowerGroup） */}
+                                {g.id === 'tower' && detail.snapshot != null && (
+                                  <TowerPlate
+                                    snap={detail.snapshot}
+                                    machineType={detail.summary.machineType}
+                                    modelMap={detail.modelMap}
+                                    slicerTower={detail.tower?.slicerTower}
+                                  />
+                                )}
+                                {/* 校准件：同一块画布，画真实外形与实测包围盒 */}
                                 {g.id === 'result' && detail.calibration?.measured != null && (
                                   <div className={s.plate}>
                                     <CalibrationPlate

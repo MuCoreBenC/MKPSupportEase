@@ -128,6 +128,12 @@ pub struct ReportDetail {
     pub ironing: Option<serde_json::Value>,
     /// 擦料塔组（`detail.tower`）。
     pub tower: Option<serde_json::Value>,
+    /// **校准件身份证据链**（`detail.calibration`）：原始模型 / 3MF 标记 / 判读 / 实测包围盒 /
+    /// 命中档位 / 最终模式。原样透传，不在这一层挑字段。
+    ///
+    /// 只有判成校准件那一趟后端才写这一格；普通模型 / 旧记录都是 `null` ⇒
+    /// 页面不摆「校准身份」组、结论里也不多那一行。
+    pub calibration: Option<serde_json::Value>,
     /// 切片工艺组（`detail.slicer`）。
     pub slicer: Option<serde_json::Value>,
     /// 管线各步计时（`pipeline`：id / elapsedMs / message / status）
@@ -479,6 +485,7 @@ fn detail_of(summary: ReportSummary, meta: &serde_json::Value) -> ReportDetail {
         glue: detail.and_then(|d| d.get("glue")).cloned(),
         ironing: detail.and_then(|d| d.get("ironing")).cloned(),
         tower: detail.and_then(|d| d.get("tower")).cloned(),
+        calibration: detail.and_then(|d| d.get("calibration")).cloned(),
         slicer: detail.and_then(|d| d.get("slicer")).cloned(),
         snapshot: detail.and_then(|d| d.get("snapshot")).cloned(),
         debug: detail.and_then(|d| d.get("debug")).cloned(),
@@ -1295,6 +1302,12 @@ mod tests {
                 "estimatedPrintSeconds": 2952.9109519850203,
                 "glue": {"glueTotalLength": 9350.845588078173},
                 "tower": {"towerLayers": 536},
+                "calibration": {
+                    "verdict": "from_3mf",
+                    "measured": [69.979, 189.49, 98.144, 113.416],
+                    "profileId": "zoffset-ext",
+                    "mode": "ZOffset"
+                },
                 "slicer": {"machinePresetName": "Bambu Lab A1 mini 0.4 nozzle"}
             }
         });
@@ -1307,10 +1320,19 @@ mod tests {
             "Bambu Lab A1 mini 0.4 nozzle"
         );
 
+        /* 校准那一格：报告页靠 `verdict` 判"这是校准件"、靠 `measured` 画位置图、
+        靠 `mode` / `profileId` 在结论里写识别结果 —— 四格都要原样带出来 */
+        let calib = d.calibration.expect("校准那一格要透传");
+        assert_eq!(calib["verdict"], "from_3mf");
+        assert_eq!(calib["measured"][0], 69.979);
+        assert_eq!(calib["profileId"], "zoffset-ext");
+        assert_eq!(calib["mode"], "ZOffset");
+
         // 旧记录（没有这些键）：全是 None，不 panic —— 报告页整组不摆
         let old = serde_json::json!({"detail": {"stats": {}}});
         let d = detail_of(summary, &old);
         assert!(d.glue.is_none() && d.tower.is_none() && d.slicer.is_none());
+        assert!(d.calibration.is_none(), "普通模型 / 旧记录没有这一格");
         assert!(d.estimated_print_seconds.is_none());
     }
 
