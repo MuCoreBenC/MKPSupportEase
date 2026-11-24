@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>报告页画布 · 走线细节预览</title>
+    <style>
+      :root {
+        --bg: #f4f5f7;
+        --card: #ffffff;
+        --line: #e5e7eb;
+        --text: #111827;
+        --muted: #6b7280;
+        --accent: #059669;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.5 ui-sans-serif, system-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        display: grid;
+        grid-template-columns: 268px 1fr;
+        min-height: 0;
+      }
+      aside {
+        background: #fff;
+        border-right: 1px solid var(--line);
+        padding: 14px;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      aside h1 {
+        font-size: 13px;
+        margin: 0;
+        font-weight: 600;
+      }
+      #stats {
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      .group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .group > label,
+      .group > .title {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .row output {
+        min-width: 46px;
+        text-align: right;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      input[type='range'] {
+        width: 100%;
+      }
+      .checks {
+        display: grid;
+        gap: 4px;
+        font-size: 12px;
+      }
+      .checks label {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        color: var(--text);
+      }
+      .legend {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .legend i {
+        display: inline-block;
+        width: 18px;
+        height: 2px;
+        margin-right: 8px;
+        vertical-align: middle;
+      }
+      main {
+        display: grid;
+        place-items: center;
+        padding: 28px;
+        min-height: 0;
+        overflow: auto;
+      }
+      /* ---- 报告页那张卡片 ---- */
+      .card {
+        width: 560px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px 16px 16px;
+        box-shadow: 0 1px 2px rgb(16 24 40 / 4%);
+      }
+      .card .head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+      }
+      .card .head .name {
+        font-weight: 600;
+        font-size: 14px;
+      }
+      .card .head .ok {
+        color: #047857;
+        background: #d1fae5;
+        border-radius: 999px;
+        padding: 1px 8px;
+        font-size: 11px;
+      }
+      .card .head .time {
+        margin-left: auto;
+        color: var(--muted);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      .plate-wrap {
+        position: relative;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: auto;
+        cursor: zoom-in;
+        border-radius: 8px;
+      }
+      .note {
+        margin: 8px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      #hint {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        color: var(--muted);
+        cursor: pointer;
+        background: #fff;
+        border-radius: 8px;
+        border: 1px dashed var(--line);
+        padding: 24px;
+      }
+      #hint.hidden {
+        display: none;
+      }
+      #hint strong {
+        color: var(--text);
+      }
+      input[type='file'] {
+        display: none;
+      }
+      /* ---- 放大层 ---- */
+      #zoom {
+        position: fixed;
+        inset: 0;
+        background: rgb(17 24 39 / 55%);
+        display: none;
+        place-items: center;
+        padding: 24px;
+        z-index: 20;
+      }
+      #zoom.open {
+        display: grid;
+      }
+      #zoom .box {
+        background: #fff;
+        border-radius: 12px;
+        padding: 12px;
+        max-width: min(92vw, 900px);
+        max-height: 92vh;
+      }
+      #zoom canvas {
+        width: auto;
+        height: min(78vh, 820px);
+        cursor: zoom-out;
+      }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <h1>报告页画布 · 走线细节</h1>
+      <div id="stats">把 G-code 拖到右边</div>
+
+      <div class="group">
+        <label for="density">纹理密度（每 N 条填充画一条）</label>
+        <div class="row">
+          <input id="density" type="range" min="1" max="80" step="1" value="16" />
+          <output id="densityOut">16</output>
+        </div>
+      </div>
+
+      <div class="group">
+        <label for="texture">纹理浓度</label>
+        <div class="row">
+          <input id="texture" type="range" min="0.02" max="0.6" step="0.02" value="0.14" />
+          <output id="textureOut">0.14</output>
+        </div>
+      </div>
+
+      <div class="group">
+        <label for="outline">轮廓粗细</label>
+        <div class="row">
+          <input id="outline" type="range" min="0.6" max="2.4" step="0.1" value="1.1" />
+          <output id="outlineOut">1.1</output>
+        </div>
+      </div>
+
+      <div class="group">
+        <span class="title">显示</span>
+        <div class="checks">
+          <label><input id="showSupport" type="checkbox" checked /> 支撑（绿色）</label>
+          <label><input id="showInfill" type="checkbox" checked /> 填充纹理</label>
+          <label><input id="showTower" type="checkbox" checked /> 擦料塔</label>
+        </div>
+      </div>
+
+      <div class="group">
+        <span class="title">图例</span>
+        <div class="legend">
+          <span><i style="background:#6b7280"></i>模型轮廓</span>
+          <span><i style="background:#10b981"></i>支撑</span>
+          <span><i style="background:#f59e0b"></i>擦料塔</span>
+        </div>
+      </div>
+
+      <div class="group">
+        <span class="title">操作</span>
+        <div class="checks">
+          <label>拖文件进右侧卡片</label>
+          <label>点画布放大，Esc 收起</label>
+        </div>
+      </div>
+    </aside>
+
+    <main>
+      <div class="card">
+        <div class="head">
+          <span class="name" id="fileName">.gcode</span>
+          <span class="ok">成功</span>
+          <span class="time" id="fileTime">—</span>
+        </div>
+        <div class="plate-wrap">
+          <canvas id="c" width="1050" height="1050"></canvas>
+          <div id="hint">
+            <p><strong>把 G-code 拖进来</strong></p>
+            <p>或点这里选择文件</p>
+          </div>
+        </div>
+        <p class="note" id="note">预设 (20, 20) = 实际 (20, 20)</p>
+      </div>
+    </main>
+
+    <div id="zoom">
+      <div class="box"><canvas id="cz" width="1050" height="1050"></canvas></div>
+    </div>
+    <input id="file" type="file" accept=".gcode,.txt" />
+
+    <script>
+      const FEATURES = [
+        { match: /outer wall/i, name: '外墙', kind: 'outline' },
+        { match: /inner wall|overhang wall/i, name: '内墙', kind: 'wall' },
+        { match: /support interface/i, name: '支撑面', kind: 'support' },
+        { match: /support/i, name: '支撑', kind: 'support' },
+        { match: /prime tower/i, name: '擦料塔', kind: 'tower' },
+        { match: /sparse infill|internal solid infill|top surface|bottom surface|internal bridge|bridge|gap fill|skin/i, name: '填充', kind: 'infill' },
+      ]
+      const OTHER = { name: '其它', kind: 'other' }
+
+      const el = {
+        stats: document.getElementById('stats'),
+        fileName: document.getElementById('fileName'),
+        fileTime: document.getElementById('fileTime'),
+        note: document.getElementById('note'),
+        density: document.getElementById('density'),
+        densityOut: document.getElementById('densityOut'),
+        texture: document.getElementById('texture'),
+        textureOut: document.getElementById('textureOut'),
+        outline: document.getElementById('outline'),
+        outlineOut: document.getElementById('outlineOut'),
+        showSupport: document.getElementById('showSupport'),
+        showInfill: document.getElementById('showInfill'),
+        showTower: document.getElementById('showTower'),
+        hint: document.getElementById('hint'),
+        file: document.getElementById('file'),
+        canvas: document.getElementById('c'),
+        zoom: document.getElementById('zoom'),
+        zoomCanvas: document.getElementById('cz'),
+      }
+
+      /** @type {null | ReturnType<typeof parse>} */
+      let model = null
+      let frame = null
+
+      function parse(text) {
+        const t0 = performance.now()
+        const lines = text.split('\n')
+        let cap = 4096
+        let xy = new Float32Array(cap * 4)
+        let z = new Float32Array(cap)
+        let kind = new Uint8Array(cap)
+        let isPaint = new Uint8Array(cap)
+        const grow = () => {
+          const nc = Math.ceil(cap * 1.6)
+          const a = new Float32Array(nc * 4)
+          a.set(xy)
+          xy = a
+          const b = new Float32Array(nc)
+          b.set(z)
+          z = b
+          const c = new Uint8Array(nc)
+          c.set(kind)
+          kind = c
+          const d = new Uint8Array(nc)
+          d.set(isPaint)
+          isPaint = d
+          cap = nc
+        }
+        const KINDS = ['other', 'outline', 'wall', 'infill', 'support', 'tower']
+        const kindOf = (feature) => {
+          for (const f of FEATURES) if (f.match.test(feature)) return KINDS.indexOf(f.kind)
+          return 0
+        }
+        let x = NaN
+        let y = NaN
+        let curZ = 0
+        let feature = ''
+        let inPaint = false
+        let paintZ = null
+        let k = 0
+        const bbox = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }
+        let paintSegs = 0
+        for (let i = 0; i < lines.length; i++) {
+          const l = lines[i]
+          if (l.charCodeAt(0) === 59) {
+            if (l.startsWith(';MKP_BEGIN paint')) {
+              inPaint = true
+              const m = /z=(-?\d+(?:\.\d+)?)/.exec(l)
+              paintZ = m ? +m[1] : null
+            } else if (l.startsWith(';MKP_END paint')) {
+              inPaint = false
+              paintZ = null
+            }
+            const fm = /^;\s*(FEATURE|TYPE):\s*(.+)$/i.exec(l.trim())
+            if (fm && fm[1].toUpperCase() === 'FEATURE') feature = fm[2].trim()
+            continue
+          }
+          if (l.charCodeAt(0) !== 71) continue
+          const zm = /(?:^|\s)Z(-?\d+(?:\.\d+)?)/.exec(l)
+          if (zm) curZ = +zm[1]
+          const hasE = l.indexOf(' E') > 0
+          const painting = inPaint && paintZ !== null && curZ - paintZ < 6
+          if (!hasE && !painting) {
+            /* 非挤出也要更新坐标（空走之后的第一段从正确位置起笔） */
+            const xm0 = /(?:^|\s)X(-?\d+(?:\.\d+)?)/.exec(l)
+            const ym0 = /(?:^|\s)Y(-?\d+(?:\.\d+)?)/.exec(l)
+            if (xm0) x = +xm0[1]
+            if (ym0) y = +ym0[1]
+            continue
+          }
+          const xm = /(?:^|\s)X(-?\d+(?:\.\d+)?)/.exec(l)
+          const ym = /(?:^|\s)Y(-?\d+(?:\.\d+)?)/.exec(l)
+          if (!xm && !ym) continue
+          const nx = xm ? +xm[1] : x
+          const ny = ym ? +ym[1] : y
+          if (Number.isFinite(x)) {
+            if (k >= cap) grow()
+            xy[k * 4] = x
+            xy[k * 4 + 1] = y
+            xy[k * 4 + 2] = nx
+            xy[k * 4 + 3] = ny
+            z[k] = curZ
+            kind[k] = painting ? 0 : kindOf(feature)
+            isPaint[k] = painting ? 1 : 0
+            if (painting) paintSegs++
+            k++
+            if (nx < bbox.x0) bbox.x0 = nx
+            if (nx > bbox.x1) bbox.x1 = nx
+            if (ny < bbox.y0) bbox.y0 = ny
+            if (ny > bbox.y1) bbox.y1 = ny
+            if (x < bbox.x0) bbox.x0 = x
+            if (x > bbox.x1) bbox.x1 = x
+            if (y < bbox.y0) bbox.y0 = y
+            if (y > bbox.y1) bbox.y1 = y
+          }
+          x = nx
+          y = ny
+        }
+        xy = xy.slice(0, k * 4)
+        z = z.slice(0, k)
+        kind = kind.slice(0, k)
+        isPaint = isPaint.slice(0, k)
+        return {
+          xy,
+          z,
+          kind,
+          isPaint,
+          count: k,
+          paintSegs,
+          bbox,
+          parseMs: performance.now() - t0,
+        }
+      }
+
+      const PALETTE = {
+        outline: '#6b7280',
+        wall: '#9ca3af',
+        infill: '#9ca3af',
+        support: '#10b981',
+        tower: '#f59e0b',
+        other: '#cbd5e1',
+      }
+
+      /* ---- 板：A1 那块单卡舌 256（`presets/plates/single-latch-256.toml` 的 path / bodyPath / frame） ---- */
+      const PLATE = {
+        w: 258,
+        d: 276,
+        path: 'M95.1,7.8L102.7,0.9A1.2,1.2 0 0 1 103.5,0.6L154.5,0.6A1.2,1.2 0 0 1 155.3,0.9L162.9,7.8A0.6,0.6 0 0 1 163.3,8.0L250.5,8.0A7.5,7.5 0 0 1 258.0,15.5L258.0,268.0A8.0,8.0 0 0 1 250.0,276.0L83.0,276.0A1.2,1.2 0 0 1 82.2,275.7L72.3,266.3A1.2,1.2 0 0 1 71.5,266.0L6.0,266.0A6.0,6.0 0 0 1 0.0,260.0L0.0,15.5A7.5,7.5 0 0 1 7.5,8.0L94.7,8.0A0.6,0.6 0 0 1 95.1,7.8ZM107.0,6.2L151.0,6.2L151.0,8.0L107.0,8.0L107.0,6.2ZM224.0,266.1L231.4,266.1L237.7,272.8L224.0,272.8L224.0,266.1ZM236.0,266.1L249.0,266.1L249.0,272.8L241.9,272.8L236.0,266.1Z',
+        bodyPath:
+          'M7.5,8.0L250.5,8.0A7.5,7.5 0 0 1 258.0,15.5L258.0,266.0L6.0,266.0A6.0,6.0 0 0 1 0.0,260.0L0.0,15.5A7.5,7.5 0 0 1 7.5,8.0Z',
+        /* 可打印区在这块板里的落点（机器坐标 0..256 就铺在这里） */
+        frame: { x: 1.0, y: 8.5, w: 256.0, h: 256.0 },
+      }
+
+      function drawPlate(ctx, view) {
+        const { scale, ox, oy } = view
+        ctx.save()
+        ctx.translate(ox, oy)
+        ctx.scale(scale, scale)
+        const body = new Path2D(PLATE.path)
+        ctx.fillStyle = '#f1fbf3'
+        ctx.fill(body, 'evenodd')
+        /* 板缘 → 可打印区之间的余量圈（evenodd(板身, 可打印区)） */
+        const ring = new Path2D(PLATE.bodyPath)
+        ring.rect(PLATE.frame.x, PLATE.frame.y, PLATE.frame.w, PLATE.frame.h)
+        ctx.fillStyle = 'rgba(134, 239, 172, 0.3)'
+        ctx.fill(ring, 'evenodd')
+        ctx.strokeStyle = '#86efac'
+        ctx.lineWidth = 1.4 / scale
+        ctx.stroke(body)
+        /* 8×8 网格（只在可打印区里） */
+        ctx.strokeStyle = 'rgba(31, 41, 55, 0.08)'
+        ctx.lineWidth = 1 / scale
+        ctx.beginPath()
+        for (let i = 1; i < 8; i++) {
+          const gx = PLATE.frame.x + (PLATE.frame.w * i) / 8
+          const gy = PLATE.frame.y + (PLATE.frame.h * i) / 8
+          ctx.moveTo(gx, PLATE.frame.y)
+          ctx.lineTo(gx, PLATE.frame.y + PLATE.frame.h)
+          ctx.moveTo(PLATE.frame.x, gy)
+          ctx.lineTo(PLATE.frame.x + PLATE.frame.w, gy)
+        }
+        ctx.stroke()
+        ctx.restore()
+      }
+
+      function fit(w, h) {
+        if (!model) return null
+        const pad = 14
+        const scale = Math.min((w - pad * 2) / PLATE.w, (h - pad * 2) / PLATE.d)
+        const ox = (w - PLATE.w * scale) / 2
+        const oy = (h - PLATE.d * scale) / 2
+        return { scale, ox, oy }
+      }
+
+      function render(ctx, w, h, view, zoomed) {
+        if (!model || !view) return
+        const { scale, ox, oy } = view
+        ctx.setTransform(1, 0, 0, 1, 0, 0)
+        ctx.clearRect(0, 0, w, h)
+
+        drawPlate(ctx, view)
+
+        /* 机器坐标（可打印区 0..256，y 向上）→ 板坐标（`PLATE.frame`，y 向下） */
+        const px = (x) => ox + (PLATE.frame.x + x) * scale
+        const py = (y) => oy + (PLATE.frame.y + PLATE.frame.h - y) * scale
+        const lw = +el.outline.value * (zoomed ? 1 : 1)
+        const tex = +el.texture.value
+        const every = Math.max(1, +el.density.value)
+        const showSupport = el.showSupport.checked
+        const showInfill = el.showInfill.checked
+        const showTower = el.showTower.checked
+
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+        ctx.lineWidth = lw
+
+        /* 轮廓（外墙 / 内墙 / 塔）先画：模型块的外沿靠它 */
+        const outlineSegs = []
+        const wallSegs = []
+        const infillSegs = []
+        const supportSegs = []
+        const towerSegs = []
+        let infillCounter = 0
+        for (let i = 0; i < model.count; i++) {
+          if (model.isPaint[i]) continue
+          const kd = model.kind[i]
+          if (kd === 1) outlineSegs.push(i)
+          else if (kd === 2) wallSegs.push(i)
+          else if (kd === 3) {
+            /* 填充抽样：每 N 条画一条，密度由滑杆定 */
+            infillCounter++
+            if (showInfill && infillCounter % every === 0) infillSegs.push(i)
+          } else if (kd === 4) {
+            if (showSupport) supportSegs.push(i)
+          } else if (kd === 5) {
+            if (showTower) towerSegs.push(i)
+          }
+        }
+
+        const stroke = (ids, color, alpha, width) => {
+          if (!ids.length) return
+          ctx.globalAlpha = alpha
+          ctx.strokeStyle = color
+          ctx.lineWidth = width
+          const CHUNK = 20000
+          for (let s = 0; s < ids.length; s += CHUNK) {
+            const end = Math.min(ids.length, s + CHUNK)
+            ctx.beginPath()
+            for (let j = s; j < end; j++) {
+              const i = ids[j]
+              const o = i * 4
+              ctx.moveTo(px(model.xy[o]), py(model.xy[o + 1]))
+              ctx.lineTo(px(model.xy[o + 2]), py(model.xy[o + 3]))
+            }
+            ctx.stroke()
+          }
+          ctx.globalAlpha = 1
+        }
+
+        /* 支撑在模型下面（Bambu 那个关系）：先画，模型盖上去，只在模型外沿露出绿边 */
+        stroke(supportSegs, PALETTE.support, 0.32, lw * 0.9)
+
+        /* 模型本体：填充纹理垫底，墙压上去 —— 全部淡，叠出来才是"浅灰有纹理"，不是一块黑 */
+        stroke(infillSegs, PALETTE.infill, tex, lw * 0.9)
+        stroke(wallSegs, PALETTE.wall, 0.22, lw)
+        stroke(outlineSegs, PALETTE.outline, 0.3, lw * 1.15)
+
+        /* 擦料塔：黄块 + 红虚线框 */
+        if (towerSegs.length) {
+          stroke(towerSegs, PALETTE.tower, 0.9, lw * 1.2)
+        }
+        let tb = null
+        for (let i = 0; i < model.count; i++) {
+          if (model.kind[i] !== 5) continue
+          const o = i * 4
+          for (const [a, b] of [
+            [model.xy[o], model.xy[o + 1]],
+            [model.xy[o + 2], model.xy[o + 3]],
+          ]) {
+            if (!tb) tb = { x0: a, y0: b, x1: a, y1: b }
+            tb.x0 = Math.min(tb.x0, a)
+            tb.x1 = Math.max(tb.x1, a)
+            tb.y0 = Math.min(tb.y0, b)
+            tb.y1 = Math.max(tb.y1, b)
+          }
+        }
+        if (showTower && tb) {
+          const padB = 1.5
+          const [lx, ty] = [px(tb.x0 - padB), py(tb.y1 + padB)]
+          const rw = (tb.x1 - tb.x0 + padB * 2) * scale
+          const rh = (tb.y1 - tb.y0 + padB * 2) * scale
+          ctx.save()
+          ctx.setLineDash([6, 4])
+          ctx.strokeStyle = '#ef4444'
+          ctx.lineWidth = 1.6
+          ctx.strokeRect(lx, ty, rw, rh)
+          ctx.restore()
+        }
+      }
+
+      function paintAll() {
+        if (!model) return
+        /* 画布按板的宽深比开（板是 258×276，不是正方形） */
+        const w = 1050
+        const h = Math.round((w * PLATE.d) / PLATE.w)
+        const c = el.canvas
+        c.width = w
+        c.height = h
+        const view = fit(c.width, c.height)
+        frame = view
+        render(c.getContext('2d'), c.width, c.height, view, false)
+        const cz = el.zoomCanvas
+        cz.width = w
+        cz.height = h
+        render(cz.getContext('2d'), cz.width, cz.height, fit(cz.width, cz.height), true)
+      }
+
+      function boot(text, name) {
+        el.hint.classList.add('hidden')
+        el.fileName.textContent = name
+        el.stats.textContent = '解析中…'
+        requestAnimationFrame(() => {
+          const m = parse(text)
+          model = m
+          el.stats.textContent = `${m.count.toLocaleString()} 段 · 解析 ${Math.round(m.parseMs)} ms`
+          el.fileTime.textContent = new Date().toLocaleTimeString('zh-CN', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+          paintAll()
+        })
+      }
+
+      async function takeFile(file) {
+        if (!file) return
+        el.stats.textContent = `读取 ${file.name}…`
+        boot(await file.text(), file.name)
+      }
+
+      /* ---- 交互 ---- */
+      el.hint.addEventListener('click', () => el.file.click())
+      el.file.addEventListener('change', () => takeFile(el.file.files[0]))
+      for (const ev of ['dragenter', 'dragover']) {
+        document.addEventListener(ev, (e) => {
+          e.preventDefault()
+        })
+      }
+      document.addEventListener('drop', (e) => {
+        e.preventDefault()
+        takeFile(e.dataTransfer.files[0])
+      })
+      el.canvas.addEventListener('click', () => el.zoom.classList.add('open'))
+      el.zoom.addEventListener('click', () => el.zoom.classList.remove('open'))
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') el.zoom.classList.remove('open')
+      })
+
+      for (const id of ['density', 'texture', 'outline']) {
+        el[id].addEventListener('input', () => {
+          el[`${id}Out`].value = el[id].value
+          paintAll()
+        })
+      }
+      for (const id of ['showSupport', 'showInfill', 'showTower']) {
+        el[id].addEventListener('change', paintAll)
+      }
+      window.addEventListener('resize', paintAll)
+    </script>
+  </body>
+</html>
