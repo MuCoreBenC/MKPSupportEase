@@ -74,6 +74,8 @@ interface Props {
    * 模型几何，那里不摆塔、不摆判据框，图例里也没有塔这一条。
    */
   noTower?: boolean
+  /** **塔的判据框不画**（真实塔走线已经在位图里，框只是旧版的辅助线） */
+  hideTowerBox?: boolean
   /**
    * **越界那一屏的允许范围**（2026-11-19）：给了就把模型**超出这块**的部分再画一遍红色。
    *
@@ -175,6 +177,7 @@ export default function CollisionMap({
   height,
   label,
   noTower = false,
+  hideTowerBox = false,
   allowed = null,
   box = null,
   pieces = null,
@@ -725,7 +728,7 @@ export default function CollisionMap({
 
       {/* 判据框：碰撞按这一块算（虚线，压在塔的真实形状外沿上）。
           `noTower`（模型俯视图）没有塔 ⇒ 这一层不画。 */}
-      {tower !== null && (
+      {tower !== null && !hideTowerBox && (
         <rect
           className={s.towerBox}
           x={towerLeftPlate}

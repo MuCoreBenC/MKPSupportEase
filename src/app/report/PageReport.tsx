@@ -1756,7 +1756,7 @@ function TowerPlate({
    * `false` = 参数化 SVG 塔（红虚线判据框 + 塔身/斜肋/护套）。
    * 旧的那版留着 —— 真实那版不好看时切回 `false` 即可。
    */
-  const REAL_TOWER = true
+  const REAL_TOWER = false
 
   return (
     <div className={s.plate}>
@@ -1767,6 +1767,7 @@ function TowerPlate({
         ghost={ghost}
         hideLegend
         noTower={REAL_TOWER}
+        hideTowerBox
         height={132}
         label={tr('report.towerPlate.label')}
       />
