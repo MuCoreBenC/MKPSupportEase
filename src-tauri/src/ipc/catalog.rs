@@ -523,17 +523,18 @@ pub async fn download_runtime_files(
                             .iter()
                             .find(|f| f.file_name == o.file_name)
                             .and_then(|f| {
-                                let mut got =
-                                    match runtime::download::receipt_of(&root, f, &context, false) {
-                                        Ok(got) => got,
-                                        Err(_) => {
-                                            tracing::warn!(
-                                                file = %o.file_name,
-                                                "下载成功但回执读不回来"
-                                            );
-                                            return None;
-                                        }
-                                    };
+                                let mut got = match runtime::download::receipt_of(
+                                    &root, f, &context, false,
+                                ) {
+                                    Ok(got) => got,
+                                    Err(_) => {
+                                        tracing::warn!(
+                                            file = %o.file_name,
+                                            "下载成功但回执读不回来"
+                                        );
+                                        return None;
+                                    }
+                                };
                                 if place {
                                     got.placed = place_after_download(&root, f);
                                 }
@@ -695,13 +696,14 @@ pub async fn fetch_cloud_preset(
              */
             let context = runtime::download::DownloadContext {
                 source: identity.clone(),
-                release: catalog.catalog_id.as_ref().map(|id| {
-                    runtime::download::ReleaseIdentity {
+                release: catalog
+                    .catalog_id
+                    .as_ref()
+                    .map(|id| runtime::download::ReleaseIdentity {
                         catalog_id: id.clone(),
                         serial: catalog.publish_serial,
                         published_at: catalog.published_at.clone(),
-                    }
-                }),
+                    }),
                 catalog_revision: catalog.revision.clone(),
             };
             /*

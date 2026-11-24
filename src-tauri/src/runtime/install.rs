@@ -120,8 +120,14 @@ mod tests {
         assert!(r.ok());
         assert_eq!((r.targets, r.written), (2, 2));
         assert!(!r.replaced, "目标本来是空的");
-        assert_eq!(std::fs::read(a.path().join("MKPProcess.json")).unwrap(), b"{}");
-        assert_eq!(std::fs::read(b.path().join("MKPProcess.json")).unwrap(), b"{}");
+        assert_eq!(
+            std::fs::read(a.path().join("MKPProcess.json")).unwrap(),
+            b"{}"
+        );
+        assert_eq!(
+            std::fs::read(b.path().join("MKPProcess.json")).unwrap(),
+            b"{}"
+        );
     }
 
     /// 目标已有同名 ⇒ `replaced` 为真（界面据此说「切片器里那份换了」）。

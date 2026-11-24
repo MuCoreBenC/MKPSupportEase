@@ -28,6 +28,8 @@
 pub mod app_state;
 
 use postprocess::diag::messages;
+/// **应用事务**：已存在的本地资源 → 当前使用（校验不过不落指针）
+pub mod apply;
 /// **备份与恢复**（2026-10-17）：一个 zip = 这台机器的全部家当（设置 / catalog /
 /// toml / 修改历史 / 基准 / 执行归档）；**恢复 = 全量覆盖**（理由见模块头）
 pub mod backup;
@@ -48,10 +50,6 @@ pub mod delivery;
 pub mod delivery_index;
 /// **下载事务**：一次下载固定一份身份快照，走完一条提交路径才发回执
 pub mod download;
-/// **应用事务**：已存在的本地资源 → 当前使用（校验不过不落指针）
-pub mod apply;
-/// **放入事务**：已存在的本地资源 → 切片器账号目录（失败账号可见）
-pub mod install;
 /// **修改历史账本**（2026-10-17）：一份文件一本，git 式 —— 不清空、重开软件还在
 /// （用户线按相对路径、云端线按文件名认文件，于是导入的 toml 也有自己的一本）。
 /// 见 [`history`] 的模块头。
@@ -60,6 +58,8 @@ pub mod history;
 /// 共用这一层，Preset 只是第一个消费者。与云端线 / 用户线都分开：
 /// 它只管"进来"，不碰"使用"（不校验内容、不碰状态）。
 pub mod import;
+/// **放入事务**：已存在的本地资源 → 切片器账号目录（失败账号可见）
+pub mod install;
 /// **用户线**：用户自己的预设（`presets-local/`）—— 与云端线（[`content`] /
 /// [`delivery_index`] / `archive/`）分开
 pub mod local;

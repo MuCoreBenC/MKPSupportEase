@@ -3145,14 +3145,27 @@ mod tests {
             save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "  ", None, None).is_err()
         );
         assert!(
-            save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "别的.txt", None, None)
-                .is_err(),
+            save_cloud_as_new(
+                user.path(),
+                &file,
+                "涂胶宽度 = 1.0\n",
+                "别的.txt",
+                None,
+                None
+            )
+            .is_err(),
             "后缀不许换"
         );
         /* 路径分隔符剔掉照落 —— 落点仍在 presets-local/ 里（那些字符不是目录） */
-        let done =
-            save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "../外面.toml", None, None)
-                .unwrap();
+        let done = save_cloud_as_new(
+            user.path(),
+            &file,
+            "涂胶宽度 = 1.0\n",
+            "../外面.toml",
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(done.file_name, "..外面.toml", "剔掉那两个分隔符");
         assert!(done.adjusted);
     }
@@ -3244,7 +3257,8 @@ mod tests {
             None,
         )
         .unwrap();
-        let text = String::from_utf8(std::fs::read(user.path().join(&without.path)).unwrap()).unwrap();
+        let text =
+            String::from_utf8(std::fs::read(user.path().join(&without.path)).unwrap()).unwrap();
         let origin = source_record::parse(&text).unwrap().origin.unwrap();
         assert_eq!(
             (origin.platform, origin.repo, origin.branch),
@@ -3261,8 +3275,7 @@ mod tests {
             kind: "bbs_profile".to_owned(),
             ..entry_bytes("MKPProcess.json", "{}")
         };
-        let e = save_cloud_as_new(user.path(), &file, "{}", "本地.json", None, None)
-            .unwrap_err();
+        let e = save_cloud_as_new(user.path(), &file, "{}", "本地.json", None, None).unwrap_err();
         assert!(e.message.contains("不是 MKP 预设"), "{}", e.message);
     }
 

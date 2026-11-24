@@ -56,11 +56,7 @@ pub fn apply(
 }
 
 /// 云端线：目录里的那一份。
-fn apply_preset(
-    root: &Path,
-    catalog: &Catalog,
-    file_name: &str,
-) -> Result<ApplyReceipt, AppError> {
+fn apply_preset(root: &Path, catalog: &Catalog, file_name: &str) -> Result<ApplyReceipt, AppError> {
     let file = catalog
         .files
         .iter()
@@ -140,10 +136,7 @@ mod tests {
     use crate::runtime::catalog::CatalogFile;
 
     fn root_pair() -> (tempfile::TempDir, tempfile::TempDir) {
-        (
-            tempfile::tempdir().unwrap(),
-            tempfile::tempdir().unwrap(),
-        )
+        (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap())
     }
 
     fn preset(name: &str, kind: &str) -> CatalogFile {
