@@ -438,6 +438,9 @@ export const ja: Record<StringKey, string> = {
   'settings.restoreModal.cancel': 'キャンセル',
 
   'settings.advanced.title': '詳細設定',
+  'settings.online.label': 'オンライン機能',
+  'settings.online.note': 'オフにすると、クラウドのプリセット・モデル・更新を受け取れません',
+  'settings.online.hint': 'オフにすると一切通信しません：プリセットやモデルの取得、更新確認も行いません',
   'settings.advanced.desc': 'クラウドデータの URL',
   'settings.advanced.sourceLabel': 'プリセットのデータソース',
   'settings.advanced.sourceNote': '中国国内では Gitee が安定します。',

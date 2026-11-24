@@ -468,6 +468,32 @@ export const UPDATE_STATE_TEXT: Record<PresetUpdateState, StringKey> = {
 }
 
 /**
+ * **切片器档云端行**（BBS 工艺 / Orca）的那一个动作 —— 操作列与右键菜单共用这一条。
+ *
+ * 与 MKP 档分开：`updateStatusOf` 读的是「我那份基于云端哪一版」（`localState`），
+ * 那本账只有 MKP 有。切片器档看两样：`presetState`（源上算好的四态）与
+ * `basedOn === 'newer'`（云端比我手上那份旧）。
+ *
+ * ★ 从前菜单直接问 `updateStatusOf`，切片器行没有 `localState` ⇒ 它落到"状态未知"的
+ *   兜底上，菜单把这一行念成「云端较旧」并**禁掉下载** —— 而同一行的操作列明明有「下载」。
+ *   判据收在这里，两个入口就不会各说一套。
+ */
+export function slicerCloudActionOf(row: {
+  presetState?: PresetFileState
+  downloaded?: boolean
+  basedOn?: BasedOn
+}): { action: PresetUpdateState | 'none'; gotIt: boolean; older: boolean } {
+  const older = row.basedOn === 'newer'
+  const gotIt = row.presetState === undefined ? row.downloaded === true : row.presetState === 'ok'
+  if (older || gotIt) return { action: 'none', gotIt, older }
+  return {
+    action: row.presetState === undefined ? 'missing' : updateStateOf(row.presetState),
+    gotIt,
+    older,
+  }
+}
+
+/**
  * 「有更新」底下那行**认不出**的注记（只有 `tampered` 那一档给）。
  *
  * 2026-10-06 查明的实情：客户端的版本记忆只留得住"每一代被换下的目录"（归档链），

@@ -323,6 +323,8 @@ pub async fn download_runtime_file(
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("downloadRuntimeFile", |_| {
             let root = internal_root(&app)?;
+            /* 联网功能关着 ⇒ 一个字节都不出网（见 runtime::online） */
+            runtime::online::require(&root)?;
             let catalog = runtime::load_released_catalog(&root)?;
             let file = catalog
                 .files
@@ -444,6 +446,8 @@ pub async fn download_runtime_files(
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("downloadRuntimeFiles", |_| {
             let root = internal_root(&app)?;
+            /* 联网功能关着 ⇒ 一个字节都不出网（见 runtime::online） */
+            runtime::online::require(&root)?;
             let catalog = runtime::load_released_catalog(&root)?;
 
             // 先对一遍清单：**目录里没有的那份是调用方的错**，整次拒绝 ——
@@ -613,6 +617,8 @@ pub async fn fetch_cloud_preset(
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("fetchCloudPreset", |_| {
             let root = internal_root(&app_handle)?;
+            /* 联网功能关着 ⇒ 一个字节都不出网（见 runtime::online） */
+            runtime::online::require(&root)?;
             let user = crate::fsx::paths::user_root(&app_handle)?;
             let catalog = runtime::load_released_catalog(&root)?;
             /* 索引与当前目录对一次：共享 SHA 直接认、目录里已经没有的 path 退出索引 */
@@ -1317,6 +1323,8 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("checkRemoteUpdate", |_| {
             let root = internal_root(&app)?;
+            /* 联网功能关着 ⇒ 连目录都不问（见 runtime::online） */
+            runtime::online::require(&root)?;
             let resolved = runtime::source::resolve_source(&root)?;
             let bytes = runtime::net::get_catalog(&resolved.catalog_url()?)?;
             let remote = runtime::Catalog::parse(&bytes)?;
@@ -1334,8 +1342,16 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
         AppError::internal(messages::text("ui.ipc.catalog.077", &[])).with_detail(e.to_string())
     })?;
     if out.is_ok() {
+        let usage_app = notify_app.clone();
         tauri::async_runtime::spawn_blocking(move || {
             runtime::update_check::maybe_check_after_catalog(&notify_app);
+        });
+        /* 匿名使用统计：一天最多报一次「今天用过」（见 runtime::usage_ping 的模块头）。
+        与上面那趟同一个触发点 —— 拉目录本来就要联网，顺路；失败静默，不进启动路径。 */
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Ok(root) = internal_root(&usage_app) {
+                runtime::usage_ping::maybe_ping(&root);
+            }
         });
     }
     out
@@ -1352,6 +1368,8 @@ pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("applyRemoteUpdate", |_| {
             let root = internal_root(&app)?;
+            /* 联网功能关着 ⇒ 不换目录（见 runtime::online） */
+            runtime::online::require(&root)?;
             let resolved = runtime::source::resolve_source(&root)?;
             let bytes = runtime::net::get_catalog(&resolved.catalog_url()?)?;
             let remote = runtime::Catalog::parse(&bytes)?;

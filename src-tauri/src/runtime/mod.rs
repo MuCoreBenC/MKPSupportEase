@@ -60,6 +60,9 @@ pub mod local;
 /// **一次性存储迁移**（2026-10-29）：旧 delivery/baseline → content + 索引
 pub mod migrate;
 pub mod net;
+/// **「联网功能」那道闸**：关着时这个程序一个字节都不出网（预设 / 模型下载、
+/// 检查更新、匿名统计全停）。判据只有一条 —— [`app_state::online`]。
+pub mod online;
 /// **逐参数「云端更新」的比对**（2026-10-09）：我这份 / 云端旧值 / 云端新值三方账。
 /// 纯算法（不读盘），落点是 `ipc::param_sync` 的两条命令。
 pub mod param_sync;
@@ -105,6 +108,9 @@ pub mod updater;
 /// **「哪份预设用得最多」本机学习账**（2026-10-17）：`run/usage.json`，
 /// **不进备份**（换设备就从零学）。见 [`usage`] 的模块头。
 pub mod usage;
+/// **匿名使用统计**（`run/usage-ping.json`）：一天最多报一次「今天这台机器用过」，
+/// 出口仍是 [`net`]，挂在「成功拉到云端目录」之后，失败静默。见 [`usage_ping`] 的模块头。
+pub mod usage_ping;
 pub mod utxn;
 /// **云端版本清单**（2026-10-08）：这台机器"见过"的交付预设版本 = 历次目录里登记过的
 /// 那几版（当前目录 + 版本链），按内容摘要去重。见 [`versions`] 的模块头。

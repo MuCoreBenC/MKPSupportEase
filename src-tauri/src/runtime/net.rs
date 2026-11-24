@@ -174,6 +174,13 @@ pub const RETRIES: u32 = 2;
 /// 退避基数：第 n 次重试前等 `BACKOFF_BASE * 2^(n-1)`
 pub const BACKOFF_BASE: Duration = Duration::from_millis(300);
 
+/// 使用统计那次心跳的总时间上限。它比拉一份文件短一截：这一层是顺路的，
+/// 卡住就不该拖着界面等
+pub const USAGE_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// 使用统计那次心跳的连接上限
+pub const USAGE_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// 每次从响应体读多少。它同时是水位上报的粒度：太细就一直在刷事件，
 /// 太粗界面看不出在动
 const CHUNK: usize = 64 * 1024;
@@ -587,6 +594,28 @@ pub fn stream_get(url: &str) -> Result<ureq::http::Response<ureq::Body>, AppErro
 
 pub fn get_release(release_url: &str) -> Result<Vec<u8>, AppError> {
     get_bytes(release_url, &GetPlan::new(RELEASE_FILE), &noop_tick)
+}
+
+/// 匿名使用统计的一次心跳。**发一次 GET 就走，响应体只读掉不解析**。
+///
+/// 计数在服务端按 `Referer` 分组 —— 这里 Referer 不是"来源页"，而是这条请求的身份：
+/// 哪一天、哪个版本、哪个平台（见 [`super::usage_ping`]）。所以它必须由调用方给出，
+/// 不许在这一层猜。
+///
+/// 超时比拉文件短一截：这一层是顺路的，不许把任何界面吊住。
+pub fn usage_ping(url: &str, referer: &str) -> Result<(), AppError> {
+    let agent = agent_with(USAGE_TIMEOUT, USAGE_CONNECT_TIMEOUT);
+    let response = agent
+        .get(url)
+        .header("Referer", referer)
+        .header("User-Agent", "SupportEase")
+        .call()
+        .map_err(|e| transport_error(url, &e))?;
+    /* 把响应体读掉再走：不读就断，对端可能把这次算成半截请求 */
+    let mut reader = response.into_body().into_reader();
+    let mut buf = [0u8; 512];
+    let _ = reader.read(&mut buf);
+    Ok(())
 }
 
 /* ------------------------------- 远端的 Source 实现 ------------------------------- */

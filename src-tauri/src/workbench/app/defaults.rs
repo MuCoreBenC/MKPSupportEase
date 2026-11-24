@@ -225,6 +225,12 @@ const EDITABLE: &[Spec] = &[
         label: "自动检查更新",
         kind: Kind::Bool,
     },
+    Spec {
+        section: Section::Client,
+        key: "Online",
+        label: "联网功能",
+        kind: Kind::Bool,
+    },
 ];
 
 /// 一行默认值

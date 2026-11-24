@@ -4251,6 +4251,17 @@ export interface MkpApi {
   setAutoCheckUpdate(enabled: boolean): Promise<boolean>
 
   /**
+   * **联网功能**开着吗（出厂 = 开）。
+   *
+   * 关掉之后这个程序**一个字节都不出网**：预设 / 模型下载、目录检查、检查更新、
+   * 匿名统计全停，命令一律回 `W_ONLINE_OFF_001`。闸在 `runtime::online`。
+   */
+  getOnline(): Promise<boolean>
+
+  /** 开关联网功能：立即生效并落盘（`run/app-state.json` 的 `online` 格）。 */
+  setOnline(enabled: boolean): Promise<boolean>
+
+  /**
    * **更新渠道**（2026-11-20）：`stable` / `preview`。**没选过 = `stable`**。
    *
    * 落 `run/app-state.json` 的 `updateChannel` 格 —— 自动检查要按它挑清单，

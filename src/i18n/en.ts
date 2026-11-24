@@ -437,6 +437,9 @@ export const en: Record<StringKey, string> = {
   'settings.restoreModal.cancel': 'Cancel',
 
   'settings.advanced.title': 'Advanced settings',
+  'settings.online.label': 'Online features',
+  'settings.online.note': 'Off: no presets, models or updates',
+  'settings.online.hint': 'Off means the app never goes online: no preset or model downloads, no update check',
   'settings.advanced.desc': 'Cloud data address',
   'settings.advanced.sourceLabel': 'Preset data source',
   'settings.advanced.sourceNote': 'In mainland China, Gitee is more reliable.',
