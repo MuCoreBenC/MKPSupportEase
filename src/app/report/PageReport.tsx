@@ -1751,6 +1751,13 @@ function TowerPlate({
         }
       : null
 
+  /*
+   * 塔画哪一版：`true` = G-code 里的**真实走线**（位图自带黄色，跟着模型一起缩放），
+   * `false` = 参数化 SVG 塔（红虚线判据框 + 塔身/斜肋/护套）。
+   * 旧的那版留着 —— 真实那版不好看时切回 `false` 即可。
+   */
+  const REAL_TOWER = true
+
   return (
     <div className={s.plate}>
       <CollisionMap
@@ -1759,6 +1766,7 @@ function TowerPlate({
         arrow={arrow}
         ghost={ghost}
         hideLegend
+        noTower={REAL_TOWER}
         height={132}
         label={tr('report.towerPlate.label')}
       />
