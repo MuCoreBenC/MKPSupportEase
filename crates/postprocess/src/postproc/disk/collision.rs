@@ -940,12 +940,14 @@ struct RasterBuilder {
     model: Vec<u16>,
     support: Vec<u16>,
     tower: Vec<u16>,
+    /// 塔框（机器坐标）：裁图时并进来，否则塔离模型远时整块被裁掉
+    tower_box: Option<GBBox>,
     /// 看到第几层了（Z 每变一次 +1）—— 只画抽样层，全量叠加会糊成一块
     layer_index: i64,
     last_z: f64,
 }
 
-/// 一段走线属于哪一类（只分两类：模型灰 / 支撑绿）
+/// 一段走线属于哪一类（模型灰 / 支撑绿 / 塔黄）
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RasterKind {
     Model,
@@ -971,7 +973,7 @@ const RASTER_ALPHA_FLOOR: f32 = 0.24;
 const RASTER_ALPHA_GAIN: f32 = 0.52;
 
 impl RasterBuilder {
-    fn new(bed: &Box4) -> Self {
+    fn new(bed: &Box4, tower: Option<&GBBox>) -> Self {
         let span = (bed.x_max - bed.x_min).max(bed.y_max - bed.y_min);
         let cell = (span / RASTER_MAX_PX as f64).max(RASTER_CELL_MM);
         let width = (((bed.x_max - bed.x_min) / cell).ceil() as u32).clamp(1, RASTER_MAX_PX);
@@ -985,6 +987,7 @@ impl RasterBuilder {
             model: vec![0; (width * height) as usize],
             support: vec![0; (width * height) as usize],
             tower: vec![0; (width * height) as usize],
+            tower_box: tower.copied(),
             layer_index: -1,
             last_z: f64::NAN,
         }
@@ -1056,6 +1059,23 @@ impl RasterBuilder {
                     y0 = y0.min(y);
                     y1 = y1.max(y);
                 }
+            }
+        }
+        /* 塔框并进来：长板上塔常在模型另一角，只裁模型 bbox 会把塔整块丢掉 */
+        if let Some(tb) = self.tower_box {
+            let tx0 = ((tb.x_min - self.x_min) / self.cell).floor().max(0.0) as u32;
+            let ty0 = ((tb.y_min - self.y_min) / self.cell).floor().max(0.0) as u32;
+            let tx1 = ((tb.x_max - self.x_min) / self.cell)
+                .ceil()
+                .min(self.width as f64) as u32;
+            let ty1 = ((tb.y_max - self.y_min) / self.cell)
+                .ceil()
+                .min(self.height as f64) as u32;
+            if tx1 > tx0 && ty1 > ty0 {
+                x0 = x0.min(tx0);
+                x1 = x1.max(tx1 - 1);
+                y0 = y0.min(ty0);
+                y1 = y1.max(ty1 - 1);
             }
         }
         if x0 > x1 || y0 > y1 {
@@ -1149,7 +1169,7 @@ fn model_footprint_in(content: &[String], bed: &Box4, tower: Option<&GBBox>) -> 
     /* 报告页轮廓那一份：0.5mm 格 + 按线段采样，出来的才是 G-code 的真实投影 */
     let mut outline_occ = Occupancy::new(bed, OUTLINE_CELL_MM);
     /* 报告页贴的那张走线图：同一遍扫描里顺手画 */
-    let mut raster = RasterBuilder::new(bed);
+    let mut raster = RasterBuilder::new(bed, tower);
     let mut bbox: Option<GBBox> = None;
     let mut in_prime_tower = false;
     /* 上一段挤出的终点（细格按线段采样用）；被跳过的点也要更新，下一段不能从更早的位置连过来 */
