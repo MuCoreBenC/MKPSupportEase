@@ -2334,7 +2334,7 @@ dependencies = [
 
 [[package]]
 name = "mkp-support-ease"
-version = "0.0.19-preview.1"
+version = "0.0.19-preview.2"
 dependencies = [
  "ab_glyph",
  "arboard",
