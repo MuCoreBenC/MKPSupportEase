@@ -424,6 +424,23 @@ mod tests {
         assert_eq!(remove_final_lower_z(&lines), lines);
     }
 
+    /// 校准 home 拆成「空走 + 0.1mm 虚拟挤出」之后，锚点仍要从**带 X/Y/Z 的那一行**
+    /// 认出来（`remove_final_lower_z` 靠它清尾部降 Z，认不出就是喷嘴刮板）。
+    #[test]
+    fn the_split_home_still_yields_its_anchor() {
+        assert_eq!(
+            is_calibration_home_line("G1 X100 Y100 F3000"),
+            None,
+            "空走没有 Z，不是锚点"
+        );
+        assert_eq!(
+            is_calibration_home_line(
+                "G1 X100.1 Y100 Z10.2 E0.001 F3000 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility"
+            ),
+            Some(10.2)
+        );
+    }
+
     #[test]
     fn remove_param_from_line_strips_axis_keeps_comment() {
         assert_eq!(

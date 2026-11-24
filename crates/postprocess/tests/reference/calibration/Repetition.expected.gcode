@@ -1,7 +1,8 @@
 ; LShape Repetition Calibration
 G1 Z10.2 F1200
 ; FEATURE: Outer wall
-G1 X100 Y100 Z10.2 E0.001 F3000 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility
+G1 X100 Y100 F3000
+G1 X100.1 Y100 Z10.2 E0.001 F3000 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility
 ; FEATURE: Custom
 ;Rising nozzle to avoid collision
 G1 Z10.2

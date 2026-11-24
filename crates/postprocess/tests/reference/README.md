@@ -67,25 +67,26 @@
 
 | 模式 | 行数 | 文件 |
 |---|---|---|
-| ZOffset | 901 | `ZOffset.{input.json,expected.gcode}` |
-| Precise | 239 | `Precise.…` |
-| Rough | 239 | `Rough.…` |
-| Repetition | 117 | `Repetition.…` |
-| ZOffset.new | 901 | `ZOffset.new.…` |
-| Precise.new | 261 | `Precise.new.…` |
-| Rough.new | 261 | `Rough.new.…` |
+| ZOffset | 902 | `ZOffset.{input.json,expected.gcode}` |
+| Precise | 240 | `Precise.…` |
+| Rough | 240 | `Rough.…` |
+| Repetition | 118 | `Repetition.…` |
+| ZOffset.new | 902 | `ZOffset.new.…` |
+| Precise.new | 262 | `Precise.new.…` |
+| Rough.new | 262 | `Rough.new.…` |
 
 **没有再生开关**：改期望值就是人工生成一份新输出、逐行看过、替换文件。
 测试不会自己覆写判据。
 
-### 校准块的开头五行（当前形态）
+### 校准块的开头六行（当前形态）
 
 ```
 1  ; ZOffset Calibration
 2  G1 Z10.2 F1200
 3  ; FEATURE: Outer wall
-4  G1 X100 Y100 Z10.2 E0.001 F3000 ; MKPSE: virtual extrusion …
-5  ; FEATURE: Custom
+4  G1 X100 Y100 F3000
+5  G1 X100.1 Y100 Z10.2 E0.001 F3000 ; MKPSE: virtual extrusion …
+6  ; FEATURE: Custom
 ```
 
 这两个 `10.2` 不是常量：校准块的安全高度统一是
@@ -94,12 +95,16 @@
 参考夹具的 IR 没有 `Prefs` 段 ⇒ 走 `PrefsIr::default()`，首层 0.2、`z_offset` 0、抬升 10，
 所以落在 10.2。挂笔前、收笔前用的是同一个高度，三种校准不再分化。
 
-第 3、5 行的作用是**换角色**：切片器建路径包围盒时排除 `erCustom`，而校准块整段活在
-start gcode 的 `; FEATURE: Custom` 之下 —— 不换角色，第 4 行那条虚拟挤出等于没写，
+第 3、6 行的作用是**换角色**：切片器建路径包围盒时排除 `erCustom`，而校准块整段活在
+start gcode 的 `; FEATURE: Custom` 之下 —— 不换角色，第 5 行那条虚拟挤出等于没写，
 `direct_calibrate`（模型路径被删光）那一支第二盘起会被判「路径在床外」。
 探针之后立刻换回来，校准图案的角色保持原样。
 
-第 2 行单独抬 Z 同样不可省：第 4 行把 XY 与 Z 写在同一句里，打印机会线性插值，
+第 4 行是**空驶**（无 E）：从上一个挤出点走到锚点的那一段长移动不该被读成外墙。
+第 5 行从锚点再往外走 0.1mm —— 长度不能是 0（BBS 算不出线宽就不参与包围盒），
+它仍带 X/Y/Z，`is_calibration_home_line` 认它当锚点。
+
+第 2 行单独抬 Z 同样不可省：抬 Z 与平移分成两句，打印机会线性插值，
 于是「从当前 Z 平移 200mm」这一路是贴着板面拖过去的。先抬到目标 Z 再平移，
 坐标不变、过程不同。
 
@@ -120,7 +125,7 @@ start gcode 的 `; FEATURE: Custom` 之下 —— 不换角色，第 4 行那条
 质心按同一位移平移，所以形变/旋转检测仍然放过。
 
 行数关系：XY 的 260 = 经典 238 + 22 条 `G4` 停留（New 每轮都停，经典分支不消费 dwell）；
-Z 的 900 与经典同行数（Z 经典本来就有停留），差别只在坐标原点。
+Z 的两支同行数（Z 经典本来就有停留），差别只在坐标原点。
 
 ### `ZOffset.new` 的重切（2026-10-19）
 
@@ -133,7 +138,7 @@ Y：3.755 → 3.255，即 −0.5 —— 见 `presets/calibration_models.toml` �
 **170 行逐字节相同**（home / 回原点这类固定坐标）、**727 行只差 X/Y 平移**（图案相关），
 **没有任何第三种差异**。也就是说它是「同一套结构 + 两个实调常数」，不是照着当刻输出重录。
 
-现在这份是 **900 行**：在 897 的基础上多了校准块开头那 2 行角色切换（`; FEATURE:` 一对）。
+现在这份是 **902 行**：`; FEATURE:` 那对角色切换 2 行，加上 home 的「空走 + 0.1mm 虚拟挤出」2 行。
 若哪天再调 datum，这条参考要跟着重切，`z_new_matches_classic_up_to_the_datum_trim`
 也会按新实调量重算差值。
 

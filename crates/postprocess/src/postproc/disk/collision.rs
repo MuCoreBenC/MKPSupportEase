@@ -91,6 +91,11 @@ pub struct CollisionFacts {
     /// 空数组（旧记录 / 稀疏到不足 3 个点）⇒ 界面退回 `model_boxes` 的矩形。
     #[serde(default)]
     pub model_polygons: Vec<Vec<[f64; 2]>>,
+    /// **每个模型的真实外形**（内凹保留；与报告页 `modelMap.modelOutlines` 同一套算法）。
+    ///
+    /// 画图画它；空数组（旧记录 / 退化块）⇒ 界面退回 `model_polygons` 的凸包。
+    #[serde(default)]
+    pub model_outlines: Vec<Vec<[f64; 2]>>,
     /// 可打印区外接框（mm，机器坐标）：**gcode 里切片器写下的 `; printable_area` 优先**
     /// （[`printable_area_of`]），gcode 没写才退回机型 toml 的 `min_x…max_y`
     pub printable: Box4,
@@ -198,8 +203,10 @@ pub struct CollisionResult {
     /// **每个模型各自的包围盒**（按占用格的连通块算；报告页画成一个个框）。
     /// `model_bbox` 仍然保留：它是"整体一块"，给"挪模型"的建议方向用。
     pub model_boxes: Vec<GBBox>,
-    /// **每个模型各自的轮廓**（凸包，≤24 边）—— 俯视图画的是它，矩形只是兜底
+    /// **每个模型各自的轮廓**（凸包，≤24 边）—— 旧记录的兜底，矩形再退一层
     pub model_polygons: Vec<Vec<[f64; 2]>>,
+    /// **每个模型的真实外形**（内凹保留）—— 俯视图画的是它
+    pub model_outlines: Vec<Vec<[f64; 2]>>,
     /// **箭头起点**：真正撞上的那个模型的中心（作者 2026-10-18：「这个箭头应该从具体的
     /// 哪个模型指出去的才对」）——`None` = 没有模型块吃到冲突点（原塔撞 / 禁区那一档），
     /// 那时退回整体框中心。
@@ -280,6 +287,34 @@ impl Occupancy {
             return;
         }
         self.bits[cy * self.cols + cx] = true;
+    }
+
+    /// 打一个点，并把周围一圈也打上。
+    ///
+    /// 细格采样用：相邻挤出线之间只有 0.4mm 左右的缝，不补这一圈，每条填充线会各自
+    /// 成一个连通块，轮廓就碎成几十条。外扩一格在缩略图上不可见。
+    fn mark_thick(&mut self, x: f64, y: f64) {
+        let step = self.cell;
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                self.mark(x + dx as f64 * step, y + dy as f64 * step);
+            }
+        }
+    }
+
+    /// 沿一段直线把中间经过的格子也打上（细格不能只标终点 —— 一段长移动中间会漏空，
+    /// 轮廓就在那里断开）。
+    pub fn mark_line(&mut self, from: (f64, f64), to: (f64, f64)) {
+        let dx = to.0 - from.0;
+        let dy = to.1 - from.1;
+        let len = (dx * dx + dy * dy).sqrt();
+        /* 半格一步：相邻采样点之间的中点不会落回同一个格 */
+        let steps = (len / (self.cell * 0.5)).ceil().max(1.0);
+        let steps = steps as usize;
+        for i in 0..=steps {
+            let t = i as f64 / steps as f64;
+            self.mark_thick(from.0 + dx * t, from.1 + dy * t);
+        }
     }
 
     /// 这个框碰到任何一个被占的格子 ⇒ `true`。
@@ -477,7 +512,7 @@ impl Occupancy {
                 let points: Vec<[f64; 2]> = cells.iter().map(|&c| self.cell_center(c)).collect();
                 let hull = crate::postproc::disk::wipe::convex_hull(&points);
                 if hull.len() >= 3 {
-                    return simplify_polygon(hull);
+                    return simplify_polygon(hull, MODEL_POLY_MAX_POINTS);
                 }
                 let b = self.bbox_of(cells);
                 vec![
@@ -512,7 +547,7 @@ impl Occupancy {
                 let points: Vec<[f64; 2]> = cells.iter().map(|&c| self.cell_center(c)).collect();
                 let hull = crate::postproc::disk::wipe::convex_hull(&points);
                 if hull.len() >= 3 {
-                    return simplify_polygon(hull);
+                    return simplify_polygon(hull, MODEL_OUTLINE_MAX_POINTS);
                 }
                 let b = self.bbox_of(cells);
                 vec![
@@ -600,7 +635,7 @@ impl Occupancy {
         if poly.len() < 3 {
             return None;
         }
-        let simplified = simplify_polygon(poly);
+        let simplified = simplify_polygon(poly, MODEL_OUTLINE_MAX_POINTS);
         (simplified.len() >= 3).then_some(simplified)
     }
 }
@@ -619,6 +654,17 @@ fn ring_area2(ring: &[(i64, i64)]) -> f64 {
 /// 模型轮廓最多几条边（作者给的上限：12 或 24 —— 取细的那一档，
 /// 既不像矩形，也不至于把 2mm 格网的锯齿全画出来）
 const MODEL_POLY_MAX_POINTS: usize = 24;
+
+/// 报告页轮廓那张格网的格边长（mm）。
+///
+/// 2mm 格走出来的斜边是一节一节的台阶，缩略图上就是锯齿；0.5mm 的台阶小于下面的
+/// 平滑容差，抹完之后是真实外形。**只给 `outlines` 用**，碰撞判据仍吃 2mm 格。
+const OUTLINE_CELL_MM: f64 = 0.5;
+
+/// 报告页轮廓最多几个点。
+///
+/// 细格走出来的环比 2mm 格长得多；仍按 24 削会把直角也削成斜边，所以单独给一档。
+const MODEL_OUTLINE_MAX_POINTS: usize = 72;
 
 /// 轮廓平滑的容差（mm）：小于它的起伏当锯齿抹掉。
 ///
@@ -663,12 +709,12 @@ fn rdp(points: &[[f64; 2]], eps: f64) -> Vec<[f64; 2]> {
     left
 }
 
-/// 轮廓整形：① 先抹锯齿（RDP，闭合环要从最远两点切开）；② 还超 24 个顶点就按
-/// 面积贡献继续削（Visvalingam）。
+/// 轮廓整形：① 先抹锯齿（RDP，闭合环要从最远两点切开）；② 还超 `max_points` 个顶点
+/// 就按面积贡献继续削（Visvalingam）。
 ///
 /// 为什么第 ② 步不是等距采样：等距会把尖角（模型的鼻子、爪子）削平，而"看着像撞了"
 /// 正是那个角造成的 —— 削最平的角，形状才留得住。
-fn simplify_polygon(poly: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
+fn simplify_polygon(poly: Vec<[f64; 2]>, max_points: usize) -> Vec<[f64; 2]> {
     let original = poly.clone();
     let mut poly = poly;
     if poly.len() >= 4 {
@@ -697,7 +743,7 @@ fn simplify_polygon(poly: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
     if poly.len() < 3 {
         return original;
     }
-    while poly.len() > MODEL_POLY_MAX_POINTS {
+    while poly.len() > max_points {
         let n = poly.len();
         let mut worst = 1usize;
         let mut worst_area = f64::INFINITY;
@@ -763,6 +809,7 @@ impl ModelFootprint {
         result.model_bbox = self.bbox;
         result.model_boxes = self.boxes.clone();
         result.model_polygons = self.polygons.clone();
+        result.model_outlines = self.outlines.clone();
     }
 }
 
@@ -827,6 +874,7 @@ impl ModelMapFacts {
             printable: self.printable,
             model_boxes: self.model_boxes.clone(),
             model_polygons: self.model_polygons.clone(),
+            model_outlines: self.model_outlines.clone(),
             forbidden_zones: self.forbidden_zones.clone(),
             ..CollisionFacts::default()
         }
@@ -845,9 +893,14 @@ pub fn model_footprint(content: &[String], ir_data: &Ir) -> ModelFootprint {
 /// 同 [`model_footprint`]，但床由调用方给（碰撞检测那一趟手里已经有一份可打印区，
 /// 不必再解析一遍 `; printable_area`）。
 fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
+    /* 判据那一份（框 / 凸包 / 碰撞）仍吃 2mm 格、只标终点 —— 一格都没动 */
     let mut occ = Occupancy::new(bed, 2.0);
+    /* 报告页轮廓那一份：0.5mm 格 + 按线段采样，出来的才是 G-code 的真实投影 */
+    let mut outline_occ = Occupancy::new(bed, OUTLINE_CELL_MM);
     let mut bbox: Option<GBBox> = None;
     let mut in_prime_tower = false;
+    /* 上一段挤出的终点（细格按线段采样用）；被跳过的点也要更新，下一段不能从更早的位置连过来 */
+    let mut prev: Option<(f64, f64)> = None;
     for line in content {
         let trimmed = line.trim();
         if crate::gcode::has_slicer_comment_prefix(trimmed, "FEATURE") {
@@ -855,16 +908,27 @@ fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
                 crate::gcode::has_slicer_comment_prefix(trimmed, "FEATURE: Prime tower");
             continue;
         }
-        let Some((x, y)) = is_extrusion_move(line) else {
+        let Some((x, y)) = motion_xy(line) else {
             continue;
         };
-        if in_prime_tower {
+        /* 空走 / 抬 Z：下一段挤出不和这一段连（连了就等于把空走也画进轮廓） */
+        if is_extrusion_move(line).is_none() {
+            prev = None;
+            continue;
+        }
+        /* 虚拟挤出（E0.001）是给 BBS 撑包围盒的假移动，不是模型几何 ——
+        它落在锚点 (100,100) 这类位置上，收进来会在轮廓外多一个尖 */
+        if in_prime_tower || crate::gcode::virtual_extrude::is_tagged(line) {
+            prev = Some((x, y));
             continue;
         }
         /* 板外的挤出不算模型 —— 与碰撞检测同一条闸（见那里的长注） */
         if x < bed.x_min || x > bed.x_max || y < bed.y_min || y > bed.y_max {
+            prev = Some((x, y));
             continue;
         }
+        outline_occ.mark_line(prev.unwrap_or((x, y)), (x, y));
+        prev = Some((x, y));
         occ.mark(x, y);
         bbox = Some(match bbox {
             Some(b) => GBBox {
@@ -885,7 +949,7 @@ fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
         bbox,
         boxes: occ.boxes(),
         polygons: occ.polygons(),
-        outlines: occ.outlines(),
+        outlines: outline_occ.outlines(),
     }
 }
 
@@ -1175,6 +1239,7 @@ impl CollisionResult {
             model_bbox: self.model_bbox.map(|b| Box4::of(&b)).unwrap_or_default(),
             model_boxes: self.model_boxes.iter().map(Box4::of).collect(),
             model_polygons: self.model_polygons.clone(),
+            model_outlines: self.model_outlines.clone(),
             printable: self.printable.unwrap_or(Box4 {
                 x_min: ir.machine.min_x,
                 x_max: ir.machine.max_x,
@@ -1404,12 +1469,9 @@ pub fn printable_area_of(content: &[String]) -> Option<Box4> {
     None
 }
 
-/// `isExtrusionMove`：G0/G1/G2/G3 行含 " E" 且 rest 有 X/Y，NumStrip 取 [1]/[2]。
-fn is_extrusion_move(line: &str) -> Option<(f64, f64)> {
+/// 一条运动行的终点（G0/G1/G2/G3 且带 X/Y；有没有 E 不管）。NumStrip 取 [1]/[2]。
+fn motion_xy(line: &str) -> Option<(f64, f64)> {
     let trimmed = line.trim();
-    if !trimmed.contains(" E") {
-        return None;
-    }
     let is_motion = [("G0", 3), ("G1", 3), ("G2", 3), ("G3", 3)]
         .iter()
         .any(|(pfx, _)| {
@@ -1433,6 +1495,14 @@ fn is_extrusion_move(line: &str) -> Option<(f64, f64)> {
     } else {
         None
     }
+}
+
+/// `isExtrusionMove`：运动行且含 " E"。
+fn is_extrusion_move(line: &str) -> Option<(f64, f64)> {
+    if !line.trim().contains(" E") {
+        return None;
+    }
+    motion_xy(line)
 }
 
 /// ir.NumStrip 的本模块内联（与 ir::build 的实现同一语义，独立副本避免跨层引用）。
@@ -2860,6 +2930,60 @@ mod tests {
         assert!(
             facts.model_outlines.iter().all(|poly| poly.len() >= 3),
             "真实外形至少三个点：{:?}",
+            facts.model_outlines
+        );
+    }
+
+    /// **轮廓来自 G-code 投影，不是 2mm 格网**：斜边走出来的轮廓点不会全落在
+    /// 2mm 的格角上（那正是缩略图上的锯齿）。
+    #[test]
+    fn outlines_follow_the_projection_not_the_2mm_grid() {
+        let ir = tower_ir();
+        let content = lines(&[
+            "; printable_area = 0x0,180x0,180x180,0x180",
+            "G1 X10 Y10 E0.5",
+            "G1 X20 Y10 E0.6",
+            "G1 X20 Y20 E0.7",
+            "G1 X10 Y20 E0.8",
+            "G1 X10 Y10 E0.9",
+        ]);
+        let facts = model_map_facts(&content, &ir).expect("板上有模型就该给几何");
+        let outline = &facts.model_outlines[0];
+        assert!(
+            outline
+                .iter()
+                .any(|p| (p[0] % 2.0).abs() > 1e-9 || (p[1] % 2.0).abs() > 1e-9),
+            "轮廓点全在 2mm 格角上，说明还在用 2mm 格网：{outline:?}"
+        );
+    }
+
+    /// **虚拟挤出不是模型**：E0.001 那条是给 BBS 撑包围盒的假移动，落在锚点（100,100）
+    /// 这类位置上，收进模型会把轮廓撑出一个尖。
+    #[test]
+    fn a_virtual_extrusion_does_not_enlarge_the_model() {
+        let ir = tower_ir();
+        let content = lines(&[
+            "; printable_area = 0x0,180x0,180x180,0x180",
+            "G1 X30 Y30 E0.5",
+            "G1 X35 Y30 E0.6",
+            "G1 X100 Y100 Z10 E0.001 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility",
+        ]);
+        let facts = model_map_facts(&content, &ir).expect("板上有模型就该给几何");
+        assert!(
+            facts
+                .model_boxes
+                .iter()
+                .all(|b| b.x_max < 50.0 && b.y_max < 50.0),
+            "锚点被算进模型了：{:?}",
+            facts.model_boxes
+        );
+        assert!(
+            facts
+                .model_outlines
+                .iter()
+                .flatten()
+                .all(|p| p[0] < 50.0 && p[1] < 50.0),
+            "轮廓里混进了锚点：{:?}",
             facts.model_outlines
         );
     }
