@@ -31,6 +31,7 @@ import ZoomLayer from '../../components/zoom/ZoomLayer'
 import { useSourceRevision } from '../state/deliveryState'
 import { arrowPathOf, minArrowLength } from './arrowGeometry'
 import { boundaryNumbering } from './boundaryNumbering'
+import { rasterScreenRect } from './rasterRect'
 import s from './CollisionMap.module.css'
 
 interface Props {
@@ -352,6 +353,13 @@ export default function CollisionMap({
           )
           .filter((poly) => poly.length >= 3)
       : []
+  /*
+   * **走线投影**：机器坐标 → 板坐标（与 `bedPt` 同一套 y 翻转）。
+   * 图是预先渲染好的 PNG，这里只算它该占哪一块。
+   */
+  const raster = collision.modelRaster ?? null
+  const rasterRect = raster == null ? null : rasterScreenRect(raster, bedPt)
+
   /* 真实外形优先；旧记录没有这一格 ⇒ 退回凸包（与从前一致） */
   const modelPolys =
     boundaryPolys.length > 0
@@ -628,6 +636,20 @@ export default function CollisionMap({
           />
         )
       })}
+
+      {/* **走线投影**（预先渲染好的 PNG）：垫在板子与轮廓之间 —— 打开记录只贴一张图，
+          不读 G-code。旧记录没有这一格 ⇒ 不画。 */}
+      {raster !== null && rasterRect !== null && (
+        <image
+          className={s.raster}
+          href={`data:image/png;base64,${raster.pngBase64}`}
+          x={rasterRect.x}
+          y={rasterRect.y}
+          width={rasterRect.w}
+          height={rasterRect.h}
+          preserveAspectRatio="none"
+        />
+      )}
 
       {/* 参考框（校准件的实测包围盒）：只圈位置，不参与任何判据 */}
       {box != null &&

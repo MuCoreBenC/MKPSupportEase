@@ -1992,6 +1992,7 @@ mod tests {
                 model_boxes: Vec::new(),
                 model_polygons: Vec::new(),
                 model_outlines: Vec::new(),
+                model_raster: None,
                 forbidden_zones: Vec::new(),
             }),
             relocation: None,

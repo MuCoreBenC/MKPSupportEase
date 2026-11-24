@@ -149,6 +149,25 @@ export interface ReportBox4 {
 }
 
 /**
+ * **走线投影**（报告页贴的那张静态图）。
+ *
+ * 内核在算模型几何那一遍扫描里，把**第一层**的挤出线按 `cellMm` 栅格化、裁到有内容的
+ * 范围，编成一张透明底的灰度 PNG。画布只负责按下面五个数把它摆进板坐标 ——
+ * 打开记录不读 G-code、不重新算。
+ */
+export interface ReportRaster {
+  /** 图片左下角在机器坐标里的位置（mm） */
+  xMin: number
+  yMin: number
+  /** 一格多少毫米 */
+  cellMm: number
+  width: number
+  height: number
+  /** PNG 的 base64（`data:image/png;base64,` 后面那一段） */
+  pngBase64: string
+}
+
+/**
  * **模型俯视几何**（2026-10-27，`_meta.json` 顶层 `modelMap`）。
  *
  * 作者：「我希望把它模型的包围盒也显示出来，就是后处理的时候碰撞检测的那个显示的一样的，
@@ -173,6 +192,8 @@ export interface ReportModelMap {
    * 走出来的一圈。报告页的校准件画布画它；空 / 缺这一格（旧记录）⇒ 退回凸包。
    */
   modelOutlines?: [number, number][][]
+  /** **走线投影**（预先渲染好的 PNG）；旧记录没有 ⇒ 不画这一层 */
+  modelRaster?: ReportRaster | null
   /** 机型禁区（通常没有） */
   forbiddenZones?: [number, number][][]
 }
@@ -268,6 +289,8 @@ export interface ReportCollision {
    * 画图优先用它；缺这一格（旧记录）⇒ 退回 `modelPolygons` 的凸包。
    */
   modelOutlines?: [number, number][][]
+  /** **走线投影**（预先渲染好的 PNG）；旧记录没有 ⇒ 不画这一层 */
+  modelRaster?: ReportRaster | null
   /** 可打印区 */
   printable?: ReportBox4
   /** 画塔真实形状要的参数（与参数页同一套算法） */

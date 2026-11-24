@@ -47,6 +47,9 @@ flate2.workspace = true
 clap.workspace = true
 # Ctrl-C → CancelToken（成熟件不自造信号处理）
 ctrlc.workspace = true
+# 报告页那张「走线投影」：栅格化后编成 PNG，随记录存 base64（见 `disk/collision.rs`）
+image = { version = "0.25", default-features = false, features = ["png"] }
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile.workspace = true

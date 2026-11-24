@@ -231,6 +231,7 @@ fn relocate_geo() -> crate::hook_ipc::RelocateGeoPayload {
                 ],
                 vec![[52.0, 62.0], [90.0, 62.0], [92.0, 88.0], [52.0, 88.0]],
             ],
+            model_raster: None,
             printable: Box4 {
                 x_min: 0.0,
                 x_max: 256.0,

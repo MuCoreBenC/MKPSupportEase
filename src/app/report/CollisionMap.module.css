@@ -287,6 +287,12 @@
 }
 
 /* 实测包围盒（校准件画布）：细虚线参考框，压在模型层下面 */
+/* 走线投影（内核预先渲染好的 PNG）：透明底、灰度线，只负责"看得见怎么走的" */
+.raster {
+  pointer-events: none;
+  image-rendering: auto;
+}
+
 .guide {
   fill: none;
   stroke: var(--text-3);

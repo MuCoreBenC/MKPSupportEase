@@ -35,6 +35,24 @@ impl Box4 {
     }
 }
 
+/// **报告页那张「走线投影」**：板内挤出线按 `cell_mm` 栅格化后编成 PNG（透明底）。
+///
+/// 画布把它当一张静态图贴上去 —— 打开记录不读 G-code、不做几何计算。
+/// 走线是位图不是矢量：一份 115MB 产物的挤出线段有 234 万条，矢量化后 JSON 会到 MB 级。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelRaster {
+    /// 图片左下角在**机器坐标**里的位置（mm）
+    pub x_min: f64,
+    pub y_min: f64,
+    /// 一格多少毫米（0.2 起，板大到超过像素上限时按比例放大）
+    pub cell_mm: f64,
+    pub width: u32,
+    pub height: u32,
+    /// PNG 的 base64（`data:image/png;base64,` 后面那一段）
+    pub png_base64: String,
+}
+
 /// **画塔用的那几个参数**（2026-10-18）—— 不是句子，是几何。
 ///
 /// 报告页拿它按参数页同一套算法画出塔的真实形状（塔身 / 斜肋 / 护套），
@@ -96,6 +114,9 @@ pub struct CollisionFacts {
     /// 画图画它；空数组（旧记录 / 退化块）⇒ 界面退回 `model_polygons` 的凸包。
     #[serde(default)]
     pub model_outlines: Vec<Vec<[f64; 2]>>,
+    /// **走线投影**（报告页贴的那张 PNG）；旧记录 / 空 ⇒ `None`
+    #[serde(default)]
+    pub model_raster: Option<ModelRaster>,
     /// 可打印区外接框（mm，机器坐标）：**gcode 里切片器写下的 `; printable_area` 优先**
     /// （[`printable_area_of`]），gcode 没写才退回机型 toml 的 `min_x…max_y`
     pub printable: Box4,
@@ -207,6 +228,8 @@ pub struct CollisionResult {
     pub model_polygons: Vec<Vec<[f64; 2]>>,
     /// **每个模型的真实外形**（内凹保留）—— 俯视图画的是它
     pub model_outlines: Vec<Vec<[f64; 2]>>,
+    /// **走线投影**（报告页贴的那张 PNG）
+    pub model_raster: Option<ModelRaster>,
     /// **箭头起点**：真正撞上的那个模型的中心（作者 2026-10-18：「这个箭头应该从具体的
     /// 哪个模型指出去的才对」）——`None` = 没有模型块吃到冲突点（原塔撞 / 禁区那一档），
     /// 那时退回整体框中心。
@@ -786,6 +809,8 @@ pub struct ModelFootprint {
     pub boxes: Vec<GBBox>,
     pub polygons: Vec<Vec<[f64; 2]>>,
     pub outlines: Vec<Vec<[f64; 2]>>,
+    /// 走线投影（报告页贴的那张图）；一个像素都没画到 ⇒ `None`
+    pub raster: Option<ModelRaster>,
 }
 
 impl ModelFootprint {
@@ -802,6 +827,7 @@ impl ModelFootprint {
         facts.model_bbox = self.bbox.map(|b| Box4::of(&b)).unwrap_or_default();
         facts.model_boxes = self.boxes.iter().copied().map(|b| Box4::of(&b)).collect();
         facts.model_polygons = self.polygons.clone();
+        facts.model_raster = self.raster.clone();
     }
 
     /// 同 [`Self::apply_to`]，灌进内核自己的检测结果（`detect_tower_collision` 那一路）。
@@ -810,6 +836,7 @@ impl ModelFootprint {
         result.model_boxes = self.boxes.clone();
         result.model_polygons = self.polygons.clone();
         result.model_outlines = self.outlines.clone();
+        result.model_raster = self.raster.clone();
     }
 }
 
@@ -836,6 +863,7 @@ pub fn model_map_facts(content: &[String], ir: &Ir) -> Option<ModelMapFacts> {
         model_boxes: foot.boxes.iter().map(Box4::of).collect(),
         model_polygons: foot.polygons.clone(),
         model_outlines: foot.outlines.clone(),
+        model_raster: foot.raster.clone(),
         forbidden_zones: ir
             .machine
             .forbidden_zones
@@ -863,6 +891,9 @@ pub struct ModelMapFacts {
     /// **真实外形**（内凹保留，≤24 点；2026-11-23）。空数组 = 旧记录 ⇒ 界面退回凸包。
     #[serde(default)]
     pub model_outlines: Vec<Vec<[f64; 2]>>,
+    /// **走线投影**（报告页贴的那张 PNG）；旧记录 / 空 ⇒ `None` ⇒ 不画这一层
+    #[serde(default)]
+    pub model_raster: Option<ModelRaster>,
     #[serde(default)]
     pub forbidden_zones: Vec<Vec<[f64; 2]>>,
 }
@@ -875,6 +906,7 @@ impl ModelMapFacts {
             model_boxes: self.model_boxes.clone(),
             model_polygons: self.model_polygons.clone(),
             model_outlines: self.model_outlines.clone(),
+            model_raster: self.model_raster.clone(),
             forbidden_zones: self.forbidden_zones.clone(),
             ..CollisionFacts::default()
         }
@@ -890,6 +922,146 @@ pub fn model_footprint(content: &[String], ir_data: &Ir) -> ModelFootprint {
     model_footprint_in(content, &bed)
 }
 
+/// 走线投影的栅格化器（见 [`ModelRaster`]）。
+///
+/// 一次扫描里顺手画：每段挤出按 Bresenham 落格，每个格补一圈 3×3 —— 0.2mm 的线在
+/// 132px 缩略图上只有 0.1px，不补这一圈就被缩没了。
+struct RasterBuilder {
+    cell: f64,
+    x_min: f64,
+    y_min: f64,
+    width: u32,
+    height: u32,
+    bits: Vec<u8>,
+    /// 保留的是哪一层（第一段挤出所在的 Z）—— 全部层叠在一起会糊成一块实心灰，
+    /// 每层都画等于什么都没画；只留一层才看得见走线。
+    layer_z: Option<f64>,
+}
+
+/// 一格多少毫米（板子小到这个格够用时就用它）
+const RASTER_CELL_MM: f64 = 0.2;
+/// 一张图最多多少像素（板再大就放大格距，不许把 meta 撑爆）
+const RASTER_MAX_PX: u32 = 1280;
+/// 走线的灰与不透明度（与模型轮廓同一个灰，半透明压在板子上）
+const RASTER_GRAY: u8 = 107;
+const RASTER_ALPHA: u8 = 190;
+
+impl RasterBuilder {
+    fn new(bed: &Box4) -> Self {
+        let span = (bed.x_max - bed.x_min).max(bed.y_max - bed.y_min);
+        let cell = (span / RASTER_MAX_PX as f64).max(RASTER_CELL_MM);
+        let width = (((bed.x_max - bed.x_min) / cell).ceil() as u32).clamp(1, RASTER_MAX_PX);
+        let height = (((bed.y_max - bed.y_min) / cell).ceil() as u32).clamp(1, RASTER_MAX_PX);
+        Self {
+            cell,
+            x_min: bed.x_min,
+            y_min: bed.y_min,
+            width,
+            height,
+            bits: vec![0; (width * height) as usize],
+            layer_z: None,
+        }
+    }
+
+    fn mark(&mut self, px: i32, py: i32) {
+        if px < 0 || py < 0 || px >= self.width as i32 || py >= self.height as i32 {
+            return;
+        }
+        self.bits[(py as u32 * self.width + px as u32) as usize] = 1;
+    }
+
+    /// 一段挤出线（机器坐标 → 格坐标，Bresenham 步进）。
+    ///
+    /// 只收**第一层**（`z` 与第一段挤出的 Z 差 ≤ 0.01mm）：整盘叠加会糊成一块实心灰。
+    fn line(&mut self, from: (f64, f64), to: (f64, f64), z: f64) {
+        match self.layer_z {
+            None => self.layer_z = Some(z),
+            Some(base) if (z - base).abs() > 0.01 => return,
+            _ => {}
+        }
+        let ax = ((from.0 - self.x_min) / self.cell).floor() as i32;
+        let ay = ((from.1 - self.y_min) / self.cell).floor() as i32;
+        let bx = ((to.0 - self.x_min) / self.cell).floor() as i32;
+        let by = ((to.1 - self.y_min) / self.cell).floor() as i32;
+        let dx = (bx - ax).abs();
+        let sx = if ax < bx { 1 } else { -1 };
+        let dy = -(by - ay).abs();
+        let sy = if ay < by { 1 } else { -1 };
+        let mut err = dx + dy;
+        let (mut x, mut y) = (ax, ay);
+        loop {
+            self.mark(x, y);
+            if x == bx && y == by {
+                break;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y += sy;
+            }
+        }
+    }
+
+    /// 编成 PNG + base64；一个像素都没画到 ⇒ `None`（不写一张空白图）
+    fn finish(self) -> Option<ModelRaster> {
+        /* 整板 1280² 里模型只占一角：先找有内容的范围，裁掉空白再编码 ——
+        不裁的话一张 1280² 的稀疏线图 PNG 要一两百 KB */
+        let (mut x0, mut x1, mut y0, mut y1) = (u32::MAX, 0u32, u32::MAX, 0u32);
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if self.bits[(y * self.width + x) as usize] != 0 {
+                    x0 = x0.min(x);
+                    x1 = x1.max(x);
+                    y0 = y0.min(y);
+                    y1 = y1.max(y);
+                }
+            }
+        }
+        if x0 > x1 || y0 > y1 {
+            return None;
+        }
+        let width = x1 - x0 + 1;
+        let height = y1 - y0 + 1;
+        /* 灰度 + alpha 就够（走线只有一个颜色）—— 比 RGBA 小一半 */
+        let mut img = image::GrayAlphaImage::new(width, height);
+        for y in y0..=y1 {
+            for x in x0..=x1 {
+                if self.bits[(y * self.width + x) as usize] == 0 {
+                    continue;
+                }
+                /* PNG 第 0 行在顶部，位图第 0 行是机器 y_min（底部）—— 写的时候翻过来 */
+                img.put_pixel(
+                    x - x0,
+                    height - 1 - (y - y0),
+                    image::LumaA([RASTER_GRAY, RASTER_ALPHA]),
+                );
+            }
+        }
+        let mut png = Vec::new();
+        use base64::Engine as _;
+        use image::ImageEncoder as _;
+        image::codecs::png::PngEncoder::new_with_quality(
+            &mut png,
+            image::codecs::png::CompressionType::Best,
+            image::codecs::png::FilterType::Adaptive,
+        )
+        .write_image(img.as_raw(), width, height, image::ExtendedColorType::La8)
+        .ok()?;
+        Some(ModelRaster {
+            x_min: self.x_min + x0 as f64 * self.cell,
+            y_min: self.y_min + y0 as f64 * self.cell,
+            cell_mm: self.cell,
+            width,
+            height,
+            png_base64: base64::engine::general_purpose::STANDARD.encode(&png),
+        })
+    }
+}
+
 /// 同 [`model_footprint`]，但床由调用方给（碰撞检测那一趟手里已经有一份可打印区，
 /// 不必再解析一遍 `; printable_area`）。
 fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
@@ -897,16 +1069,28 @@ fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
     let mut occ = Occupancy::new(bed, 2.0);
     /* 报告页轮廓那一份：0.5mm 格 + 按线段采样，出来的才是 G-code 的真实投影 */
     let mut outline_occ = Occupancy::new(bed, OUTLINE_CELL_MM);
+    /* 报告页贴的那张走线图：同一遍扫描里顺手画 */
+    let mut raster = RasterBuilder::new(bed);
     let mut bbox: Option<GBBox> = None;
     let mut in_prime_tower = false;
     /* 上一段挤出的终点（细格按线段采样用）；被跳过的点也要更新，下一段不能从更早的位置连过来 */
     let mut prev: Option<(f64, f64)> = None;
+    /* 当前 Z（模态：行里没写就沿用上一行）—— 位图只收第一层 */
+    let mut cur_z = 0.0;
     for line in content {
         let trimmed = line.trim();
         if crate::gcode::has_slicer_comment_prefix(trimmed, "FEATURE") {
             in_prime_tower =
                 crate::gcode::has_slicer_comment_prefix(trimmed, "FEATURE: Prime tower");
             continue;
+        }
+        let z = if trimmed.contains('Z') {
+            motion_z(trimmed)
+        } else {
+            None
+        };
+        if let Some(z) = z {
+            cur_z = z;
         }
         let Some((x, y)) = motion_xy(line) else {
             continue;
@@ -927,7 +1111,9 @@ fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
             prev = Some((x, y));
             continue;
         }
-        outline_occ.mark_line(prev.unwrap_or((x, y)), (x, y));
+        let from = prev.unwrap_or((x, y));
+        outline_occ.mark_line(from, (x, y));
+        raster.line(from, (x, y), cur_z);
         prev = Some((x, y));
         occ.mark(x, y);
         bbox = Some(match bbox {
@@ -950,6 +1136,7 @@ fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
         boxes: occ.boxes(),
         polygons: occ.polygons(),
         outlines: outline_occ.outlines(),
+        raster: raster.finish(),
     }
 }
 
@@ -1240,6 +1427,7 @@ impl CollisionResult {
             model_boxes: self.model_boxes.iter().map(Box4::of).collect(),
             model_polygons: self.model_polygons.clone(),
             model_outlines: self.model_outlines.clone(),
+            model_raster: self.model_raster.clone(),
             printable: self.printable.unwrap_or(Box4 {
                 x_min: ir.machine.min_x,
                 x_max: ir.machine.max_x,
@@ -1465,6 +1653,38 @@ pub fn printable_area_of(content: &[String]) -> Option<Box4> {
         }
         /* 只有一个 CONFIG_BLOCK：读到（无论解析成没成）就收手 */
         return bbox;
+    }
+    None
+}
+
+/// 一行里的 Z（模态值由调用方维护）；`;` 之后不看。
+fn motion_z(line: &str) -> Option<f64> {
+    let code = line.split(';').next().unwrap_or(line);
+    let bytes = code.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'Z' {
+            let start = i + 1;
+            let mut end = start;
+            if end < bytes.len() && (bytes[end] == b'+' || bytes[end] == b'-') {
+                end += 1;
+            }
+            let mut dot = false;
+            while end < bytes.len() {
+                match bytes[end] {
+                    b'0'..=b'9' => end += 1,
+                    b'.' if !dot => {
+                        dot = true;
+                        end += 1;
+                    }
+                    _ => break,
+                }
+            }
+            if end > start {
+                return code[start..end].parse().ok();
+            }
+        }
+        i += 1;
     }
     None
 }
@@ -2986,6 +3206,67 @@ mod tests {
             "轮廓里混进了锚点：{:?}",
             facts.model_outlines
         );
+    }
+
+    /// **走线投影**：有模型就有一张 PNG，尺寸与事实对得上，能解码。
+    #[test]
+    fn the_model_map_carries_a_raster_projection() {
+        let ir = tower_ir();
+        let content = lines(&[
+            "; printable_area = 0x0,180x0,180x180,0x180",
+            "G1 Z0.2",
+            "G1 X30 Y30 E0.5",
+            "G1 X60 Y30 E0.6",
+            "G1 X60 Y60 E0.7",
+        ]);
+        let facts = model_map_facts(&content, &ir).expect("有模型就得给几何");
+        let r = facts.model_raster.expect("有模型就该有走线图");
+        assert_eq!(r.cell_mm, RASTER_CELL_MM);
+        assert!(r.width > 0 && r.height > 0);
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&r.png_base64)
+            .expect("base64 能解");
+        let img = image::load_from_memory(&bytes).expect("PNG 能解码");
+        assert_eq!((img.width(), img.height()), (r.width, r.height));
+    }
+
+    /// **只画第一层**：整盘叠起来会糊成一块实心灰，第二层不许混进图里。
+    #[test]
+    fn the_raster_keeps_only_the_first_layer() {
+        let ir = tower_ir();
+        let content = lines(&[
+            "; printable_area = 0x0,180x0,180x180,0x180",
+            "G1 Z0.2",
+            "G1 X10 Y10 E0.5",
+            "G1 X20 Y10 E0.6",
+            "G1 Z0.4",
+            "G1 X100 Y100 E0.7",
+            "G1 X110 Y100 E0.8",
+        ]);
+        let facts = model_map_facts(&content, &ir).unwrap();
+        let r = facts.model_raster.expect("有模型就该有走线图");
+        let right = r.x_min + r.width as f64 * r.cell_mm;
+        let top = r.y_min + r.height as f64 * r.cell_mm;
+        assert!(right < 50.0, "第二层混进图里了：右沿 {right}");
+        assert!(top < 50.0, "第二层混进图里了：上沿 {top}");
+    }
+
+    /// **虚拟挤出不上图**：E0.001 那条是给 BBS 撑包围盒的假移动，不是走线。
+    #[test]
+    fn a_virtual_extrusion_does_not_show_up_in_the_raster() {
+        let ir = tower_ir();
+        let content = lines(&[
+            "; printable_area = 0x0,180x0,180x180,0x180",
+            "G1 Z0.2",
+            "G1 X30 Y30 E0.5",
+            "G1 X35 Y30 E0.6",
+            "G1 X100 Y100 Z10 E0.001 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility",
+        ]);
+        let facts = model_map_facts(&content, &ir).unwrap();
+        let r = facts.model_raster.expect("有模型就该有走线图");
+        let right = r.x_min + r.width as f64 * r.cell_mm;
+        assert!(right < 50.0, "锚点被画进图里了：右沿 {right}");
     }
 
     /// **箭头从撞上的那个模型出发**（2026-10-18 作者：「这个箭头应该从具体的哪个模型

@@ -46,6 +46,8 @@ export default function CalibrationPlate({
           modelBoxes: modelMap.modelBoxes,
           /* 真实外形优先；旧记录退回凸包（与整理前一致） */
           modelPolygons: outlines.length > 0 ? outlines : modelMap.modelPolygons,
+          /* 走线投影（内核预先渲染好的第一层；旧记录没有这一格） */
+          modelRaster: modelMap.modelRaster,
           forbiddenZones: modelMap.forbiddenZones,
         }
       : null),

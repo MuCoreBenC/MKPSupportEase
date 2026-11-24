@@ -2373,9 +2373,11 @@ dependencies = [
 name = "mkpse-postprocess"
 version = "0.2.0"
 dependencies = [
+ "base64 0.22.1",
  "clap",
  "ctrlc",
  "flate2",
+ "image",
  "serde",
  "serde_json",
  "sha2",

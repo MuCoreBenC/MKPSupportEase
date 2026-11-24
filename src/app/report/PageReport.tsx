@@ -1726,6 +1726,8 @@ function TowerPlate({
           modelPolygons: modelMap.modelOutlines?.length
             ? modelMap.modelOutlines
             : modelMap.modelPolygons,
+          /* 走线投影（内核预先渲染好的第一层；旧记录没有这一格） */
+          modelRaster: modelMap.modelRaster,
           forbiddenZones: modelMap.forbiddenZones,
         }
       : null),
