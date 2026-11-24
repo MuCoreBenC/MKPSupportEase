@@ -922,7 +922,7 @@ impl ModelMapFacts {
 pub fn model_footprint(content: &[String], ir_data: &Ir) -> ModelFootprint {
     let printable = printable_area_of(content);
     let bed = bed_of(ir_data, printable);
-    model_footprint_in(content, &bed, tower_box_of(ir_data).as_ref())
+    model_footprint_in(content, &bed)
 }
 
 /// 走线投影的栅格化器（见 [`ModelRaster`]）。
@@ -939,21 +939,16 @@ struct RasterBuilder {
     /// alpha 叠加叠几十次就饱和成一块实心，密度才能分出深浅
     model: Vec<u16>,
     support: Vec<u16>,
-    tower: Vec<u16>,
-    /// 塔框（机器坐标）：裁图时并进来，否则塔离模型远时整块被裁掉
-    tower_box: Option<GBBox>,
     /// 看到第几层了（Z 每变一次 +1）—— 只画抽样层，全量叠加会糊成一块
     layer_index: i64,
     last_z: f64,
 }
 
-/// 一段走线属于哪一类（模型灰 / 支撑绿 / 塔黄）
+/// 一段走线属于哪一类（模型灰 / 支撑绿）
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RasterKind {
     Model,
     Support,
-    /// 擦料塔（真实走线，按 IR 的塔位认出来）
-    Tower,
 }
 
 /// 一格多少毫米（板子小到这个格够用时就用它）
@@ -967,13 +962,12 @@ const RASTER_INFILL_STEP: u64 = 16;
 /// 模型灰与支撑绿（密度 → alpha 的系数：压过 N 次的像素，N×系数 就是它的不透明度）
 const RASTER_MODEL_RGBA: [u8; 3] = [96, 105, 120];
 const RASTER_SUPPORT_RGBA: [u8; 3] = [16, 185, 129];
-const RASTER_TOWER_RGBA: [u8; 3] = [245, 158, 11];
 /// 归一化后的淡/浓：最疏的地方 24%，最密的地方 76%
 const RASTER_ALPHA_FLOOR: f32 = 0.24;
 const RASTER_ALPHA_GAIN: f32 = 0.52;
 
 impl RasterBuilder {
-    fn new(bed: &Box4, tower: Option<&GBBox>) -> Self {
+    fn new(bed: &Box4) -> Self {
         let span = (bed.x_max - bed.x_min).max(bed.y_max - bed.y_min);
         let cell = (span / RASTER_MAX_PX as f64).max(RASTER_CELL_MM);
         let width = (((bed.x_max - bed.x_min) / cell).ceil() as u32).clamp(1, RASTER_MAX_PX);
@@ -986,8 +980,6 @@ impl RasterBuilder {
             height,
             model: vec![0; (width * height) as usize],
             support: vec![0; (width * height) as usize],
-            tower: vec![0; (width * height) as usize],
-            tower_box: tower.copied(),
             layer_index: -1,
             last_z: f64::NAN,
         }
@@ -1002,7 +994,6 @@ impl RasterBuilder {
         let arr = match kind {
             RasterKind::Model => &mut self.model,
             RasterKind::Support => &mut self.support,
-            RasterKind::Tower => &mut self.tower,
         };
         arr[i] = arr[i].saturating_add(1);
     }
@@ -1053,29 +1044,12 @@ impl RasterBuilder {
         for y in 0..self.height {
             for x in 0..self.width {
                 let i = (y * self.width + x) as usize;
-                if self.model[i] != 0 || self.support[i] != 0 || self.tower[i] != 0 {
+                if self.model[i] != 0 || self.support[i] != 0 {
                     x0 = x0.min(x);
                     x1 = x1.max(x);
                     y0 = y0.min(y);
                     y1 = y1.max(y);
                 }
-            }
-        }
-        /* 塔框并进来：长板上塔常在模型另一角，只裁模型 bbox 会把塔整块丢掉 */
-        if let Some(tb) = self.tower_box {
-            let tx0 = ((tb.x_min - self.x_min) / self.cell).floor().max(0.0) as u32;
-            let ty0 = ((tb.y_min - self.y_min) / self.cell).floor().max(0.0) as u32;
-            let tx1 = ((tb.x_max - self.x_min) / self.cell)
-                .ceil()
-                .min(self.width as f64) as u32;
-            let ty1 = ((tb.y_max - self.y_min) / self.cell)
-                .ceil()
-                .min(self.height as f64) as u32;
-            if tx1 > tx0 && ty1 > ty0 {
-                x0 = x0.min(tx0);
-                x1 = x1.max(tx1 - 1);
-                y0 = y0.min(ty0);
-                y1 = y1.max(ty1 - 1);
             }
         }
         if x0 > x1 || y0 > y1 {
@@ -1087,18 +1061,12 @@ impl RasterBuilder {
         出来就是一块实心灰（深浅只能靠归一化后的曲线分） */
         let model_max = self.model.iter().copied().max().unwrap_or(0) as f32;
         let support_max = self.support.iter().copied().max().unwrap_or(0) as f32;
-        let tower_max = self.tower.iter().copied().max().unwrap_or(0) as f32;
         let mut img = image::RgbaImage::new(width, height);
         for y in y0..=y1 {
             for x in x0..=x1 {
                 let i = (y * self.width + x) as usize;
-                /* 塔最前、模型盖住支撑（Bambu 那个关系） */
-                let (rgb, t) = if self.tower[i] > 0 {
-                    (
-                        RASTER_TOWER_RGBA,
-                        (self.tower[i] as f32 / tower_max.max(1.0)).sqrt(),
-                    )
-                } else if self.model[i] > 0 {
+                /* 模型盖住支撑（Bambu 那个关系） */
+                let (rgb, t) = if self.model[i] > 0 {
                     (
                         RASTER_MODEL_RGBA,
                         (self.model[i] as f32 / model_max.max(1.0)).sqrt(),
@@ -1143,33 +1111,15 @@ impl RasterBuilder {
     }
 }
 
-/// 擦料塔在板上占的那一块（位图里给塔的走线上黄色用）。
-///
-/// 位置取 IR 的 `Wiping.WiperX/WiperY`（程序认到的那个），四周放宽一圈给外围结构。
-fn tower_box_of(ir: &Ir) -> Option<GBBox> {
-    let (x, y) = (ir.wiping.wiper_x, ir.wiping.wiper_y);
-    if !x.is_finite() || !y.is_finite() || (x == 0.0 && y == 0.0) {
-        return None;
-    }
-    let pad = 8.0;
-    let side = TOWER_OUTER_BOUND - TOWER_INNER_BOUND;
-    Some(GBBox {
-        x_min: x - pad,
-        x_max: x + side + pad,
-        y_min: y - pad,
-        y_max: y + side + pad,
-    })
-}
-
 /// 同 [`model_footprint`]，但床由调用方给（碰撞检测那一趟手里已经有一份可打印区，
 /// 不必再解析一遍 `; printable_area`）。
-fn model_footprint_in(content: &[String], bed: &Box4, tower: Option<&GBBox>) -> ModelFootprint {
+fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
     /* 判据那一份（框 / 凸包 / 碰撞）仍吃 2mm 格、只标终点 —— 一格都没动 */
     let mut occ = Occupancy::new(bed, 2.0);
     /* 报告页轮廓那一份：0.5mm 格 + 按线段采样，出来的才是 G-code 的真实投影 */
     let mut outline_occ = Occupancy::new(bed, OUTLINE_CELL_MM);
     /* 报告页贴的那张走线图：同一遍扫描里顺手画 */
-    let mut raster = RasterBuilder::new(bed, tower);
+    let mut raster = RasterBuilder::new(bed);
     let mut bbox: Option<GBBox> = None;
     let mut in_prime_tower = false;
     /* 上一段挤出的终点（细格按线段采样用）；被跳过的点也要更新，下一段不能从更早的位置连过来 */
@@ -1218,13 +1168,10 @@ fn model_footprint_in(content: &[String], bed: &Box4, tower: Option<&GBBox>) -> 
         }
         let from = prev.unwrap_or((x, y));
         outline_occ.mark_line(from, (x, y));
-        /* 塔单独上黄（按 IR 的塔位认，它的 feature 是 Custom，靠名字分不出来）；
-        支撑单独上绿；填充按 1/N 抽样（全画出来是一块实心灰） */
-        let in_tower = tower
-            .is_some_and(|tb| x >= tb.x_min && x <= tb.x_max && y >= tb.y_min && y <= tb.y_max);
-        let kind = if in_tower {
-            RasterKind::Tower
-        } else if feature.contains("support") {
+        /* 支撑单独上绿；填充按 1/N 抽样（全画出来是一块实心灰）。
+        塔的走线不单列一档：塔框按塔位放宽一圈，与塔重叠的模型走线会一起落进框内
+        （撞塔那一趟正是这种情况），整块模型就被染成了塔的颜色。 */
+        let kind = if feature.contains("support") {
             RasterKind::Support
         } else {
             RasterKind::Model
@@ -2255,7 +2202,7 @@ fn detect_tower_collision_all_layers(
     ★ 2026-10-27：**图上那块模型只由 [`model_footprint_in`] 一个出口给**（报告页那张
       "只有塔"的图也走它 ⇒ 两处画的必须是同一块模型、同一种切法）。上面那段逐层扫描
       仍留着自己的 `model_occ` / 整体框 —— 它们喂的是"撞了多少、往哪挪"，不是画图。 */
-    model_footprint_in(content, &bed, tower_box_of(ir_data).as_ref()).apply_to_result(&mut result);
+    model_footprint_in(content, &bed).apply_to_result(&mut result);
     result
 }
 
@@ -3357,6 +3304,44 @@ mod tests {
             .expect("base64 能解");
         let img = image::load_from_memory(&bytes).expect("PNG 能解码");
         assert_eq!((img.width(), img.height()), (r.width, r.height));
+    }
+
+    /// **塔位那一块不许把模型染成塔色**（2026-11-24 作者：「这个模型不要被染黄色」）：
+    /// 塔框按塔位放宽一圈，与塔重叠的模型走线会整块落进框内。走线图上只有模型灰 /
+    /// 支撑绿两种颜色，塔由塔图自己画。
+    #[test]
+    fn the_raster_never_paints_the_model_in_the_tower_colour() {
+        let ir = tower_ir();
+        let content = lines(&[
+            "; printable_area = 0x0,180x0,180x180,0x180",
+            "; FEATURE: Outer wall",
+            "G1 Z0.2",
+            "G1 X25 Y25 E0.5",
+            "G1 X50 Y25 E0.6",
+            "G1 X50 Y50 E0.7",
+        ]);
+        let facts = model_map_facts(&content, &ir).expect("有模型就得给几何");
+        let r = facts.model_raster.expect("有模型就该有走线图");
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&r.png_base64)
+            .expect("base64 能解");
+        let img = image::load_from_memory(&bytes)
+            .expect("PNG 能解码")
+            .to_rgba8();
+        let mut painted = 0;
+        for p in img.pixels() {
+            if p[3] == 0 {
+                continue;
+            }
+            painted += 1;
+            let rgb = [p[0], p[1], p[2]];
+            assert!(
+                rgb == RASTER_MODEL_RGBA || rgb == RASTER_SUPPORT_RGBA,
+                "走线只许模型灰 / 支撑绿，画出了 {rgb:?}"
+            );
+        }
+        assert!(painted > 0, "这段走线该画出东西来");
     }
 
     /// **只画抽样层**：整盘叠起来会糊成一块实心灰；没被抽中的层不许混进图里。
