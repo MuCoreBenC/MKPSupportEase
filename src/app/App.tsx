@@ -25,6 +25,8 @@ import { useUnsavedDraft } from './state/useUnsavedDraft'
 import { installUiTracking, setUiPage, track } from './log/track'
 /* 提示气泡（2026-10-30）：全站唯一一份，挂在根上认 `data-tip` */
 import { TipLayer } from '../components/tooltip'
+/* 切页要先把还开着的放大预览收掉（登记表在那边） */
+import { closeAllZoomPreviews } from '../components/zoom/zoomPreview'
 import TopTabs from './components/TopTabs'
 import { tabs } from './constants/tabs'
 import PageHome from './home/PageHome'
@@ -268,6 +270,18 @@ export default function App() {
   const density = useDensity(rootRef)
   const [tab, setTab] = useState('machine')
 
+  /*
+   * **切页的唯一出口**：先收掉所有还开着的放大预览，再换页。
+   *
+   * 放大层 portal 到 `body`，页面切走只是 `PageSlot` 给一层 `hidden`（组件还挂着）——
+   * 不先收的话，报告页点开的板子图会跟着停在新页上。登记表在
+   * `components/zoom/zoomPreview.ts`；顶栏、跨页跳转、开发台都走这里。
+   */
+  const switchTab = useCallback((next: string) => {
+    closeAllZoomPreviews()
+    setTab(next)
+  }, [])
+
   /* 置顶档位（工艺页那枚胶囊点出来的）；落到窗口上的是下面 `postProcess` 之后那条 effect */
   const pin = usePinPref()
 
@@ -313,8 +327,8 @@ export default function App() {
 
   const openBbs = useCallback((name: string) => {
     setPendingBbs((prev) => ({ name, nonce: (prev?.nonce ?? 0) + 1 }))
-    setTab('bbs')
-  }, [])
+    switchTab('bbs')
+  }, [switchTab])
 
   /*
    * 反方向那一条（2026-10-13，工艺页 → 预设页）：工艺页「MKP 工艺」档里那几份
@@ -329,8 +343,8 @@ export default function App() {
 
   const openPresetsForSlicer = useCallback(() => {
     setPendingPresets((prev) => ({ nonce: (prev?.nonce ?? 0) + 1 }))
-    setTab('preset')
-  }, [])
+    switchTab('preset')
+  }, [switchTab])
 
   /*
    * 预设页那句「此预设需要更新版 SupportEase」的「去更新」出口：切到设置页。
@@ -350,9 +364,9 @@ export default function App() {
    */
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget | null>(null)
   const openSettings = useCallback((target?: SettingsTargetId) => {
-    setTab('settings')
+    switchTab('settings')
     setSettingsTarget(target === undefined ? null : { id: target, nonce: Date.now() })
-  }, [])
+  }, [switchTab])
 
   /*
    * 右上角「有新版本」通知（2026-11-05，作者：「点击了就跳转过去定位」）。
@@ -392,7 +406,7 @@ export default function App() {
    * 后处理那一屏的「看报告」出口（跨页跳转的出口由外壳给，与 `openBbs` / `openSettings` 同类）。
    * 失败也照样进报告页 —— 那一条执行记录里写着原因与错误码（见 `app/postprocess/`）。
    */
-  const openReport = useCallback(() => setTab('report'), [])
+  const openReport = useCallback(() => switchTab('report'), [switchTab])
 
   /* 后处理那一趟：读一次，两处用（见 import 处那条注释） */
   /*
@@ -490,7 +504,7 @@ export default function App() {
           （见 `app/dev/preview.tsx`）—— 放最外层，各页的模态框都能认领自己的那一格 */}
       <DevPreviewProvider>
       {/* 开发台：把那一格所在的页签切到前台（认领方在别的页签上时，光开框看不见） */}
-      <DevPreviewTabs onTab={setTab} />
+      <DevPreviewTabs onTab={switchTab} />
       {/* 通用导入入口（第十二层）包在最外层：拖拽事件要落在外壳上、重名那一格要盖全窗 */}
       <FileImportProvider>
         {/* 浮层层要在最外面：它给所有弹出物提供挂载点与坐标基准 */}
@@ -498,7 +512,7 @@ export default function App() {
           <TopTabs
             tabs={tabs}
             active={tab}
-            onChange={setTab}
+            onChange={switchTab}
             density={density}
             platform={PLATFORM}
             fluid
