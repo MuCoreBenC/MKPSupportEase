@@ -352,10 +352,11 @@ export default function CollisionMap({
           )
           .filter((poly) => poly.length >= 3)
       : []
+  /* 真实外形优先；旧记录没有这一格 ⇒ 退回凸包（与从前一致） */
   const modelPolys =
     boundaryPolys.length > 0
       ? boundaryPolys
-      : (collision.modelPolygons ?? [])
+      : (collision.modelOutlines?.length ? collision.modelOutlines : (collision.modelPolygons ?? []))
           .map((poly) =>
             poly
               .filter((p): p is [number, number] => Array.isArray(p) && p.length === 2)

@@ -258,11 +258,16 @@ export interface ReportCollision {
    */
   modelBoxes?: ReportBox4[]
   /**
-   * **每个模型各自的轮廓**（凸包，≤24 边，机器坐标）。俯视图画的是它 ——
+   * **每个模型各自的轮廓**（凸包，≤24 边，机器坐标）—— 旧记录的兜底。
    * 矩形四个角会把模型旁边的空算进去，看着像早就撞上了。
    * 空 / 缺这一格（旧记录、稀疏块）⇒ 界面退回 `modelBoxes` 的矩形。
    */
   modelPolygons?: [number, number][][]
+  /**
+   * **每个模型的真实外形**（内凹保留，机器坐标）：与 `modelMap.modelOutlines` 同一套算法。
+   * 画图优先用它；缺这一格（旧记录）⇒ 退回 `modelPolygons` 的凸包。
+   */
+  modelOutlines?: [number, number][][]
   /** 可打印区 */
   printable?: ReportBox4
   /** 画塔真实形状要的参数（与参数页同一套算法） */

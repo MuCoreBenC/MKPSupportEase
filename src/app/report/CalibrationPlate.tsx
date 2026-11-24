@@ -15,6 +15,7 @@
 import type { ReportBox4, ReportCollision, ReportModelMap } from '../../api'
 import { useT } from '../../i18n'
 import CollisionMap from './CollisionMap'
+import { shouldShowMeasuredBox } from './plateBox'
 
 export default function CalibrationPlate({
   measured,
@@ -57,7 +58,8 @@ export default function CalibrationPlate({
       noTower
       height={height}
       label={tr('report.calibMap.label')}
-      box={box}
+      /* 轮廓与实测框贴在一起时只留轮廓（见 plateBox.ts） */
+      box={shouldShowMeasuredBox(measured, outlines) ? box : null}
     />
   )
 }

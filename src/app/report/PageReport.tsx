@@ -1717,12 +1717,15 @@ function TowerPlate({
   const collision: ReportCollision = {
     towerBbox: boxAt(at.x, at.y),
     ...(slicerBox !== null ? { slicerTowerBbox: slicerBox } : null),
-    /* 模型几何照抄后端那一格（同一个内核出口算的，不在这里推算）—— `null` 就什么都不加 */
+    /* 模型几何照抄后端那一格（同一个内核出口算的，不在这里推算）—— `null` 就什么都不加。
+       真实外形优先；旧记录没有这一格 ⇒ 退回凸包 */
     ...(modelMap != null
       ? {
           printable: modelMap.printable,
           modelBoxes: modelMap.modelBoxes,
-          modelPolygons: modelMap.modelPolygons,
+          modelPolygons: modelMap.modelOutlines?.length
+            ? modelMap.modelOutlines
+            : modelMap.modelPolygons,
           forbiddenZones: modelMap.forbiddenZones,
         }
       : null),
