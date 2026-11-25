@@ -1897,7 +1897,7 @@ export const zhCN = {
   'presets.source.current': '当前来源',
   'presets.source.all': '全部来源',
   'presets.source.unfiled': '没有来源',
-  'presets.source.peek': '来源筛选',
+  'presets.source.toggle': '来源',
   'presets.tree.cloudLocal.elsewhere': '不同分支，不比较',
   'presets.tree.cloudLocal.newer': '云端比本机旧',
   'presets.tree.cloudLocal.detached': '本地副本',

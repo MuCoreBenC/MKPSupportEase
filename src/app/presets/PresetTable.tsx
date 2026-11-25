@@ -633,6 +633,37 @@ export default function PresetTable({
     : rows.map((row) => ({ row, meta: null }))
 
   /*
+   * 置顶 / 取消置顶会把行从一个位置挪到另一个位置。先量旧位置、再量新位置，
+   * 用 FLIP 让每行从旧位置滑到新位置；新行没有旧位置，直接出现。
+   */
+  const tbodyRef = useRef<HTMLTableSectionElement | null>(null)
+  const flipTops = useRef<Map<string, number>>(new Map())
+  useLayoutEffect(() => {
+    const body = tbodyRef.current
+    if (body === null) return
+    const origin = body.getBoundingClientRect().top
+    const next = new Map<string, number>()
+    const moved: { el: HTMLTableRowElement; delta: number }[] = []
+    body
+      .querySelectorAll<HTMLTableRowElement>('tr[data-rowkey], tr[data-detail-rowkey]')
+      .forEach((el) => {
+        const key = el.dataset.rowkey ?? `${el.dataset.detailRowkey ?? ''}::detail`
+        const top = el.getBoundingClientRect().top - origin
+        next.set(key, top)
+        const prev = flipTops.current.get(key)
+        if (prev !== undefined && Math.abs(prev - top) > 0.5) moved.push({ el, delta: prev - top })
+      })
+    flipTops.current = next
+    if (moved.length === 0 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    for (const { el, delta } of moved) {
+      el.animate([{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }], {
+        duration: 260,
+        easing: 'cubic-bezier(.2,.8,.2,1)',
+      })
+    }
+  }, [displayRows])
+
+  /*
    * 展开卡底部那两条编辑带（备注 / 归属）的开关 —— 2026-10-10 第八轮。
    * 存的是**打开那一刻的行数据指纹**（见下面每行的 `remarkBand / attrBand`）：
    * 页面重读后（保存成功 / 恢复默认）指纹对不上，渲染时自然回到展示态 ——
@@ -869,7 +900,7 @@ export default function PresetTable({
           <col className={s.thAct} />
         </colgroup>
 
-          <tbody>
+          <tbody ref={tbodyRef}>
             {displayRows.map(({ row, meta }) => {
               const version = versionsText(tr, row.versions)
               /*
@@ -1519,7 +1550,7 @@ export default function PresetTable({
                 </tr>
 
                 {rowHot && (
-                  <tr className={s.expandRow}>
+                  <tr className={s.expandRow} data-detail-rowkey={row.rowKey}>
                     {/*
                      * colSpan 必须**跟着上面的表头列数走**：MKP 5 列（名称 / 机型 / 版本 / 时间 /
                      * 操作）、切片器 6 列（名称 / 机型 / 喷嘴 / 层高 / 时间 / 操作）。

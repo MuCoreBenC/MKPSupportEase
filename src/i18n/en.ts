@@ -1836,7 +1836,7 @@ export const en: Record<StringKey, string> = {
   'presets.source.current': 'Current source',
   'presets.source.all': 'All sources',
   'presets.source.unfiled': 'No source',
-  'presets.source.peek': 'Source filter',
+  'presets.source.toggle': 'Source',
   'presets.tree.cloudLocal.elsewhere': 'Different branch, not compared',
   'presets.tree.cloudLocal.newer': 'Cloud is older than this device',
   'presets.tree.cloudLocal.detached': 'Local copy',

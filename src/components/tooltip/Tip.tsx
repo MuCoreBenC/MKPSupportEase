@@ -44,7 +44,7 @@ export default function Tip({ text, children, ariaLabel, decorative }: TipProps)
     </span>
   )
   return (
-    <span className={s.wrap} data-tip={text}>
+    <span className={s.wrap} data-tip={text} data-tip-always="">
       {dot}
     </span>
   )

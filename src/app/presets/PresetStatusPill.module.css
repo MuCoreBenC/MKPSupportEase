@@ -358,47 +358,53 @@
   align-items: flex-start;
 }
 
-.sourceShell {
-  flex: 0 0 26px;
-  display: flex;
+/* 弹层打开时，触发器胶囊多出「来源」这一段；两段共用一颗胶囊的圆角 */
+.mkpTrigger {
+  display: inline-flex;
   align-items: stretch;
+  flex-shrink: 0;
+  min-width: 0;
 }
 
-/* 收起时是一条可点的窄边；箭头明说上下展开 */
-.sourcePeek {
-  flex: 0 0 26px;
-  width: 26px;
+.mkpTrigger[data-open='true'] .filterBtn {
+  border-radius: 0;
+}
+
+.sourceToggle {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 1px solid var(--line);
-  border-right: 0;
-  border-radius: 12px 0 0 12px;
-  background: var(--surface-solid);
-  color: var(--text-3);
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 0 11px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0 999px 999px 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-2);
   cursor: pointer;
 }
 
-.sourcePeek:hover {
+.sourceToggle:hover {
   background: rgb(32 178 90 / 6%);
 }
 
-.sourcePeekIcon {
-  width: 12px;
-  height: 12px;
+.sourceToggleIcon {
+  width: 11px;
+  height: 11px;
   transition: transform 160ms ease;
 }
 
-.sourcePeek[data-open='true'] .sourcePeekIcon {
+.sourceToggle[data-open='true'] .sourceToggleIcon {
   transform: rotate(180deg);
 }
 
-/* 来源卡片压在窄边右侧，绝对定位不参与弹层宽度；位移由组件在布局阶段写内联样式 */
+/* 来源卡片绝对定位，不参与弹层宽度；位移由组件在布局阶段写内联样式 */
 .sourcePane {
   position: absolute;
   top: 0;
-  left: 26px;
+  left: calc(100% + 8px);
   width: max-content;
   transform-origin: left top;
 }
@@ -410,11 +416,10 @@
 
 .sourceInner {
   width: max-content;
-  min-width: 220px;
-  max-width: 360px;
+  min-width: 0;
   opacity: 0;
-  transform: translateY(6px) scale(0.985);
-  transform-origin: left bottom;
+  transform: scale(0.96);
+  transform-origin: left center;
   will-change: transform, opacity;
 }
 
@@ -429,15 +434,14 @@
   flex-direction: column;
   gap: 4px;
   /*
-   * ★ 2026-10-10（作者）：值一多菜单就比窗口还长（层高一个喷嘴五六档、叠起来十几档），
-   *   底下那几档伸到窗口外，滚都滚不到 —— 所以菜单自己封顶可滚。
-   *   40vh 与 SelectField 的 .list 同一个数：同一页里所有下拉一样高。
+   * 封顶用固定值，不跟窗口高度一起缩：窗口变矮时卡片高度不提前变化。
+   * 只有窗口本身矮到放不下时才用 100vh - 24px 兜底。
    *
-   *   滚动条**不画**：全局 `*::-webkit-scrollbar { width: 0 }` / `scrollbar-width: none`
-   *   已经管住了（作者：「你可以让我滚动，但是不需要滚动条也可以」）——
-   *   滚轮 / 触控板照常，只是不占宽、不出槽。
+   * 滚动条**不画**：全局 `*::-webkit-scrollbar { width: 0 }` / `scrollbar-width: none`
+   * 已经管住了（作者：「你可以让我滚动，但是不需要滚动条也可以」）——
+   * 滚轮 / 触控板照常，只是不占宽、不出槽。
    */
-  max-height: 40vh;
+  max-height: min(360px, calc(100vh - 24px));
   overflow-y: auto;
   /* 滚到边界别再往下传（剩余 delta 会链给后面的页面 —— 这一步与 FieldPopover 的
      wheel 兜底分工：CSS 管「到底了」「这一滚只吃了一部分」，JS 管「压根没得滚」） */
@@ -502,13 +506,25 @@
   visibility: visible;
 }
 
+.itemLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mid {
+  flex-shrink: 1;
+  min-width: 0;
   margin-left: auto;
   padding-left: 14px;
+  overflow: hidden;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
   font-weight: 400;
   color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---------- 切片器 pill 的左拍（喷嘴 × 层高）与它的弹层 ---------- */

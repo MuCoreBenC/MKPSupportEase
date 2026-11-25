@@ -31,6 +31,10 @@ interface Props {
   align?: 'start' | 'end'
   /** 最小宽度跟着触发器 —— 下拉要（列表不能比触发器窄），菜单不要 */
   matchWidth?: boolean
+  /** 窗口缩放时重算位置而不是关掉；预设页那颗双列筛选要它 */
+  keepOnResize?: boolean
+  /** 下方放不下时也优先留在下方，只贴边避让，不提前翻到上方 */
+  avoidFlip?: boolean
   onClose: () => void
   children: ReactNode
 }
@@ -49,12 +53,15 @@ export default function FieldPopover({
   anchor,
   align = 'start',
   matchWidth = false,
+  keepOnResize = false,
+  avoidFlip = false,
   onClose,
   children,
 }: Props) {
   const layer = useFieldLayer()
   const ref = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<Box | null>(null)
+  const [measureTick, setMeasureTick] = useState(0)
 
   /* onClose 每帧都是新函数，但登记/卸载不该跟着重跑，所以走 ref */
   const closeRef = useRef(onClose)
@@ -93,9 +100,11 @@ export default function FieldPopover({
     const aRight = (a.right - l.left) / zoom
 
     let top = aBottom + GAP
-    /* 下面放不下、上面放得下就往上翻；上下都放不下就贴上沿（宁可挡住锚点也别切掉内容） */
-    const up = top + h > availH - EDGE && aTop - h - GAP > EDGE
-    if (up) top = aTop - h - GAP
+    /* 默认：下面放不下、上面放得下就往上翻；avoidFlip 时只贴边，不提前翻 */
+    if (!avoidFlip) {
+      const up = top + h > availH - EDGE && aTop - h - GAP > EDGE
+      if (up) top = aTop - h - GAP
+    }
     top = Math.max(EDGE, Math.min(top, Math.max(EDGE, availH - EDGE - h)))
 
     let left = align === 'end' ? aRight - w : aLeft
@@ -103,7 +112,7 @@ export default function FieldPopover({
     left = Math.max(EDGE, left)
 
     setBox({ left, top, minWidth: matchWidth ? a.width / zoom : undefined })
-  }, [align, anchor, layer.el, matchWidth, children])
+  }, [align, anchor, layer.el, matchWidth, avoidFlip, children, measureTick])
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -123,25 +132,29 @@ export default function FieldPopover({
      * **捕获阶段**落到 window（下面是 `addEventListener('scroll', …, true)`），原来会立刻把
      * 浮层关掉 —— 症状看着像"滚轮没反应"，其实列表是被关了。
      *
-     * resize 也绑在这个处理函数上，那时 `e.target` 是 window（不是 Node）—— 顺着往下关，照旧。
+     * resize 是另一条：默认关掉；`keepOnResize` 时只重算位置。
      */
     const onScroll = (e: Event) => {
       const t = e.target
       if (t instanceof Node && ref.current?.contains(t) === true) return
       closeRef.current()
     }
+    const onResize = () => {
+      if (keepOnResize) setMeasureTick((v) => v + 1)
+      else closeRef.current()
+    }
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey)
     /* capture：滚动事件不冒泡，要在捕获阶段才收得到表格容器自己的滚动 */
     window.addEventListener('scroll', onScroll, true)
-    window.addEventListener('resize', onScroll)
+    window.addEventListener('resize', onResize)
     return () => {
       window.removeEventListener('mousedown', onDown)
       window.removeEventListener('keydown', onKey)
       window.removeEventListener('scroll', onScroll, true)
-      window.removeEventListener('resize', onScroll)
+      window.removeEventListener('resize', onResize)
     }
-  }, [anchor])
+  }, [anchor, keepOnResize])
 
   if (layer.el === null) return null
 

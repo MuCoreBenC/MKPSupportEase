@@ -67,6 +67,26 @@ function showing(el: HTMLElement): boolean {
   return el.getClientRects().length > 0
 }
 
+/** 这一层自己是否裁掉了内容（省略号通常挂在 `td` / 内层 `span` 上） */
+function clippedSelf(el: HTMLElement): boolean {
+  if (!showing(el) || (el.textContent ?? '').trim() === '') return false
+  const style = getComputedStyle(el)
+  const clipped =
+    style.overflowX === 'hidden' ||
+    style.overflowX === 'clip' ||
+    style.overflowY === 'hidden' ||
+    style.overflowY === 'clip' ||
+    style.textOverflow === 'ellipsis'
+  return clipped && overflows(el)
+}
+
+/** 自己的裁切，或所在单元格的裁切（版本列就是 `td` 裁、内层 `span` 不裁） */
+function clippedAt(el: HTMLElement): boolean {
+  if (clippedSelf(el)) return true
+  const cell = el.closest('td, th')
+  return cell instanceof HTMLElement && clippedSelf(cell)
+}
+
 /**
  * 这块元素是不是**已经把这句话写着了** —— 是就不弹。
  *
@@ -87,16 +107,35 @@ function saidAlready(host: HTMLElement, text: string): boolean {
     if (norm(n.nodeValue ?? '') !== want) continue
     const parent = n.parentElement
     if (parent === null || !showing(parent)) continue
-    return !overflows(parent)
+    return !clippedAt(parent)
   }
   return false
 }
 
-/** 这个元素该弹的那句话；空串 = 不弹 */
+/**
+ * 这块元素里有没有**真的被裁掉**的文字。
+ *
+ * 只看自己与后代里有文字的元素；气泡的默认出口是“被省略号截断的值”，
+ * 普通按钮名、表头排序说明都不算。
+ */
+function hasTruncatedText(el: HTMLElement): boolean {
+  const nodes: HTMLElement[] = [el, ...el.querySelectorAll<HTMLElement>('*')]
+  return nodes.some((node) => clippedAt(node))
+}
+
+/**
+ * 这个元素该弹的那句话；空串 = 不弹。
+ *
+ * 默认只有三档出口：内容真的被裁掉、元素禁用（必须说原因）、调用方显式标了
+ * `data-tip-always`（设置页的 `?` 说明）。普通图标名与表头动作说明不再弹。
+ */
 function tipOf(el: HTMLElement): string {
   const text = el.dataset.tip ?? ''
   if (text === '') return ''
-  return saidAlready(el, text) ? '' : text
+  if (el.closest('[data-tip-always]') !== null) return text
+  if (el.matches(':disabled, [aria-disabled="true"]')) return text
+  if (saidAlready(el, text)) return ''
+  return hasTruncatedText(el) ? text : ''
 }
 
 export default function TipLayer() {

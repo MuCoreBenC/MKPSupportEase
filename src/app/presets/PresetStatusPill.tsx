@@ -69,7 +69,7 @@
  * 随之退役 —— 切片器筛选从此只有这一种摆法。
  */
 
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useT } from '../../i18n'
 import { FieldPopover } from '../../components/field'
 import type { ActivePreset, Machine } from '../../api'
@@ -167,7 +167,7 @@ function FilterItems({
           onClick={() => onPick('')}
         >
           <CheckMark />
-          {allText}
+          <span className={s.itemLabel}>{allText}</span>
           {allMeta !== undefined && <span className={s.mid}>{allMeta}</span>}
         </button>
       )}
@@ -181,8 +181,12 @@ function FilterItems({
           onClick={() => onPick(o.value)}
         >
           <CheckMark />
-          {o.label}
-          {o.meta !== undefined && <span className={s.mid}>{o.meta}</span>}
+          <span className={s.itemLabel}>{o.label}</span>
+          {o.meta !== undefined && (
+            <span className={s.mid} data-tip={o.meta}>
+              {o.meta}
+            </span>
+          )}
         </button>
       ))}
     </>
@@ -316,7 +320,8 @@ export function PresetMkpFilter({
   const tr = useT()
   const [open, setOpen] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
-  const triggerRef = useRef<HTMLButtonElement>(null)
+  const [resizeTick, setResizeTick] = useState(0)
+  const triggerRef = useRef<HTMLSpanElement>(null)
   const sourcePaneRef = useRef<HTMLDivElement>(null)
   const sourceInnerRef = useRef<HTMLDivElement>(null)
   const machineMenuRef = useRef<HTMLDivElement>(null)
@@ -348,6 +353,13 @@ export function PresetMkpFilter({
     return { value: m.id, label: m.display, meta: count === 0 ? undefined : String(count) }
   })
 
+  useEffect(() => {
+    if (!open) return
+    const onResize = () => setResizeTick((v) => v + 1)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [open])
+
   useLayoutEffect(() => {
     const prev = prevRef.current
     prevRef.current = { open, sourceOpen }
@@ -356,14 +368,30 @@ export function PresetMkpFilter({
     const inner = sourceInnerRef.current
     const machineMenu = machineMenuRef.current
     if (pane === null || inner === null || machineMenu === null) return
-    /* 两张卡片从同一个中点分开：来源往左、机型往右；弹层盒子宽度始终不变 */
-    const sourceShift = (pane.offsetWidth + 8) / 2
-    const collapsedSource = 'translateX(0)'
-    const openSource = `translateX(-${sourceShift}px)`
+
+    /* 机型卡用满左侧空间贴到窗口边；来源卡从同一个起点向右滑出 */
+    pane.style.transform = 'none'
+    machineMenu.style.transform = 'none'
+    pane.style.clipPath = 'none'
+    const machineWidth = machineMenu.offsetWidth
+    const popoverLeft = pane.getBoundingClientRect().left - machineWidth - 8
+    /* 左边留一条随窗口宽度变化的边距：窄窗接近最小值，宽窗才拉开 */
+    const edge = Math.min(56, Math.max(8, window.innerWidth * 0.045 - 16))
+    const machineShift = Math.max(0, popoverLeft - edge)
+    const leftGap = popoverLeft - machineShift
+    /* 先铺到与左侧相同的右边距，但给来源卡一个最大宽度，避免宽窗里拉成一张巨卡 */
+    const available = window.innerWidth - 2 * leftGap - machineWidth - 8
+    const width = Math.max(120, Math.min(560, available))
+    pane.style.width = `${width}px`
+    inner.style.width = `${width}px`
+
+    /* 来源卡起点在机型卡原位，展开时向右滑到机型卡右侧 */
+    const collapsedSource = `translateX(-${machineWidth + 8}px)`
+    const openSource = `translateX(-${machineShift}px)`
     const collapsedMachine = 'translateX(0)'
-    const openMachine = `translateX(${sourceShift}px)`
-    const collapsedInner = { opacity: '0', transform: 'translateY(6px) scale(.985)' }
-    const openInner = { opacity: '1', transform: 'translate(0, 0) scale(1)' }
+    const openMachine = `translateX(-${machineShift}px)`
+    const collapsedInner = { opacity: '0', transform: 'scale(.96)' }
+    const openInner = { opacity: '1', transform: 'scale(1)' }
     const startSource = sourceOpen ? collapsedSource : openSource
     const endSource = sourceOpen ? openSource : collapsedSource
     const startMachine = sourceOpen ? collapsedMachine : openMachine
@@ -379,12 +407,17 @@ export function PresetMkpFilter({
     }
 
     const firstPaint = !prev.open && open
-    if (firstPaint || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const relayout = prev.open === open && prev.sourceOpen === sourceOpen
+    if (
+      firstPaint ||
+      relayout ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
       write(endSource, endMachine, endInner)
       return
     }
 
-    /* 先把首帧钉在起点，再播动画；两列都只做 transform，不触发布局 */
+    /* 先把首帧钉在起点，再播动画：机型卡向左、来源卡从起点向右滑出 */
     write(startSource, startMachine, startInner)
     const duration = sourceOpen ? 360 : 240
     const easing = 'cubic-bezier(.4,0,.2,1)'
@@ -412,7 +445,7 @@ export function PresetMkpFilter({
       animInner.cancel()
       animMachine.cancel()
     }
-  }, [open, sourceOpen])
+  }, [open, sourceOpen, resizeTick])
 
   const pick = (action: () => void) => {
     setOpen(false)
@@ -421,63 +454,70 @@ export function PresetMkpFilter({
 
   return (
     <span className={s.hold}>
-      <button
-        type="button"
-        ref={triggerRef}
-        className={s.filterBtn}
-        data-filt={machineId !== ''}
-        aria-haspopup="true"
-        aria-expanded={open}
-        onClick={() => {
-          const next = !open
-          setOpen(next)
-          if (next) setSourceOpen(false)
-        }}
-      >
-        <FunnelIcon />
-        {prefix !== undefined && <span className={s.filterPrefix}>{prefix}</span>}
-        <b className={s.filterName}>{machine?.display ?? tr('presets.filter.all')}</b>
-        <i className={s.caret} aria-hidden />
-      </button>
+      <span ref={triggerRef} className={s.mkpTrigger} data-open={open}>
+        <button
+          type="button"
+          className={s.filterBtn}
+          data-filt={machineId !== ''}
+          aria-haspopup="true"
+          aria-expanded={open}
+          onClick={() => {
+            const next = !open
+            setOpen(next)
+            if (next) setSourceOpen(false)
+          }}
+        >
+          <FunnelIcon />
+          {prefix !== undefined && <span className={s.filterPrefix}>{prefix}</span>}
+          <b className={s.filterName}>{machine?.display ?? tr('presets.filter.all')}</b>
+          {!open && <i className={s.caret} aria-hidden />}
+        </button>
+        {open && (
+          <button
+            type="button"
+            className={s.sourceToggle}
+            data-open={sourceOpen}
+            aria-expanded={sourceOpen}
+            onClick={() => setSourceOpen((v) => !v)}
+          >
+            {tr('presets.source.toggle')}
+            <svg className={s.sourceToggleIcon} viewBox="0 0 10 10" aria-hidden="true">
+              <path
+                d="M2.2 3.8 5 6.6l2.8-2.8"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+        )}
+      </span>
       {open && (
-        <FieldPopover anchor={triggerRef.current} align="start" onClose={() => setOpen(false)}>
+        <FieldPopover
+          anchor={triggerRef.current}
+          align="start"
+          keepOnResize
+          avoidFlip
+          onClose={() => setOpen(false)}
+        >
           <div className={s.dualMenu}>
-            <div className={s.sourceShell}>
-              <button
-                type="button"
-                className={s.sourcePeek}
-                data-open={sourceOpen}
-                aria-label={tr('presets.source.peek')}
-                aria-expanded={sourceOpen}
-                onClick={() => setSourceOpen((v) => !v)}
-              >
-                <svg className={s.sourcePeekIcon} viewBox="0 0 10 10" aria-hidden="true">
-                  <path
-                    d="M2.2 3.8 5 6.6l2.8-2.8"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+            <div
+              ref={sourcePaneRef}
+              className={s.sourcePane}
+              data-open={sourceOpen}
+              aria-hidden={!sourceOpen}
+            >
+              <div ref={sourceInnerRef} className={s.sourceInner}>
+                <div className={s.menu}>
+                  <FilterItems
+                    options={sourceOptions}
+                    value={source.value}
+                    withAllOption={false}
+                    hiddenFromTab={!sourceOpen}
+                    onPick={(next) => pick(() => source.onPick(next as SourceFilter))}
                   />
-                </svg>
-              </button>
-              <div
-                ref={sourcePaneRef}
-                className={s.sourcePane}
-                data-open={sourceOpen}
-                aria-hidden={!sourceOpen}
-              >
-                <div ref={sourceInnerRef} className={s.sourceInner}>
-                  <div className={s.menu}>
-                    <FilterItems
-                      options={sourceOptions}
-                      value={source.value}
-                      withAllOption={false}
-                      hiddenFromTab={!sourceOpen}
-                      onPick={(next) => pick(() => source.onPick(next as SourceFilter))}
-                    />
-                  </div>
                 </div>
               </div>
             </div>
