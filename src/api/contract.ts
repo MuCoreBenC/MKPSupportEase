@@ -3009,7 +3009,9 @@ export interface PostProcessChoice {
 
 export interface PostProcessQuestion {
   /**
-   * 问题种类：`machine-mismatch` = 机型不匹配（给「继续 / 停下」两颗按钮）。
+   * 问题种类：`machine-mismatch` = 机型不匹配（「继续 / 停下」）；
+   * `calibration-mode` = 校准件怎么跑；`calibration-not-a-model` = 校准 3MF 里这一盘
+   * 不是校准模型（答 `force-print` 按普通模型继续）；`tower-relocation` / `debug-plan` 同理。
    *
    * ★ 字段名是 `questionKind` 而不是 `kind`（2026-10-17 真机事故）：线上的枚举标签
    * 已经叫 `kind`（`{"kind":"question",…}`），payload 再来一个同名键，解析会报

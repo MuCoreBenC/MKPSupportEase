@@ -193,6 +193,8 @@ pub struct RelocateGeoPayload {
 pub const QKIND_MACHINE_MISMATCH: &str = "machine-mismatch";
 /// 这是一份校准件：先打印再校准 / 直接校准
 pub const QKIND_CALIBRATION_MODE: &str = "calibration-mode";
+/// 校准 3MF 里这一盘不是校准模型：按普通模型继续 / 停下
+pub const QKIND_CALIBRATION_NOT_A_MODEL: &str = "calibration-not-a-model";
 /// 模型与擦料塔相撞：自动把塔挪到不撞的位置 / 自己去挪模型（2026-10-18）
 pub const QKIND_TOWER_RELOCATION: &str = "tower-relocation";
 /// 调试那一问（2026-11-11）：开跑前选「这一趟测哪些动作」。
@@ -216,6 +218,8 @@ pub const CHOICE_MODEL: &str = "model";
 pub const CHOICE_CALIB_PRINT: &str = "print";
 /// 校准那一问：直接校准（去掉打印件，只留校准路径）
 pub const CHOICE_CALIB_DIRECT: &str = "direct";
+/// 非校准模型那一问：按普通模型继续这一趟（只改本趟，不改偏好）
+pub const CHOICE_FORCE_PRINT: &str = "force-print";
 
 /// 问句里的一颗按钮。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

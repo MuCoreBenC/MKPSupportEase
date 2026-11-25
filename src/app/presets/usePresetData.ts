@@ -59,6 +59,7 @@ import { api, errorText } from '../../api'
 import { activePresetSnapshot, appStateMutated, useActivePreset } from '../state/appState'
 import {
   deliveryMutated,
+  deliveryRevisionNow,
   useDeliveryRevision,
   usePresetPrefsRevision,
   useSourceRevision,
@@ -93,18 +94,17 @@ import type { DeliveryPresetSource } from './presetTree'
 import {
   applySlicerFilters,
   archivedIds,
-  branchOf,
   buildPresetTree,
   catalogKindToFileKind,
   cloudRows,
-  identityRefOf,
   localRows,
   machineNode,
   machinesInScope,
   slicerFilterValues,
+  sourceKeyOf,
+  sourceLabelOf,
 } from './presetTree'
 import type {
-  BranchFilter,
   PresetCloudRow,
   PresetKindAxis,
   PresetLocalRow,
@@ -118,7 +118,15 @@ import type {
   PresetFileState,
   LocalPresetFile,
   PresetVersionInput,
+  SourceFilter,
 } from './presetTree'
+
+/** 台账角标菜单里的一条来源；`count` 是本机属于这条来源的文件数 */
+export interface SourceOption {
+  key: string
+  label: string
+  count: number
+}
 
 export interface PresetData {
   loading: boolean
@@ -809,11 +817,14 @@ export function usePresetData(importRevision = 0): PresetData {
    * 读失败照抛（调用方决定怎么说）——失败不写快照，保持上一份。
    */
   const readSeqRef = useRef(0)
+  /** 最近一次重读对过的投递面代次。写命令返回前自己读一次时记下它，effect 就不必再双读 */
+  const feedReadRevisionRef = useRef(-1)
   const readPresetFeedInto = useCallback(async (): Promise<void> => {
     const seq = ++readSeqRef.current
     const next = await readPresetFeed()
     if (seq !== readSeqRef.current) return
     setDelivery(next)
+    feedReadRevisionRef.current = deliveryRevisionNow()
   }, [readPresetFeed])
 
   /*
@@ -997,11 +1008,16 @@ export function usePresetData(importRevision = 0): PresetData {
   const deliveryRevision = useDeliveryRevision()
   useEffect(() => {
     if (!ready) return
-    /* 走那条带守卫的出口（`readPresetFeedInto`）：这次重读与首屏 / 换目录后的重读
-       并发时，晚发起的那次才算数 —— 旧读晚回来不许覆盖新快照 */
-    void readPresetFeedInto().catch(() => {
-      /* 读不到就保持旧数据 —— 与首屏同一条纪律：不把这一路升格成整页错误 */
-    })
+    /*
+     * 写命令返回前若已显式重读过这一代（`feedReadRevisionRef`），这里就不再读一遍 ——
+     * 那次重读就在广播之后，正是为了让行状态赶在守卫释放前刷新。
+     * 别的页写的（首页下载并使用等）本页没读过，仍从这条订阅重读。
+     */
+    if (feedReadRevisionRef.current < deliveryRevision) {
+      void readPresetFeedInto().catch(() => {
+        /* 读不到就保持旧数据 —— 与首屏同一条纪律：不把这一路升格成整页错误 */
+      })
+    }
     /*
      * **本地文件也要重读**：投递面变了 = 云端那一份的字节可能刚被取回来（「使用」按需取回、
      * 「另存为本地预设」也会先取一份），而 `presets-local/` own 目录里也可能刚多出一份
@@ -1241,6 +1257,8 @@ export function usePresetData(importRevision = 0): PresetData {
       return await api.copyToSlicer(fileName, slicer, account)
     } finally {
       setSlicerCopied(await api.getSlicerCopied())
+      /* 切片器那份也是投递面的一部分：BBS 页的「我们发的」认同一本代次 */
+      deliveryMutated()
     }
   }, [])
 
@@ -1248,10 +1266,11 @@ export function usePresetData(importRevision = 0): PresetData {
    * 交付预设那一路的「下载」：走新世界下载管道，落进下载区 `mkp/`。
    * 不 catch：失败传给页面说出来，与 `apply` / `copy` 同一条规矩。（「应用」走上面那一个。）
    *
-   * 写完**只广播**（`deliveryMutated()`）：本页与别的页都从订阅里重读那一路 ——
-   * 这里是"写下 / 移出投递面"的四个出口之一，不再各自显式重读一次（单一触发路径）。
+   * 写完广播并**在本命令里等本页重读完成**：行状态赶在动作守卫释放前刷新，
+   * 右键菜单再点同一个动作时已读到"本地已有"，不会再进第二次下载。
+   * 别的页仍从订阅里重读（订阅见 `feedReadRevisionRef` 那一段）。
    *
-   * ★ 2026-11-18：下载**同时放进切片器**（后端 `download_runtime_file` 里那一手）。
+   * ★ 下载**同时放进切片器**（后端 `download_runtime_file` 里那一手）。
    * 回来重读「已放入」，并把结论交回页面 —— 提示条按它说实话：放进了 / 本机没有
    * 切片器目录、得自己点「放入」。
    *
@@ -1270,11 +1289,12 @@ export function usePresetData(importRevision = 0): PresetData {
         /* 成没成都广播：`deliver` 是"先归档旧份、再换新"，失败也可能动过盘 ——
            宁可多读一次，不赌"失败 = 没变"（与首页 `applyCurrent` 同一条） */
         deliveryMutated()
+        await readPresetFeedInto().catch(() => {})
         const copied = await api.getSlicerCopied().catch(() => null)
         if (copied !== null) setSlicerCopied(copied)
       }
     },
-    [],
+    [readPresetFeedInto],
   )
 
   /*
@@ -1289,10 +1309,11 @@ export function usePresetData(importRevision = 0): PresetData {
     async (fileName: string, renameIfTaken = false): Promise<FetchCloudResult> => {
       const done = await api.fetchCloudPreset(fileName, renameIfTaken)
       deliveryMutated()
+      await readPresetFeedInto().catch(() => {})
       await readLocalPresets()
       return done
     },
-    [readLocalPresets],
+    [readLocalPresets, readPresetFeedInto],
   )
 
   /*
@@ -1318,9 +1339,15 @@ export function usePresetData(importRevision = 0): PresetData {
   const commitTextDraft = useCallback(async () => {
     const done = await api.commitTextDraft()
     await readLocalPresets()
+    /*
+     * 整份写回改了盘上字节与来源记录：投递面那一账要跟着走，
+     * 本页与别的页对这一份的判定才会一起翻过来。
+     */
+    deliveryMutated()
+    await readPresetFeedInto().catch(() => {})
     draftMutated()
     return done
-  }, [readLocalPresets])
+  }, [readLocalPresets, readPresetFeedInto])
 
   /*
    * **「云端更新」那条链**（2026-10-10）：读差异账 + 把用户的处理结果**一次性**写进本地文件。
@@ -1341,12 +1368,18 @@ export function usePresetData(importRevision = 0): PresetData {
        */
       await api.applyPresetParamDecisions(path, decisions)
       await readLocalPresets()
+      /*
+       * 来源记录推进到云端当前版 ⇒ 云端行那份认领要翻成「本地已有」。
+       * 投递面广播 + 本页重读（带代次守卫），让预设页与别的页一起翻状态。
+       */
+      deliveryMutated()
+      await readPresetFeedInto().catch(() => {})
       /* 盘上那份刚被改过（大小与时刻变了）—— 列表标记顺手对一眼 */
       draftMutated()
       /* 决定账（状态账）也动了 —— 云端更新那一段的读法跟着刷新 */
       appStateMutated()
     },
-    [readLocalPresets],
+    [readLocalPresets, readPresetFeedInto],
   )
 
   /*
@@ -1491,9 +1524,10 @@ export function usePresetData(importRevision = 0): PresetData {
     async (fileNames: string[], onTick?: (tick: DownloadTick) => void, place = true) => {
       const outcomes = await api.downloadCatalogFiles(fileNames, onTick, place)
       deliveryMutated()
+      await readPresetFeedInto().catch(() => {})
       return outcomes
     },
-    [],
+    [readPresetFeedInto],
   )
 
   const machineId = at?.machineId ?? ''
@@ -1709,16 +1743,19 @@ export interface PresetPage {
   setQuery: (next: string) => void
   searching: boolean
   /**
-   * 本地表的**分支筛选**（当前分支 / 全部 / 没有来源）。
-   *
-   * `branches.length < 2` 时页面不渲染这个下拉 —— 只有一个分支的用户看不到它。
+   * 本地表的**来源筛选**（当前来源 / 全部 / 没有来源 / 指定来源）。
+   * 默认只显示当前来源 + 没有来源的文件；其他来源默认藏起来。
    */
-  branchFilter: BranchFilter
-  setBranchFilter: (next: BranchFilter) => void
-  /** 本机出现过的来源分支（含当前这一支），已排序 */
-  branches: string[]
-  /** 当前源的分支；自建源没有 ref ⇒ `null` */
-  currentBranch: string | null
+  sourceFilter: SourceFilter
+  setSourceFilter: (next: SourceFilter) => void
+  /** 本机出现过的完整来源身份（含当前这一条），按显示名排序 */
+  sources: SourceOption[]
+  /** 当前源的完整身份；没配源 ⇒ `null` */
+  currentSource: string | null
+  /** 默认档下被藏起来的其他来源文件数；0 时台账不给入口 */
+  hiddenSourceCount: number
+  /** 没有来源记录的文件数，供「没有来源」那一档显示 */
+  unfiledCount: number
 
   /**
    * 切片器的喷嘴 / 层高筛选。MKP 没有这两个字段 ——
@@ -1776,11 +1813,11 @@ export function usePresetPage(data: PresetData): PresetPage {
   const [kind, setKind] = useSessionState<PresetKindAxis>('presets.kind', 'mkp')
   const [scope, setScope] = useSessionState<PresetScopeAxis>('presets.scope', 'local')
   /*
-   * 本地表按**来源分支**筛。默认「当前分支 + 没有来源」—— 只有一个分支时这个下拉
-   * 根本不出现，普通用户看不到分支这回事。
+   * 本地表按**完整来源身份**筛。默认「当前来源 + 没有来源」—— 别的来源仍在盘上，
+   * 但默认不列；只有台账角标出现时用户才有机会看到它们。
    */
-  const [branchFilter, setBranchFilter] = useSessionState<BranchFilter>(
-    'presets.branch',
+  const [sourceFilter, setSourceFilter] = useSessionState<SourceFilter>(
+    'presets.source',
     'current',
   )
   /* 切片器的喷嘴 / 层高筛选。空串 = 「全部」。落会话：切页对一眼回来不该复位 */
@@ -1875,19 +1912,28 @@ export function usePresetPage(data: PresetData): PresetPage {
   )
 
   /*
-   * **本机出现过的来源分支**（含当前这一支）—— 只决定"要不要给下拉"。
-   *
-   * 只有一个分支时不出现任何分支控件：普通用户不该知道分支是什么。
+   * **本机出现过的完整来源**（含当前这一条）—— 决定台账角标与菜单里有哪些档。
+   * 按身份原文去重：同一 ref、不同仓库或自建源地址/端口/目录都算不同来源。
    */
-  const branchInfo = useMemo(() => {
-    const seen = new Set<string>()
+  const sourceInfo = useMemo(() => {
+    const counts = new Map<string, number>()
+    let unfiledCount = 0
     for (const f of data.local) {
-      const ref = branchOf(f.basedOnFacts)
-      if (ref !== null) seen.add(ref)
+      const key = sourceKeyOf(f.basedOnFacts)
+      if (key === null) {
+        unfiledCount += 1
+        continue
+      }
+      counts.set(key, (counts.get(key) ?? 0) + 1)
     }
-    const current = identityRefOf(data.sourceIdentity)
-    if (current !== null) seen.add(current)
-    return { branches: [...seen].sort((a, b) => a.localeCompare(b)), current }
+    const current = data.sourceIdentity ?? null
+    if (current !== null && !counts.has(current)) counts.set(current, 0)
+    const sources: SourceOption[] = [...counts]
+      .map(([key, count]) => ({ key, label: sourceLabelOf(key) ?? key, count }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+    const hiddenSourceCount =
+      current === null ? 0 : sources.reduce((n, s) => n + (s.key === current ? 0 : s.count), 0)
+    return { current, sources, hiddenSourceCount, unfiledCount }
   }, [data.local, data.sourceIdentity])
 
   /* 两张表的输入是同一份 —— 拼一次，两个纯函数各取所需 */
@@ -1917,10 +1963,10 @@ export function usePresetPage(data: PresetData): PresetPage {
       catalogSerial: data.delivery.catalogSerial,
       sourceIdentity: data.sourceIdentity,
       remarks: data.remarks,
-      branchFilter,
+      sourceFilter,
     }),
     /* `data` 一个就够（`data.xxx` 都在它下面 —— 单列出来 eslint 会报"多余"） */
-    [data, copiedSet, kind, localSet, machines, pinned, deferredQuery, sort, branchFilter],
+    [data, copiedSet, kind, localSet, machines, pinned, deferredQuery, sort, sourceFilter],
   )
 
   /*
@@ -2038,11 +2084,13 @@ export function usePresetPage(data: PresetData): PresetPage {
     query,
     setQuery,
     searching: query.trim() !== '',
-    /* 分支筛选：只有一个分支时页面不渲染它（`branches.length` 由页面判断） */
-    branchFilter,
-    setBranchFilter,
-    branches: branchInfo.branches,
-    currentBranch: branchInfo.current,
+    /* 来源筛选：默认只显示当前来源；角标与菜单只在有其他来源文件/筛选生效时出现 */
+    sourceFilter,
+    setSourceFilter,
+    sources: sourceInfo.sources,
+    currentSource: sourceInfo.current,
+    hiddenSourceCount: sourceInfo.hiddenSourceCount,
+    unfiledCount: sourceInfo.unfiledCount,
     slicerFilters: {
       nozzles: slicerValues.nozzles,
       allLayers: slicerValues.layers,

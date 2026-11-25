@@ -1,57 +1,75 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  branchKept,
-  branchMatches,
-  branchOf,
   familyLayoutOf,
   isMainCopy,
+  keyOfSourceFilter,
   slicerCloudActionOf,
+  sourceKept,
+  sourceKeyOf,
+  sourceLabelOf,
+  sourceMatches,
+  sourceValueOf,
   updateStatusOf,
 } from './presetTree'
 
 /*
- * 分支隔离的三条判据。
- *
- * 模型：每个分支的下载各落一个文件夹；"我这儿有没有这一支的"只看同分支的那几份。
- * 其它分支的文件仍在盘上（切筛选看得到），但**不冒充**当前这一支已有。
+ * 来源隔离：本地表只认完整来源身份，不再只看 ref。
+ * 同一个 `main` 也可能来自不同仓库、不同自建源地址或目录，默认各自分开。
  */
-describe('分支隔离', () => {
-  it('从来源记录里取出分支名；没有 ref（自建源）给 null', () => {
-    expect(branchOf({ sourceRef: 'github#o/r@main' })).toBe('main')
-    expect(branchOf({ sourceRef: 'github#o/r@feat/pen' })).toBe('feat/pen')
-    expect(branchOf({ sourceRef: 'custom#127.0.0.1:8787@-' })).toBeNull()
-    expect(branchOf({ sourceRef: null })).toBeNull()
-    expect(branchOf(null)).toBeNull()
+describe('来源隔离', () => {
+  it('取的是完整来源身份；自建源连同地址与路径一起留着', () => {
+    expect(sourceKeyOf({ sourceRef: 'github#o/r@main' })).toBe('github#o/r@main')
+    expect(sourceKeyOf({ sourceRef: 'gitee#o/r@main' })).toBe('gitee#o/r@main')
+    expect(sourceKeyOf({ sourceRef: 'custom#127.0.0.1:8787/delivery@-' })).toBe(
+      'custom#127.0.0.1:8787/delivery@-',
+    )
+    expect(sourceKeyOf({ sourceRef: null })).toBeNull()
+    expect(sourceKeyOf(null)).toBeNull()
   })
 
-  it('两个分支互不认领；没有来源的老副本照旧参与', () => {
-    expect(branchMatches('main', 'delivery')).toBe(false)
-    expect(branchMatches('main', 'main')).toBe(true)
-    /* 导入 / 老副本没有来源记录 —— 不属于任何一支，不因分支不同被排除 */
-    expect(branchMatches(null, 'main')).toBe(true)
-    /* 当前源没有 ref（自建源）⇒ 不隔离 */
-    expect(branchMatches('main', null)).toBe(true)
+  it('显示名不露内部名 custom，自建源念地址与路径', () => {
+    expect(sourceLabelOf('github#o/r@main')).toBe('GitHub · o/r · main')
+    expect(sourceLabelOf('gitee#o/r@main')).toBe('Gitee · o/r · main')
+    expect(sourceLabelOf('custom#127.0.0.1:8787/delivery@-')).toBe('127.0.0.1:8787/delivery')
   })
 
-  it('本地表三档：当前分支带「没有来源」/ 全部 / 没有来源', () => {
-    /* 当前分支：自己这一支留着，别的分支藏起来 */
-    expect(branchKept('main', true, 'current', 'main')).toBe(true)
-    expect(branchKept('delivery', true, 'current', 'main')).toBe(false)
-    /* 但"没有来源"的不能被藏 —— 藏了等于说用户那份不见了 */
-    expect(branchKept(null, false, 'current', 'main')).toBe(true)
-
-    expect(branchKept('delivery', true, 'all', 'main')).toBe(true)
-    expect(branchKept(null, false, 'all', 'main')).toBe(true)
-
-    expect(branchKept(null, false, 'unfiled', 'main')).toBe(true)
-    expect(branchKept('main', true, 'unfiled', 'main')).toBe(false)
+  it('同一个 ref、不同仓库或自建源地址都互不认领；无来源照旧参与', () => {
+    const current = 'github#o/r@main'
+    expect(sourceMatches(current, current)).toBe(true)
+    expect(sourceMatches('github#other/r@main', current)).toBe(false)
+    expect(sourceMatches('gitee#o/r@main', current)).toBe(false)
+    expect(
+      sourceMatches('custom#127.0.0.1:8787/delivery@-', 'custom#127.0.0.1:8788/delivery@-'),
+    ).toBe(false)
+    expect(sourceMatches(null, current)).toBe(true)
+    expect(sourceMatches(current, null)).toBe(true)
   })
 
-  it('自建源：记着来源但没有分支，归「当前」，不进「没有来源」', () => {
-    /* `custom#127.0.0.1:8787@-` → ref 是 null，但来源记录在 */
-    expect(branchKept(null, true, 'unfiled', null)).toBe(false)
-    expect(branchKept(null, true, 'current', null)).toBe(true)
+  it('四档筛选：当前来源带「没有来源」/ 全部 / 没有来源 / 指定来源', () => {
+    const current = 'github#o/r@main'
+    const other = 'gitee#o/r@main'
+    expect(sourceKept(current, true, 'current', current)).toBe(true)
+    expect(sourceKept(other, true, 'current', current)).toBe(false)
+    expect(sourceKept(null, false, 'current', current)).toBe(true)
+
+    expect(sourceKept(other, true, 'all', current)).toBe(true)
+    expect(sourceKept(null, false, 'all', current)).toBe(true)
+
+    expect(sourceKept(null, false, 'unfiled', current)).toBe(true)
+    expect(sourceKept(current, true, 'unfiled', current)).toBe(false)
+
+    expect(sourceKept(other, true, sourceValueOf(other), current)).toBe(true)
+    expect(sourceKept(current, true, sourceValueOf(other), current)).toBe(false)
+    expect(sourceKept(null, false, sourceValueOf(other), current)).toBe(false)
+  })
+
+  it('筛选值把完整身份与三个保留档分开', () => {
+    expect(sourceValueOf('github#o/r@main')).toBe('source:github#o/r@main')
+    expect(keyOfSourceFilter(sourceValueOf('gitee#o/r@main'))).toBe('gitee#o/r@main')
+    expect(keyOfSourceFilter('current')).toBeNull()
+    expect(keyOfSourceFilter('all')).toBeNull()
+    expect(keyOfSourceFilter('unfiled')).toBeNull()
   })
 })
 

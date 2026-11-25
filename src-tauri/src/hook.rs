@@ -97,6 +97,12 @@ pub(crate) mod keys {
     pub const CALIB_STOPPED: &str = "hook.calib_stopped";
     /// 强制校准模式开着、但外形对不上任何一块校准板 ⇒ 停下（原文件不动）
     pub const CALIB_NOT_RECOGNIZED: &str = "hook.calib_not_recognized";
+    /// 校准 3MF 里这一盘不是校准模型 ⇒ 问一句按不按普通模型继续
+    pub const CALIB_NOT_MODEL_QUESTION: &str = "hook.calib_not_model_question";
+    /// 上面的问句选了停下 / 超时 ⇒ 停下（原文件不动）
+    pub const CALIB_NOT_MODEL_STOPPED: &str = "hook.calib_not_model_stopped";
+    /// 没有界面可答复时的硬错出口
+    pub const CALIB_NOT_MODEL: &str = "hook.calib_not_model";
     /* 挪塔那一问（2026-10-18）：设置页「智能塔位置」开着且真撞了才问 */
     pub const TOWER_RELOCATION_QUESTION: &str = "hook.tower_relocation_question";
     /// 挪完了、复检通过（成功句）
@@ -120,6 +126,9 @@ pub(crate) mod keys {
     pub const CHOICE_CALIB_PRINT_HINT: &str = "hook.choice_calib_print_hint";
     pub const CHOICE_CALIB_DIRECT: &str = "hook.choice_calib_direct";
     pub const CHOICE_CALIB_DIRECT_HINT: &str = "hook.choice_calib_direct_hint";
+    pub const CHOICE_CALIB_FORCE_PRINT: &str = "hook.choice_calib_force_print";
+    pub const CHOICE_CALIB_FORCE_PRINT_HINT: &str = "hook.choice_calib_force_print_hint";
+    pub const CHOICE_CALIB_NOT_MODEL_STOP: &str = "hook.choice_calib_not_model_stop";
     /// 板上根本没有不撞的塔位 ⇒ 停下
     pub const TOWER_RELOCATE_UNAVAILABLE: &str = "hook.tower_relocate_unavailable";
     /* 校准件那一趟的两种成功结论（`print` = 打印件保留 / `direct` = 去掉打印件）——
@@ -161,6 +170,12 @@ const ALL_KEYS: &[&str] = &[
     keys::CALIB_MODE_QUESTION,
     keys::CALIB_STOPPED,
     keys::CALIB_NOT_RECOGNIZED,
+    keys::CALIB_NOT_MODEL_QUESTION,
+    keys::CALIB_NOT_MODEL_STOPPED,
+    keys::CALIB_NOT_MODEL,
+    keys::CHOICE_CALIB_FORCE_PRINT,
+    keys::CHOICE_CALIB_FORCE_PRINT_HINT,
+    keys::CHOICE_CALIB_NOT_MODEL_STOP,
     keys::CALIB_DONE_PRINT,
     keys::CALIB_DONE_DIRECT,
     keys::CANCELLED,
@@ -1098,14 +1113,17 @@ pub fn run(
      * **不猜**：不看正文里的旧注释、不看尺寸、不看文件名（2026-10-18 删掉的那条
      * G-code 标记链就是"看了会给出错答案"的例子）。
      */
-    /* 身份定案的三条口径（2026-11-12 加第三档）：
+    /* 身份定案：调试、强制开关、3MF 身份与实测外形各管一段。
      *
-     *   ① 调试在跑 ⇒ 一律普通模型（`Mode::None`）：调试那一趟只跑动作，跟校准无关，
-     *      否则会先弹校准那一问、再弹调试那一问（要答两次），碰撞还会在调试之前把这一趟掐掉；
-     *   ② 强制校准模式（设置页开关）⇒ **不看 3MF 身份**，只按实测外形认；对不上就停下
-     *      （原文件不动），提示用户去关掉开关；
-     *   ③ 出厂档 ⇒ 3MF 有身份才认，并用外形纠正合并文件里读错的那一盘（见 `decide_calibration`）。
+     *   · 调试在跑 ⇒ 一律普通模型（`Mode::None`）：这一趟只跑动作，跟校准无关，
+     *     否则会先弹校准那一问、再弹调试那一问；
+     *   · 强制校准模式开着 ⇒ 不看 3MF 身份，只按外形认；对不上就停下（原文件不动），
+     *     提示去关掉开关；
+     *   · 3MF 说这是校准文件、但这一盘外形不是任何一块校准板 ⇒ 问用户要不要强制打印，
+     *     没有通道可问就停下；
+     *   · 其余按 3MF 身份跑，并用外形纠正合并文件里读错的那一盘（见 `decide_calibration`）。
      */
+    let mut preflight_err: Option<HookError> = None;
     let calib_mode = if ir.debug.is_some() {
         calibration::Mode::None
     } else {
@@ -1120,7 +1138,7 @@ pub fn run(
                 profiles,
             ),
             /* 档表没装载（预设目录缺）：强制模式下无从判断 ⇒ 与「对不上」同一条路；
-             * 出厂档下保持 3MF 那条原判。 */
+             * 否则保持 3MF 那条原判。 */
             None if force => postprocess::postproc::calib_models::CalibVerdict::Unrecognized,
             None => postprocess::postproc::calib_models::decide_calibration(
                 false,
@@ -1134,41 +1152,70 @@ pub fn run(
             postprocess::postproc::calib_models::CalibVerdict::NotCalibration => {
                 calibration::Mode::None
             }
-            /* 强制模式下认不出 ⇒ **停下**：静默降级成普通模型会把校准板当模型打出来。
-             * 出口与"校准那一问答了停止"同一条（归档 + 原文件不动）。 */
+            /* 强制模式下认不出 ⇒ 停下：静默降级成普通模型会把校准板当模型打出来。 */
             postprocess::postproc::calib_models::CalibVerdict::Unrecognized => {
-                let err = HookError::bad_input(Reason::new(keys::CALIB_NOT_RECOGNIZED));
-                let ff = FailureFacts::capture(
-                    &ir,
-                    &content,
-                    &raw,
-                    job,
-                    "",
-                    &opening_slicer,
-                    opening_layer_height,
-                    opening_nozzle,
-                );
-                archive_failure(
-                    &archived,
-                    job,
-                    &preset_machine,
-                    &err,
-                    true,
-                    raw.len() as u64,
-                    started_at,
-                    started,
-                    /* 管线还没进（判在读身份这一步），没有步骤账 */
-                    Vec::new(),
-                    None,
-                    Some(&ff),
-                    relocation.as_ref(),
-                    model_map_from(&content, Some(&ir)),
-                    &identity_probe,
-                );
-                return Err(err);
+                preflight_err = Some(HookError::bad_input(Reason::new(
+                    keys::CALIB_NOT_RECOGNIZED,
+                )));
+                calibration::Mode::None
+            }
+            /* 校准 3MF 里的非校准模型：由用户点「强制打印」才降级，答复只改这一趟。 */
+            postprocess::postproc::calib_models::CalibVerdict::NotCalibrationModel => {
+                match ui.client() {
+                    Some(client) => {
+                        let question = Reason::new(keys::CALIB_NOT_MODEL_QUESTION).text();
+                        let mut asker = ChannelAsker { client };
+                        match asker.ask_calibration_not_a_model(&question) {
+                            Some(id) if id == crate::hook_ipc::CHOICE_FORCE_PRINT => {
+                                calibration::Mode::None
+                            }
+                            _ => {
+                                preflight_err = Some(HookError::stopped(Reason::new(
+                                    keys::CALIB_NOT_MODEL_STOPPED,
+                                )));
+                                calibration::Mode::None
+                            }
+                        }
+                    }
+                    None => {
+                        preflight_err =
+                            Some(HookError::bad_input(Reason::new(keys::CALIB_NOT_MODEL)));
+                        calibration::Mode::None
+                    }
+                }
             }
         }
     };
+    if let Some(err) = preflight_err {
+        let ff = FailureFacts::capture(
+            &ir,
+            &content,
+            &raw,
+            job,
+            "",
+            &opening_slicer,
+            opening_layer_height,
+            opening_nozzle,
+        );
+        archive_failure(
+            &archived,
+            job,
+            &preset_machine,
+            &err,
+            true,
+            raw.len() as u64,
+            started_at,
+            started,
+            /* 管线还没进（判在读身份这一步），没有步骤账 */
+            Vec::new(),
+            None,
+            Some(&ff),
+            relocation.as_ref(),
+            model_map_from(&content, Some(&ir)),
+            &identity_probe,
+        );
+        return Err(err);
+    }
     if let (true, Some(client)) = (
         postprocess::postproc::calibration::is_any(calib_mode),
         ui.client(),
@@ -2431,6 +2478,36 @@ impl ProgressSink for StepRecorder<'_> {
 struct ChannelAsker<'a> {
     client: &'a crate::hook_ipc::Client,
 }
+impl ChannelAsker<'_> {
+    /// 校准 3MF 里这一盘不是校准模型那一问：停下 / 按普通模型继续。
+    fn ask_calibration_not_a_model(&mut self, question: &str) -> Option<String> {
+        use crate::hook_ipc::{
+            QuestionChoice, CHOICE_FORCE_PRINT, CHOICE_STOP, QKIND_CALIBRATION_NOT_A_MODEL,
+        };
+        let choices = vec![
+            QuestionChoice {
+                id: CHOICE_STOP.to_owned(),
+                label: Reason::new(keys::CHOICE_CALIB_NOT_MODEL_STOP).text(),
+                hint: None,
+                accent: false,
+            },
+            QuestionChoice {
+                id: CHOICE_FORCE_PRINT.to_owned(),
+                label: Reason::new(keys::CHOICE_CALIB_FORCE_PRINT).text(),
+                hint: Some(Reason::new(keys::CHOICE_CALIB_FORCE_PRINT_HINT).text()),
+                accent: true,
+            },
+        ];
+        let answer = self.client.ask(
+            QKIND_CALIBRATION_NOT_A_MODEL,
+            question,
+            choices,
+            CHOICE_STOP,
+        )?;
+        /* 超时 / 停下 ⇒ 当成"没答"，由调用方走停下那一路 */
+        (answer != CHOICE_STOP).then_some(answer)
+    }
+}
 impl Asker for ChannelAsker<'_> {
     fn confirm(&mut self, question: &str) -> bool {
         /* 机型那一问：不摆选项表（界面用默认那两颗），超时 = 停下（`stop`） */
@@ -3142,6 +3219,37 @@ mod tests {
             postprocess::ir::CALIBRATION_EXEC_PRINT_THEN_CALIBRATE
         );
         assert_eq!(calib_choice_of("keep"), "print");
+    }
+
+    /// 「强制打印」那一问的线格式：问句种类与答复 id 是前后端约定。
+    #[test]
+    fn force_print_question_wire_names_are_stable() {
+        assert_eq!(
+            crate::hook_ipc::QKIND_CALIBRATION_NOT_A_MODEL,
+            "calibration-not-a-model"
+        );
+        assert_eq!(crate::hook_ipc::CHOICE_FORCE_PRINT, "force-print");
+        assert_ne!(
+            crate::hook_ipc::CHOICE_FORCE_PRINT,
+            crate::hook_ipc::CHOICE_CALIB_PRINT
+        );
+        assert_ne!(
+            crate::hook_ipc::CHOICE_FORCE_PRINT,
+            crate::hook_ipc::CHOICE_CALIB_DIRECT
+        );
+    }
+
+    /// 强制模式开启与校准 3MF 里的非校准模型各有自己的码，报告与探针据此分开数。
+    #[test]
+    fn not_a_model_and_force_mode_failures_carry_distinct_codes() {
+        assert_eq!(
+            messages::code_of(keys::CALIB_NOT_RECOGNIZED).as_deref(),
+            Some("E_CALIB_UNRECOGNIZED_001")
+        );
+        assert_eq!(
+            messages::code_of(keys::CALIB_NOT_MODEL).as_deref(),
+            Some("E_CALIB_NOT_MODEL_001")
+        );
     }
 
     fn job(toml: &std::path::Path, gcode: &std::path::Path) -> HookJob {

@@ -320,6 +320,7 @@ export function useCalibration(preset: PresetState): Calibration {
     if (!draft) return
     const copy = preset.status === 'ready' ? preset.preset.local : null
     if (copy === null) return
+    const before = lastAxesRef.current
     setSaved(draft)
     lastAxesRef.current = draft
     setZPick(null)
@@ -341,8 +342,10 @@ export function useCalibration(preset: PresetState): Calibration {
         if (guidesEnabled()) setResliceAsk(true)
       },
       () => {
-        /* 保存失败什么都不做：`savedNote` 那条绿字与控制台已经说过了，
-           这里不叠第二句，更不该在这种时候还问重切 */
+        /* 盘上没写成：把乐观置上的"已保存"退回提交前那一份，不留下假象 */
+        setSaved(before)
+        lastAxesRef.current = before
+        setSavedNote(false)
       },
     )
   }, [draft, preset])

@@ -1788,7 +1788,8 @@ export default function PostProcessModal({
        * - `machine-mismatch` / `debug-plan` = 警告橙：前者是"结果可能出错"，
        *   后者是"接下来笔会真动、不是打印" —— 两种都要先拦住看一眼；
        * - `calibration-mode` = 中性绿：**不是出错**，是"这一盘怎么跑"的流程选择，
-       *   拿警告色去说它会让用户以为出了问题。
+       *   拿警告色去说它会让用户以为出了问题；
+       * - `calibration-not-a-model` = 警告橙：3MF 带校准身份，但这一盘不是任何一块校准板。
        *
        * ★ 种类串必须与后端常量**逐字一致**（`hook_ipc::QKIND_*`）：对不上就落到兜底
        *   那条橙框（校准那一问曾经被套上"预设与机型不匹配 · 等你决定"，2026-10-17）。
@@ -1800,9 +1801,11 @@ export default function PostProcessModal({
         title={tr(
           run.question.questionKind === 'debug-plan'
             ? 'postproc.ask.debugTitle'
-            : run.question.questionKind === 'calibration-mode'
-              ? 'postproc.ask.calibTitle'
-              : 'postproc.ask.machineTitle',
+            : run.question.questionKind === 'calibration-not-a-model'
+              ? 'postproc.ask.calibNotModelTitle'
+              : run.question.questionKind === 'calibration-mode'
+                ? 'postproc.ask.calibTitle'
+                : 'postproc.ask.machineTitle',
         )}
         lines={run.question.text.split('\n')}
         hint={countdownText(run.question.deadlineUnixMs) ?? undefined}

@@ -188,6 +188,7 @@ import { usePresetUsage } from '../state/usePresetUsage'
 /* 设置页那一格「复制出来的也跟着云端更新」：本地行画不画「有新版」看它（2026-10-20） */
 /* 「下载之后自动使用」（2026-11-18）：云端表那颗「下载」取回之后接不接着走「使用」 */
 import { useAutoUseAfterDownload, useCopiesFollowCloud } from '../state/deliveryState'
+import { useActionGuard } from './useActionGuard'
 /* 「正文草稿被别处作废」那一嗓子（参数页保存时发）：编辑器还开着就按新内容重开 */
 import { lastTextDraftDroppedPath, useTextDraftDrop } from '../state/draftState'
 import { FieldLayer } from '../../components/field'
@@ -221,7 +222,7 @@ import CompareModal from './CompareModal'
 import PlacementsModal from './PlacementsModal'
 import TextDiffModal from './TextDiffModal'
 import PresetScopeBar from './PresetScopeBar'
-import PresetStatusPill, { PresetBranchFilter, PresetSlicerPill } from './PresetStatusPill'
+import PresetStatusPill, { PresetSlicerPill } from './PresetStatusPill'
 import PresetTable from './PresetTable'
 import {
   ARCHIVE_DRAWER,
@@ -628,6 +629,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const data = usePresetData(imp.revision)
   const page = usePresetPage(data)
   /*
+   * 右键菜单的 onSelect 捕获的是打开菜单那一刻的 row。下载完成后那一份已经翻成"本地已有"，
+   * 但旧闭包里的 row 还是"未下载"，菜单却重新变亮可点。动作入口从这里读当帧的表来重判，
+   * 表由 `usePresetPage` 按最新底账算出，与行 / 菜单 / 详情共用同一套判据。
+   */
+  const pageRef = useRef(page)
+  pageRef.current = page
+  /*
    * 搜索框的两个 ref（**必须住在这儿**：本组件后面有提前 return，hook 不能跟在后面）
    * —— 见 `searchNode` 那段注：非受控输入 + 防抖筛表。
    */
@@ -965,49 +973,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const [placements, setPlacements] = useState<{ fileName: string } | null>(null)
   /*
-   * 正在做动作的那几行（rowKey 集合）—— 只用来把**那一颗**按钮禁掉 / 换成「下载中」。
-   *
-   * ★ 从"一个 key"改成"一个集合"（2026-10-29 作者）：「我点击了下载之后它变成了灰色，
-   *   然后我点击了另外一个的下载，然后另外一个变成了灰色，之前那一个又恢复成了原本的颜色」。
-   *   根因是单值：后点的那一行把前一行**顶掉**，前一行于是回到可点状态（它确实还在下），
-   *   而任何一个完成都会把所有人清空。动作本来就是各下各的，状态也该各记各的。
-   *
-   * 不做全表遮罩：一行的动作不该把整张表锁住（这条没变）。
+   * 行内按钮、右键菜单与详情卡的动作共用这一套在途守卫。
+   * `busy` 给界面画禁用态，`enter` 是同步账，挡住下一次渲染之前的连点。
+   * 不做全表遮罩：各行动作各记各的，两行可以同时在跑。
    */
-  const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(() => new Set())
-  const markBusy = (key: string) =>
-    setBusyKeys((cur) => {
-      if (cur.has(key)) return cur
-      const next = new Set(cur)
-      next.add(key)
-      return next
-    })
-  const clearBusy = (key: string) =>
-    setBusyKeys((cur) => {
-      if (!cur.has(key)) return cur
-      const next = new Set(cur)
-      next.delete(key)
-      return next
-    })
-  /*
-   * **行内动作的同步在途闸**（2026-10-20）。
-   *
-   * `busyKey` 要等下一次渲染才把按钮 `disabled` 掉 —— 手快连点（或回车连按）时，
-   * 第二下仍会进到处理函数里，后端就真的落两份（作者：「下载的时候我点得很快，
-   * 它好像就重复了」）。所以再记一份**同步**的账：进入时先占住 `动作:行键`，
-   * 占不到就**静默丢掉这一下**（按钮本来就该是灰的，不需要再解释一句）。
-   *
-   * 键带动作名：同一行上「下载」与「使用」互不相干，不该互相挡住。
-   */
-  const inflightRef = useRef(new Set<string>())
-  const enter = (key: string): boolean => {
-    if (inflightRef.current.has(key)) return false
-    inflightRef.current.add(key)
-    return true
-  }
-  const leave = (key: string) => {
-    inflightRef.current.delete(key)
-  }
+  const { isBusy, enter, leave } = useActionGuard()
   /*
    * 批量入口 2026-10-10 退役（作者：「这个可以去掉的……跟本地的一样就可以」）：
    * 云端表的呈现与本地表一致，只在行上逐份下载 / 更新，不再有整批按钮。
@@ -1663,8 +1633,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     page.setKind('mkp')
     page.setScope('local')
     data.pickMachine('')
-    /* 在用的那份可能来自别的分支 —— 不放开分支筛选就找不到它 */
-    page.setBranchFilter('all')
+    /* 在用的那份可能来自别的来源 —— 不放开来源筛选就找不到它 */
+    page.setSourceFilter('all')
     window.setTimeout(() => {
       const row = rootRef.current?.querySelector('tr[data-live="true"]') as HTMLElement | null
       if (row !== null) flashRow(row)
@@ -1703,8 +1673,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     if (target.kind !== null) page.setKind(target.kind)
     data.pickMachine('')
     page.setQuery('')
-    /* 目标行可能在另一个分支下 —— 同上，放开分支筛选才送得到 */
-    page.setBranchFilter('all')
+    /* 目标行可能在另一个来源下 —— 同上，放开来源筛选才送得到 */
+    page.setSourceFilter('all')
     /* `expandedKey` **一个字都不动** —— 见上面那段：只滚 + 闪，不动他手上那张卡 */
     window.setTimeout(() => {
       const row = rootRef.current?.querySelector(
@@ -1815,17 +1785,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *   ③ **有要改值的项** ⇒ 顺势打开「修改参数 → 选择要更新的参数」那一屏，
    *      由用户勾（采用云端新值）/ 不勾（保持我的值）后一次落下去。
    *
-   * `behind` = 要更新的那一份本地文件；`row` = 发起它的那一行（忙的那一颗按钮认它）；
-   * `fileName` = 它对应的云端文件名（文案用）。
+   * `behind` = 要更新的那一份本地文件；`fileName` = 它对应的云端文件名（文案用）。
    *
    * ★ 定义写在两个调用方**前面**（`const` 有暂时性死区：写在后面调用方拿不到）。
    */
   const applyCloudUpdate = async (
     behind: LocalPresetFile,
-    row: PresetTableRow,
     fileName: string,
   ): Promise<void> => {
-    markBusy(row.rowKey)
     /*
      * ② 读逐参数三方账。`fetchMissing: true` 允许后端**顺手把云端新版字节取回来**
      * （内部基准，**不动本地这份文件**）—— 所以这里不需要先「下载」一遍。
@@ -1834,7 +1801,6 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * 因为用户到这一步已经点了「更新」（作者 2026-10-20：不点就别替他去取）。
      */
     const sync = await data.presetSync(behind.path, true)
-    clearBusy(row.rowKey)
     /*
      * `null` = 这一份不认云端（复制出来的那一份）。账本已经把它滤掉了，
      * 正常走不到这里 —— 万一走到（数据刚被别处改过），也**不许当成"零项待处理"**，
@@ -1934,17 +1900,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       setNote({ text: msg('presets.page.update.gone', { name: row.fileName }), bad: true })
       return
     }
-    /* 连点的第二下丢掉（见 `inflightRef`）—— 两次更新会各写一遍盘 */
-    const key = `update:${row.rowKey}`
-    if (!enter(key)) return
+    /* 连点的第二下丢掉（见 `useActionGuard`）—— 两次更新会各写一遍盘 */
+    if (!enter('update', row.rowKey)) return
     const cloudName = row.basedOnCloud ?? row.fileName
     setNote({ text: msg('presets.page.update.running', { name: row.fileName }), bad: false })
-    void applyCloudUpdate(local, row, cloudName)
+    void applyCloudUpdate(local, cloudName)
       .catch((e: unknown) => {
-        clearBusy(row.rowKey)
         setNote({ text: msg('presets.page.update.failed', { detail: errorText(e) }), bad: true })
       })
-      .finally(() => leave(key))
+      .finally(() => leave('update', row.rowKey))
   }
 
   /**
@@ -1959,11 +1923,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const runUpdate = (row: PresetTableRow) => {
     if (row.scope !== 'cloud') return
     /* 与本地行那颗「更新」共用一把锁：同一行上两条入口都是"更新这一份" */
-    const key = `update:${row.rowKey}`
-    if (!enter(key)) return
+    if (!enter('update', row.rowKey)) return
     const fileName = row.fileName
     void (async () => {
-      markBusy(row.rowKey)
       setNote({ text: msg('presets.page.update.running', { name: fileName }), bad: false })
       /*
        * ① 更新的是**本地那一份**：它跟这个云端条目的关系**只看身份账本**
@@ -1988,20 +1950,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           )
         }) ?? null
       if (behind === null) {
-        clearBusy(row.rowKey)
         setNote({
           text: msg('presets.page.update.nothingToDo', { name: fileName }),
           bad: false,
         })
         return
       }
-      await applyCloudUpdate(behind, row, fileName)
+      await applyCloudUpdate(behind, fileName)
     })()
       .catch((e: unknown) => {
-        clearBusy(row.rowKey)
         setNote({ text: msg('presets.page.update.failed', { detail: errorText(e) }), bad: true })
       })
-      .finally(() => leave(key))
+      .finally(() => leave('update', row.rowKey))
   }
 
   /**
@@ -2010,14 +1970,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const confirmTakenImport = () => {
     if (takenAsk === null || takenAsk.busy) return
-    /* 这颗按钮的 `disabled` 也要等一帧 —— 连点两下会导入两份（自动改名的第二份） */
-    const key = `import:${takenAsk.fileName}`
-    if (!enter(key)) return
+    /* 连点两下会导入两份（自动改名的第二份），同步闸先占住 */
+    if (!enter('import', takenAsk.fileName)) return
     const ask = takenAsk
     setTakenAsk({ ...ask, busy: true })
     data.fetchCloud(ask.fileName, true).then(
       (done) => {
-        leave(key)
+        leave('import', ask.fileName)
         setTakenAsk(null)
         setNote({
           text: msg('presets.page.import.takenDone', { name: done.fileName }),
@@ -2025,7 +1984,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         })
       },
       (e: unknown) => {
-        leave(key)
+        leave('import', ask.fileName)
         setTakenAsk((cur) => (cur === null ? cur : { ...cur, busy: false }))
         setNote({ text: msg('presets.page.import.failed', { detail: errorText(e) }), bad: true })
       },
@@ -2050,30 +2009,44 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      */
     const place = opts?.place ?? true
     /*
-     * **连点的第二下丢掉**（见 `inflightRef`）。作者 2026-10-20：
-     * 「下载的时候，我点得很快，就会出现这个情况，它好像就重复了」——
-     * 第一下已经把本地那份落下来了，第二下就变成"撞名、再导入一份"。
+     * 旧菜单 / 旧按钮带的 row 是打开那一刻的快照。下载完成后底账已经翻成"本地已有"，
+     * 但那份旧 row 还写着"未下载" ⇒ 菜单又变亮、点了会重复取回。动作入口按 rowKey
+     * 到当帧的表里重读这一行，判据与行 / 菜单 / 详情同源，不另写一套。
+     */
+    if (row.scope === 'cloud') {
+      const fresh =
+        pageRef.current.cloud.rows.find((r) => r.rowKey === row.rowKey) ??
+        pageRef.current.local.rows.find((r) => r.rowKey === row.rowKey)
+      if (fresh !== undefined && fresh.scope === 'cloud') {
+        const slicer = fresh.localState === undefined ? slicerCloudActionOf(fresh) : null
+        const act = slicer !== null ? slicer.action : updateStatusOf(fresh).action
+        if (act === 'none') {
+          setNote({ text: msg('presets.page.download.alreadyLatest', { name: row.fileName }), bad: false })
+          return
+        }
+      }
+    }
+    /*
+     * 连点的第二下丢掉（见 `useActionGuard`）：第一下已经把本地那份落下来了，
+     * 第二下就变成"撞名、再导入一份"。三个入口共用这把锁。
      */
     /* 云端较旧的行任何入口都不该走到这里（按钮与右键项都已撤）—— 兜底也别做反向更新 */
     if (row.scope === 'cloud' && row.basedOn === 'newer') return
-    const key = `download:${row.rowKey}`
-    if (!enter(key)) return
+    if (!enter('download', row.rowKey)) return
     if (row.scope === 'cloud' && row.localState !== undefined) {
       /* 「更新」≠ 只把云端取回来：要把差异处理到本地这份上（见 runUpdate）。
          判据与徽章/按钮同源：`updateStatusOf` 说更新才更新，`stale` 不再是唯一入口。 */
       if (updateStatusOf(row).action === 'update') {
         /* 交给更新那把锁（它自己也防连点），这一把先放掉 */
-        leave(key)
+        leave('download', row.rowKey)
         runUpdate(row)
         return
       }
       /* 「下载」：本地还没有这一份 —— 取回云端当前版并落一份本地的 */
-      markBusy(row.rowKey)
       setNote({ text: msg('presets.page.download.running', { name: row.fileName }), bad: false })
       data.fetchCloud(row.fileName).then(
         async (done) => {
-          leave(key)
-          clearBusy(row.rowKey)
+          leave('download', row.rowKey)
           /*
            * ★ a04：**同名已经有一份了** —— 不覆盖、也不静默：问用户
            * （同意就自动改一个没被占的名字落一份新的，原来那份一个字节不动）。
@@ -2117,8 +2090,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           }
         },
         (e: unknown) => {
-          leave(key)
-          clearBusy(row.rowKey)
+          leave('download', row.rowKey)
           /* 断网 / 取不回来照实说：不假装已经可以使用（它确实还不能用） */
           setNote({ text: msg('presets.page.download.failed', { detail: errorText(e) }), bad: true })
         },
@@ -2133,7 +2105,6 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
        * 别在这里分支去找"另一个命令"：没有那个命令。
        */
       const updating = row.presetState === 'tampered' || row.presetState === 'old'
-      markBusy(row.rowKey)
       setNote({
         text: updating
           ? msg('presets.page.update.running', { name: row.fileName })
@@ -2149,8 +2120,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         )
         .then(
           (receipt) => {
-            leave(key)
-            clearBusy(row.rowKey)
+            leave('download', row.rowKey)
             /*
              * 回执把两件事分开说：**取回来 / 校验过没有**、**放进切片器成没成**。
              *   · `placed` 缺席 = 这次没做放入（MKP 预设 / 「下载不放入」）；
@@ -2186,8 +2156,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             })
           },
           (e: unknown) => {
-            leave(key)
-            clearBusy(row.rowKey)
+            leave('download', row.rowKey)
             setNote({
               text: updating
                 ? msg('presets.page.update.failed', { detail: errorText(e) })
@@ -2203,7 +2172,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * 它的「下载」残支 2026-10-09 按用户裁断**连入口一起撤了**（`downloadFiles`
      * 从契约里删掉）—— 界面上这类行不再给下载按钮，走到这里说明按钮闸漏了。
      */
-    leave(key)
+    leave('download', row.rowKey)
     setNote({
       text: msg('presets.page.download.notDeliverable', { name: row.fileName }),
       bad: true,
@@ -2220,14 +2189,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const redownloadLocal = (row: PresetTableRow) => {
     if (row.origin !== 'local') return
     const fileName = row.cloudFile ?? row.fileName
-    const key = `redownload:${row.rowKey}`
-    if (!enter(key)) return
-    markBusy(row.rowKey)
+    if (!enter('redownload', row.rowKey)) return
     setNote({ text: msg('presets.page.download.running', { name: fileName }), bad: false })
     data.fetchCloud(fileName).then(
       (done) => {
-        leave(key)
-        clearBusy(row.rowKey)
+        leave('redownload', row.rowKey)
         if (done.takenBy !== undefined) {
           setTakenAsk({
             fileName,
@@ -2240,8 +2206,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         setNote({ text: msg('presets.page.download.done', { name: done.fileName }), bad: false })
       },
       (e: unknown) => {
-        leave(key)
-        clearBusy(row.rowKey)
+        leave('redownload', row.rowKey)
         setNote({ text: msg('presets.page.download.failed', { detail: errorText(e) }), bad: true })
       },
     )
@@ -2817,9 +2782,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const runDuplicate = (row: PresetTableRow) => {
     menu.close()
-    /* 连点两下 = 复制出两份（`copy`、`copy 2`）—— 第二下丢掉（见 `inflightRef`） */
-    const key = `duplicate:${row.rowKey}`
-    if (!enter(key)) return
+    /* 连点两下 = 复制出两份（`copy`、`copy 2`）—— 第二下丢掉（见 `useActionGuard`） */
+    if (!enter('duplicate', row.rowKey)) return
     const name = duplicateNameOf(
       row.fileName,
       data.local.map((f) => f.fileName),
@@ -2827,7 +2791,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     setNote({ text: msg('presets.page.copy.running', { name: row.fileName }), bad: false })
     data.copyAsNew(row.path, name).then(
       (done) => {
-        leave(key)
+        leave('duplicate', row.rowKey)
         setNote({
           /*
            * 名字有上限（255 字节）：原名本来就长的时候 `<原名> copy.toml` 会超 ——
@@ -2840,7 +2804,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         })
       },
       (e: unknown) => {
-        leave(key)
+        leave('duplicate', row.rowKey)
         setNote({ text: msg('presets.page.copy.failed', { detail: errorText(e) }), bad: true })
       },
     )
@@ -3248,18 +3212,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * **不用发网络**：字节在你盘上（要拿云端新版是云端表「更新」那件事）。
    */
   const runUse = (row: PresetLocalRow) => {
-    const key = `use:${row.rowKey}`
-    if (!enter(key)) return
-    markBusy(row.rowKey)
+    if (!enter('use', row.rowKey)) return
     data.apply(row.fileName, row.path).then(
       () => {
-        leave(key)
-        clearBusy(row.rowKey)
+        leave('use', row.rowKey)
         setNote({ text: msg('presets.page.use.done', { name: row.fileName }), bad: false })
       },
       (e: unknown) => {
-        leave(key)
-        clearBusy(row.rowKey)
+        leave('use', row.rowKey)
         setNote({ text: msg('presets.page.use.failed', { detail: errorText(e) }), bad: true })
       },
     )
@@ -3273,11 +3233,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * `run/active-preset.json`）—— **磁盘上一个字节都不动**；撤完 pill 左拍回到
    * 「还没有使用任何预设」。不做二次确认：点错了再点「使用」就回来了。
    */
-  const runUnuse = () => {
+  const runUnuse = (row: PresetLocalRow) => {
+    if (!enter('unuse', row.rowKey)) return
     data.clearApply().then(
-      () => setNote({ text: msg('presets.page.use.cleared'), bad: false }),
-      (e: unknown) =>
-        setNote({ text: msg('presets.page.use.clearFailed', { detail: errorText(e) }), bad: true }),
+      () => {
+        leave('unuse', row.rowKey)
+        setNote({ text: msg('presets.page.use.cleared'), bad: false })
+      },
+      (e: unknown) => {
+        leave('unuse', row.rowKey)
+        setNote({ text: msg('presets.page.use.clearFailed', { detail: errorText(e) }), bad: true })
+      },
     )
   }
 
@@ -3542,6 +3508,19 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     return { id: 'compare', label: tr('presets.page.menu.compare'), onSelect: () => pickForCompare(row) }
   }
 
+  /*
+   * 菜单项与行内按钮读同一份忙碌态。动作在途时给一句禁用原因（不是空灰），
+   * 让用户知道这项正在做、不用再点。
+   */
+  const busyWhy = (action: string, target: string, isUpdate = false): string | undefined =>
+    isBusy(action, target) || (action === 'download' && isBusy('update', target))
+      ? tr(
+          isUpdate || isBusy('update', target)
+            ? 'presets.tree.cloudLocalAction.updating'
+            : 'presets.tree.cloudLocalAction.downloading',
+        )
+      : undefined
+
   const entriesOf = (row: PresetTableRow | null): ContextMenuEntry[] => {
     if (row === null) return []
 
@@ -3588,7 +3567,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             : slicer.gotIt
               ? tr(CLOUD_STATE_TEXT.downloaded)
               : tr(slicer.action === 'update' ? UPDATE_ACTION_TEXT.update : UPDATE_ACTION_TEXT.missing)
-      const disabled =
+      const whyNot =
         action === 'none'
           ? slicer !== null
             ? tr(slicer.older ? 'presets.table.staleOlder.title' : CLOUD_STATE_TEXT.downloaded)
@@ -3596,6 +3575,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
               ? tr('presets.table.staleOlder.title')
               : tr(st!.text, st!.params)
           : undefined
+      const disabled = whyNot ?? busyWhy('download', row.rowKey, action === 'update')
       return [
         {
           id: 'download',
@@ -3620,6 +3600,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     ? 'presets.page.menu.updateNoPlace'
                     : 'presets.page.menu.downloadNoPlace',
                 ),
+                disabled: busyWhy('download', row.rowKey, action === 'update'),
                 onSelect: () => download(row, { place: false }),
               },
             ]
@@ -3668,12 +3649,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
        * 其余行的原因照旧按 `useWhyNot` 给（不给必报错的项）。
        */
       const useEntry: ContextMenuEntry = row.live
-        ? { id: 'unuse', icon: 'close', label: tr(ASSET_USE_TEXT.cancel), onSelect: runUnuse }
+        ? {
+            id: 'unuse',
+            icon: 'close',
+            label: tr(ASSET_USE_TEXT.cancel),
+            disabled: isBusy('unuse', row.rowKey) ? tr('presets.page.use.clearing') : undefined,
+            onSelect: () => runUnuse(row),
+          }
         : {
             id: 'use',
             icon: 'check',
             label: tr(ASSET_USE_TEXT.off),
-            disabled: useWhyNot,
+            disabled: useWhyNot ?? (isBusy('use', row.rowKey) ? tr('presets.page.use.using') : undefined),
             onSelect: () => runUse(row),
           }
       /*
@@ -3786,6 +3773,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 id: 'update',
                 icon: 'download',
                 label: tr(UPDATE_ACTION_TEXT.update),
+                disabled: busyWhy('update', row.rowKey, true),
                 onSelect: () => runUpdateLocal(row),
               },
             ] satisfies ContextMenuEntry[])
@@ -3801,6 +3789,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 id: 'redownload',
                 icon: 'download',
                 label: tr('presets.page.menu.redownload'),
+                disabled: busyWhy('redownload', row.rowKey),
                 onSelect: () => redownloadLocal(row),
               },
             ] satisfies ContextMenuEntry[])
@@ -3814,7 +3803,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
              的 `copy`（两份纸）分开：两行都叫"复制"，字形要一眼认得出来 */
           icon: 'fileCopy',
           label: tr(LOCAL_COPY.cell),
-          disabled: copyWhyNot(row),
+          disabled:
+            copyWhyNot(row) ??
+            (isBusy('duplicate', row.rowKey)
+              ? tr('presets.page.copy.running', { name: row.fileName })
+              : undefined),
           onSelect: () => runDuplicate(row),
         },
         {
@@ -4442,21 +4435,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   machines={data.machines}
                   machineId={data.machineId}
                   onPick={pickMachine}
+                  source={
+                    page.scope === 'local'
+                      ? {
+                          current: page.currentSource,
+                          sources: page.sources,
+                          unfiledCount: page.unfiledCount,
+                          value: page.sourceFilter,
+                          onPick: page.setSourceFilter,
+                        }
+                      : undefined
+                  }
                 />
-                {/*
-                 * **分支筛选**：只在本地表、且本机出现过两个以上分支时出现。
-                 *
-                 * 和机型筛选**同一颗件、同一张弹层**（`PresetBranchFilter`），只是
-                 * 默认档是「当前分支」—— 别的分支那几份仍在盘上，切到「全部来源」才看得见。
-                 * 只有一个分支的用户完全看不到这一格。
-                 */}
-                {page.scope === 'local' && page.branches.length >= 2 ? (
-                  <PresetBranchFilter
-                    current={page.currentBranch}
-                    value={page.branchFilter}
-                    onPick={page.setBranchFilter}
-                  />
-                ) : null}
                 {metaNode}
               </span>
             </>
@@ -4562,7 +4552,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                  * 操作列常驻：本地表那一颗按钮的字随类型变（应用 / 复制），云端表是下载。
                  * 右键菜单**照旧全在**，操作列只是把最常用的那一个摆到明面上。
                  */
-                busyKeys={busyKeys}
+                isBusy={isBusy}
                 /* 表头排序（2026-10-16）：状态在 `page` 里（落会话），表这边只把点击交出去 */
                 sort={page.sort}
                 onSort={page.toggleSort}

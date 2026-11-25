@@ -432,6 +432,13 @@ fn cloud_text_for(
      * 表现成 `cloudReady: false` + `versionAdvanced: true`（界面说"云端有新版本，
      * 还没取回来"）—— 比整页报错有用得多。
      */
+    /*
+     * 同一份文件正在下载时不再发一次取回（在途登记与 download_runtime_file / fetch_cloud_preset
+     * 共用）。占不到不是错误 —— 这一路本来就允许"没取回来"，照旧比不了即可。
+     */
+    let Some(_guard) = super::catalog::enter_download("cloudtext", &file.file_name) else {
+        return Ok(None);
+    };
     if let Err(e) = super::catalog::deliver_cloud_bytes(root, file) {
         tracing::warn!(file = %file.file_name, detail = %e.message, "云端当前版没取回来（照旧比不了）");
         return Ok(None);

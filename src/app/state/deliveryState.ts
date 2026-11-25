@@ -54,6 +54,11 @@ export function deliveryMutated(): void {
   for (const listener of listeners) listener()
 }
 
+/** 投递面当前代次（同步读）。写完立刻重读的那一方用它记下"这一代已经对过账" */
+export function deliveryRevisionNow(): number {
+  return revision
+}
+
 /** 投递面代次。放进 effect 依赖里：变了就重读你自己那一路 */
 export function useDeliveryRevision(): number {
   return useSyncExternalStore(

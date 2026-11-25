@@ -438,12 +438,10 @@ interface Props {
    */
   onPin: (row: PresetTableRow) => void
   /**
-   * 正在做动作的那几行（rowKey 集合）。只禁那几颗按钮，不锁整张表。
-   *
-   * **是集合不是单值**（2026-10-29 作者）：两次下载可以同时在跑，后点的那一行
-   * 不该把前一行的「进行中」顶掉 —— 详见 `PagePresets` 里 `busyKeys` 的注释。
+   * 这一行上某个动作是否正在跑。`动作:目标` 那套守卫的判断，按钮与右键菜单共用。
+   * 按动作查而不是整行一个忙：同一行的「下载」与「使用」互不挡。
    */
-  busyKeys: ReadonlySet<string>
+  isBusy: (action: string, target: string) => boolean
   /**
    * 定位到来源那一行（「复制自 X」可点击那一格的落点）：切轴 + 展开 + 滚动 + 闪光
    * 全在页面层（与状态条「定位」同一个 overlay 机制），表这边只把点击交出去。
@@ -579,7 +577,7 @@ export default function PresetTable({
   failure,
   triggerProps,
   activeKey,
-  busyKeys,
+  isBusy,
   /** 展开详情的那一行(rowKey)。状态在页面层(右键菜单也要能展开它) */
   expandedKey,
   onToggleExpand,
@@ -886,7 +884,12 @@ export default function PresetTable({
                * 云端的「已下载」不画线 —— 下载不等于生效，九行里有八行带绿线那道线就没意思了。
                */
               const inUse = row.scope === 'local' ? row.live : row.applied
-              const busy = busyKeys.has(row.rowKey)
+              /* 各动作各记各的忙：同一行的下载与使用互不挡 */
+              const downloadBusy = isBusy('download', row.rowKey) || isBusy('update', row.rowKey)
+              const useBusy = isBusy('use', row.rowKey)
+              const liveBusy = isBusy('live', row.rowKey)
+              const remarkBusy = isBusy('remark', row.rowKey)
+              const attrBusy = isBusy('attribution', row.rowKey)
               /*
                * preset 行的**云端 vs 盘上**三态（未下载 / 已下载 / 有更新）——
                * 状态主词与按钮都从它出（见 `updateStateOf`）。以前"盘上字节认不出"那一档
@@ -1316,7 +1319,7 @@ export default function PresetTable({
                        */
                       <CloudLocalAction
                         row={row}
-                        busy={busy}
+                        busy={downloadBusy}
                         onDownload={onDownload}
                       />
                     ) : row.scope === 'local' && mkp ? (
@@ -1374,7 +1377,7 @@ export default function PresetTable({
                         <button
                           type="button"
                           className={s.useBtn}
-                          disabled={busy}
+                          disabled={useBusy}
                           onClick={() => onUse(row)}
                         >
                           {/* 隐形的那一份是「在用」那一档：它更长，撑住了两档同宽 */}
@@ -1401,7 +1404,7 @@ export default function PresetTable({
                         <button
                           type="button"
                           className={s.updateBtn}
-                          disabled={busy}
+                          disabled={downloadBusy}
                           onClick={() => onDownload(row)}
                         >
                           {tr(UPDATE_ACTION_TEXT.update)}
@@ -1430,7 +1433,7 @@ export default function PresetTable({
                           <button
                             type="button"
                             className={s.useBtn}
-                            disabled={busy}
+                            disabled={liveBusy}
                            
                             onClick={() => onLive(row)}
                           >
@@ -1447,7 +1450,7 @@ export default function PresetTable({
                         <button
                           type="button"
                           className={s.actBtn}
-                          disabled={busy}
+                          disabled={liveBusy}
                          
                           onClick={() => onLive(row)}
                         >
@@ -1473,7 +1476,7 @@ export default function PresetTable({
                         <button
                           type="button"
                           className={s.actBtn}
-                          disabled={busy}
+                          disabled={liveBusy}
                          
                           onClick={() => onLive(row)}
                         >
@@ -1496,7 +1499,7 @@ export default function PresetTable({
                       <button
                         type="button"
                         className={needsUpdate ? s.updateBtn : s.actBtn}
-                        disabled={busy}
+                        disabled={downloadBusy}
                         onClick={() => onDownload(row)}
                       >
                         {needsUpdate
@@ -1836,7 +1839,7 @@ export default function PresetTable({
                                         <button
                                           type="button"
                                           className={`${s.updateBtn} ${s.dInlineAction}`}
-                                          disabled={busy}
+                                          disabled={downloadBusy}
                                           data-tip={tr('presets.table.detail.update.title')}
                                           onClick={() => onUpdateLocal(row)}
                                         >
@@ -2324,7 +2327,7 @@ export default function PresetTable({
                             hasOverride={
                               row.remarkKey !== null && remarks[row.remarkKey] !== undefined
                             }
-                            busy={busy}
+                            busy={remarkBusy}
                             onSave={(remark) => onSetRemark(row.remarkKey ?? '', remark)}
                             onClose={() => setBands((b) => ({ ...b, remark: null }))}
                           />
@@ -2332,7 +2335,7 @@ export default function PresetTable({
                         {attrBand !== null && (
                           <AttrBand
                             open={bands.attr === attrBand}
-                            busy={busy}
+                            busy={attrBusy}
                             machines={machines}
                             machineId={ownMachineId}
                             versionId={ownVersionId}

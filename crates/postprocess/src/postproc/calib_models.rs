@@ -265,12 +265,14 @@ pub enum CalibVerdict {
     Calibration(crate::postproc::calibration::Mode),
     /// **强制校准模式开着、但外形对不上任何一块板** —— 调用方必须停下（不许静默降级成普通模型）。
     Unrecognized,
+    /// **3MF 带着校准身份、但这一盘外形不是任何一块校准板** —— 调用方问用户要不要按普通模型继续。
+    NotCalibrationModel,
 }
 
 /// 身份定案：**强制开关 + 3MF 身份 + 实测外形** 三者一起说。
 ///
-/// - `force == false`（出厂）：3MF 没有身份 ⇒ 普通模型；有身份 ⇒ 能按外形纠就纠
-///   （合并 3MF 里只有一条身份，另一块板会被认错），纠不上就保持原判。
+/// - `force == false`（出厂）：3MF 没有身份 ⇒ 普通模型；有具体身份 ⇒ 能按外形纠就纠，
+///   纠不上就保持原判；身份是 `Combined` 而外形认不出档 ⇒ [`CalibVerdict::NotCalibrationModel`]。
 /// - `force == true`：**不看身份**，只按外形；对不上任何一块板 ⇒ [`CalibVerdict::Unrecognized`]。
 ///
 /// `size` 是 `(宽, 高)`（`disk::compute_bbox` 的实测值）。算不出来（`None`）在强制模式下
@@ -292,11 +294,11 @@ pub fn decide_calibration(
         };
     }
     /* 合体文件（`Combined`）只说"这一盘是校准件"，具体哪一盘**必须**靠外形 ——
-     * 认不出来就停（校**准板当模型打出来比停下更糟**），不许把 `Combined` 带进管线。 */
+     * 认不出来时不许把 `Combined` 带进管线，也不静默当普通模型跑；由调用方问用户。 */
     if marker == Mode::Combined {
         return match by_shape {
             Some(m) => CalibVerdict::Calibration(m),
-            None => CalibVerdict::Unrecognized,
+            None => CalibVerdict::NotCalibrationModel,
         };
     }
     if !is_any(marker) {
@@ -452,9 +454,9 @@ mod tests {
         assert_eq!(detect_mode_by_size(&ps, 60.0, 60.0), None);
     }
 
-    /// 身份定案的三种口径：关着不猜、开着只看外形、外形对不上就判「不是校准件」。
+    /// 身份定案的四种口径：关着不猜、开着只看外形、认不出与校准文件里不是校准模型分开报。
     #[test]
-    fn decide_calibration_covers_all_three_verdicts() {
+    fn decide_calibration_covers_all_four_verdicts() {
         use crate::postproc::calibration::Mode;
         let ps = vec![
             profile("zoffset", &["ZOffset"], 119.58, 13.063),
@@ -510,8 +512,13 @@ mod tests {
         );
         assert_eq!(
             decide_calibration(false, Mode::Combined, unknown, &ps),
+            CalibVerdict::NotCalibrationModel,
+            "合体文件里不是校准模型 ⇒ 由调用方问用户按不按普通模型跑"
+        );
+        assert_eq!(
+            decide_calibration(true, Mode::Combined, unknown, &ps),
             CalibVerdict::Unrecognized,
-            "合体文件认不出哪一盘 ⇒ 停下，不许把 Combined 带进管线"
+            "开着时认不出 ⇒ 停下，与 3MF 身份无关"
         );
     }
 

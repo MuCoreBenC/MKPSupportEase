@@ -661,17 +661,6 @@ export function identityRefOf(key: string | null | undefined): string | null {
 }
 
 /**
- * 这份用户文件**属于哪个来源分支**（ref）。`null` = 没有来源记录（导入 / 手拖）。
- *
- * 只用它分组与筛选：版本新旧仍然由 Rust 侧 `based_on` 回答，这里不重算任何判定。
- */
-export function branchOf(
-  facts: { sourceRef?: string | null } | null | undefined,
-): string | null {
-  return identityRefOf(facts?.sourceRef ?? null)
-}
-
-/**
  * 这份用户文件是不是**下载建的主份**。
  *
  * 云端那一行只认它：同一份云端可能被「另存为 / 复制」出好几份，副本各有各的
@@ -684,34 +673,90 @@ export function isMainCopy(f: { provenanceKind?: string | null }): boolean {
 }
 
 /**
- * 这一份（属于 `mine` 支）算不算"当前这一支的"。
- *
- * - 当前源没有 ref（自建源）⇒ 一律算（不隔离）
- * - 这一份没有来源记录 ⇒ 算（导入 / 老副本，不属于任何分支）
- * - 两边都有且不同 ⇒ **不算**（它在盘上照旧存在，只是不参与当前这一支的认领）
+ * 一份本地文件的**完整来源身份**，与当前源身份同形（`platform#repo@ref`）。
+ * 没有来源记录（导入 / 手拖）⇒ `null`。它只用于本地表分组与筛选。
  */
-export function branchMatches(mine: string | null, current: string | null): boolean {
+export function sourceKeyOf(
+  facts: { sourceRef?: string | null } | null | undefined,
+): string | null {
+  return facts?.sourceRef ?? null
+}
+
+/** 本地表的来源筛选档：当前来源 / 全部 / 没有来源 / 指定完整来源身份 */
+export type SourceFilter = 'current' | 'all' | 'unfiled' | `source:${string}`
+
+/** 把完整来源身份包成筛选值，避开三个保留档名 */
+export function sourceValueOf(key: string): `source:${string}` {
+  return `source:${key}`
+}
+
+/** 从筛选值里取回完整来源身份；三个保留档给 `null` */
+export function keyOfSourceFilter(filter: SourceFilter): string | null {
+  return filter.startsWith('source:') ? filter.slice('source:'.length) : null
+}
+
+/**
+ * 完整来源身份的可读短名：`GitHub · owner/repo · main`、
+ * `127.0.0.1:8787/delivery`。自建源念完整地址与路径，不露内部名 `custom`。
+ */
+export function sourceLabelOf(key: string | null | undefined): string | null {
+  if (!key) return null
+  const hash = key.indexOf('#')
+  if (hash < 0) return key
+  const platform = key.slice(0, hash)
+  const rest = key.slice(hash + 1)
+  const at = rest.lastIndexOf('@')
+  const repo = at >= 0 ? rest.slice(0, at) : rest
+  const ref = at >= 0 ? rest.slice(at + 1) : null
+  const suffix = ref !== null && ref !== '-' ? ref : null
+  if (platform === 'github' || platform === 'gitee') {
+    return [identityLineOf(key), repo, suffix].filter(Boolean).join(' · ')
+  }
+  if (platform === 'custom') return [repo, suffix].filter(Boolean).join(' · ')
+  return key
+}
+
+/**
+ * 这一份算不算"当前来源的"。
+ *
+ * - 没配当前源 ⇒ 一律算（无从隔离）
+ * - 这一份没有来源记录 ⇒ 算（导入 / 老副本）
+ * - 两边都有且完整身份不同 ⇒ 不算（**哪怕 ref 相同、只是仓库或自建源地址不同**）
+ */
+export function sourceMatches(mine: string | null, current: string | null): boolean {
   return current === null || mine === null || mine === current
+}
+
+/**
+ * 云端行的认领仍按 ref 隔离；这一对只给那一处用，不参与本地表筛选。
+ */
+export function branchOf(facts: { sourceRef?: string | null } | null | undefined): string | null {
+  return identityRefOf(facts?.sourceRef ?? null)
+}
+
+/** 与 `sourceMatches` 同一条隔离口径，参数这里按 ref 传。 */
+export function branchMatches(mine: string | null, current: string | null): boolean {
+  return sourceMatches(mine, current)
 }
 
 /**
  * 本地表筛选：这一行在 `filter` 档下留不留。
  *
- * `hasSource` = 这份文件尾部**有没有来源记录**（`basedOnFacts.sourceRef` 非空）。
- * 它和"分支名"是两件事：自建源（`http://127.0.0.1:8787` 那种）记着来源、但**没有
- * 分支概念**（ref 是 `-`）—— 那种文件属于"当前源"，不是「没有来源」。
+ * `hasSource` = 文件尾部有没有来源记录。自建源记着来源、ref 是 `-`，属于具体来源；
  * 只有导入 / 手拖进来、压根没有来源记录的，才进「没有来源」那一档。
  */
-export function branchKept(
+export function sourceKept(
   mine: string | null | undefined,
   hasSource: boolean,
-  filter: BranchFilter,
+  filter: SourceFilter,
   current: string | null,
 ): boolean {
   if (filter === 'all') return true
   if (filter === 'unfiled') return !hasSource
-  /* 当前分支：没有来源记录的也留着 —— 在哪个分支下藏掉它都等于说"你那份不见了" */
-  return !hasSource || branchMatches(mine ?? null, current)
+  const wanted = keyOfSourceFilter(filter)
+  if (wanted !== null) return mine === wanted
+  /* 当前来源：没有来源记录的也留着 —— 藏了等于说用户那份文件不见了 */
+  return !hasSource || sourceMatches(mine ?? null, current)
 }
 
 /**
@@ -1948,12 +1993,11 @@ export interface PresetLocalRow extends PresetRowBase {
   basedOnFacts?: BasedOnFacts
   basedOn?: BasedOn
   /**
-   * 这份文件属于哪个来源分支（ref）；`null` = 没有来源记录（导入 / 手拖）。
+   * 这份文件的**完整来源身份**（`platform#repo@ref`）；`null` = 没有来源记录。
    *
-   * 分支之间靠**磁盘目录**隔离（各落各的文件夹），这一格只供筛选与"我这儿有没有
-   * 这一支的"使用 —— 不参与版本判定。
+   * 只供本地表分组与筛选；版本判定仍由 Rust 侧 `based_on` 回答。
    */
-  branch?: string | null
+  sourceKey?: string | null
   /**
    * 来源记录里记的来源原文（`delivery/mkp/presets/A1-standard.toml`）。没有来源记录是 `null`。
    * **老文件里可能记着旧形状（`mkp/presets/…`）** —— 那种认不出就是 `unknown`，
@@ -2159,16 +2203,15 @@ export interface PresetRowsInput {
    */
   sourceIdentity: string | null
   /**
-   * 本地表按**来源分支**筛：`current` = 当前分支 + 没有来源（默认）；
-   * `all` = 全都列；`unfiled` = 只列没有来源的。
+   * 本地表按**完整来源身份**筛：`current` = 当前来源 + 没有来源（默认）；
+   * `all` = 全都列；`unfiled` = 只列没有来源的；`source:…` = 指定一条来源。
    *
-   * 只有本机存在多个分支时才在界面上给这一档（见 `PagePresets` 的筛选排）。
+   * 只有本机出现其他来源时才在台账上给入口（见 `PagePresets` 的计数行）。
    */
-  branchFilter?: BranchFilter
+  sourceFilter?: SourceFilter
 }
 
-/** 本地表的分支筛选档（见 `PresetRowsInput.branchFilter`） */
-export type BranchFilter = 'current' | 'all' | 'unfiled'
+/** 本地表的来源筛选档定义见 `SourceFilter`。 */
 
 /**
  * 目录里登记的一份交付预设，摊平成行要用的形状。
@@ -2877,7 +2920,7 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
         basedOnFacts: f.basedOnFacts,
         /* 这一份自己的字节摘要（「本机 SHA」那格；与「来源版本 SHA」是两个数） */
         localSha256: f.sha256,
-        branch: branchOf(f.basedOnFacts),
+        sourceKey: sourceKeyOf(f.basedOnFacts),
         basedOnSource: f.basedOnLabel,
         basedOnCloud: source,
 
@@ -3139,23 +3182,23 @@ export function localRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
 
   const all = [...assetRows, ...local, ...presetRows]
   /*
-   * 本地表按**来源分支**筛（云端表不筛：它永远只有当前分支的目录）。
+   * 本地表按**完整来源身份**筛（云端表不筛：它永远只有当前来源的目录）。
    *
-   * `current` 把"没有来源"的那批一起留着 —— 导入 / 手拖进来的文件不属于任何分支，
-   * 在哪个分支下藏掉它都等于说"你那份不见了"。
+   * `current` 把"没有来源"的那批一起留着 —— 导入 / 手拖进来的文件不属于任何来源，
+   * 在哪个来源下藏掉它都等于说"你那份不见了"。
    */
-  const currentRef = identityRefOf(input.sourceIdentity)
-  const branchFilter = input.branchFilter ?? 'current'
-  const keepsBranch = (row: PresetLocalRow): boolean =>
-    /* 切片器那一档与来源分支无关 */
+  const currentSource = input.sourceIdentity ?? null
+  const sourceFilter = input.sourceFilter ?? 'current'
+  const keepsSource = (row: PresetLocalRow): boolean =>
+    /* 切片器那一档与来源无关 */
     row.origin !== 'local' ||
-    branchKept(
-      row.branch,
+    sourceKept(
+      row.sourceKey ?? null,
       row.basedOnFacts?.sourceRef != null,
-      branchFilter,
-      currentRef,
+      sourceFilter,
+      currentSource,
     )
-  const kept = all.filter(keepsBranch)
+  const kept = all.filter(keepsSource)
   return {
     rows: sortRows(kept.filter((r) => fileMatchesQuery(r, query)), sort),
     total: kept.length,

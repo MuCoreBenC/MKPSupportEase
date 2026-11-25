@@ -16,7 +16,10 @@
 
 use postprocess::diag::messages;
 
+use std::collections::HashSet;
+use std::fs;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -27,6 +30,41 @@ use crate::fsx::paths::internal_root;
 use crate::runtime;
 
 use super::traced;
+
+/*
+ * 下载命令的进程级在途账。同一份文件（同一类下载动作）同时只跑一次：
+ * 界面守卫挡住连点，这一层挡住绕过界面的重复请求（第二个 IPC 调用）。
+ * 键是 `动作:文件名` —— 下载到下载区与取回到 presets-local 是两件事，互不挡。
+ */
+static DOWNLOADS_IN_FLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn downloads_in_flight() -> &'static Mutex<HashSet<String>> {
+    DOWNLOADS_IN_FLIGHT.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// 在途占位。同一键已有任务在跑 ⇒ `None`，调用方据此拒绝这一下。
+/// guard 生命周期结束即注销（成功 / 失败 / panic 都释放）。
+pub(super) struct DownloadGuard {
+    key: String,
+}
+
+impl Drop for DownloadGuard {
+    fn drop(&mut self) {
+        if let Ok(mut set) = downloads_in_flight().lock() {
+            set.remove(&self.key);
+        }
+    }
+}
+
+pub(super) fn enter_download(action: &str, file_name: &str) -> Option<DownloadGuard> {
+    let key = format!("{action}:{file_name}");
+    let mut set = downloads_in_flight().lock().ok()?;
+    if !set.insert(key.clone()) {
+        return None;
+    }
+    drop(set);
+    Some(DownloadGuard { key })
+}
 
 /// 界面读的那份目录：② 为准 + **随包那份只兜底**（补 ② 里没有的 bundled 资产条目）。
 ///
@@ -310,6 +348,14 @@ pub async fn download_runtime_file(
     on_tick: Channel<DownloadTick>,
     place: Option<bool>,
 ) -> Result<runtime::download::DownloadReceipt, AppError> {
+    /* 同一份文件的下载同时只跑一次；占不到就报在途冲突，不动盘 */
+    let _guard = enter_download("runtime", &file_name).ok_or_else(|| {
+        AppError::invalid_argument(messages::text(
+            "ui.ipc.catalog.081",
+            &[("file_name", &file_name.to_string())],
+        ))
+        .with_message_code("E_CATALOG_DOWNLOAD_BUSY_001")
+    })?;
     /* `place: false` = 这一次只要文件，别往切片器目录里塞（界面「下载不放入」）。
     缺省 / None = 老口径：切片器配置下完就放进每个账号目录。 */
     let place = place.unwrap_or(true);
@@ -384,6 +430,22 @@ pub async fn download_runtime_file(
     task.await.map_err(|e| {
         AppError::internal(messages::text("ui.ipc.catalog.061", &[])).with_detail(e.to_string())
     })?
+}
+
+/// 本地那一份是不是就是目录登记的当前云端版。
+///
+/// 判据是**文件尾的来源记录里那一版的 sha256**，不比用户改过的正文 —— 用户改过的值
+/// 必然与云端不同，拿正文比会得出"永远不是当前版"。读不出来（没有来源记录 / 坏档）⇒ false。
+fn local_is_current_version(target: &Path, expected_sha: Option<&str>) -> bool {
+    let Some(expected) = expected_sha else {
+        return false;
+    };
+    let Ok(text) = fs::read_to_string(target) else {
+        return false;
+    };
+    runtime::provenance::parse(&text)
+        .and_then(|p| p.latest_version().and_then(|v| v.sha256.clone()))
+        .is_some_and(|sha| sha == expected)
 }
 
 /// 一份目录文件的**云端下载链接**（用户「复制链接」复制的就是它）。
@@ -641,6 +703,14 @@ pub async fn fetch_cloud_preset(
     file_name: String,
     rename_if_taken: Option<bool>,
 ) -> Result<FetchCloudDto, AppError> {
+    /* 同一份文件的取回同时只跑一次；占不到就报在途冲突，不动盘 */
+    let _guard = enter_download("cloud", &file_name).ok_or_else(|| {
+        AppError::invalid_argument(messages::text(
+            "ui.ipc.catalog.082",
+            &[("file_name", &file_name.to_string())],
+        ))
+        .with_message_code("E_CATALOG_FETCH_BUSY_001")
+    })?;
     /* 句柄先留一份给自己：广播在任务之外发（阻塞任务里那把会被 move 进去） */
     let app_handle = app.clone();
     let task = tauri::async_runtime::spawn_blocking(move || {
@@ -782,6 +852,27 @@ pub async fn fetch_cloud_preset(
                 )
                 .is_ok();
                 (name, rel, None, None, indexed)
+            } else if local_is_current_version(&target, source_sha) {
+                /*
+                 * 本地已存在，而且那份的来源记录就指着云端当前版 —— 这次重复取回
+                 * 已经把云端字节刷新过（`deliver_cloud_bytes` 在上面跑过了），不必再
+                 * 落第二份、也不弹撞名问框。幂等落在"不生成第二份本地文件"这一层，
+                 * 显式下载真实联网那条口径不变。
+                 *
+                 * 来路账照记：界面认云端行靠账上这一条（`getLocalPresetIndex`），
+                 * 缺了它就会"本地已是最新、云端仍给下载"。`record_download` 按 path 覆盖，
+                 * 已有的那一条会被刷新而不是再添一份。
+                 */
+                let indexed = runtime::source_ledger::record_download(
+                    &root,
+                    &rel,
+                    identity.as_ref(),
+                    &file.file_name,
+                    &stamp,
+                    source_sha,
+                )
+                .is_ok();
+                (file.file_name.clone(), rel, None, None, indexed)
             } else {
                 /* 默认：不动它 —— 把"谁占了 + 会改成什么"交给界面问 */
                 (
@@ -1454,4 +1545,61 @@ pub fn get_install_flavor() -> Result<String, AppError> {
         "installed"
     }
     .to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn same_download_key_is_exclusive_until_the_guard_drops() {
+        let first = enter_download("cloud", "A1.toml").expect("第一次占位成功");
+        assert!(
+            enter_download("cloud", "A1.toml").is_none(),
+            "同键在途必须挡住"
+        );
+        /* 不同动作 / 不同目标互不挡 */
+        assert!(enter_download("runtime", "A1.toml").is_some());
+        assert!(enter_download("cloud", "B1.toml").is_some());
+        drop(first);
+        assert!(
+            enter_download("cloud", "A1.toml").is_some(),
+            "释放后可以再进"
+        );
+    }
+
+    #[test]
+    fn local_is_current_version_reads_the_source_record_not_the_body() {
+        let dir = std::env::temp_dir().join(format!(
+            "mkpse-idempotent-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("A1.toml");
+        let sha = "abc123";
+        let text = format!(
+            "# A1\n[x]\ny = 1\n\n[mkp_source]\nschema = 1\n\
+             [[mkp_source.history]]\nkind = \"download\"\nsha256 = \"{sha}\"\n"
+        );
+        crate::fsx::atomic::atomic_write(&target, text.as_bytes()).unwrap();
+
+        assert!(local_is_current_version(&target, Some(sha)));
+        assert!(!local_is_current_version(&target, Some("other")));
+        assert!(!local_is_current_version(&target, None));
+        /* 没有来源记录的普通文件不算当前版 */
+        let plain = dir.join("plain.toml");
+        crate::fsx::atomic::atomic_write(&plain, b"[x]\ny = 1\n").unwrap();
+        assert!(!local_is_current_version(&plain, Some(sha)));
+        /* 文件不存在也不算 */
+        assert!(!local_is_current_version(
+            &dir.join("missing.toml"),
+            Some(sha)
+        ));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

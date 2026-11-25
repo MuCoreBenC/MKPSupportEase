@@ -358,7 +358,34 @@ text_zh_tw = "這一盤不是校準件：外形對不上任何一塊校準板。
 text_ja = "このプレートはキャリブレーション造形ではありません（形状がどのキャリブレーション板とも一致しません）。設定で「強制キャリブレーションモード」をオフにしてから、通常の後処理を行ってください。"
 slicer = "不是校准件 —— 请在设置里关闭强制校准模式，再正常后处理"
 params = []
-note = "2026-11-12：**强制校准模式**（设置页开关）开着、而这一盘的实测外形对不上任何一块校准板时报这一条。此时**停下、原文件不动** —— 静默降级成普通模型会把校准板当模型打出来。句子写两件事：不是校准件 + 下一步（去关开关）；不写包围盒、footprint 这些内部判据"
+note = "**强制校准模式**（设置页开关）开着、而这一盘的实测外形对不上任何一块校准板时报这一条；关着而 3MF 带校准身份时走「不是校准模型」那一问。此时**停下、原文件不动** —— 静默降级成普通模型会把校准板当模型打出来。句子写两件事：不是校准件 + 下一步（去关开关）；不写包围盒、footprint 这些内部判据"
+
+["hook.calib_not_model_question"]
+code = "Q_CALIB_NOT_MODEL_001"
+text = "这一盘来自校准 3MF，但不是校准模型。按普通模型继续打印吗？"
+text_en = "This plate comes from a calibration 3MF, but it isn't a calibration model. Continue as a normal model?"
+text_zh_tw = "這一盤來自校準 3MF，但不是校準模型。按普通模型繼續列印嗎？"
+text_ja = "このプレートはキャリブレーション 3MF から来ていますが、キャリブレーション造形ではありません。通常モデルとして続けますか？"
+params = []
+note = "强制校准模式关闭、3MF 带校准身份而这一盘不是任何一块校准板时的问句。按钮后果写在选项上，正文不重复按钮名"
+
+["hook.calib_not_model_stopped"]
+code = "W_CALIB_NOT_MODEL_001"
+text = "已停下（这一盘不是校准模型）—— 原文件没有被改动"
+text_en = "Stopped (this plate isn't a calibration model) — the original file was not changed"
+text_zh_tw = "已停下（這一盤不是校準模型）—— 原檔案沒有被改動"
+text_ja = "停止しました（このプレートはキャリブレーション造形ではありません）— 元ファイルは変更されていません"
+params = []
+
+["hook.calib_not_model"]
+code = "E_CALIB_NOT_MODEL_001"
+text = "这一盘来自校准 3MF，但不是校准模型 —— 原文件没有被改动。"
+text_en = "This plate comes from a calibration 3MF, but it isn't a calibration model — the original file was not changed."
+text_zh_tw = "這一盤來自校準 3MF，但不是校準模型 —— 原檔案沒有被改動。"
+text_ja = "このプレートはキャリブレーション 3MF から来ていますが、キャリブレーション造形ではありません — 元ファイルは変更されていません。"
+slicer = "校准 3MF 里这一盘不是校准模型，原文件没有被改动"
+params = []
+note = "没有界面可答复时的出口，只说事实，不引导去改设置"
 
 ["hook.calib_done_print"]
 code = "N_CALIB_PRINT_001"
@@ -1175,6 +1202,18 @@ text = "检查软件更新没跑到终局"
 text_en = "The update check did not run to completion"
 text_zh_tw = "檢查軟體更新沒跑到終局"
 text_ja = "ソフトウェア更新の確認が完了しませんでした"
+
+["ui.ipc.catalog.081"]
+text = "这份正在下载，请稍候"
+text_en = "This file is downloading; please wait"
+text_zh_tw = "這份正在下載，請稍候"
+text_ja = "このファイルはダウンロード中です。お待ちください"
+
+["ui.ipc.catalog.082"]
+text = "这份正在取回，请稍候"
+text_en = "This file is being fetched; please wait"
+text_zh_tw = "這份正在取回，請稍候"
+text_ja = "このファイルを取得中です。お待ちください"
 
 ["ui.ipc.guide.081"]
 text = "建不出引导窗口"
@@ -5158,6 +5197,30 @@ text_zh_tw = "去掉列印件，只走校準路徑"
 text_ja = "印刷物を削除し、キャリブレーション経路のみ"
 params = []
 note = "次按钮的副标题"
+
+["hook.choice_calib_not_model_stop"]
+code = "Q_CALIB_CHOICE_NOT_MODEL_STOP_001"
+text = "停止"
+text_en = "Stop"
+text_zh_tw = "停止"
+text_ja = "停止"
+params = []
+
+["hook.choice_calib_force_print"]
+code = "Q_CALIB_CHOICE_FORCE_PRINT_001"
+text = "强制打印"
+text_en = "Print anyway"
+text_zh_tw = "強制列印"
+text_ja = "強制的に印刷"
+params = []
+
+["hook.choice_calib_force_print_hint"]
+code = "Q_CALIB_CHOICE_FORCE_PRINT_002"
+text = "按普通模型后处理，不走校准"
+text_en = "Post-process as a normal model, without calibration"
+text_zh_tw = "按普通模型後處理，不走校準"
+text_ja = "通常モデルとして後処理し、校正は行いません"
+params = []
 
 ["ui.runtime.source_ledger.493"]
 code = "E_FS_SOURCE_LEDGER_001"

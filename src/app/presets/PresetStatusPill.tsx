@@ -14,7 +14,7 @@
  *                 "这一份在生效"，字面重复
  *   左拍（动作）  点它 = 定位 —— **清掉机型筛选** + 把正在生效的那一行滚到眼前闪一下。
  *                 不写「定位」两个字（作者第三轮：「不用显示定位两个字」），悬停有提示
- *   右拍（筛选）  看哪个机型的 —— 漏斗 + 当前值，点开菜单选机型。
+ *   右拍（筛选）  漏斗 + 当前机型；本地 MKP 点开是来源与机型两列，其余是机型单列。
  *                 **它是筛选，不是切换**（作者第二轮纠正：「这个是个筛选的……不能再用
  *                 抽屉了」）—— 所以这里没有抽屉、没有「切换」两个字，选完就地筛这张表。
  *                 **窄窗里它一寸不让**（`.hold` 不收缩，见 CSS）—— 收缩全由左拍名字承担
@@ -73,7 +73,8 @@ import { useRef, useState } from 'react'
 import { useT } from '../../i18n'
 import { FieldPopover } from '../../components/field'
 import type { ActivePreset, Machine } from '../../api'
-import type { BranchFilter } from './presetTree'
+import { sourceLabelOf, sourceValueOf } from './presetTree'
+import type { SourceFilter } from './presetTree'
 import s from './PresetStatusPill.module.css'
 
 interface FilterOption {
@@ -81,12 +82,6 @@ interface FilterOption {
   label: string
   /** 行尾那截灰色小字（机型的 id；喷嘴 / 层高没有这一格） */
   meta?: string
-  /**
-   * **触发器上显示的短标签**（菜单里仍用 `label`）。
-   *
-   * 给分支筛选用：「当前分支 · feat/x」在菜单里说得清，挤在胶囊里就太长了。
-   */
-  trigger?: string
 }
 
 /**
@@ -120,16 +115,68 @@ interface PresetFilterProps {
   onPick: (value: string) => void
   /**
    * 漏斗要不要转绿（「筛上了」的信号）。默认看 `value !== ''` —— 机型那一档
-   * 「全部」是空串，所以成立；分支筛选的默认档不是"不筛"，由调用方显式给。
+   * 「全部」是空串，所以成立；来源筛选的默认档不是"不筛"，由调用方显式给。
    */
   active?: boolean
-  /** 菜单第一档「全部」要不要画。分支筛选三档都是实选，没有"全部"这一档 */
+  /** 菜单第一档「全部」要不要画。来源筛选各档都是实选，没有"全部"这一档 */
   withAllOption?: boolean
   /**
    * 触发器最宽多少像素。默认不限（机型名都很短）；
-   * 分支名可以很长（`feat/postproc-fold-inline-diff`），超了省略，别把台账挤出去。
+   * 完整来源名可以很长，超了省略，别把台账挤出去。
    */
   maxWidth?: number
+}
+
+interface FilterItemsProps {
+  options: FilterOption[]
+  value: string
+  onPick: (value: string) => void
+  allText?: string
+  allMeta?: string
+  withAllOption?: boolean
+}
+
+function CheckMark() {
+  return (
+    <span className={s.check} aria-hidden>
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    </span>
+  )
+}
+
+/** 一组单选项；触发按钮与弹层外壳由调用方管，来源列与机型列共用这一份渲染。 */
+function FilterItems({
+  options,
+  value,
+  onPick,
+  allText,
+  allMeta,
+  withAllOption = true,
+}: FilterItemsProps) {
+  return (
+    <>
+      {withAllOption && (
+        <button type="button" className={s.item} data-on={value === ''} onClick={() => onPick('')}>
+          <CheckMark />
+          {allText}
+          {allMeta !== undefined && <span className={s.mid}>{allMeta}</span>}
+        </button>
+      )}
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          className={s.item}
+          data-on={value === o.value}
+          onClick={() => onPick(o.value)}
+        >
+          <CheckMark />
+          {o.label}
+          {o.meta !== undefined && <span className={s.mid}>{o.meta}</span>}
+        </button>
+      ))}
+    </>
+  )
 }
 
 export function PresetFilter({
@@ -162,49 +209,24 @@ export function PresetFilter({
       >
         <FunnelIcon />
         {prefix !== undefined && <span className={s.filterPrefix}>{prefix}</span>}
-        <b className={s.filterName}>{current?.trigger ?? current?.label ?? allText}</b>
+        <b className={s.filterName}>{current?.label ?? allText}</b>
         {/* 箭头是 CSS 画的两条边（见 .caret）：不排「▼」字形，免得它自带一套基线 */}
         <i className={s.caret} aria-hidden />
       </button>
       {open && (
         <FieldPopover anchor={triggerRef.current} align="end" onClose={() => setOpen(false)}>
           <div className={s.menu}>
-            {/* 第一档是「全部」（那一档的值是空串，与原来的下拉同一个值）；三档实选的筛选不画它 */}
-            {withAllOption && (
-              <button
-                type="button"
-                className={s.item}
-                data-on={value === ''}
-                onClick={() => {
-                  setOpen(false)
-                  onPick('')
-                }}
-              >
-                <span className={s.check} aria-hidden>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                </span>
-                {allMenuText}
-                {allMeta !== undefined && <span className={s.mid}>{allMeta}</span>}
-              </button>
-            )}
-            {options.map((o) => (
-              <button
-                key={o.value}
-                type="button"
-                className={s.item}
-                data-on={value === o.value}
-                onClick={() => {
-                  setOpen(false)
-                  onPick(o.value)
-                }}
-              >
-                <span className={s.check} aria-hidden>
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 6.2l2.4 2.4 4.6-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                </span>
-                {o.label}
-                {o.meta !== undefined && <span className={s.mid}>{o.meta}</span>}
-              </button>
-            ))}
+            <FilterItems
+              options={options}
+              value={value}
+              onPick={(next) => {
+                setOpen(false)
+                onPick(next)
+              }}
+              allText={allMenuText}
+              allMeta={allMeta}
+              withAllOption={withAllOption}
+            />
           </div>
         </FieldPopover>
       )}
@@ -257,41 +279,104 @@ export function PresetMachineFilter({ machines, machineId, onPick, prefix }: Fil
   )
 }
 
-interface BranchFilterProps {
-  /** 当前源的分支名；自建源没有 ⇒ `null` */
+interface MkpSourceProps {
+  /** 当前源的完整身份；没配源 ⇒ `null` */
   current: string | null
-  value: BranchFilter
-  onPick: (value: BranchFilter) => void
+  /** 本机出现过的来源（含当前这一条），按显示名排好 */
+  sources: { key: string; label: string; count: number }[]
+  unfiledCount: number
+  value: SourceFilter
+  onPick: (value: SourceFilter) => void
 }
 
 /**
- * 分支筛选：`PresetFilter` 的分支版 —— **与机型筛选同一颗件、同一张弹层**。
+ * MKP 那一颗 pill 的右拍：触发器只写机型，点开是**来源 × 机型**两列。
  *
- * 三档都是实选（没有"全部 = 不筛"那一档），所以菜单不画第一档的「全部」；
- * 漏斗只在离开默认档（当前分支）时转绿。触发器上只写分支名，整句放在菜单里。
+ * 触发器颜色只看机型；来源筛选没有常驻提示，切档也只影响这张表的行。
  */
-export function PresetBranchFilter({ current, value, onPick }: BranchFilterProps) {
+export function PresetMkpFilter({
+  machines,
+  machineId,
+  onPick,
+  prefix,
+  source,
+}: FilterProps & { source: MkpSourceProps }) {
   const tr = useT()
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const machine = machines.find((m) => m.id === machineId)
+
+  const sourceOptions: FilterOption[] = [
+    {
+      value: 'current',
+      label: tr('presets.source.current'),
+      meta: source.current === null ? undefined : (sourceLabelOf(source.current) ?? source.current),
+    },
+    { value: 'all', label: tr('presets.source.all') },
+    {
+      value: 'unfiled',
+      label: tr('presets.source.unfiled'),
+      meta: String(source.unfiledCount),
+    },
+    ...source.sources
+      .filter((item) => item.key !== source.current)
+      .map((item) => ({
+        value: sourceValueOf(item.key),
+        label: item.label,
+        meta: String(item.count),
+      })),
+  ]
+  const machineOptions: FilterOption[] = machines.map((m) => ({
+    value: m.id,
+    label: m.display,
+    meta: m.id,
+  }))
+
+  const pick = (action: () => void) => {
+    setOpen(false)
+    action()
+  }
+
   return (
-    <PresetFilter
-      withAllOption={false}
-      active={value !== 'current'}
-      maxWidth={220}
-      allText={tr('presets.branch.current')}
-      allMenuText={tr('presets.branch.current')}
-      options={[
-        {
-          value: 'current',
-          label: tr('presets.branch.current'),
-          meta: current ?? undefined,
-          trigger: current ?? tr('presets.branch.current'),
-        },
-        { value: 'all', label: tr('presets.branch.all') },
-        { value: 'unfiled', label: tr('presets.branch.unfiled') },
-      ]}
-      value={value}
-      onPick={(next) => onPick(next as BranchFilter)}
-    />
+    <span className={s.hold}>
+      <button
+        type="button"
+        ref={triggerRef}
+        className={s.filterBtn}
+        data-filt={machineId !== ''}
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <FunnelIcon />
+        {prefix !== undefined && <span className={s.filterPrefix}>{prefix}</span>}
+        <b className={s.filterName}>{machine?.display ?? tr('presets.filter.all')}</b>
+        <i className={s.caret} aria-hidden />
+      </button>
+      {open && (
+        <FieldPopover anchor={triggerRef.current} align="start" onClose={() => setOpen(false)}>
+          <div className={s.dualMenu}>
+            <div className={s.menu}>
+              <FilterItems
+                options={sourceOptions}
+                value={source.value}
+                withAllOption={false}
+                onPick={(next) => pick(() => source.onPick(next as SourceFilter))}
+              />
+            </div>
+            <div className={s.menu}>
+              <FilterItems
+                options={machineOptions}
+                value={machineId}
+                allText={tr('presets.filter.allMachines')}
+                allMeta={tr('presets.filter.machines', { count: machines.length })}
+                onPick={(next) => pick(() => onPick(next))}
+              />
+            </div>
+          </div>
+        </FieldPopover>
+      )}
+    </span>
   )
 }
 
@@ -479,6 +564,8 @@ interface Props {
   machines: Machine[]
   machineId: string
   onPick: (machineId: string) => void
+  /** 本地 MKP 表传来源状态；云端表不传，右拍退回只有机型的单列菜单 */
+  source?: MkpSourceProps
 }
 
 export default function PresetStatusPill({
@@ -489,6 +576,7 @@ export default function PresetStatusPill({
   machines,
   machineId,
   onPick,
+  source,
 }: Props) {
   const tr = useT()
   return (
@@ -522,7 +610,16 @@ export default function PresetStatusPill({
         </button>
       )}
       <i className={s.divider} aria-hidden />
-      <PresetMachineFilter machines={machines} machineId={machineId} onPick={onPick} />
+      {source === undefined ? (
+        <PresetMachineFilter machines={machines} machineId={machineId} onPick={onPick} />
+      ) : (
+        <PresetMkpFilter
+          machines={machines}
+          machineId={machineId}
+          onPick={onPick}
+          source={source}
+        />
+      )}
     </span>
   )
 }

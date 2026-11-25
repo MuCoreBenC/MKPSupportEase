@@ -184,7 +184,7 @@ pub fn catalog_for_ui(root: &std::path::Path) -> Result<Catalog, crate::error::A
 pub const EMBEDDED_CATALOG: &[u8] = include_bytes!("catalog.generated.json");
 
 /// 校准档表：源在 `presets/`，编译期钉进二进制。发布物磁盘上没有 presets/，
-/// 而合体（Combined）校准件靠外形定档必须要这张表，缺了就会把校准件判成普通模型。
+/// 而合体（Combined）校准件靠外形定档必须要这张表，缺了就认不出是哪一块校准板。
 pub const EMBEDDED_CALIBRATION_MODELS: &str =
     include_str!("../../../presets/calibration_models.toml");
 
@@ -314,12 +314,12 @@ mod tests {
             tables
                 .calibration_models()
                 .is_some_and(|models| !models.is_empty()),
-            "合体校准件靠档表按外形定档，档表空了就会把它当普通模型"
+            "合体校准件靠档表按外形定档，档表空了就认不出是哪一块"
         );
     }
 
-    /// 二合一（Combined）身份必须靠档表按外形定档。档表空了 ⇒ 认不出 ⇒ 报「不是校准件」，
-    /// 静默把校准件当普通模型跑。这条咬住「随包档表能被认档函数命中」，是那次回归的直接判据。
+    /// 二合一（Combined）身份必须靠档表按外形定档。档表空了 ⇒ 认不出 ⇒ 由钩子问用户
+    /// 要不要按普通模型跑，或者停下。这条咬住「随包档表能被认档函数命中」。
     #[test]
     fn bundled_calibration_profiles_are_recognisable_by_size() {
         use postprocess::postproc::calib_models::find_profile;

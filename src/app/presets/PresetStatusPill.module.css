@@ -227,7 +227,7 @@
   font-size: var(--fs-body);
   color: var(--text-1);
   cursor: pointer;
-  /* 触发器的 max-width（分支名可能很长）要能真的收住内部文字 */
+  /* 触发器的 max-width（来源名可能很长）要能真的收住内部文字 */
   min-width: 0;
 }
 
@@ -275,7 +275,7 @@
 .filterName {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  /* 长分支名在 `.filterBtn` 的 max-width 内省略，不把这一排撑开 */
+  /* 长来源名在 `.filterBtn` 的 max-width 内省略，不把这一排撑开 */
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -301,9 +301,8 @@
   position: relative;
   flex-shrink: 0;
   align-self: center;
-  /* 与漏斗同一条规矩、方向相反：chevron 的尖朝下，视觉重量压在尖上，
-     盒居中时看着"偏低"（作者原话）。上移 1px 才是视觉居中。 */
-  top: -1px;
+  /* chevron 的尖朝下，视觉重量压在尖上；盒居中时看着偏低，再上移 1px 才对齐文字 */
+  top: -2px;
   width: 7px;
   height: 7px;
   border-right: 1.5px solid currentcolor;
@@ -351,6 +350,13 @@
 }
 
 /* ---------- 菜单（FieldPopover 只管定位，框和影自己画） ---------- */
+
+/* MKP 那颗右拍的两列：来源与机型并列，各自沿用 .menu 的边框与滚动 */
+.dualMenu {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
 
 /* a03：菜单内项与容器边缘留白（padding 8）、项与项之间留缝（gap 4） */
 .menu {
