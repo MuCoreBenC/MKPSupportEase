@@ -351,11 +351,75 @@
 
 /* ---------- 菜单（FieldPopover 只管定位，框和影自己画） ---------- */
 
-/* MKP 那颗右拍的两列：来源与机型并列，各自沿用 .menu 的边框与滚动 */
+/* MKP 那颗右拍：机型列是弹层的宽度来源，来源列绝对定位、从中点向左展开 */
 .dualMenu {
+  position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+}
+
+.sourceShell {
+  flex: 0 0 26px;
+  display: flex;
+  align-items: stretch;
+}
+
+/* 收起时是一条可点的窄边；箭头明说上下展开 */
+.sourcePeek {
+  flex: 0 0 26px;
+  width: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-right: 0;
+  border-radius: 12px 0 0 12px;
+  background: var(--surface-solid);
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.sourcePeek:hover {
+  background: rgb(32 178 90 / 6%);
+}
+
+.sourcePeekIcon {
+  width: 12px;
+  height: 12px;
+  transition: transform 160ms ease;
+}
+
+.sourcePeek[data-open='true'] .sourcePeekIcon {
+  transform: rotate(180deg);
+}
+
+/* 来源卡片压在窄边右侧，绝对定位不参与弹层宽度；位移由组件在布局阶段写内联样式 */
+.sourcePane {
+  position: absolute;
+  top: 0;
+  left: 26px;
+  width: max-content;
+  transform-origin: left top;
+}
+
+/* 收起时卡片虽透明，仍在机型列下面；别挡住机型菜单的点击 */
+.sourcePane[data-open='false'] {
+  pointer-events: none;
+}
+
+.sourceInner {
+  width: max-content;
+  min-width: 220px;
+  max-width: 360px;
+  opacity: 0;
+  transform: translateY(6px) scale(0.985);
+  transform-origin: left bottom;
+  will-change: transform, opacity;
+}
+
+.sourceInner .menu {
+  width: 100%;
 }
 
 /* a03：菜单内项与容器边缘留白（padding 8）、项与项之间留缝（gap 4） */

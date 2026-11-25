@@ -69,7 +69,7 @@
  * 随之退役 —— 切片器筛选从此只有这一种摆法。
  */
 
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useT } from '../../i18n'
 import { FieldPopover } from '../../components/field'
 import type { ActivePreset, Machine } from '../../api'
@@ -134,6 +134,8 @@ interface FilterItemsProps {
   allText?: string
   allMeta?: string
   withAllOption?: boolean
+  /** 收起的来源列仍在 DOM 里，但不进 Tab 序 */
+  hiddenFromTab?: boolean
 }
 
 function CheckMark() {
@@ -152,11 +154,18 @@ function FilterItems({
   allText,
   allMeta,
   withAllOption = true,
+  hiddenFromTab = false,
 }: FilterItemsProps) {
   return (
     <>
       {withAllOption && (
-        <button type="button" className={s.item} data-on={value === ''} onClick={() => onPick('')}>
+        <button
+          type="button"
+          className={s.item}
+          data-on={value === ''}
+          tabIndex={hiddenFromTab ? -1 : undefined}
+          onClick={() => onPick('')}
+        >
           <CheckMark />
           {allText}
           {allMeta !== undefined && <span className={s.mid}>{allMeta}</span>}
@@ -168,6 +177,7 @@ function FilterItems({
           type="button"
           className={s.item}
           data-on={value === o.value}
+          tabIndex={hiddenFromTab ? -1 : undefined}
           onClick={() => onPick(o.value)}
         >
           <CheckMark />
@@ -290,20 +300,27 @@ interface MkpSourceProps {
 }
 
 /**
- * MKP 那一颗 pill 的右拍：触发器只写机型，点开是**来源 × 机型**两列。
+ * MKP 那一颗 pill 的右拍：触发器只写机型。
  *
- * 触发器颜色只看机型；来源筛选没有常驻提示，切档也只影响这张表的行。
+ * 点开先只有机型列；左边那条窄边紧贴机型列，点一下来源列才展开。
+ * 展开时机型列留在原位，随来源列宽度平滑右移；触发器颜色始终只看机型。
  */
 export function PresetMkpFilter({
   machines,
   machineId,
+  machineCounts,
   onPick,
   prefix,
   source,
-}: FilterProps & { source: MkpSourceProps }) {
+}: FilterProps & { machineCounts: Record<string, number>; source: MkpSourceProps }) {
   const tr = useT()
   const [open, setOpen] = useState(false)
+  const [sourceOpen, setSourceOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const sourcePaneRef = useRef<HTMLDivElement>(null)
+  const sourceInnerRef = useRef<HTMLDivElement>(null)
+  const machineMenuRef = useRef<HTMLDivElement>(null)
+  const prevRef = useRef({ open: false, sourceOpen: false })
   const machine = machines.find((m) => m.id === machineId)
 
   const sourceOptions: FilterOption[] = [
@@ -326,11 +343,76 @@ export function PresetMkpFilter({
         meta: String(item.count),
       })),
   ]
-  const machineOptions: FilterOption[] = machines.map((m) => ({
-    value: m.id,
-    label: m.display,
-    meta: m.id,
-  }))
+  const machineOptions: FilterOption[] = machines.map((m) => {
+    const count = machineCounts[m.id] ?? 0
+    return { value: m.id, label: m.display, meta: count === 0 ? undefined : String(count) }
+  })
+
+  useLayoutEffect(() => {
+    const prev = prevRef.current
+    prevRef.current = { open, sourceOpen }
+    if (!open) return
+    const pane = sourcePaneRef.current
+    const inner = sourceInnerRef.current
+    const machineMenu = machineMenuRef.current
+    if (pane === null || inner === null || machineMenu === null) return
+    /* 两张卡片从同一个中点分开：来源往左、机型往右；弹层盒子宽度始终不变 */
+    const sourceShift = (pane.offsetWidth + 8) / 2
+    const collapsedSource = 'translateX(0)'
+    const openSource = `translateX(-${sourceShift}px)`
+    const collapsedMachine = 'translateX(0)'
+    const openMachine = `translateX(${sourceShift}px)`
+    const collapsedInner = { opacity: '0', transform: 'translateY(6px) scale(.985)' }
+    const openInner = { opacity: '1', transform: 'translate(0, 0) scale(1)' }
+    const startSource = sourceOpen ? collapsedSource : openSource
+    const endSource = sourceOpen ? openSource : collapsedSource
+    const startMachine = sourceOpen ? collapsedMachine : openMachine
+    const endMachine = sourceOpen ? openMachine : collapsedMachine
+    const startInner = sourceOpen ? collapsedInner : openInner
+    const endInner = sourceOpen ? openInner : collapsedInner
+
+    const write = (source: string, machine: string, style: { opacity: string; transform: string }) => {
+      pane.style.transform = source
+      inner.style.opacity = style.opacity
+      inner.style.transform = style.transform
+      machineMenu.style.transform = machine
+    }
+
+    const firstPaint = !prev.open && open
+    if (firstPaint || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      write(endSource, endMachine, endInner)
+      return
+    }
+
+    /* 先把首帧钉在起点，再播动画；两列都只做 transform，不触发布局 */
+    write(startSource, startMachine, startInner)
+    const duration = sourceOpen ? 360 : 240
+    const easing = 'cubic-bezier(.4,0,.2,1)'
+    const animSource = pane.animate(
+      [{ transform: startSource }, { transform: endSource }],
+      { duration, easing, fill: 'both' },
+    )
+    const animInner = inner.animate(
+      [
+        { opacity: startInner.opacity, transform: startInner.transform },
+        { opacity: endInner.opacity, transform: endInner.transform },
+      ],
+      { duration, easing, fill: 'both' },
+    )
+    const animMachine = machineMenu.animate(
+      [{ transform: startMachine }, { transform: endMachine }],
+      { duration, easing, fill: 'both' },
+    )
+    const finish = () => write(endSource, endMachine, endInner)
+    animSource.onfinish = finish
+    animInner.onfinish = finish
+    animMachine.onfinish = finish
+    return () => {
+      animSource.cancel()
+      animInner.cancel()
+      animMachine.cancel()
+    }
+  }, [open, sourceOpen])
 
   const pick = (action: () => void) => {
     setOpen(false)
@@ -346,7 +428,11 @@ export function PresetMkpFilter({
         data-filt={machineId !== ''}
         aria-haspopup="true"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          const next = !open
+          setOpen(next)
+          if (next) setSourceOpen(false)
+        }}
       >
         <FunnelIcon />
         {prefix !== undefined && <span className={s.filterPrefix}>{prefix}</span>}
@@ -356,15 +442,46 @@ export function PresetMkpFilter({
       {open && (
         <FieldPopover anchor={triggerRef.current} align="start" onClose={() => setOpen(false)}>
           <div className={s.dualMenu}>
-            <div className={s.menu}>
-              <FilterItems
-                options={sourceOptions}
-                value={source.value}
-                withAllOption={false}
-                onPick={(next) => pick(() => source.onPick(next as SourceFilter))}
-              />
+            <div className={s.sourceShell}>
+              <button
+                type="button"
+                className={s.sourcePeek}
+                data-open={sourceOpen}
+                aria-label={tr('presets.source.peek')}
+                aria-expanded={sourceOpen}
+                onClick={() => setSourceOpen((v) => !v)}
+              >
+                <svg className={s.sourcePeekIcon} viewBox="0 0 10 10" aria-hidden="true">
+                  <path
+                    d="M2.2 3.8 5 6.6l2.8-2.8"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              <div
+                ref={sourcePaneRef}
+                className={s.sourcePane}
+                data-open={sourceOpen}
+                aria-hidden={!sourceOpen}
+              >
+                <div ref={sourceInnerRef} className={s.sourceInner}>
+                  <div className={s.menu}>
+                    <FilterItems
+                      options={sourceOptions}
+                      value={source.value}
+                      withAllOption={false}
+                      hiddenFromTab={!sourceOpen}
+                      onPick={(next) => pick(() => source.onPick(next as SourceFilter))}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
-            <div className={s.menu}>
+            <div ref={machineMenuRef} className={s.menu}>
               <FilterItems
                 options={machineOptions}
                 value={machineId}
@@ -563,6 +680,8 @@ interface Props {
   /* 右拍那一颗（机型筛选）的三个入参，与 `PresetMachineFilter` 同一套 */
   machines: Machine[]
   machineId: string
+  /** 每台机型的预设份数；只给 MKP 双列菜单用，0 不显示 */
+  machineCounts?: Record<string, number>
   onPick: (machineId: string) => void
   /** 本地 MKP 表传来源状态；云端表不传，右拍退回只有机型的单列菜单 */
   source?: MkpSourceProps
@@ -575,6 +694,7 @@ export default function PresetStatusPill({
   onLocate,
   machines,
   machineId,
+  machineCounts = {},
   onPick,
   source,
 }: Props) {
@@ -616,6 +736,7 @@ export default function PresetStatusPill({
         <PresetMkpFilter
           machines={machines}
           machineId={machineId}
+          machineCounts={machineCounts}
           onPick={onPick}
           source={source}
         />

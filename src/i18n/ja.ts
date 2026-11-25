@@ -1831,6 +1831,7 @@ export const ja: Record<StringKey, string> = {
   'presets.source.current': '現在のソース',
   'presets.source.all': 'すべてのソース',
   'presets.source.unfiled': 'ソースなし',
+  'presets.source.peek': 'ソースの絞り込み',
   'presets.tree.cloudLocal.elsewhere': '別ブランチのため比較しません',
   'presets.tree.cloudLocal.newer': 'クラウドの方が古いです',
   'presets.tree.cloudLocal.detached': 'ローカルコピー',

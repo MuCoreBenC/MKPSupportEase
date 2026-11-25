@@ -4434,6 +4434,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   onLocate={locateApplied}
                   machines={data.machines}
                   machineId={data.machineId}
+                  machineCounts={Object.fromEntries(
+                    data.tree.machines.map((node) => [node.machine.id, node.fileCount]),
+                  )}
                   onPick={pickMachine}
                   source={
                     page.scope === 'local'

@@ -1864,6 +1864,7 @@ export const zhTW: Record<StringKey, string> = {
   'presets.source.current': '目前來源',
   'presets.source.all': '全部來源',
   'presets.source.unfiled': '沒有來源',
+  'presets.source.peek': '來源篩選',
   'presets.tree.cloudLocal.elsewhere': '不同分支，不比對',
   'presets.tree.cloudLocal.newer': '雲端比本機舊',
   'presets.tree.cloudLocal.detached': '本機副本',
