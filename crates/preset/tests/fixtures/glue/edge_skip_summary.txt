@@ -1,0 +1,5 @@
+# 边缘带支撑免抬：真实样本三档的产物摘要（MKP_support_test_models / A1_MINI fast261111）
+# margin lines z_lines lifts
+0.00 87744 5390 1901
+0.50 85786 3432 917
+2.00 86902 4548 1479

@@ -91,12 +91,6 @@ const GROUPS: EditGroup[] = [
     ],
   },
   {
-    id: 'under',
-    title: '下方支撑余量',
-    desc: '笔下面有支撑、且离边够远时就不抬',
-    sections: [{ note: '', keys: ['UnderSupportEnabled', 'UnderSupportMm'] }],
-  },
-  {
     id: 'glue',
     title: '热床预涂胶',
     desc: '可能划伤打印板',
@@ -129,7 +123,6 @@ const GROUPS: EditGroup[] = [
 
 /** 数字框各自的单位与步进 —— 与客户端设置页那几个框一致 */
 const NUM_META: Record<string, { unit: string; step: number; min: number; max: number }> = {
-  UnderSupportMm: { unit: 'mm', step: 0.05, min: 0, max: 2 },
   BeginStageRetractZLiftMm: { unit: 'mm', step: 1, min: 5, max: 30 },
   CalibrationSafeLiftMm: { unit: 'mm', step: 1, min: 6, max: 20 },
   ZCalibrationDwellSec: { unit: '秒', step: 1, min: 1, max: 20 },

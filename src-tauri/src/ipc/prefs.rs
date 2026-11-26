@@ -733,9 +733,6 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 /* 等回答时置顶（2026-11-17）：只影响窗口层级，不进 IR */
                 "autoTopOnAsk": r.auto_top_on_ask,
                 "glueBottomEnabled": r.glue_bottom_enabled,
-                /* 下方支撑余量（实验，2026-11-17）：余量够的涂胶段不抬高 */
-                "underSupportEnabled": r.under_support_enabled,
-                "underSupportMm": r.under_support_mm,
                 "skipVibrationCalibration": r.skip_vibration_calibration,
                 "beginStageRetractEnabled": r.begin_stage_retract_enabled,
                 "beginStageRetractZLiftMm": r.begin_stage_retract_z_lift_mm,
@@ -789,8 +786,6 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "calibrationSafeLiftMm": f.calibration_safe_lift_mm,
                 "zCalibrationDwellSec": f.z_calibration_dwell_sec,
                 "xyCalibrationDwellSec": f.xy_calibration_dwell_sec,
-                "underSupportEnabled": f.under_support_enabled,
-                "underSupportMm": f.under_support_mm,
                 "glueBottomEnabled": f.glue_bottom_enabled,
                 "bedGlueEnabled": f.bed_glue_enabled,
                 "bedGlueAllModels": f.bed_glue_all_models,
@@ -807,10 +802,6 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "calibLift": {
                     "min": runtime::app_state::CALIBRATION_SAFE_LIFT_MM_MIN,
                     "max": runtime::app_state::CALIBRATION_SAFE_LIFT_MM_MAX,
-                },
-                "underSupport": {
-                    "min": runtime::app_state::UNDER_SUPPORT_MM_MIN,
-                    "max": runtime::app_state::UNDER_SUPPORT_MM_MAX,
                 },
             },
         }))

@@ -15,8 +15,6 @@
 
 [Prefs]
 GlueBottomEnabled = false
-UnderSupportEnabled = true
-UnderSupportMm = 0.5
 SkipVibrationCalibration = true
 BeginStageRetractEnabled = true
 BeginStageRetractZLiftMm = 5

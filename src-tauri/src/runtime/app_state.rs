@@ -300,12 +300,6 @@ pub struct PostprocPrefs {
     /// **支撑面底面涂胶**：在支撑面下方一层也涂（比主涂胶低一个层高）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub glue_bottom_enabled: Option<bool>,
-    /// **下方支撑余量（实验）**：涂胶段离笔下方支撑边界够远时就不抬高。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub under_support_enabled: Option<bool>,
-    /// 下方支撑余量的阈值（mm）。`None` = 出厂 0.5。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub under_support_mm: Option<f64>,
     /// **跳过震动补偿校准检测**（G-code 里的 M970/M974），省掉打印准备时间。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skip_vibration_calibration: Option<bool>,
@@ -527,13 +521,6 @@ impl PostprocPrefs {
             ui_mode: self.ui_mode.unwrap_or(c.ui_mode),
             auto_top_on_ask: self.auto_top_on_ask.unwrap_or(c.auto_top_on_ask),
             glue_bottom_enabled: self.glue_bottom_enabled.unwrap_or(d.glue_bottom_enabled),
-            under_support_enabled: self
-                .under_support_enabled
-                .unwrap_or(d.under_support_enabled),
-            under_support_mm: self
-                .under_support_mm
-                .unwrap_or(d.under_support_mm)
-                .clamp(UNDER_SUPPORT_MM_MIN, UNDER_SUPPORT_MM_MAX),
             skip_vibration_calibration: self
                 .skip_vibration_calibration
                 .unwrap_or(d.skip_vibration_calibration),
@@ -654,11 +641,6 @@ pub const XY_DWELL_DEFAULT: i64 = 3;
 pub const XY_DWELL_MIN: i64 = 1;
 pub const XY_DWELL_MAX: i64 = 10;
 
-/// 下方支撑余量的**出厂值镜像**与量程（mm）。上限 2mm 与设置页滑杆一致。理同上。
-pub const UNDER_SUPPORT_MM_DEFAULT: f64 = 0.5;
-pub const UNDER_SUPPORT_MM_MIN: f64 = 0.0;
-pub const UNDER_SUPPORT_MM_MAX: f64 = 2.0;
-
 /// 开始阶段收笔在原版抬 Z 之上再补抬的相对高度（mm）的**出厂值镜像**与量程。
 ///
 /// ★ 量程必须与内核那一份（`postprocess::pipeline::hooks::BEGIN_STAGE_RETRACT_Z_LIFT_*_MM`）
@@ -709,10 +691,6 @@ pub struct ResolvedPostprocPrefs {
     /// 有待答的问句时把主窗置顶（见 [`PostprocPrefs::auto_top_on_ask`]）
     pub auto_top_on_ask: bool,
     pub glue_bottom_enabled: bool,
-    /// **下方支撑余量（实验）**：见 [`PostprocPrefs::under_support_enabled`]
-    pub under_support_enabled: bool,
-    /// 余量阈值（mm），量程 `UNDER_SUPPORT_MM_*`
-    pub under_support_mm: f64,
     pub skip_vibration_calibration: bool,
     pub begin_stage_retract_enabled: bool,
     pub begin_stage_retract_z_lift_mm: i64,

@@ -138,6 +138,7 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
         "IroningKeepoutMode" => ConfigVal::Str(w.ironing_keepout_mode.clone()),
         "GlueEdgeLines" => ConfigVal::I64(w.glue_edge_lines),
         "GlueEdgeLift" => ConfigVal::F64(w.glue_edge_lift),
+        "GlueEdgeSkipMargin" => ConfigVal::F64(w.glue_edge_skip_margin),
         "PrimeTriggerLayers" => ConfigVal::I64(w.prime_trigger_layers),
         "PrimeEnabled" => ConfigVal::Bool(w.prime_enabled),
         "DiskStaggerMode" => ConfigVal::Str(w.disk_stagger_mode.clone()),

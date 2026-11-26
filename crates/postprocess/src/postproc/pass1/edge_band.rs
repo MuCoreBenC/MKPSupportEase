@@ -506,9 +506,12 @@ fn estimate_pitch(moves: &[Move]) -> f64 {
 
 /// 按边缘带切段并插标记。`lines <= 0` 或 `lift <= 0` ⇒ 原样返回。
 ///
-/// `under` = （上一层支撑覆盖, 余量阈值 mm）：给了就再叠一条判据 ——
-/// 这一小段整段都离支撑边界 ≥ 阈值 ⇒ **不抬**（哪怕它落在边缘带里）。
+/// `under` = （上一层支撑覆盖, 免抬距离 mm）：给了就再叠一条判据 ——
+/// 这一小段整段都离支撑边界 ≥ 该距离 ⇒ **不抬**（哪怕它落在边缘带里）。
 /// 只覆盖「本来要抬」的段，不新增抬升。
+///
+/// ★ **距离 0 = 关闭**：这里先把它当"没给"处理。若直接拿 0 去问 `covers`，
+///   `edge_distance < 0` 永远为假 ⇒ 有支撑就全免抬，正好与"关闭"相反。
 pub(crate) fn apply(
     iface: &[String],
     lines: i64,
@@ -518,6 +521,7 @@ pub(crate) fn apply(
     if lines <= 0 || lift <= 0.0 || iface.is_empty() {
         return iface.to_vec();
     }
+    let under = under.filter(|cfg| cfg.1 > 0.0);
     let moves = collect_moves(iface);
     if moves.len() < 2 {
         return iface.to_vec();
@@ -1333,5 +1337,36 @@ mod tests {
         let grid = UnderGrid::build(&segs, &segs).expect("铺得出网格");
         let out = apply(&input, 2, 1.5, Some((&grid, 0.5)));
         assert!(out.iter().any(|l| l == MARKER_EDGE_RAISE));
+    }
+
+    /// **0 = 关闭**：支撑铺满整块也不许免抬，所有边缘带段照抬。
+    #[test]
+    fn zero_margin_disables_the_skip() {
+        let input = rect(60.0, 60.0, 40.0, 40.0);
+        let segs = hatch(30.0, 30.0, 110.0, 110.0);
+        let grid = UnderGrid::build(&segs, &segs).expect("铺得出网格");
+        let out = apply(&input, 2, 1.5, Some((&grid, 0.0)));
+        assert!(
+            out.iter().any(|l| l == MARKER_EDGE_RAISE),
+            "0 是关闭，不是「只要有支撑就全免抬」：{out:?}"
+        );
+    }
+
+    /// 免抬距离越大越保守：2mm 比 0.1mm 抬得多，且不会少抬。
+    #[test]
+    fn a_larger_margin_raises_at_least_as_much() {
+        let input = rect(60.0, 60.0, 40.0, 40.0);
+        /* 支撑只盖住涂胶面中间 30×30，四周都在支撑外 */
+        let segs = hatch(55.0, 55.0, 85.0, 85.0);
+        let grid = UnderGrid::build(&segs, &segs).expect("铺得出网格");
+        let loose = apply(&input, 2, 1.5, Some((&grid, 0.1)));
+        let strict = apply(&input, 2, 1.5, Some((&grid, 2.0)));
+        let count = |v: &[String]| v.iter().filter(|l| *l == MARKER_EDGE_RAISE).count();
+        assert!(
+            count(&strict) >= count(&loose),
+            "更大的距离不该少抬：loose={} strict={}",
+            count(&loose),
+            count(&strict)
+        );
     }
 }

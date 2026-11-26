@@ -503,13 +503,13 @@ pub fn first_pass(
             stats.total_z_height_layers += 1;
         }
 
-        /* ---- 下方支撑：按层攒「支撑 + 零件本体」的挤出移动（实验判据的数据源） ----
-         * 开关关着就一行不攒：产物与旧版逐字节一致，也不付这份内存。
+        /* ---- 下方支撑：按层攒「支撑 + 零件本体」的挤出移动（边缘带支撑免抬的数据源） ----
+         * `edge_skip_margin` 为 0（关闭）时一行不攒：产物与没有这条判据一致，也不付这份内存。
          * 支撑铺覆盖区；零件本体只用于判「孔里有没有料」（填内孔的条件）。 */
-        if ir_data.prefs.under_support_enabled && class == LineClass::Feature {
+        if ir_data.glue.edge_skip_margin > 0.0 && class == LineClass::Feature {
             in_support = crate::gcode::is_support_material_feature(trimmed);
         }
-        if ir_data.prefs.under_support_enabled
+        if ir_data.glue.edge_skip_margin > 0.0
             && class == LineClass::Motion
             && !trimmed.contains("G1 F")
         {
@@ -1334,10 +1334,11 @@ pub fn first_pass(
              * 两个参数都是 0 时原样返回，输出逐字节不变。
              */
             /*
-             * 下方支撑余量（实验）：上一层支撑铺一张填过孔的覆盖图，
-             * 余量够的段不让它抬。开关关着 / 没攒到支撑 ⇒ `None`，输出与旧版一致。
+             * 边缘带支撑免抬：上一层支撑铺一张填过孔的覆盖图，
+             * 离支撑边够远的段不让它抬。`edge_skip_margin = 0` 时整套判据关闭
+             * （不建图、不传参），输出与没有它时一致；没攒到支撑也走 `None`。
              */
-            let under_cfg = if ir_data.prefs.under_support_enabled && !prev_moves.is_empty() {
+            let under_cfg = if ir_data.glue.edge_skip_margin > 0.0 && !prev_moves.is_empty() {
                 let support: Vec<(f64, f64, f64, f64)> = prev_moves
                     .iter()
                     .filter(|m| m.4)
@@ -1346,7 +1347,7 @@ pub fn first_pass(
                 let all: Vec<(f64, f64, f64, f64)> =
                     prev_moves.iter().map(|m| (m.0, m.1, m.2, m.3)).collect();
                 edge_band::UnderGrid::build(&support, &all)
-                    .map(|grid| (grid, ir_data.prefs.under_support_mm.max(0.0)))
+                    .map(|grid| (grid, ir_data.glue.edge_skip_margin))
             } else {
                 None
             };

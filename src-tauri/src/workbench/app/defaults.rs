@@ -167,19 +167,6 @@ const EDITABLE: &[Spec] = &[
         label: "XY 轴校准停留时间",
         kind: Kind::Number,
     },
-    /* ---- 下方支撑余量 ---- */
-    Spec {
-        section: Section::Prefs,
-        key: "UnderSupportEnabled",
-        label: "启用下方支撑余量",
-        kind: Kind::Bool,
-    },
-    Spec {
-        section: Section::Prefs,
-        key: "UnderSupportMm",
-        label: "余量阈值",
-        kind: Kind::Number,
-    },
     /* ---- 热床预涂胶 ---- */
     Spec {
         section: Section::Prefs,
@@ -295,8 +282,6 @@ fn read_text(ctx: &Ctx) -> Result<String, AppError> {
 fn value_of_prefs(prefs: &postprocess::ir::PrefsIr, key: &str) -> Option<Value> {
     use postprocess::ir::TowerRelocateModeIr;
     Some(match key {
-        "UnderSupportEnabled" => Value::Bool(prefs.under_support_enabled),
-        "UnderSupportMm" => Value::from(prefs.under_support_mm),
         "GlueBottomEnabled" => Value::Bool(prefs.glue_bottom_enabled),
         "SkipVibrationCalibration" => Value::Bool(prefs.skip_vibration_calibration),
         "BeginStageRetractEnabled" => Value::Bool(prefs.begin_stage_retract_enabled),
@@ -528,14 +513,14 @@ mod tests {
         let before = parse(RAW).expect("改之前");
         let spec = EDITABLE
             .iter()
-            .find(|s| s.key == "UnderSupportEnabled")
+            .find(|s| s.key == "GlueBottomEnabled")
             .expect("那一格");
         let next = edit_text(RAW, spec, &Value::Bool(true)).expect("改得动");
         let after = parse(&next).expect("改完之后还得能解析");
 
-        assert!(after.prefs.under_support_enabled, "改的那一格没生效");
+        assert!(after.prefs.glue_bottom_enabled, "改的那一格没生效");
         assert_eq!(
-            after.prefs.under_support_mm, before.prefs.under_support_mm,
+            after.prefs.bed_glue_enabled, before.prefs.bed_glue_enabled,
             "只改一格不许连带别的"
         );
         assert_eq!(
@@ -567,7 +552,7 @@ mod tests {
             "只改一格不许连带别的"
         );
         assert_eq!(
-            after.prefs.under_support_mm, before.prefs.under_support_mm,
+            after.prefs.bed_glue_enabled, before.prefs.bed_glue_enabled,
             "改 [Client] 不许碰 [Prefs]"
         );
         assert!(next.contains("[Client]"), "整段被写丢了");

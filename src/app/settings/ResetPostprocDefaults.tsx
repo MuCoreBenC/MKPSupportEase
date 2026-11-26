@@ -3,7 +3,7 @@
  *
  * # 它恢复的是哪两份
  *
- * ① 后处理那 16 个偏好（`[Prefs]` 的 12 项 + 通知 / 显示方式 / 置顶 / 强制校准）全部置回
+ * ① 后处理那 16 个偏好（`[Prefs]` 的 10 项 + 通知 / 显示方式 / 置顶 / 强制校准）全部置回
  *    `null`（= 没设过），由后端 `resolved()` 去读 `presets/client-defaults.toml`；
  * ② 客户端壳那几格（主题 / 语言 / 自动清理 / 自动检查更新 / 预设页三项 / 数据源覆盖）
  *    由 `resetClientPrefs` 清回 `None` —— 同一个口径：清"没设过"，不是写死出厂值。
@@ -39,7 +39,7 @@ import s from './PageSettings.module.css'
 /**
  * 「恢复默认」的那一份补丁：全给 `null`，由后端按出厂重算。
  *
- * 键 = 「有出厂值的那 16 项」（`[Prefs]` 的 12 项 + 通知 / 显示方式 / 置顶 / 强制校准）；
+ * 键 = 「有出厂值的那 14 项」（`[Prefs]` 的 10 项 + 通知 / 显示方式 / 置顶 / 强制校准）；
  * 漏一个就是「那一项恢复不了」。
  */
 const RESET_PATCH = {
@@ -48,8 +48,6 @@ const RESET_PATCH = {
   autoTopOnAsk: null,
   forceCalibrationMode: null,
   glueBottomEnabled: null,
-  underSupportEnabled: null,
-  underSupportMm: null,
   skipVibrationCalibration: null,
   beginStageRetractEnabled: null,
   beginStageRetractZLiftMm: null,
@@ -61,7 +59,7 @@ const RESET_PATCH = {
   autoTowerPosition: null,
 } as const
 
-/** 对比表里的 16 行（顺序与设置页出现顺序一致；标签走文案表，与设置页同一句） */
+/** 对比表里的 14 行（顺序与设置页出现顺序一致；标签走文案表，与设置页同一句） */
 const ITEMS: { key: keyof PostprocPrefsView['factory']; label: StringKey }[] = [
   { key: 'notifyOnFinish', label: 'settings.postproc.notify' },
   { key: 'uiMode', label: 'settings.postproc.mode' },
@@ -73,8 +71,6 @@ const ITEMS: { key: keyof PostprocPrefsView['factory']; label: StringKey }[] = [
   { key: 'calibrationSafeLiftMm', label: 'settings.calib.calibLift' },
   { key: 'zCalibrationDwellSec', label: 'settings.calib.zDwell' },
   { key: 'xyCalibrationDwellSec', label: 'settings.calib.xyDwell' },
-  { key: 'underSupportEnabled', label: 'settings.under.enable' },
-  { key: 'underSupportMm', label: 'settings.under.margin' },
   { key: 'glueBottomEnabled', label: 'settings.postproc.glueBottom' },
   { key: 'bedGlueEnabled', label: 'settings.glue.enable' },
   { key: 'bedGlueAllModels', label: 'settings.glue.allModels' },

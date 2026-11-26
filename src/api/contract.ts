@@ -2587,10 +2587,6 @@ export interface ResolvedPostprocPrefs {
    */
   autoTopOnAsk: boolean
   glueBottomEnabled: boolean
-  /** **下方支撑余量（实验）**：涂胶段离笔下方支撑边界够远就不抬高 */
-  underSupportEnabled: boolean
-  /** 余量阈值（mm），量程见 `limits.underSupport` */
-  underSupportMm: number
   skipVibrationCalibration: boolean
   beginStageRetractEnabled: boolean
   beginStageRetractZLiftMm: number
@@ -2658,10 +2654,6 @@ export interface PostprocPrefsWire {
   /** 等回答时置顶窗口：`null` = 回到出厂档（开） */
   autoTopOnAsk?: boolean | null
   glueBottomEnabled?: boolean | null
-  /** **下方支撑余量（实验）**：`null` = 回到出厂档（关） */
-  underSupportEnabled?: boolean | null
-  /** 余量阈值（mm）：`null` = 回到出厂档（0.5） */
-  underSupportMm?: number | null
   skipVibrationCalibration?: boolean | null
   beginStageRetractEnabled?: boolean | null
   beginStageRetractZLiftMm?: number | null
@@ -2767,8 +2759,6 @@ export interface PostprocPrefsView {
     calibrationSafeLiftMm: number
     zCalibrationDwellSec: number
     xyCalibrationDwellSec: number
-    underSupportEnabled: boolean
-    underSupportMm: number
     glueBottomEnabled: boolean
     bedGlueEnabled: boolean
     bedGlueAllModels: boolean
@@ -2780,7 +2770,6 @@ export interface PostprocPrefsView {
     xyDwell: { min: number; max: number }
     zLift: { min: number; max: number }
     calibLift: { min: number; max: number }
-    underSupport: { min: number; max: number }
   }
 }
 

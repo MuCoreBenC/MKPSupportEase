@@ -145,6 +145,10 @@ pub struct WipingConfig {
     /// 边缘带上涂胶段的落笔抬高（mm）。`0` = 关。
     #[serde(default)]
     pub glue_edge_lift: f64,
+    /// **边缘带支撑免抬**（mm）：笔下方有上一层支撑托着、且离支撑边超过这个距离的段，
+    /// 不抬笔。`0` = 关闭整个免抬优化（边缘带照常抬笔），越大越保守。
+    #[serde(default)]
+    pub glue_edge_skip_margin: f64,
     /// **已退役**（2026-11-16）：旧的「涂胶面四周向内收 mm」。
     ///
     /// 保留这一格只为**老预设文件读得进来**（`glue_inset = …` 不会变成未知键报错），

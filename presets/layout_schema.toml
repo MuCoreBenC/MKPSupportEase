@@ -219,6 +219,10 @@ id = 'item_wiping_glue_edge_lift'
 paramKey = 'wiping.glue_edge_lift'
 
 [[tabs.sections.items]]
+id = 'item_wiping_glue_edge_skip_margin'
+paramKey = 'wiping.glue_edge_skip_margin'
+
+[[tabs.sections.items]]
 id = 'item_wiping_min_support_interface_enabled'
 paramKey = 'wiping.min_support_interface_enabled'
 

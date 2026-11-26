@@ -117,6 +117,7 @@ pub const EDITABLE_KEYS: &[(&str, &str)] = &[
     ("wiping", "ironing_keepout_mode"),
     ("wiping", "glue_edge_lines"),
     ("wiping", "glue_edge_lift"),
+    ("wiping", "glue_edge_skip_margin"),
     ("wiping", "prime_trigger_layers"),
     ("wiping", "prime_enabled"),
     ("wiping", "disk_stagger_mode"),

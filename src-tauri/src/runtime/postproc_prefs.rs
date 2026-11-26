@@ -49,8 +49,6 @@ fn tower_mode_to_ir(mode: TowerRelocateMode) -> TowerRelocateModeIr {
 ///   先写的话会被它盖掉。
 pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
     ir.prefs.glue_bottom_enabled = prefs.glue_bottom_enabled;
-    ir.prefs.under_support_enabled = prefs.under_support_enabled;
-    ir.prefs.under_support_mm = prefs.under_support_mm;
     ir.prefs.skip_vibration_calibration = prefs.skip_vibration_calibration;
     ir.prefs.begin_stage_retract_enabled = prefs.begin_stage_retract_enabled;
     ir.prefs.begin_stage_retract_z_lift_mm = prefs.begin_stage_retract_z_lift_mm;
@@ -104,8 +102,8 @@ mod tests {
     use crate::runtime::app_state::{
         PostprocPrefs, BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT, BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
         BEGIN_STAGE_RETRACT_Z_LIFT_MIN, CALIBRATION_SAFE_LIFT_MM_DEFAULT,
-        CALIBRATION_SAFE_LIFT_MM_MAX, CALIBRATION_SAFE_LIFT_MM_MIN, UNDER_SUPPORT_MM_DEFAULT,
-        XY_DWELL_DEFAULT, Z_DWELL_DEFAULT,
+        CALIBRATION_SAFE_LIFT_MM_MAX, CALIBRATION_SAFE_LIFT_MM_MIN, XY_DWELL_DEFAULT,
+        Z_DWELL_DEFAULT,
     };
 
     /// ★★★ **两份出厂档必须一致**：两边现在都读 `presets/client-defaults.toml`，
@@ -116,14 +114,6 @@ mod tests {
         let kernel = postprocess::ir::PrefsIr::default();
 
         assert_eq!(kernel.glue_bottom_enabled, client.glue_bottom_enabled);
-        assert_eq!(
-            kernel.under_support_enabled, client.under_support_enabled,
-            "下方支撑余量开关出厂值两端不一致"
-        );
-        assert!(
-            (kernel.under_support_mm - client.under_support_mm).abs() < 1e-9,
-            "下方支撑余量阈值出厂值两端不一致"
-        );
         assert_eq!(
             kernel.skip_vibration_calibration,
             client.skip_vibration_calibration
@@ -156,10 +146,6 @@ mod tests {
         );
 
         /* 顺带把常量也咬住：镜像常量与 `client-defaults.toml` 漂了同样是红的 */
-        assert!(
-            (kernel.under_support_mm - UNDER_SUPPORT_MM_DEFAULT).abs() < 1e-9,
-            "下方支撑余量出厂值与镜像常量不一致"
-        );
         assert_eq!(
             kernel.z_calibration_dwell_sec, Z_DWELL_DEFAULT,
             "Z 停留出厂值两端不一致"
@@ -233,8 +219,6 @@ mod tests {
             /* 这是**界面偏好**（等回答时置顶），不进 IR —— 这里给什么都一样 */
             auto_top_on_ask: true,
             glue_bottom_enabled: true,
-            under_support_enabled: true,
-            under_support_mm: 0.75,
             skip_vibration_calibration: true,
             begin_stage_retract_enabled: false,
             begin_stage_retract_z_lift_mm: 42,
@@ -271,8 +255,6 @@ mod tests {
         apply_to_ir(&mut ir, &prefs);
 
         assert!(ir.prefs.glue_bottom_enabled);
-        assert!(ir.prefs.under_support_enabled);
-        assert!((ir.prefs.under_support_mm - 0.75).abs() < 1e-9);
         assert!(
             ir.state.glue_bottom_enabled,
             "底面涂胶的实际开关在 `state` 这一格 —— 只写 `prefs` 等于没开"

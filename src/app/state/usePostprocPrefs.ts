@@ -138,8 +138,6 @@ export function usePostprocPrefs(): PostprocPrefsApi {
           uiMode: wire.uiMode ?? before.resolved.uiMode,
           autoTopOnAsk: wire.autoTopOnAsk ?? before.resolved.autoTopOnAsk,
           glueBottomEnabled: wire.glueBottomEnabled ?? before.resolved.glueBottomEnabled,
-          underSupportEnabled: wire.underSupportEnabled ?? before.resolved.underSupportEnabled,
-          underSupportMm: wire.underSupportMm ?? before.resolved.underSupportMm,
           skipVibrationCalibration:
             wire.skipVibrationCalibration ?? before.resolved.skipVibrationCalibration,
           beginStageRetractEnabled:

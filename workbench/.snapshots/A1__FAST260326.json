@@ -36,6 +36,7 @@
   "wiping.fast_tower_mode": "fast",
   "wiping.glue_edge_lift": 0.5,
   "wiping.glue_edge_lines": 1,
+  "wiping.glue_edge_skip_margin": 0.5,
   "wiping.glue_inter_model_lift_height": 2.0,
   "wiping.glue_pass_count": 1,
   "wiping.glue_sparse_ratio": 50.0,

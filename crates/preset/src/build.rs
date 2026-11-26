@@ -263,6 +263,7 @@ pub fn build(
         0
     };
     ir.glue.edge_lift = cfg.wiping.glue_edge_lift;
+    ir.glue.edge_skip_margin = cfg.wiping.glue_edge_skip_margin;
     ir.glue.sparse_ratio = cfg.wiping.glue_sparse_ratio;
     ir.glue.pass_count = cfg.wiping.glue_pass_count;
     if ir.glue.pass_count == 0 {
@@ -697,6 +698,13 @@ fn validate_ranges(ir: &Ir, registry: Option<&Registry>) -> Result<(), PostprocE
             config_key: "GlueEdgeLift",
             hard_min: 0.0,
             hard_max: 20.0,
+        },
+        FloatCheck {
+            name: "GlueEdgeSkipMargin",
+            val: ir.glue.edge_skip_margin,
+            config_key: "GlueEdgeSkipMargin",
+            hard_min: 0.0,
+            hard_max: 2.0,
         },
         FloatCheck {
             name: "GlueZOffset",
@@ -1160,6 +1168,26 @@ mod tests {
         let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
         assert_eq!(ir.glue.edge_lines, 3);
         assert!((ir.glue.edge_lift - 1.5).abs() < f64::EPSILON);
+    }
+
+    /// 边缘带支撑免抬到 IR：填多少就是多少；缺键按 0（关闭）。
+    #[test]
+    fn glue_edge_skip_margin_reaches_ir() {
+        let cfg: TomlConfig = toml::from_str("[wiping]\nglue_edge_skip_margin = 0.75\n").unwrap();
+        let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
+        assert!((ir.glue.edge_skip_margin - 0.75).abs() < f64::EPSILON);
+
+        let absent: TomlConfig = toml::from_str("[wiping]\n").unwrap();
+        let ir = build(&absent, None, CalibrationExecMode::Fallback).unwrap();
+        assert_eq!(ir.glue.edge_skip_margin, 0.0, "缺键按 0（关闭）");
+    }
+
+    /// 超过 2mm 直接报错，不静默夹取。
+    #[test]
+    fn glue_edge_skip_margin_out_of_range_fails() {
+        let cfg: TomlConfig = toml::from_str("[wiping]\nglue_edge_skip_margin = 3\n").unwrap();
+        let err = build(&cfg, None, CalibrationExecMode::Fallback).unwrap_err();
+        assert!(err.to_string().contains("out of range"), "实际: {err}");
     }
 
     /// 旧口径开着（10%）而新键没写：按默认条数接过来，不许把人家正开着的功能悄悄关掉。

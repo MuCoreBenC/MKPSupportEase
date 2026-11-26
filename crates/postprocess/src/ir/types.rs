@@ -193,6 +193,12 @@ pub struct GlueIr {
     /// 笔跑出支撑面再回来不会刮到模型。见 `postproc::pass1::edge_band`。
     #[serde(default)]
     pub edge_lift: f64,
+    /// **边缘带支撑免抬**（mm）：边缘带里那些「笔下方有上一层支撑托着、且离支撑边
+    /// 超过这个距离」的段不抬笔。`0` = 关闭整个免抬优化（边缘带照常抬），越大越保守。
+    ///
+    /// 判据见 `postproc::pass1::edge_band` 的 `UnderGrid`。
+    #[serde(default)]
+    pub edge_skip_margin: f64,
     pub sparse_ratio: f64,
     pub pass_count: i64,
     pub z_lift_height: f64,

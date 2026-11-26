@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "677f152965ffc859",
+  "revision": "ad299eba7e250bc3",
   "publishedAt": "2026-11-19T04:25:52Z",
   "brands": [
     {
@@ -3309,15 +3309,15 @@
         "configKey": "BedGlueSpeedMode",
         "tomlKey": "bed_glue_speed_mode",
         "jsonKey": "bed_glue_speed_mode",
-        "label": "预涂胶速度",
-        "labelEn": "Pre-print glue speed",
-        "labelJa": "予備塗布速度",
-        "labelTw": "預塗膠速度",
-        "desc": "跟随机型、用涂胶速度，或自己填。",
-        "descEn": "Follow the machine, reuse the glue speed, or enter your own.",
-        "descJa": "機種に追従、塗布速度を使う、自分で入力、から選びます。",
-        "descTw": "跟隨機型、用塗膠速度，或自己填。",
-        "tomlComment": "预涂胶速度(follow/glue/custom)",
+        "label": "热床预涂胶速度",
+        "labelEn": "Bed pre-glue speed",
+        "labelJa": "ヒートベッド事前塗布速度",
+        "labelTw": "熱床預塗膠速度",
+        "desc": "跟随切片、用涂胶速度，或自己填。跟随时取切片文件的空驶速度。",
+        "descEn": "Follow the slicer, reuse the glue speed, or enter your own. Follow reads the travel speed from the sliced file.",
+        "descJa": "スライスに追従、塗布速度を使う、自分で入力、から選びます。追従はスライスファイルの移動速度を使います。",
+        "descTw": "跟隨切片、用塗膠速度，或自己填。跟隨時取切片檔案的空駛速度。",
+        "tomlComment": "热床预涂胶速度(follow/glue/custom)",
         "valueType": "string",
         "uiComponent": "select",
         "defaultValue": "follow",
@@ -3335,10 +3335,10 @@
         "showWhen": null,
         "choices": [
           {
-            "label": "跟随机型",
-            "labelEn": "Follow machine",
-            "labelJa": "機種に追従",
-            "labelTw": "跟隨機型",
+            "label": "跟随切片",
+            "labelEn": "Follow slicer",
+            "labelJa": "スライスに追従",
+            "labelTw": "跟隨切片",
             "value": "follow",
             "deprecated": false
           },
@@ -3375,15 +3375,15 @@
         "configKey": "BedGlueSpeed",
         "tomlKey": "bed_glue_speed",
         "jsonKey": "bed_glue_speed",
-        "label": "预涂胶速度·自定义",
-        "labelEn": "Pre-print glue speed (custom)",
-        "labelJa": "予備塗布速度（カスタム）",
-        "labelTw": "預塗膠速度（自訂）",
+        "label": "热床预涂胶速度·自定义",
+        "labelEn": "Bed pre-glue speed (custom)",
+        "labelJa": "ヒートベッド事前塗布速度（カスタム）",
+        "labelTw": "熱床預塗膠速度（自訂）",
         "desc": "只在选「自定义」时生效。",
         "descEn": "Only applies when Custom is selected.",
         "descJa": "「カスタム」を選んだときだけ有効です。",
         "descTw": "只在選「自訂」時生效。",
-        "tomlComment": "预涂胶速度自定义值(mm/s) 范围:10~300",
+        "tomlComment": "热床预涂胶速度自定义值(mm/s) 范围:10~300",
         "valueType": "float",
         "uiComponent": "number",
         "defaultValue": 70.0,
@@ -3420,15 +3420,15 @@
         "configKey": "GlueTravelSpeedMode",
         "tomlKey": "glue_travel_speed_mode",
         "jsonKey": "glue_travel_speed_mode",
-        "label": "段间横移速度",
-        "labelEn": "Segment travel speed",
-        "labelJa": "区間移動速度",
-        "labelTw": "段間橫移速度",
-        "desc": "涂胶段之间移动的速度，笔不抬起。",
-        "descEn": "Speed of moving between glue segments with the pen still down.",
-        "descJa": "ペンを上げずに塗布区間の間を移動する速度。",
-        "descTw": "塗膠段之間移動的速度，筆不抬起。",
-        "tomlComment": "段间横移速度(follow/glue/custom)",
+        "label": "热床预涂胶段间横移速度",
+        "labelEn": "Bed pre-glue travel speed",
+        "labelJa": "ヒートベッド事前塗布の段間移動速度",
+        "labelTw": "熱床預塗膠段間橫移速度",
+        "desc": "热床预涂胶各段之间移动的速度，笔不抬起。",
+        "descEn": "Speed of moving between bed pre-glue segments with the pen still down.",
+        "descJa": "ヒートベッド事前塗布の区間を移動する速度。ペンは上げません。",
+        "descTw": "熱床預塗膠各段之間移動的速度，筆不抬起。",
+        "tomlComment": "热床预涂胶段间横移速度(follow/glue/custom)",
         "valueType": "string",
         "uiComponent": "select",
         "defaultValue": "follow",
@@ -3446,10 +3446,10 @@
         "showWhen": null,
         "choices": [
           {
-            "label": "跟随机型",
-            "labelEn": "Follow machine",
-            "labelJa": "機種に追従",
-            "labelTw": "跟隨機型",
+            "label": "跟随切片",
+            "labelEn": "Follow slicer",
+            "labelJa": "スライスに追従",
+            "labelTw": "跟隨切片",
             "value": "follow",
             "deprecated": false
           },
@@ -3486,15 +3486,15 @@
         "configKey": "GlueTravelSpeed",
         "tomlKey": "glue_travel_speed",
         "jsonKey": "glue_travel_speed",
-        "label": "段间横移速度·自定义",
-        "labelEn": "Segment travel speed (custom)",
-        "labelJa": "区間移動速度（カスタム）",
-        "labelTw": "段間橫移速度（自訂）",
+        "label": "热床预涂胶段间横移速度·自定义",
+        "labelEn": "Bed pre-glue travel speed (custom)",
+        "labelJa": "ヒートベッド事前塗布の段間移動速度（カスタム）",
+        "labelTw": "熱床預塗膠段間橫移速度（自訂）",
         "desc": "只在选「自定义」时生效。",
         "descEn": "Only applies when Custom is selected.",
         "descJa": "「カスタム」を選んだときだけ有効です。",
         "descTw": "只在選「自訂」時生效。",
-        "tomlComment": "段间横移速度自定义值(mm/s) 范围:10~300",
+        "tomlComment": "热床预涂胶段间横移速度自定义值(mm/s) 范围:10~300",
         "valueType": "float",
         "uiComponent": "number",
         "defaultValue": 70.0,
@@ -4153,6 +4153,62 @@
         "min": 0.0,
         "max": 20.0,
         "step": 0.5,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {
+          "A1": 0.5,
+          "A1:FAST260326": 0.5,
+          "A1:FAST261111": 0.5,
+          "A1:STANDARD": 0.5,
+          "A1_MINI": 0.5,
+          "A1_MINI:FAST260326": 0.5,
+          "A1_MINI:FAST261111": 0.5,
+          "A1_MINI:STANDARD": 0.5,
+          "P1S": 0.5,
+          "P1S:LITE": 0.5,
+          "P2S": 0.5,
+          "P2S:STANDARD": 0.5,
+          "X1C": 0.5,
+          "X1C:LITE": 0.5
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.glue_edge_skip_margin",
+        "configKey": "GlueEdgeSkipMargin",
+        "tomlKey": "glue_edge_skip_margin",
+        "jsonKey": "glue_edge_skip_margin",
+        "label": "边缘带支撑免抬",
+        "labelEn": "Edge support skip",
+        "labelJa": "エッジ帯の支持による省略",
+        "labelTw": "邊緣帶支撐免抬",
+        "desc": "笔下方有支撑、离支撑边超过这个距离时，边缘带不再抬笔。0 关闭。",
+        "descEn": "Skip the edge-band lift where the pen has support and stays this far from the support edge; 0 turns it off.",
+        "descJa": "ペン下に支持があり、支持の端からこの距離以上離れていればエッジ帯の浮かせを省略します。0 で無効。",
+        "descTw": "筆下方有支撐、離支撐邊超過這個距離時，邊緣帶不再抬筆。0 關閉。",
+        "tomlComment": "边缘带支撑免抬(mm) 范围:0~2",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.5,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 6.6,
+          "sectionId": "glue_ironing"
+        },
+        "min": 0.0,
+        "max": 2.0,
+        "step": 0.05,
         "unit": "mm",
         "parentKey": null,
         "showWhen": null,
@@ -6559,6 +6615,10 @@
                 "paramKey": "wiping.glue_edge_lift"
               },
               {
+                "id": "item_wiping_glue_edge_skip_margin",
+                "paramKey": "wiping.glue_edge_skip_margin"
+              },
+              {
                 "id": "item_wiping_min_support_interface_enabled",
                 "paramKey": "wiping.min_support_interface_enabled"
               },
@@ -6910,8 +6970,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "cb341ebd5b5362e882d89f35dc34bbb21ae0f6f4005e1ff7ba80d1736cc26147",
-      "size": 5353
+      "sha256": "836dc63f148b57391d84fa1b0a5b23a9e73d4684a1681c8e096bdc836030788a",
+      "size": 5462
     },
     {
       "kind": "mkp_preset",
@@ -6919,8 +6979,8 @@
       "path": "delivery/mkp/presets/A1-fast260326.toml",
       "machineId": "A1",
       "versionId": "FAST260326",
-      "sha256": "4e5835f452c467501840d41e09f28c9148ed21195d416ca2a58f7d978576b952",
-      "size": 5358
+      "sha256": "77d4ee09540d01ea3961496ae8b256f41ea3b5590a6f667d36de9d978a95d143",
+      "size": 5467
     },
     {
       "kind": "mkp_preset",
@@ -6928,8 +6988,8 @@
       "path": "delivery/mkp/presets/A1-fast261111.toml",
       "machineId": "A1",
       "versionId": "FAST261111",
-      "sha256": "f2654bc090c0d53bd1549e59158a0413494e56d9ae19220518a823b4d2fa39af",
-      "size": 5360
+      "sha256": "2dca96e5da5623f37e7a0de83a5ffdc5019b29dcac6dfc87a76c1eb4e8c50fa4",
+      "size": 5469
     },
     {
       "kind": "mkp_preset",
@@ -6937,8 +6997,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "f020a3fab9442ae6291019a51b904af6c1fc1dcd672a74e68bf7d5bc556b1176",
-      "size": 5361
+      "sha256": "68f97218737f030d7a3863587f4838c58d30b3a9c902cf804c9a09db198d6ceb",
+      "size": 5470
     },
     {
       "kind": "mkp_preset",
@@ -6946,8 +7006,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast260326.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST260326",
-      "sha256": "203c68df61ee7136294248cda50cd071b474b86b34f85e071d44a80453c744c1",
-      "size": 5361
+      "sha256": "fc225f5b4cbd22b2c95542d6e5e4609c143ad27c10249be816138b1b360ebb0e",
+      "size": 5470
     },
     {
       "kind": "mkp_preset",
@@ -6955,8 +7015,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast261111.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST261111",
-      "sha256": "31420cce7cf7aab725695a6357682675c032379f1dc0970694005af1ea065641",
-      "size": 5363
+      "sha256": "9cc056207dfea2815c801a1f95b1dc16b41aaac9e8288e12d223463d01930f53",
+      "size": 5472
     },
     {
       "kind": "mkp_preset",
@@ -6964,8 +7024,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "653c3db3ca5d8c0a11bf63ef1c53cdd91ac68e3d771ede81c043e29cd8d0c1fa",
-      "size": 5502
+      "sha256": "84aae1c6bb1509ea2045bf16683b22d27488787f6c394c540fe772e44c414a1c",
+      "size": 5611
     },
     {
       "kind": "mkp_preset",
@@ -6973,8 +7033,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "02dacdaf2a454c7cd53141ac0e46beaf18e582b34d09377d5274b80e8fd04f9c",
-      "size": 5502
+      "sha256": "848d94dea454f725c3057e113aa0a2467e1e7a8bccb2a6043bce95c09ffbdef7",
+      "size": 5611
     },
     {
       "kind": "icon",
