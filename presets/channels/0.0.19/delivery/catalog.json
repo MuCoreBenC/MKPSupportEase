@@ -6924,8 +6924,6 @@
     }
   ],
   "structureSignature": "c0848ba79464dbeb",
-  "minClientVersion": "0.0.19",
-  "channelId": "0.0.19",
   "presetSchemaSignature": "21be76b32139a81c",
   "presetContractEpoch": 1,
   "catalogId": "support-ease",

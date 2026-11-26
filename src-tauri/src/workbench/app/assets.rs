@@ -1632,8 +1632,15 @@ mod tests {
     /// （`present`、`url` 前缀、类型都在）。
     #[test]
     fn the_real_asset_list_is_complete_and_present() {
+        /* 迁移后当前线在 0.0.19 渠道；测试显式对准它，别拿 legacy 旧线判“产物不在” */
+        let old = std::env::var_os("MKPSE_PRESET_CHANNEL");
+        std::env::set_var("MKPSE_PRESET_CHANNEL", "0.0.19");
         let list =
             wb_assets(None, None, None, None, None, None, None, None).expect("真 presets 读得通");
+        match old {
+            Some(v) => std::env::set_var("MKPSE_PRESET_CHANNEL", v),
+            None => std::env::remove_var("MKPSE_PRESET_CHANNEL"),
+        }
         assert!(
             !list.assets.is_empty(),
             "真数据一条资产都没有 ⇒ 后面的完整性检查就是空转"

@@ -497,7 +497,14 @@ mod tests {
     #[test]
     fn the_real_bundle_list_is_complete() {
         use crate::workbench::domain::BuildState;
+        /* 当前线在 0.0.19 渠道；legacy 是冻结旧线，不能拿它判当前产物 */
+        let old = std::env::var_os("MKPSE_PRESET_CHANNEL");
+        std::env::set_var("MKPSE_PRESET_CHANNEL", "0.0.19");
         let list = wb_bundles(None).expect("真 presets 读得通");
+        match old {
+            Some(v) => std::env::set_var("MKPSE_PRESET_CHANNEL", v),
+            None => std::env::remove_var("MKPSE_PRESET_CHANNEL"),
+        }
         assert_eq!(
             list.total, 9,
             "一版一套：A1 三版 + A1_MINI 三版 + P1S / P2S / X1C 各一 —— 条数变了就说清为什么"

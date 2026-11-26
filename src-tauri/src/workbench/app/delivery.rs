@@ -3958,15 +3958,16 @@ mod tests {
             crate::presetdata::Presets::load_from(&presets_root).expect("真源读得出来");
         presets.set_asset_root(&repo.join(crate::runtime::catalog::REPO_ASSET_ROOT));
 
+        let delivery = repo.join("presets/channels/0.0.19/delivery");
         let mut rebuilt = crate::runtime::catalog::Catalog::build_from_presets_lenient(
             &presets,
-            &repo.join("presets/delivery/mkp/presets"),
+            &delivery.join("mkp/presets"),
         );
         let rules = crate::runtime::structure::RuleTable::load(&presets_root).expect("规则表在");
         rebuilt.apply_min_client(&rules);
 
-        let committed = std::fs::read_to_string(repo.join("presets/delivery/catalog.json"))
-            .expect("入库的交付面 catalog 在（2026-10-05 起入库）");
+        let committed = std::fs::read_to_string(delivery.join("catalog.json"))
+            .expect("入库的 0.0.19 渠道 catalog 在");
         /*
          * 戳与**发布身份**都从入库那份里取、补到重建结果上：它们是发布事件的痕迹，
          * 不来自源（2026-10-28 加了 `catalogId` / `publishSerial` 之后同一条道理 ——
