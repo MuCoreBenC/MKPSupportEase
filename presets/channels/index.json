@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "channels": [
+    {
+      "id": "legacy-0.0.18",
+      "path": "presets/delivery",
+      "minClient": "0.0.1",
+      "maxClientExclusive": "0.0.19",
+      "fallbackTo": null
+    },
+    {
+      "id": "0.0.19",
+      "path": "presets/channels/0.0.19/delivery",
+      "minClient": "0.0.19",
+      "maxClientExclusive": "0.0.20",
+      "fallbackTo": null
+    }
+  ]
+}

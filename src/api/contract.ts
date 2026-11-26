@@ -1284,12 +1284,14 @@ export type UnverifiedReason =
  * **它不回答"是不是一份合法 MKP Preset"**（有哪些字段、参数类型对不对 —— 那是 Preset 语义，
  * 客户端不复制那份 schema）；外部修改过但仍是能读的 TOML ⇒ 照常 `ok`，**不因 SHA 报警**。
  */
-export type LocalState = 'ok' | 'unreadable'
+export type LocalState = 'ok' | 'unreadable' | 'incompatible'
 
 export interface LocalPresetFile {
   /** 相对**用户根**的路径（`presets-local/A1-fast.toml`）—— 读正文 / 应用时把它交回来 */
   path: string
   fileName: string
+  /** 相对 `presets-local/` 的来源文件夹；空串 / 缺省 = 旧平铺文件 */
+  folder?: string
   size: number
   /** 最后改动时刻（UTF **epoch 秒**）。界面自己转人话：默认构建不引时间库 */
   modifiedUnix: number | null
@@ -2588,6 +2590,11 @@ export interface ResolvedPostprocPrefs {
   autoTopOnAsk: boolean
   glueBottomEnabled: boolean
   skipVibrationCalibration: boolean
+  /**
+   * **打完退料**（AMS / bMCU）：关（出厂）时收尾的退料与切丝段整段不写，
+   * 耗材留在喷头里；开着时校准块会挪到退料之后，趁热先退料再降温做校准。
+   */
+  amsUnloadAfterPrint: boolean
   beginStageRetractEnabled: boolean
   beginStageRetractZLiftMm: number
   /**
@@ -2659,6 +2666,8 @@ export interface PostprocPrefsWire {
   autoTopOnAsk?: boolean | null
   glueBottomEnabled?: boolean | null
   skipVibrationCalibration?: boolean | null
+  /** 打完退料（AMS）：`null` = 回到出厂档（关） */
+  amsUnloadAfterPrint?: boolean | null
   beginStageRetractEnabled?: boolean | null
   beginStageRetractZLiftMm?: number | null
   /** 校准抬升高度（mm）：`null` = 回到出厂档（10） */
@@ -2760,6 +2769,7 @@ export interface PostprocPrefsView {
     autoTopOnAsk: boolean
     forceCalibrationMode: boolean
     skipVibrationCalibration: boolean
+    amsUnloadAfterPrint: boolean
     beginStageRetractEnabled: boolean
     beginStageRetractZLiftMm: number
     calibrationSafeLiftMm: number

@@ -292,6 +292,8 @@ mod tests {
             version_id: "FAST".to_owned(),
             sha256: Some(super::super::catalog::hex(&Sha256::digest(text.as_bytes()))),
             size: Some(text.len() as u64),
+            preset_schema_signature: Some(preset::preset_schema_signature()),
+            preset_contract_epoch: Some(preset::preset_contract_epoch()),
         }
     }
 

@@ -78,6 +78,8 @@ pub struct LocalPresetFileDto {
     /// 相对**用户根**的路径（`presets-local/A1-fast.toml`）—— 读正文 / 应用时把它交回来
     pub path: String,
     pub file_name: String,
+    /// 相对 `presets-local/` 的来源文件夹；空串 = 旧平铺文件
+    pub folder: String,
     pub size: u64,
     /// 最后改动时刻（UTC epoch 秒）。界面自己转人话：默认构建不引时间库
     pub modified_unix: Option<u64>,
@@ -239,6 +241,7 @@ pub async fn get_local_preset_files(app: AppHandle) -> Result<Vec<LocalPresetFil
                     obtained_unix: entry.map(|e| e.at),
                     path: f.path,
                     file_name: f.file_name,
+                    folder: f.folder,
                     size: f.size,
                     modified_unix: f.modified_unix,
                     sha256: f.sha256,

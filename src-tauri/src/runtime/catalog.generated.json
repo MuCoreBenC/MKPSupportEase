@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "669edc681458ffce",
+  "revision": "14cc5743247cd87f",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -6685,56 +6685,72 @@
       "fileName": "A1-standard.toml",
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
-      "versionId": "STANDARD"
+      "versionId": "STANDARD",
+      "presetSchemaSignature": "21be76b32139a81c",
+      "presetContractEpoch": 1
     },
     {
       "kind": "mkp_preset",
       "fileName": "A1-fast260326.toml",
       "path": "delivery/mkp/presets/A1-fast260326.toml",
       "machineId": "A1",
-      "versionId": "FAST260326"
+      "versionId": "FAST260326",
+      "presetSchemaSignature": "21be76b32139a81c",
+      "presetContractEpoch": 1
     },
     {
       "kind": "mkp_preset",
       "fileName": "A1-fast261111.toml",
       "path": "delivery/mkp/presets/A1-fast261111.toml",
       "machineId": "A1",
-      "versionId": "FAST261111"
+      "versionId": "FAST261111",
+      "presetSchemaSignature": "21be76b32139a81c",
+      "presetContractEpoch": 1
     },
     {
       "kind": "mkp_preset",
       "fileName": "A1_MINI-standard.toml",
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
-      "versionId": "STANDARD"
+      "versionId": "STANDARD",
+      "presetSchemaSignature": "21be76b32139a81c",
+      "presetContractEpoch": 1
     },
     {
       "kind": "mkp_preset",
       "fileName": "A1_MINI-fast260326.toml",
       "path": "delivery/mkp/presets/A1_MINI-fast260326.toml",
       "machineId": "A1_MINI",
-      "versionId": "FAST260326"
+      "versionId": "FAST260326",
+      "presetSchemaSignature": "21be76b32139a81c",
+      "presetContractEpoch": 1
     },
     {
       "kind": "mkp_preset",
       "fileName": "A1_MINI-fast261111.toml",
       "path": "delivery/mkp/presets/A1_MINI-fast261111.toml",
       "machineId": "A1_MINI",
-      "versionId": "FAST261111"
+      "versionId": "FAST261111",
+      "presetSchemaSignature": "21be76b32139a81c",
+      "presetContractEpoch": 1
     },
     {
       "kind": "mkp_preset",
       "fileName": "P1S-lite.toml",
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
-      "versionId": "LITE"
+      "versionId": "LITE",
+      "presetSchemaSignature": "21be76b32139a81c",
+      "presetContractEpoch": 1
     },
     {
       "kind": "mkp_preset",
       "fileName": "X1C-lite.toml",
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
-      "versionId": "LITE"
+      "versionId": "LITE",
+      "presetSchemaSignature": "21be76b32139a81c",
+      "presetContractEpoch": 1
     },
     {
       "kind": "icon",
@@ -6856,6 +6872,8 @@
       "versionId": ""
     }
   ],
-  "structureSignature": "2242174c52e8a9b6",
-  "minClientVersion": "0.0.6"
+  "structureSignature": "c0848ba79464dbeb",
+  "minClientVersion": "0.0.19",
+  "presetSchemaSignature": "21be76b32139a81c",
+  "presetContractEpoch": 1
 }

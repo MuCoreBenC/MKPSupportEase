@@ -527,7 +527,12 @@ export function cloudClaimBadge(row: {
   basedOn?: BasedOn
   localState?: CloudLocalState
   basedOnFacts?: BasedOnFacts
-}): { text: StringKey; params?: Record<string, string>; state: string } | null {
+}): {
+  text: StringKey
+  params?: Record<string, string>
+  state: string
+  hint: StringKey | null
+} | null {
   /*
    * 徽章只搬 [`updateStatusOf`] 的结论（2026-10-29 收口）——
    * 以前这里自己写了一遍同样意思的 switch，详情头又直接读 `CLOUD_LOCAL_TEXT`，
@@ -535,7 +540,12 @@ export function cloudClaimBadge(row: {
    */
   const st = updateStatusOf(row)
   if (st.text === null) return null
-  return { text: st.text, params: st.params, state: row.localState ?? st.action }
+  return {
+    text: st.text,
+    params: st.params,
+    state: row.localState ?? st.action,
+    hint: st.hint,
+  }
 }
 
 export const UPDATE_ACTION_TEXT: Record<PresetUpdateState, StringKey> = {
@@ -913,6 +923,8 @@ export function updateStatusOf(row: {
         ...none,
         text: (reason !== null ? UNVERIFIED_WHY[reason] : undefined) ??
           'presets.tree.unverified.noReason',
+        action: 'download',
+        hint: 'presets.tree.cloudLocal.unverifiedDownloadWhy',
         warn: reason === 'catalog_without_identity',
       }
     }
@@ -924,14 +936,32 @@ export function updateStatusOf(row: {
      * 具体是哪两条分支在详情「更多 → 来源追溯」里（`完整来源` / `当前源地址`）。
      * 列表一行只有一行的宽度，把 identity 串塞进去会把文件名挤没。
      */
+    /*
+     * **不是同一个来源**：不比较版本，但允许下载当前源版本。
+     * 旧份由下载管道归档；“曾经下载过”不是禁止重新下载的理由。
+     */
     case 'elsewhere':
-      return { ...none, text: 'presets.tree.cloudLocal.elsewhere' }
+      return {
+        ...none,
+        text: 'presets.tree.cloudLocal.elsewhere',
+        action: 'download',
+        hint: 'presets.tree.cloudLocal.elsewhereWhy',
+      }
     /* 云端这一份比我手上的旧：不给更新（那是把用户往回带），也不显示云端时间 */
     case 'newer':
       return { ...none, text: 'presets.tree.cloudLocal.newer' }
-    /* **目录自相矛盾**：报警，不给动作（覆盖等于把错的东西写进用户文件） */
+    /*
+     * **同源同号但字节被改过**：报警，同时给“重新下载”作为修复动作。
+     * 不给动作只会把用户困在一个没有出口的状态里。
+     */
     case 'inconsistent':
-      return { ...none, text: 'presets.tree.cloudLocal.inconsistent', warn: true }
+      return {
+        ...none,
+        text: 'presets.tree.cloudLocal.inconsistent',
+        action: 'download',
+        warn: true,
+        hint: 'presets.tree.cloudLocal.inconsistentWhy',
+      }
     /*
      * 后端没给结论（老后端 / 探针数据）：退回 `localState` 那三档。
      * 这是**唯一的兜底**，一眼能看出它什么时候会被用到。
@@ -2014,6 +2044,8 @@ export interface PresetLocalRow extends PresetRowBase {
    * `'ok'` 照常。认不出是哪一类的行没有这一档（`undefined`）。
    */
   localState?: LocalState
+  /** 相对 `presets-local/` 的来源文件夹；空串 = 旧平铺文件 */
+  folder?: string
   /** 读不出来时后端给的那句人话原因（角标与动作格的 title 用它） */
   localStateDetail?: string | null
   /**
@@ -2623,6 +2655,11 @@ function sortRows<R extends PresetRowBase>(rows: R[], sort: PresetSort): R[] {
   return [...rows].sort((a, b) => {
     if (a.pinOrder !== b.pinOrder) return b.pinOrder - a.pinOrder
 
+    /* 来源文件夹先分组：同名文件来自两个源时不再挨在一起 */
+    const fa = (a as R & { folder?: string }).folder ?? ''
+    const fb = (b as R & { folder?: string }).folder ?? ''
+    if (fa !== fb) return fa.localeCompare(fb)
+
     /* 名字那一列：默认档族优先；a-z / z-a 那两档是**纯文件名文本序** */
     if (sort.key === 'name') {
       if (!family) return a.fileName.localeCompare(b.fileName) * dir
@@ -3007,6 +3044,7 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
          */
         localState: f.state ?? undefined,
         localStateDetail: f.stateDetail,
+        folder: f.folder ?? '',
         /* 来路账：「来源」与「云端发布时刻」两格的数据（见 `originCellOf`） */
         provenanceKind: f.provenanceKind,
         originPath: f.originPath,

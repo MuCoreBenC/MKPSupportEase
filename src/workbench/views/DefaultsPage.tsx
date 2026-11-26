@@ -69,7 +69,7 @@ const GROUPS: EditGroup[] = [
     id: 'postproc',
     title: '后处理',
     desc: '完成后的通知与显示',
-    sections: [{ note: '', keys: ['NotifyOnFinish', 'UiMode', 'AutoTopOnAsk', 'GlueBottomEnabled', 'AutoTowerPosition'] }],
+    sections: [{ note: '', keys: ['NotifyOnFinish', 'UiMode', 'AutoTopOnAsk', 'GlueBottomEnabled', 'AmsUnloadAfterPrint', 'AutoTowerPosition'] }],
   },
   {
     id: 'calib',

@@ -50,6 +50,7 @@ fn tower_mode_to_ir(mode: TowerRelocateMode) -> TowerRelocateModeIr {
 pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
     ir.prefs.glue_bottom_enabled = prefs.glue_bottom_enabled;
     ir.prefs.skip_vibration_calibration = prefs.skip_vibration_calibration;
+    ir.prefs.ams_unload_after_print = prefs.ams_unload_after_print;
     ir.prefs.begin_stage_retract_enabled = prefs.begin_stage_retract_enabled;
     ir.prefs.begin_stage_retract_z_lift_mm = prefs.begin_stage_retract_z_lift_mm;
     /* 校准「切笔」的安全抬升量（mm）：内核那侧是 f64，这里一格整数偏好 */
@@ -236,6 +237,7 @@ mod tests {
             auto_top_on_ask: true,
             glue_bottom_enabled: true,
             skip_vibration_calibration: true,
+            ams_unload_after_print: true,
             begin_stage_retract_enabled: false,
             begin_stage_retract_z_lift_mm: 42,
             calibration_safe_lift_mm: 14,
@@ -278,6 +280,10 @@ mod tests {
             "底面涂胶的实际开关在 `state` 这一格 —— 只写 `prefs` 等于没开"
         );
         assert!(ir.prefs.skip_vibration_calibration);
+        assert!(
+            ir.prefs.ams_unload_after_print,
+            "打完退料那一格必须真的落到 IR —— 收尾钩子与校准插入点都读它"
+        );
         assert!(!ir.prefs.begin_stage_retract_enabled);
         assert_eq!(ir.prefs.begin_stage_retract_z_lift_mm, 42);
         assert_eq!(

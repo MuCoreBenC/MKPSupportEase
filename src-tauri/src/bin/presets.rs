@@ -83,6 +83,29 @@ fn run_cli() -> Result<i32, AppError> {
     let force = rest.iter().any(|a| a == "--force");
     /* `sop --apply` 才写盘；`--confirm` 只在发布最后一步生效，缺它绝不真发 */
     let apply = rest.iter().any(|a| a == "--apply");
+    /*
+     * 渠道：`--channel 0.0.19` / `--channel legacy-0.0.18`。
+     * 不写默认走当前新线 0.0.19；legacy 必须显式点名，避免误覆盖 0.0.18 旧目录。
+     */
+    let channel = rest
+        .iter()
+        .position(|a| a == "--channel")
+        .and_then(|i| rest.get(i + 1))
+        .cloned()
+        .or_else(|| {
+            rest.iter()
+                .find_map(|a| a.strip_prefix("--channel=").map(str::to_owned))
+        });
+    if let Some(channel) = channel {
+        if channel.is_empty() || channel.contains("..") || channel.contains('/') {
+            return Err(AppError::invalid_argument(format!(
+                "渠道名不合法：{channel}（只允许字母数字、点、横线）"
+            )));
+        }
+        std::env::set_var("MKPSE_PRESET_CHANNEL", &channel);
+    } else if std::env::var_os("MKPSE_PRESET_CHANNEL").is_none() {
+        std::env::set_var("MKPSE_PRESET_CHANNEL", "0.0.19");
+    }
 
     match cmd.as_str() {
         /* 这一条**不读任何文件、不建任何目录**：它只回答「我这个二进制是哪次编的」。
@@ -119,7 +142,8 @@ fn usage() {
         "用法：
   presets build                 说清这个二进制是哪次编译的（只读，不碰数据）
   presets check                 检查源 TOML / 引用 / 交付约束（只读）
-  presets generate [--all]      跑生成器刷新交付产物（**不推进发布序号**）
+  presets generate [--all] [--channel ID]
+                                跑生成器刷新指定渠道（默认 0.0.19；**不推进发布序号**）
   presets diff                  报盘上与真生成结果的差异（只读）
   presets verify                核对 catalog / manifest / 账本 / SHA（只读）
   presets credentials           按盘上真字节重写 manifest 的 SHA / size（= 工作台「更新发布凭据」）
@@ -132,8 +156,10 @@ fn usage() {
   presets normalize             把 presets/registry/param_registry.toml 重排成机械序
   presets follows-migrate --dry-run  预演「跟随状态」迁移：说会有几条，不写任何文件
   presets follows-migrate       把存量版本键补成显式的「不跟随」+ 写迁移台账
-  presets publish --dry-run     预演发布：说会写成第几号，一个字节都不写（不需要确认）
-  presets publish --confirm     执行正式发布事务（唯一能让序号 +1 的动作）
+  presets publish --channel ID --dry-run  预演指定渠道（默认 0.0.19），一个字节都不写
+  presets publish --channel ID --confirm  执行正式发布事务（唯一能让序号 +1 的动作）
+  ★ legacy 数据补丁必须先改 `presets/legacy/0.0.18/`，再显式 `--channel legacy-0.0.18`；
+    本轮先完成渠道迁移，legacy 补丁工具随后接上
                                 ★ 真发布必须人当次明确许可；缺 --confirm 直接拒绝
 
 退出码：0 成功 · 1 执行失败 / 校验未通过 · 2 闸门拦下（要人处理）"

@@ -88,6 +88,9 @@ pub struct LocalFile {
     pub path: String,
     /// 文件名。用户自己的文件**没有"交付身份"**：云端没有它，所以没有 SHA、不属于任何版本
     pub file_name: String,
+    /// 相对 `presets-local/` 的目录；空串 = 还平铺在根上（旧文件）。
+    /// 只用于列表分组和“来源”文件夹，不改变文件身份。
+    pub folder: String,
     pub size: u64,
     /// 最后改动时刻（UTC epoch 秒）。`None` = 文件系统没给（不是 0，也不编一个）
     pub modified_unix: Option<u64>,
@@ -264,14 +267,18 @@ pub enum LocalState {
     /// 读不出来：读盘失败 / 不是 UTF-8 / TOML 语法不对 / 指向用户根之外。
     /// 界面上这一档显示"文件无法读取"，**不许应用 / 编辑**（原因在 `state_detail`）
     Unreadable,
+    /// TOML 读得动，但当前程序的预设结构读不动（多键 / 缺键 / 类型不匹配）。
+    /// 与 `Unreadable` 分开：文件没坏，只是属于另一个程序版本。
+    Incompatible,
 }
 
 impl LocalState {
-    /// 跨 IPC 的稳定词（serde 到界面就是这两个；前端契约里同名）
+    /// 跨 IPC 的稳定词（serde 到界面就是三个；前端契约里同名）
     pub fn as_str(self) -> &'static str {
         match self {
             LocalState::Ok => "ok",
             LocalState::Unreadable => "unreadable",
+            LocalState::Incompatible => "incompatible",
         }
     }
 }
@@ -456,19 +463,18 @@ fn judge_against(
     };
     if let Some(theirs) = facts.cloud_source.as_deref() {
         /*
-         * ★ 比的是 **ref（分支）**，不是整串地址。
+         * ★ 两侧都有分支时只比 ref：GitHub / Gitee 镜像同提交仍是同源。
          *
-         * 整串地址里那个 host 恰恰是镜像要忽略的东西：GitHub 与 Gitee 是同一笔提交的
-         * 两个远端，用户换镜像**不该**被判成"来源不同"（那会让每次换源都掉一批更新提示）。
-         * 而同一个仓库的另一个分支是另一回事：内容各自演化、账本各数各的号。
+         * 自定义源没有分支概念（`NO_REF`），这时比**完整身份**（host + 路径）——
+         * 否则切到另一个地址后，两边都跳过 ref 比较，会落到"同线同号但字节不同"
+         * 的 `Inconsistent`，把换源误报成云端数据异常。
          *
-         * 所以口径是「同一条 ref 才可比较」；`NO_REF`（自建源没有分支概念）与缺地址
-         * 都是"不知道"，不据此下判断。
+         * 一侧有 ref、一侧 `NO_REF` ⇒ 明确不同源；认不出（没有 `@`）才说"不知道"。
          */
-        if let (Some(a), Some(b)) = (address_ref(mine), address_ref(theirs)) {
-            if a != b {
-                return verdict!(BasedOn::Elsewhere, None);
-            }
+        match same_comparable_source(mine, theirs) {
+            Some(false) => return verdict!(BasedOn::Elsewhere, None),
+            Some(true) => {}
+            None => return unknown!("no_source_identity"),
         }
     }
 
@@ -635,6 +641,29 @@ pub fn address_ref(key: &str) -> Option<&str> {
     Some(git_ref)
 }
 
+/// 两份来源身份**能不能比较、是不是同一个源**。
+///
+/// - 两侧都有真实 ref ⇒ 只比 ref（镜像等价）；
+/// - 两侧都是 `NO_REF`（自定义源）⇒ 比完整 `platform#repo@-`；
+/// - 一侧有 ref、一侧 `NO_REF` ⇒ 明确不同源；
+/// - 任一侧连 `@` 都没有 ⇒ `None`（说不清，交给调用方走 Unverified）。
+fn same_comparable_source(mine: &str, theirs: &str) -> Option<bool> {
+    let mine_ref = address_ref(mine);
+    let theirs_ref = address_ref(theirs);
+    match (mine_ref, theirs_ref) {
+        (Some(a), Some(b)) => Some(a == b),
+        (None, None) => {
+            let no_ref = crate::runtime::source_identity::NO_REF;
+            if mine.ends_with(&format!("@{no_ref}")) && theirs.ends_with(&format!("@{no_ref}")) {
+                Some(mine == theirs)
+            } else {
+                None
+            }
+        }
+        _ => Some(false),
+    }
+}
+
 /// TOML 语法这一关（**文件级**，不是 Preset schema）：能解析 ⇒ `None`；不能 ⇒ 一句人话原因。
 ///
 /// 用的是客户端本来就在编的 `toml_edit`（`presetdata` 读 `presets/*.toml` 同一条管线）——
@@ -680,9 +709,25 @@ fn preset_file_state(path: &Path) -> (Option<LocalState>, Option<String>) {
             )),
         );
     };
-    match toml_syntax_reason(&text) {
-        None => (Some(LocalState::Ok), None),
-        Some(reason) => (Some(LocalState::Unreadable), Some(reason)),
+    if let Some(reason) = toml_syntax_reason(&text) {
+        return (Some(LocalState::Unreadable), Some(reason));
+    }
+    match preset::probe_preset_compat(text.as_bytes()) {
+        preset::PresetCompat::Compatible
+        | preset::PresetCompat::Syntax
+        | preset::PresetCompat::MissingMachine => (Some(LocalState::Ok), None),
+        preset::PresetCompat::UnknownKey { key } => (
+            Some(LocalState::Incompatible),
+            Some(format!("这份预设属于另一个版本（多了 `{key}`）")),
+        ),
+        preset::PresetCompat::MissingRequired { key } => (
+            Some(LocalState::Incompatible),
+            Some(format!("这份预设属于另一个版本（少了 `{key}`）")),
+        ),
+        preset::PresetCompat::TypeMismatch { key } => (
+            Some(LocalState::Incompatible),
+            Some(format!("这份预设属于另一个版本（`{key}` 类型不匹配）")),
+        ),
     }
 }
 
@@ -752,8 +797,13 @@ pub fn local_files(user_root: &Path) -> Vec<LocalFile> {
             let variant = head
                 .as_deref()
                 .and_then(source_record::parse_variant_from_content);
+            let folder = rel
+                .strip_prefix(&format!("{LOCAL_DIR}/"))
+                .and_then(|rest| rest.rsplit_once('/').map(|(dir, _)| dir.to_owned()))
+                .unwrap_or_default();
             out.push(LocalFile {
                 path: rel,
+                folder,
                 kind,
                 source,
                 machine,
@@ -1598,6 +1648,8 @@ mod tests {
             version_id: "STANDARD".to_owned(),
             sha256: Some(source_record::sha256_hex(content)),
             size: Some(content.len() as u64),
+            preset_schema_signature: None,
+            preset_contract_epoch: None,
         }
     }
 
@@ -1761,6 +1813,30 @@ mod tests {
         assert_eq!(got[0].state_detail, None);
         assert_eq!(got[1].kind, None, ".json 认不出是哪一类");
         assert_eq!(got[1].state, None, "认不出的没有\"能不能当预设用\"这一档");
+    }
+
+    /// 旧程序写的预设：TOML 语法没坏，但当前结构读不动 —— 单独一档，不删不迁移。
+    #[test]
+    fn local_files_marks_an_old_preset_incompatible() {
+        let root = tempfile::tempdir().unwrap();
+        write(
+            root.path(),
+            "presets-local/旧版.toml",
+            "# machine: A1\n[wiping]\nbed_glue_preheat_temp = 50\n",
+        );
+
+        let got = local_files(root.path());
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].state, Some(LocalState::Incompatible));
+        assert!(
+            got[0]
+                .state_detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("bed_glue_preheat_temp"),
+            "原因要点名那个键：{:?}",
+            got[0].state_detail
+        );
     }
 
     /// **认不出就不认**：`.json` 可能是 bbs 也可能是 orca，光看扩展名分不出
@@ -2343,6 +2419,43 @@ mod tests {
         assert_eq!(unknown.facts.unverified_reason, Some("no_source_identity"));
     }
 
+    /// **换自定义源 != 数据异常**：没有分支时比完整身份，别让 ref 比较被跳过。
+    #[test]
+    fn a_custom_source_switch_is_elsewhere_not_inconsistent() {
+        let gh = github();
+        let gitee = gitee();
+        let a = crate::runtime::source_identity::parse_identity("http://127.0.0.1:8787/delivery")
+            .unwrap();
+        let b = crate::runtime::source_identity::parse_identity("http://127.0.0.1:8788/delivery")
+            .unwrap();
+
+        assert_eq!(
+            same_comparable_source(&gh.key(), &gitee.key()),
+            Some(true),
+            "镜像是同源"
+        );
+        assert_eq!(
+            same_comparable_source(&gh.key(), &a.key()),
+            Some(false),
+            "有分支 vs 无分支"
+        );
+        assert_eq!(
+            same_comparable_source(&a.key(), &a.key()),
+            Some(true),
+            "同一自定义源"
+        );
+        assert_eq!(
+            same_comparable_source(&a.key(), &b.key()),
+            Some(false),
+            "不同自定义源"
+        );
+        assert_eq!(
+            same_comparable_source("no-at-sign", "no-at-sign"),
+            None,
+            "认不出就不猜"
+        );
+    }
+
     /// **`release_time` 与 `publishedAt` 不再决定更新方向**（这次要根治的那一条）。
     ///
     /// 现场：来源记录里 `# release_time` 是**配方写作日期**（2026-08-19），目录的
@@ -2725,7 +2838,7 @@ mod tests {
         write(
             root.path(),
             "presets-local/本地.toml",
-            "[wiping]\nspeed = 80\n",
+            "[wiping]\nfan_speed = 80\n",
         );
 
         let got = local_files(root.path());
@@ -2817,7 +2930,7 @@ mod tests {
         write(
             root.path(),
             "presets-local/B1.toml",
-            "[wiping]\nspeed = 80\n",
+            "[wiping]\nfan_speed = 80\n",
         );
 
         let e = rename_file(root.path(), "presets-local/A1.toml", "B1.toml").unwrap_err();
@@ -2825,7 +2938,7 @@ mod tests {
         assert!(e.message.contains("不覆盖"), "{}", e.message);
         assert_eq!(
             std::fs::read(root.path().join("presets-local/B1.toml")).unwrap(),
-            "[wiping]\nspeed = 80\n".as_bytes(),
+            "[wiping]\nfan_speed = 80\n".as_bytes(),
             "被撞的那份一个字节没动"
         );
         assert!(root.path().join("presets-local/A1.toml").exists());
@@ -2977,7 +3090,7 @@ mod tests {
         write(
             root.path(),
             "presets-local/B1.toml",
-            "[wiping]\nspeed = 80\n",
+            "[wiping]\nfan_speed = 80\n",
         );
 
         let e = copy_as_new(root.path(), "presets-local/A1.toml", "B1.toml").unwrap_err();
@@ -2985,7 +3098,7 @@ mod tests {
         assert!(e.message.contains("不覆盖"), "{}", e.message);
         assert_eq!(
             std::fs::read(root.path().join("presets-local/B1.toml")).unwrap(),
-            "[wiping]\nspeed = 80\n".as_bytes(),
+            "[wiping]\nfan_speed = 80\n".as_bytes(),
             "被撞的那份一个字节没动"
         );
         assert_eq!(

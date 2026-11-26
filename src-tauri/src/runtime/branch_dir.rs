@@ -48,18 +48,29 @@ struct Dirs {
     by_key: BTreeMap<String, String>,
 }
 
-/// 当前身份该落哪个文件夹。`None` = 这个源没有分支概念，保持平铺。
+/// 当前身份该落哪个文件夹。
+///
+/// 现在**永远返回一层文件夹**：有 ref 用 ref；没有 ref 的自定义源用
+/// `平台-仓库`（如 `127.0.0.1-8787-delivery`）。这样同名文件不会再和别的源
+/// 平铺在一起；渠道在 `identity.key()` 里，旧线/新线也各拿各的目录。
 pub fn folder_for(root: &Path, identity: &SourceIdentity) -> Result<Option<String>, AppError> {
-    if identity.git_ref.is_empty() || identity.git_ref == NO_REF {
-        return Ok(None);
-    }
-    let key = identity.key();
+    let key = identity.folder_key();
     let mut dirs = load(root);
     if let Some(dir) = dirs.by_key.get(&key) {
         return Ok(Some(dir.clone()));
     }
+    let base = if identity.git_ref.is_empty() || identity.git_ref == NO_REF {
+        let repo = clean(&identity.repo);
+        if repo.is_empty() {
+            clean(&identity.platform)
+        } else {
+            repo
+        }
+    } else {
+        clean(&identity.git_ref)
+    };
     let used: BTreeSet<&str> = dirs.by_key.values().map(String::as_str).collect();
-    let dir = pick(clean(&identity.git_ref), &used);
+    let dir = pick(base, &used);
     dirs.by_key.insert(key, dir.clone());
     save(root, &dirs)?;
     Ok(Some(dir))
@@ -159,6 +170,7 @@ mod tests {
             platform: platform.to_owned(),
             repo: repo.to_owned(),
             git_ref: branch.to_owned(),
+            channel: None,
         }
     }
 
@@ -195,13 +207,13 @@ mod tests {
         assert_eq!(two.as_deref(), Some("main-2"));
     }
 
-    /// 没有 ref 的源不铺文件夹：保持原来的布局
+    /// 没有 ref 的自定义源也铺一层文件夹，不再和别的源平铺混在一起
     #[test]
-    fn a_source_without_a_branch_stays_flat() {
+    fn a_source_without_a_branch_gets_a_source_folder() {
         let t = tmp();
         assert_eq!(
             folder_for(t.path(), &id("custom", "127.0.0.1:8787", NO_REF)).unwrap(),
-            None
+            Some("127.0.0.1-8787".to_owned())
         );
     }
 

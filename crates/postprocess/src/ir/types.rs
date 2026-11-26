@@ -542,6 +542,12 @@ pub struct PrefsIr {
     pub under_support_mm: f64,
     /// 跳过 G-code 里的震动补偿校准检测（M970/M974）。
     pub skip_vibration_calibration: bool,
+    /// **打完是否退料**（AMS / bMCU）：`false` 时收尾的退料与切丝段整段不写。
+    ///
+    /// 退料那一段是「切料 → 挤出 → 回抽」，要在热态喷嘴下才走得完。校准件为了不让
+    /// 喷嘴滴料，会先把目标温度压到 30 °C，紧接着机器自己那段退料就会卡在加热等待上；
+    /// 所以这一格为 `true` 时，校准块会被挪到退料之后，让退料趁热先跑完。
+    pub ams_unload_after_print: bool,
     /// 开头插入收笔序列。
     pub begin_stage_retract_enabled: bool,
     /// 收笔时在原版抬 Z 之上再补抬的相对高度（mm）。

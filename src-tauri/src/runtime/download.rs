@@ -152,6 +152,8 @@ mod tests {
             version_id: "standard".to_owned(),
             sha256: sha.map(str::to_owned),
             size: None,
+            preset_schema_signature: (kind == "mkp_preset").then(preset::preset_schema_signature),
+            preset_contract_epoch: (kind == "mkp_preset").then(preset::preset_contract_epoch),
         }
     }
 

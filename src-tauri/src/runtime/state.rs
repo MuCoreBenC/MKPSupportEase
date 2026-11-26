@@ -342,6 +342,8 @@ mod tests {
             version_id: "STANDARD".to_owned(),
             sha256: Some(hex(&Sha256::digest(content))),
             size: Some(content.len() as u64),
+            preset_schema_signature: None,
+            preset_contract_epoch: None,
         }
     }
 

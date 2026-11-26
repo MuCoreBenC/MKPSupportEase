@@ -56,8 +56,7 @@ use crate::error::AppError;
 use crate::fsx::atomic::atomic_write;
 use crate::fsx::paths::resolve_in;
 
-use super::catalog::hex;
-use super::catalog::CatalogFile;
+use super::catalog::{hex, kind, CatalogFile};
 use super::content;
 use super::delivery_index;
 use super::paths::{archive_dir, CATALOG_FILE};
@@ -259,12 +258,54 @@ fn remote_revision(internal_root: &Path) -> Option<String> {
 /// 校验只在**目录给了期望值**时做：随包 bootstrap 目录不登记期望值
 /// （见 [`CatalogFile`]），那就照收 —— 拿一个空 SHA"比一比"看着像校验、其实什么都没验，
 /// 还会把好文件判成坏的。真正的校验等 OTA 目录生效后那次下载。
+/// 预设文件在**字节落盘之前**过一遍兼容判据：
+///
+/// - 目录声明的契约代次比当前构建新 ⇒ 拒绝（先升级程序）；
+/// - 形态签名不同**不等于**不兼容 —— 用当前解析器实际 probe 一次；
+/// - 旧目录没有这两格也照 probe：旧预设在新程序上会在这里被拦住。
+fn ensure_preset_readable(file: &CatalogFile, bytes: &[u8]) -> Result<(), AppError> {
+    if file.kind != kind::PRESET {
+        return Ok(());
+    }
+
+    if let Some(epoch) = file.preset_contract_epoch {
+        if epoch > preset::preset_contract_epoch() {
+            return Err(
+                AppError::not_supported("此预设需要更新版 SupportEase").with_detail(format!(
+                    "预设契约代次 {epoch}（当前 {}）",
+                    preset::preset_contract_epoch()
+                )),
+            );
+        }
+    }
+
+    let current_sig = preset::preset_schema_signature();
+    if file.preset_schema_signature.as_deref() == Some(current_sig.as_str()) {
+        return Ok(());
+    }
+
+    match preset::probe_preset_compat(bytes) {
+        preset::PresetCompat::Compatible => Ok(()),
+        other => Err(
+            AppError::not_supported("这份预设与当前程序不兼容").with_detail(match other {
+                preset::PresetCompat::UnknownKey { key } => format!("多了 `{key}`"),
+                preset::PresetCompat::MissingRequired { key } => format!("少了 `{key}`"),
+                preset::PresetCompat::TypeMismatch { key } => format!("`{key}` 类型不匹配"),
+                preset::PresetCompat::MissingMachine => "缺少 # machine: 头".to_owned(),
+                preset::PresetCompat::Syntax => "TOML 语法读不出来".to_owned(),
+                preset::PresetCompat::Compatible => unreachable!(),
+            }),
+        ),
+    }
+}
+
 pub fn deliver(
     internal_root: &Path,
     file: &CatalogFile,
     source: &dyn Source,
 ) -> Result<PathBuf, AppError> {
     let bytes = source.fetch(file)?;
+    ensure_preset_readable(file, &bytes)?;
 
     // 校验在落盘之前：期望值来自 catalog（发布时对真字节算的），字节不对就不碰盘
     if let Some(want) = file.expected_sha() {
@@ -1142,6 +1183,8 @@ mod tests {
             version_id: "STANDARD".to_owned(),
             sha256: Some(hex(&Sha256::digest(content))),
             size: Some(content.len() as u64),
+            preset_schema_signature: None,
+            preset_contract_epoch: None,
         }
     }
 
@@ -1155,6 +1198,8 @@ mod tests {
             version_id: "STANDARD".to_owned(),
             sha256: None,
             size: None,
+            preset_schema_signature: None,
+            preset_contract_epoch: None,
         }
     }
 
@@ -1507,6 +1552,43 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
+    }
+
+    /// 旧程序的预设：字节是合法 TOML，但当前模型不认得多出来的键 —— 下载前就拒。
+    #[test]
+    fn rejects_a_preset_from_another_schema_before_writing() {
+        let root = tempfile::tempdir().unwrap();
+        let content = "# machine: A1\n[wiping]\nbed_glue_preheat_temp = 50\n";
+        let file = CatalogFile {
+            kind: crate::runtime::catalog::kind::PRESET.to_owned(),
+            file_name: "old.toml".to_owned(),
+            path: "mkp/presets/old.toml".to_owned(),
+            machine_id: "A1".to_owned(),
+            version_id: "FAST".to_owned(),
+            sha256: None,
+            size: None,
+            preset_schema_signature: None,
+            preset_contract_epoch: None,
+        };
+
+        let err = deliver(
+            root.path(),
+            &file,
+            &MemorySource(content.as_bytes().to_vec()),
+        )
+        .expect_err("旧预设必须被拦在落盘前");
+        assert_eq!(err.code, crate::error::ErrorCode::NotSupported);
+        assert!(
+            err.detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("bed_glue_preheat_temp"),
+            "要说出是哪个键：{err:?}"
+        );
+        assert!(
+            !root.path().join("mkp/presets/old.toml").exists(),
+            "坏字节连碰盘的机会都没有"
+        );
     }
 
     /// catalog 的 path 字段不 trusted：`..` 一律过不了防穿越那道闸
@@ -2208,6 +2290,8 @@ mod tests {
             version_id: "FAST".to_owned(),
             sha256: Some(hex(&Sha256::digest(content))),
             size: Some(content.len() as u64),
+            preset_schema_signature: Some(preset::preset_schema_signature()),
+            preset_contract_epoch: Some(preset::preset_contract_epoch()),
         }
     }
 

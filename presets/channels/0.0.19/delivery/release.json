@@ -1,0 +1,66 @@
+{
+  "releaseSchema": 1,
+  "version": "0.0.18",
+  "notes": "",
+  "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.18",
+  "asset": {
+    "name": "SupportEase_0.0.18_aarch64.app.zip",
+    "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_aarch64.app.zip",
+    "size": 9395235,
+    "sha256": "693122517833507463a00eec9518d66940dd069a324e0fc02e6cd7b388e89d2e",
+    "sources": {
+      "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_aarch64.app.zip",
+      "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_aarch64.app.zip"
+    }
+  },
+  "assets": [
+    {
+      "name": "SupportEase_0.0.18_aarch64.dmg",
+      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_aarch64.dmg",
+      "size": 10406846,
+      "sha256": "cc580d14be2ca5f404a8438127e14f451ce50526c1adf8e91029e744a449028f",
+      "platform": "macos",
+      "kind": "dmg",
+      "sources": {
+        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_aarch64.dmg",
+        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_aarch64.dmg"
+      }
+    },
+    {
+      "name": "SupportEase_0.0.18_aarch64.app.zip",
+      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_aarch64.app.zip",
+      "size": 9395235,
+      "sha256": "693122517833507463a00eec9518d66940dd069a324e0fc02e6cd7b388e89d2e",
+      "platform": "macos",
+      "kind": "appZip",
+      "sources": {
+        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_aarch64.app.zip",
+        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_aarch64.app.zip"
+      }
+    },
+    {
+      "name": "SupportEase_0.0.18_x64-setup.exe",
+      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_x64-setup.exe",
+      "size": 9612800,
+      "sha256": "c63ca218b27110f800353a96d4512149281a666eb216018ca5b4910569228e78",
+      "platform": "windows",
+      "kind": "nsis",
+      "sources": {
+        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_x64-setup.exe",
+        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_x64-setup.exe"
+      }
+    },
+    {
+      "name": "SupportEase_0.0.18_x64-portable.zip",
+      "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_x64-portable.zip",
+      "size": 10387974,
+      "sha256": "f58286bff2c73544693a6f71d2991b5a13065a68379d8ea61e7715520cc24e8e",
+      "platform": "windows",
+      "kind": "portable",
+      "sources": {
+        "gitee": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_x64-portable.zip",
+        "github": "https://github.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.18/SupportEase_0.0.18_x64-portable.zip"
+      }
+    }
+  ]
+}

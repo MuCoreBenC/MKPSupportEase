@@ -1024,8 +1024,15 @@ export default function PresetTable({
         </colgroup>
 
           <tbody ref={tbodyRef}>
-            {displayRows.map(({ row, meta }) => {
+            {displayRows.map(({ row, meta }, index) => {
               const version = versionsText(tr, row.versions)
+              const folder =
+                row.origin === 'local' ? ((row as { folder?: string }).folder ?? '') : null
+              const prevFolder =
+                index > 0 && displayRows[index - 1].row.origin === 'local'
+                  ? ((displayRows[index - 1].row as { folder?: string }).folder ?? '')
+                  : null
+              const showGroup = folder !== null && folder !== prevFolder
               /*
                * 机型识别色（2026-10-08 起、a03「色彩收敛」收掉）：`A1` 与 `A1 mini` 只差
                * 四个字母，作者曾在真机上把 A1 那行看成 A1 mini、点了下载才发现 —— 那一版
@@ -1181,7 +1188,7 @@ export default function PresetTable({
                * 记下、渲染时对表，数据重读后对不上就自动合上（见上面 `bands` 那段）。
                */
               const localAttr =
-                row.origin === 'local' && row.kind === 'mkp_preset' && row.localState !== 'unreadable'
+                row.origin === 'local' && row.kind === 'mkp_preset' && (row.localState !== 'unreadable' && row.localState !== 'incompatible')
               /*
                * 卡底那条操作带画不画 —— **一颗按钮都没有就别画那条线**：
                * 认不出的 MKP 文件（`unreadable`）不许「修改参数」，也没有「看正文」和归档，
@@ -1202,6 +1209,13 @@ export default function PresetTable({
               const whyNot = select === null ? undefined : select.whyNot(row)
               return (
                 <Fragment key={row.rowKey}>
+                {showGroup && (
+                  <tr className={s.groupRow}>
+                    <td className={s.groupCell} colSpan={9}>
+                      {folder === '' ? tr('presets.tree.localUnfiled') : folder}
+                    </td>
+                  </tr>
+                )}
                 <tr
                   className={rowHot ? `${s.row} ${s.rowOpen}` : s.row}
                   data-live={inUse}
@@ -1371,7 +1385,11 @@ export default function PresetTable({
                         (() => {
                           const badge = cloudClaimBadge(row)
                           return badge === null ? null : (
-                            <span className={s.localState} data-state={badge.state}>
+                            <span
+                              className={s.localState}
+                              data-state={badge.state}
+                              data-tip={badge.hint === null ? undefined : tr(badge.hint)}
+                            >
                               {tr(badge.text, badge.params)}
                             </span>
                           )
@@ -1399,7 +1417,7 @@ export default function PresetTable({
                        * 第九层：读不出来的那一份（编码 / TOML 语法 / 指向用户根之外）——
                        * 一眼看得见；为什么读不出来在 title 里。**照常列出来**，不藏。
                        */}
-                      {row.scope === 'local' && row.localState === 'unreadable' && (
+                      {row.scope === 'local' && (row.localState === 'unreadable' || row.localState === 'incompatible') && (
                         /*
                          * ★ 2026-10-29 修：这里原来直接把**键名**印出来了
                          * （`{LOCAL_UNREADABLE_TEXT}` = 一串 `presets.tree.localUnreadable`），
@@ -1408,9 +1426,17 @@ export default function PresetTable({
                          */
                         <span
                           className={s.unreadable}
-                          data-tip={localUnreadableWhy(tr, row.localStateDetail)}
+                          data-tip={
+                            row.localState === 'incompatible'
+                              ? (row.localStateDetail ?? undefined)
+                              : localUnreadableWhy(tr, row.localStateDetail)
+                          }
                         >
-                          {tr(LOCAL_UNREADABLE_TEXT)}
+                          {tr(
+                            row.localState === 'incompatible'
+                              ? 'presets.tree.localIncompatible'
+                              : LOCAL_UNREADABLE_TEXT,
+                          )}
                         </span>
                       )}
                     </span>
@@ -1522,7 +1548,7 @@ export default function PresetTable({
                         <span className={s.actNone}>
                           {DASH_}
                         </span>
-                      ) : row.origin === 'local' && row.localState === 'unreadable' ? (
+                      ) : row.origin === 'local' && (row.localState === 'unreadable' || row.localState === 'incompatible') ? (
                         <span className={s.actNone}>
                           {DASH_}
                         </span>
@@ -1578,7 +1604,7 @@ export default function PresetTable({
                           <span className={s.actNone}>
                             {DASH_}
                           </span>
-                        ) : row.localState === 'unreadable' ? (
+                        ) : (row.localState === 'unreadable' || row.localState === 'incompatible') ? (
                           <span className={s.actNone}>
                             {DASH_}
                           </span>
@@ -1986,7 +2012,7 @@ export default function PresetTable({
                                     {status.action === 'update' &&
                                       row.origin === 'local' &&
                                       !detached &&
-                                      row.localState !== 'unreadable' && (
+                                      (row.localState !== 'unreadable' && row.localState !== 'incompatible') && (
                                         <button
                                           type="button"
                                           className={`${s.updateBtn} ${s.dInlineAction}`}

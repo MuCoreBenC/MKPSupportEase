@@ -108,6 +108,16 @@ pub struct Catalog {
     /// （发布闸会拦住，所以**发出去的目录里不会缺它**）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_client_version: Option<String>,
+    /// 版本渠道（`legacy-0.0.18` / `0.0.19` …）。旧客户端忽略；新客户端用它区分
+    /// 同仓库同分支的不同数据线。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<String>,
+    /// 这一代预设要求的 TOML 形态签名（生成时写入；旧目录为 `None`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_schema_signature: Option<String>,
+    /// 这一代预设的语义代次（生成时写入；旧目录为 `None`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_contract_epoch: Option<u32>,
     /// **发布线身份**（`support-ease`）：逻辑上是同一条发布线的目录都写同一个值 ——
     /// GitHub / Gitee 镜像与随包 bootstrap 因为来自同一仓库的同一笔提交而天然同 ID。
     ///
@@ -331,6 +341,12 @@ pub struct CatalogFile {
     pub sha256: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
+    /// 这份预设要求的 TOML 形态签名；旧目录 / 非预设资产为 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_schema_signature: Option<String>,
+    /// 这份预设要求的语义代次；旧目录 / 非预设资产为 `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_contract_epoch: Option<u32>,
 }
 
 impl CatalogFile {
@@ -652,6 +668,8 @@ impl Catalog {
                     version_id: v.id.clone(),
                     sha256,
                     size,
+                    preset_schema_signature: Some(preset::preset_schema_signature()),
+                    preset_contract_epoch: Some(preset::preset_contract_epoch()),
                 });
             }
         }
@@ -703,6 +721,8 @@ impl Catalog {
                 version_id: String::new(),
                 sha256,
                 size,
+                preset_schema_signature: None,
+                preset_contract_epoch: None,
             });
         }
 
@@ -729,6 +749,9 @@ impl Catalog {
                 // 两格都由 `finalize` 收口（签名从自己算；最低版本由发布侧查规则表填）
                 structure_signature: String::new(),
                 min_client_version: None,
+                channel_id: None,
+                preset_schema_signature: None,
+                preset_contract_epoch: None,
                 /*
                  * **构建出来的目录不带发布身份**（2026-10-28）：它回答不了"这是哪条线的
                  * 第几次发布"—— 那是发布事务的事（`publish_into` 从账本抄进来）。
@@ -748,6 +771,8 @@ impl Catalog {
     /// 产物，拿它算出来的是上一代的结构 —— 那正好会漏掉"这一次改了结构"。
     /// 自指没问题：`structureSignature` 有 `#[serde(default)]`，它进不了必填清单。
     pub(crate) fn finalize(mut self) -> Catalog {
+        self.preset_schema_signature = Some(preset::preset_schema_signature());
+        self.preset_contract_epoch = Some(preset::preset_contract_epoch());
         self.structure_signature = crate::runtime::structure::signature_of_catalog(&self);
         self.revision = revision_of(&self);
         self
@@ -856,6 +881,8 @@ fn revision_of(catalog: &Catalog) -> String {
         registry: &'a CatalogRegistry,
         plates: &'a [crate::presetdata::Plate],
         files: &'a [CatalogFile],
+        preset_schema_signature: &'a Option<String>,
+        preset_contract_epoch: &'a Option<u32>,
     }
     let bytes = serde_json::to_vec(&Payload {
         brands: &catalog.brands,
@@ -866,6 +893,8 @@ fn revision_of(catalog: &Catalog) -> String {
         registry: &catalog.registry,
         plates: &catalog.plates,
         files: &catalog.files,
+        preset_schema_signature: &catalog.preset_schema_signature,
+        preset_contract_epoch: &catalog.preset_contract_epoch,
     })
     .unwrap_or_default();
     hex(&Sha256::digest(&bytes))[..16].to_owned()

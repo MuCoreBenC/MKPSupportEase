@@ -33,6 +33,7 @@
     "version:release": "node scripts/version.mjs release",
     "version:next": "node scripts/version.mjs next",
     "presets": "cargo run --quiet -p mkp-support-ease --features workbench --bin presets --",
+    "compat:matrix": "node scripts/preset-compat-matrix.mjs",
     "check:bundle": "node scripts/check-bundle.mjs",
     "check:zero-network": "node scripts/check-zero-network.mjs",
     "check:channel-args": "node scripts/check-channel-args.mjs",

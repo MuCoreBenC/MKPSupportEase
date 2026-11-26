@@ -1,0 +1,135 @@
+{
+  "brands": [
+    {
+      "id": "Bambu Lab",
+      "name": "拓竹 (Bambu Lab)",
+      "logo": "bambu-lab-logo"
+    }
+  ],
+  "machines": [
+    {
+      "id": "A1",
+      "display": "A1",
+      "brand": "Bambu Lab",
+      "externalAliases": [
+        "A1C",
+        "A1F"
+      ],
+      "image": "a1-image",
+      "icon": "a1-icon",
+      "defaultBundle": "A1_STANDARD",
+      "hasDimensions": true,
+      "versions": [
+        {
+          "id": "STANDARD",
+          "name": "标准版",
+          "tag": "经典",
+          "recommendedBundle": "A1_STANDARD",
+          "mkpPresetAssetId": "A1-standard.toml"
+        },
+        {
+          "id": "FAST260326",
+          "name": "快拆版260326",
+          "tag": "旧版快拆",
+          "recommendedBundle": "A1_FAST260326",
+          "mkpPresetAssetId": "A1-fast260326.toml"
+        },
+        {
+          "id": "FAST261111",
+          "name": "快拆版261111",
+          "tag": "最新",
+          "recommendedBundle": "A1_FAST261111",
+          "mkpPresetAssetId": "A1-fast261111.toml"
+        }
+      ]
+    },
+    {
+      "id": "A1_MINI",
+      "display": "A1 mini",
+      "brand": "Bambu Lab",
+      "externalAliases": [
+        "A1MINI",
+        "A1M",
+        "A1MC",
+        "A1MQ",
+        "A1MF"
+      ],
+      "image": "a1_mini-image",
+      "icon": "a1_mini-icon",
+      "defaultBundle": "A1_MINI_STANDARD",
+      "hasDimensions": true,
+      "versions": [
+        {
+          "id": "STANDARD",
+          "name": "标准版",
+          "tag": "经典",
+          "recommendedBundle": "A1_MINI_STANDARD",
+          "mkpPresetAssetId": "A1_MINI-standard.toml"
+        },
+        {
+          "id": "FAST260326",
+          "name": "快拆版260326",
+          "tag": "旧版快拆",
+          "recommendedBundle": "A1_MINI_FAST260326",
+          "mkpPresetAssetId": "A1_MINI-fast260326.toml"
+        },
+        {
+          "id": "FAST261111",
+          "name": "快拆版261111",
+          "tag": "最新",
+          "recommendedBundle": "A1_MINI_FAST261111",
+          "mkpPresetAssetId": "A1_MINI-fast261111.toml"
+        }
+      ]
+    },
+    {
+      "id": "P1S",
+      "display": "P1S",
+      "brand": "Bambu Lab",
+      "externalAliases": [
+        "P1",
+        "P1SC",
+        "P1P",
+        "P1C"
+      ],
+      "image": "p1s-image",
+      "icon": "p1s-icon",
+      "defaultBundle": "P1S_default",
+      "hasDimensions": true,
+      "versions": [
+        {
+          "id": "LITE",
+          "name": "lite版",
+          "tag": "推荐",
+          "recommendedBundle": "P1S_default",
+          "mkpPresetAssetId": "P1S-lite.toml"
+        }
+      ]
+    },
+    {
+      "id": "X1C",
+      "display": "X1C",
+      "brand": "Bambu Lab",
+      "externalAliases": [
+        "X1",
+        "X1S",
+        "X1E",
+        "X1 Carbon",
+        "X1CARBON"
+      ],
+      "image": "x1c-image",
+      "icon": "p1s-icon",
+      "defaultBundle": "X1C_default",
+      "hasDimensions": true,
+      "versions": [
+        {
+          "id": "LITE",
+          "name": "lite版",
+          "tag": "推荐",
+          "recommendedBundle": "X1C_default",
+          "mkpPresetAssetId": "X1C-lite.toml"
+        }
+      ]
+    }
+  ]
+}

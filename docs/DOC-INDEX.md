@@ -56,6 +56,7 @@
 | [`DELIVERY-ARCHITECTURE-RESEARCH.md`](DELIVERY-ARCHITECTURE-RESEARCH.md) | 2026-11-07 | **交付架构调研与目标设计**：`manifest` 定位判定（仅工作台使用、客户端 0 处业务读取）、交付集合 5 处算法与 `enabled` 只在 catalog 生效、catalog/manifest/账本三处重复登记、开源对照（Helm / GoReleaser / OCI / Tauri Updater）、三个必答问题的架构答案、逐函数淘汰清单、分阶段迁移、Delivery Lab 设计（两案选型 / 四角色 / 八步闭环 / 四轮计划 / 破坏性矩阵） | **调研·设计，待作者裁决**：本轮零代码改动；取代此前未经验证的重构假设（`DELIVERY-PIPELINE-REFACTOR.md` 未创建）；Delivery Lab 尚未建仓 |
 | [`HOOK-ERRORS-AND-MESSAGES.md`](HOOK-ERRORS-AND-MESSAGES.md) | 2026-10-11 | 后处理的错误：切片器那一框吃什么（BBS 源码证据）+ 文案表 + 两条日志流 | 现行（本分支新增，随"切片器能显示什么"那一刀） |
 | [`DEV-VS-RELEASE-2026-11-23.md`](DEV-VS-RELEASE-2026-11-23.md) | 2026-11-23 | **开发态绿、发布态红**复盘：仓库 `presets/` 兜底掩盖了「机型表从未 install」（101 panic）与「二合一档表漏装」（被判不是校准件）两次事故；含真机 panic 文本、修复、两层测试与「别人电脑会不会更多问题」三类风险盘点 | 现行·结论文档（本轮代码在 `fix/source-switch-refresh` 工作区，未提交） |
+| [`INVESTIGATION-AMS-UNLOAD-COLD-NOZZLE.md`](INVESTIGATION-AMS-UNLOAD-COLD-NOZZLE.md) | 2026-11-26 | **AMS 退料卡在 30 °C**：校准件的 `M104 S30` 让机器收尾那段退料停在加热等待（屏幕「加热中」、进度 2%、无切刀告警）；含官方退料顺序依据、普通模型/外挂盘对照、新增「打完退料」开关与「先退料再校准」的先后重排 | 现行·结论文档（开关出厂关；开档顺序需真机验收两步） |
 | [`NEED-BBS-INVALIDATE.md`](NEED-BBS-INVALIDATE.md) + [`INVESTIGATION-BBS-INVALIDATE.md`](INVESTIGATION-BBS-INVALIDATE.md) | 2026-10-15 | 需求：改了 MKP 参数后让 BBS 当前切片结果失效 → 技术调查 | **需求未实施**：BBS `02.08.02.60` 没有无侵入的外部入口（三个入口全排除、运行时注入被 entitlement 封死） |
 | [`detail-card-mock.html`](detail-card-mock.html) | — | 详情卡抽卡的参考图复刻（mock，浏览器直接打开） | 素材（原型） |
 | [`I18N-MAP.md`](I18N-MAP.md) | 2026-10-26 | 文案对照表：四类「名字」各住哪、前缀 → 页面 → 文件、两本字典的分段约定 | 现行（本分支新增，随"英文界面还有中文"那一刀） |

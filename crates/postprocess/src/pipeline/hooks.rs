@@ -9,7 +9,7 @@
 //! bed_glue.go（607 行生成器）默认关且无任何字节参考 —— 刻意未移植本体，
 //! 钩子点保留为 no-op（登记于 HONEST-BOUNDARIES）。
 
-use crate::gcode::{format_python_float, has_e_param};
+use crate::gcode::{MARKER_PULL_BACK_AMS, command_has_s, format_python_float, has_e_param};
 use crate::ir::Ir;
 
 /// `applySkipVibrationCalibration`（startup_common.go:218）：删除 M970*/M974 行。
@@ -39,6 +39,44 @@ pub fn apply_skip_vibration_calibration(lines: Vec<String>, skip: bool) -> Vec<S
             }
         })
         .collect()
+}
+
+/// 删掉收尾段里的「把料退回 AMS」（`; pull back filament to AMS` 起、`M621 S255` 止）。
+///
+/// 这一段是「切料 → 挤出 → 回抽」，整段要在热态喷嘴下才走得完。校准件为了不让喷嘴
+/// 滴料，在这之前已经把目标温度压到 30 °C，留着它机器会卡在加热等待上 —— 所以
+/// `unload == false`（出厂档）时整段不写。
+///
+/// 起点与终点任一处认不出来就原样返回：只删掉 `M620 S255` 或 `T255` 会把收尾改坏。
+pub fn apply_ams_end_unload(lines: Vec<String>, unload: bool) -> Vec<String> {
+    if unload {
+        return lines;
+    }
+    let Some(start) = lines.iter().position(|l| is_ams_unload_start(l)) else {
+        return lines;
+    };
+    let Some(end) = lines[start..]
+        .iter()
+        .position(|l| command_has_s(l, "M621", "255"))
+        .map(|i| start + i)
+    else {
+        return lines;
+    };
+    let mut out = Vec::with_capacity(lines.len() - (end - start + 1));
+    out.extend(lines[..start].iter().cloned());
+    out.extend(lines[end + 1..].iter().cloned());
+    out
+}
+
+/// 退料段的起点：注释头优先，模板里没有注释头时退回第一条 `M620 S255`。
+///
+/// `=` 是排除文件头那一格 `; machine_end_gcode = …`（它在注释里同样写着这句标记）。
+fn is_ams_unload_start(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.contains(MARKER_PULL_BACK_AMS) && !trimmed.contains('=') {
+        return true;
+    }
+    command_has_s(line, "M620", "255")
 }
 
 fn code_before_comment(trimmed: &str) -> &str {
@@ -342,6 +380,59 @@ mod tests {
         // skip=false 原样
         let out = apply_skip_vibration_calibration(lines(&["M970 S1"]), false);
         assert_eq!(out, lines(&["M970 S1"]));
+    }
+
+    /// 退料段整段删掉：`T255` 与切料位移动一起走，不留下孤立的卸料指令。
+    #[test]
+    fn ams_end_unload_removes_the_whole_segment() {
+        let content = lines(&[
+            "M140 S0",
+            "; pull back filament to AMS",
+            "M620 S255",
+            "G1 X181 F12000",
+            "T255",
+            "G1 X0 F18000",
+            "M621 S255",
+            "M104 S0",
+        ]);
+        assert_eq!(
+            apply_ams_end_unload(content, false),
+            lines(&["M140 S0", "M104 S0"])
+        );
+    }
+
+    /// 开关打开时一个字节都不动。
+    #[test]
+    fn ams_end_unload_keeps_everything_when_on() {
+        let content = lines(&[
+            "; pull back filament to AMS",
+            "M620 S255",
+            "T255",
+            "M621 S255",
+        ]);
+        assert_eq!(apply_ams_end_unload(content.clone(), true), content);
+    }
+
+    /// 认不出终点就不删：宁可留着，也不能只删半段把收尾改坏。
+    #[test]
+    fn ams_end_unload_leaves_the_tail_alone_without_end_marker() {
+        let content = lines(&[
+            "; pull back filament to AMS",
+            "M620 S255",
+            "T255",
+            "M104 S0",
+        ]);
+        assert_eq!(apply_ams_end_unload(content.clone(), false), content);
+    }
+
+    /// 文件头那一格 `; machine_end_gcode = …` 里也写着同一句标记，不能当起点。
+    #[test]
+    fn ams_end_unload_ignores_the_header_metadata_line() {
+        let content = lines(&[
+            "; machine_end_gcode = ;pull back filament to AMS\\nM620 S255\\nM621 S255",
+            "M104 S0",
+        ]);
+        assert_eq!(apply_ams_end_unload(content.clone(), false), content);
     }
 
     /// 块紧跟原版抬 Z 段（`G380 … G90`）之后，不等到预热与放音。

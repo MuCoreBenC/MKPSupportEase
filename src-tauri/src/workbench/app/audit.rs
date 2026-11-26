@@ -1056,7 +1056,16 @@ fn structure_gate(delivery_root: &std::path::Path) -> (AuditItem, Option<String>
         AuditSeverity::Blocker,
         "在 presets/structure-signatures.toml 里登记这一代的签名与最低客户端版本",
     );
-    let Some(publish_root) = delivery_root.parent() else {
+    /*
+     * 规则表在**发布根**（`presets/`）上，不在渠道交付根上。渠道目录多了一层
+     * `presets/channels/<id>/delivery`，所以向上找第一个带规则表的祖先；legacy
+     * 的父目录正好就是 `presets/`。
+     */
+    let Some(publish_root) = delivery_root
+        .ancestors()
+        .find(|p| p.join(structure::RULES_FILE).is_file())
+        .or_else(|| delivery_root.parent())
+    else {
         return (
             item.fail("交付根没有父目录 —— 定位不到发布根".to_owned(), Vec::new()),
             None,

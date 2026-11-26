@@ -76,11 +76,27 @@ fn write_delivery_catalog(repo: &Path) -> Result<(), Box<dyn std::error::Error>>
     let mut presets = crate::presetdata::Presets::load_from(&presets_root)?;
     presets.set_asset_root(&repo.join(runtime::catalog::REPO_ASSET_ROOT));
 
-    let delivery_root = presets_root.join("delivery");
+    /*
+     * 0.0.18 旧地址 `presets/delivery` 是冻结的旧 schema，**不许被当前源生成器覆盖**。
+     * 新线写到 `presets/channels/<channel>/delivery`；渠道默认取当前客户端版本线
+     * 0.0.19，以后发 0.0.20 时用 `MKPSE_PRESET_CHANNEL=0.0.20` 指定。
+     */
+    let channel = std::env::var("MKPSE_PRESET_CHANNEL").unwrap_or_else(|_| "0.0.19".to_owned());
+    if channel == "legacy-0.0.18" {
+        return Err(std::io::Error::other(
+            "legacy-0.0.18 是旧 schema 冻结线，不能用当前生成器重建；请在 legacy 源上改值",
+        )
+        .into());
+    }
+    let delivery_root = presets_root
+        .join("channels")
+        .join(&channel)
+        .join("delivery");
     let mut catalog =
         Catalog::build_from_presets_lenient(&presets, &delivery_root.join("mkp/presets"));
     let rules = runtime::structure::RuleTable::load(&presets_root)?;
     catalog.apply_min_client(&rules);
+    catalog.channel_id = Some(channel.clone());
 
     let out = delivery_root.join(runtime::source::CATALOG_FILE);
     /*

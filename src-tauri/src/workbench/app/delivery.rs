@@ -2916,6 +2916,8 @@ mod tests {
             version_id: String::new(),
             sha256: sha,
             size,
+            preset_schema_signature: None,
+            preset_contract_epoch: None,
         };
         let catalog = Catalog {
             files: vec![

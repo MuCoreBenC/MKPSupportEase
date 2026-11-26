@@ -67,12 +67,24 @@ pub struct SourceIdentity {
     pub repo: String,
     /// 分支 / ref（保留大小写，Git 语义）；没有这个概念时是 [`NO_REF`]
     pub git_ref: String,
+    /// 版本渠道（`legacy-0.0.18` / `0.0.19` …）；旧源 / 直接 source.json ⇒ `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
 }
 
 impl SourceIdentity {
-    /// 唯一比较口径：`平台#仓库@ref`。账本、日志、界面都写这一句。
+    /// 比较口径：`平台#仓库@ref`。**不含渠道** —— 旧来源记录没有渠道，
+    /// 让 `basedOn` 仍能认亲；渠道只参与落盘文件夹（见 [`Self::folder_key`]）。
     pub fn key(&self) -> String {
         format!("{}#{}@{}", self.platform, self.repo, self.git_ref)
+    }
+
+    /// 落盘文件夹的身份：在比较口径上再带渠道，避免旧线/新线共用目录。
+    pub fn folder_key(&self) -> String {
+        match self.channel.as_deref() {
+            Some(channel) if !channel.is_empty() => format!("{}#{}", self.key(), channel),
+            _ => self.key(),
+        }
     }
 }
 
@@ -157,6 +169,7 @@ pub fn parse_identity(url: &str) -> Option<SourceIdentity> {
             platform,
             repo: format!("{}/{repo}", owner.to_ascii_lowercase()).to_ascii_lowercase(),
             git_ref: decode_ref(&git_ref),
+            channel: None,
         });
     }
 
@@ -170,6 +183,7 @@ pub fn parse_identity(url: &str) -> Option<SourceIdentity> {
         platform: "custom".to_owned(),
         repo: custom_repo,
         git_ref: NO_REF.to_owned(),
+        channel: None,
     })
 }
 
@@ -235,6 +249,8 @@ fn decode_ref(raw: &str) -> String {
 fn strip_delivery_tail(path: &str) -> String {
     let mut out = path.trim_matches('/').to_owned();
     for tail in [
+        "presets/channels/index.json",
+        "presets/channels",
         DELIVERY_TAIL,
         &format!("{DELIVERY_TAIL}/source.json"),
         "source.json",

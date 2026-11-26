@@ -650,7 +650,12 @@ pub struct FetchCloudDto {
 /// 后缀保持原样（后缀决定它是哪一类文件）；名字空间是 `presets-local/`
 /// 内一圈一圈往后找一个没人占的。上限之后照原名返回 —— 那时由写盘那一层的
 /// "落点已存在"闸去说话，不在这一层编故事。
-fn untaken_name(user_root: &Path, subdir: Option<&str>, wanted: &str) -> String {
+fn untaken_name(
+    user_root: &Path,
+    subdir: Option<&str>,
+    wanted: &str,
+    serial: Option<u64>,
+) -> String {
     let path = std::path::Path::new(wanted);
     let stem = path
         .file_stem()
@@ -660,17 +665,42 @@ fn untaken_name(user_root: &Path, subdir: Option<&str>, wanted: &str) -> String 
         Some(ext) => format!("{stem}-{n}.{}", ext.to_string_lossy()),
         None => format!("{stem}-{n}"),
     };
-    for n in 2..=999u32 {
-        let candidate = with(n);
-        /* 撞名只在**同一个分支文件夹**里算：别的分支有同名文件不关这一支的事 */
+    let taken = |candidate: &str| {
         let rel = match subdir {
             Some(dir) => format!("{}/{dir}/{candidate}", crate::fsx::paths::LOCAL_DIR),
             None => format!("{}/{candidate}", crate::fsx::paths::LOCAL_DIR),
         };
-        let taken = crate::fsx::paths::resolve_in(user_root, &rel)
+        crate::fsx::paths::resolve_in(user_root, &rel)
             .map(|p| p.exists())
-            .unwrap_or(true);
-        if !taken {
+            .unwrap_or(true)
+    };
+    /*
+     * 同一来源、不同发布代：优先 `<原名> (v22).toml`，让人一眼看出是哪一代；
+     * 同代重复下载仍走 `-2`。读不出旧文件来源序号时也退回 `-2`，不猜。
+     */
+    if let Some(serial) = serial {
+        let current_serial = match subdir {
+            Some(dir) => format!("{}/{dir}/{wanted}", crate::fsx::paths::LOCAL_DIR),
+            None => format!("{}/{wanted}", crate::fsx::paths::LOCAL_DIR),
+        };
+        let same_serial = crate::fsx::paths::resolve_in(user_root, &current_serial)
+            .ok()
+            .and_then(|p| runtime::local::source_of_file(&p))
+            .and_then(|src| src.latest_version().and_then(|v| v.serial))
+            == Some(serial);
+        if !same_serial {
+            let candidate = match path.extension() {
+                Some(ext) => format!("{stem} (v{serial}).{}", ext.to_string_lossy()),
+                None => format!("{stem} (v{serial})"),
+            };
+            if !taken(&candidate) {
+                return candidate;
+            }
+        }
+    }
+    for n in 2..=999u32 {
+        let candidate = with(n);
+        if !taken(&candidate) {
             return candidate;
         }
     }
@@ -752,7 +782,10 @@ pub async fn fetch_cloud_preset(
              * 目录四格（id / 序号 / revision / 发布时间）与云端原文 SHA 一起定格：
              * 云端后来换代，这一格一个字都不改（= 界面的「本地版本时间」）。
              */
-            let identity = runtime::source::current_identity(&root)?;
+            let mut identity = runtime::source::current_identity(&root)?;
+            if let (Some(id), Some(channel)) = (identity.as_mut(), catalog.channel_id.as_deref()) {
+                id.channel = Some(channel.to_owned());
+            }
             let stamp = runtime::source_ledger::CatalogStamp {
                 catalog_id: catalog.catalog_id.as_deref(),
                 serial: catalog.publish_serial,
@@ -823,7 +856,12 @@ pub async fn fetch_cloud_preset(
                  * 用户已经点了"导入"：自动改一个**没被占的**名字落一份新的。
                  * 原来那份一个字节不动 —— 两份同名是不允许的，但两份内容并存是用户要的。
                  */
-                let name = untaken_name(&user, branch_dir.as_deref(), &file.file_name);
+                let name = untaken_name(
+                    &user,
+                    branch_dir.as_deref(),
+                    &file.file_name,
+                    catalog.publish_serial,
+                );
                 let text = runtime::delivery::cloud_text(&root, file)?;
                 let dir = crate::fsx::paths::LOCAL_DIR;
                 let rel = match &branch_dir {
@@ -879,7 +917,12 @@ pub async fn fetch_cloud_preset(
                     file.file_name.clone(),
                     rel.clone(),
                     Some(rel),
-                    Some(untaken_name(&user, branch_dir.as_deref(), &file.file_name)),
+                    Some(untaken_name(
+                        &user,
+                        branch_dir.as_deref(),
+                        &file.file_name,
+                        catalog.publish_serial,
+                    )),
                     false,
                 )
             };

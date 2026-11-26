@@ -1,0 +1,18 @@
+[package]
+name = "preset-compat-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "preset-compat-probe"
+path = "src/main.rs"
+
+[dependencies]
+# 由 scripts/preset-compat-matrix.mjs 替换为某个历史 worktree 的 crates/preset。
+preset = { path = "__PRESET_PATH__", package = "mkpse-preset" }
+serde_json = "1"
+
+# 探针住在仓库的 .scratch 临时目录里，必须显式声明“自己是一棵独立 workspace”，
+# 否则 cargo 会把它当成主 workspace 的成员并拒绝。
+[workspace]

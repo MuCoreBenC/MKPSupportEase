@@ -30,6 +30,7 @@ path = "src/lib.rs"
 # 唯一的内部依赖，方向 preset → 后处理内核（原 `core`，本仓叫 `postprocess`）。
 mkpse-postprocess = { path = "../postprocess" }
 serde.workspace = true
+serde_json.workspace = true
 toml.workspace = true
 # 血统摘要（判「官方版变了没有」用它）。workspace 依赖，`crates/postprocess` 已经在用，
 # 提成本 crate 的显式依赖不引入新编译单元。

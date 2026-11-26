@@ -274,12 +274,20 @@ pub struct ResolvedSource {
     /// 当前用户选的是哪条源（`gitee` / `github` / `custom`）。
     /// 软件更新按它挑同一份资产的地址；`custom` 没有镜像地址，退回主 URL。
     mode: SourceMode,
+    /// 版本渠道（只在新客户端走 `channels/index.json` 时有值）。
+    /// 旧源 / 自定义 source.json 没有渠道概念 ⇒ `None`。
+    channel: Option<String>,
 }
 
 impl ResolvedSource {
     /// 当前源（`gitee` / `github` / `custom`）。
     pub fn mode(&self) -> SourceMode {
         self.mode
+    }
+
+    /// 本次解析命中的版本渠道（`legacy-0.0.18` / `0.0.19` …）；没有就是 `None`。
+    pub fn channel(&self) -> Option<&str> {
+        self.channel.as_deref()
     }
 
     /// catalog 的完整 URL（检查 / 应用更新取它）
@@ -810,8 +818,117 @@ fn parse_source_json(url: &str) -> Result<ResolvedSource, AppError> {
 }
 
 fn parse_source_json_with(fetch: FetchBytes<'_>, url: &str) -> Result<ResolvedSource, AppError> {
+    if is_channel_index(url) {
+        return parse_channel_index_with(fetch, url);
+    }
     let bytes = fetch(url, SOURCE_FILE_NAME)?;
     parse_manifest_at(url, &bytes)
+}
+
+/// 版本渠道索引（`presets/channels/index.json`）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelIndex {
+    pub schema: u32,
+    pub channels: Vec<ChannelEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelEntry {
+    pub id: String,
+    /// 相对仓库根的交付路径，如 `presets/channels/0.0.19/delivery`。
+    pub path: String,
+    pub min_client: String,
+    pub max_client_exclusive: String,
+    #[serde(default)]
+    pub fallback_to: Option<String>,
+}
+
+fn is_channel_index(url: &str) -> bool {
+    url.split(['?', '#'])
+        .next()
+        .unwrap_or(url)
+        .trim_end_matches('/')
+        .ends_with("/presets/channels/index.json")
+}
+
+/// 从索引里选渠道：先精确命中 `[min, max)`；没有就取 min 最小（最新）的一条，
+/// 它若声明 `fallbackTo` 就继续跟，形成显式回落链。
+fn pick_channel<'a>(index: &'a ChannelIndex, version: &str) -> Option<&'a ChannelEntry> {
+    if index.schema != 1 || index.channels.is_empty() {
+        return None;
+    }
+    let exact = index.channels.iter().find(|c| {
+        crate::runtime::structure::version_at_least(version, &c.min_client)
+            && !crate::runtime::structure::version_at_least(version, &c.max_client_exclusive)
+    });
+    if let Some(hit) = exact {
+        return Some(hit);
+    }
+    let mut lower: Vec<&ChannelEntry> = index
+        .channels
+        .iter()
+        .filter(|c| crate::runtime::structure::version_at_least(version, &c.min_client))
+        .collect();
+    lower.sort_by(|a, b| {
+        if crate::runtime::structure::version_at_least(&b.min_client, &a.min_client) {
+            std::cmp::Ordering::Less
+        } else if crate::runtime::structure::version_at_least(&a.min_client, &b.min_client) {
+            std::cmp::Ordering::Greater
+        } else {
+            std::cmp::Ordering::Equal
+        }
+    });
+    let picked = lower.pop()?;
+    if let Some(next) = picked.fallback_to.as_deref() {
+        return index.channels.iter().find(|c| c.id == next);
+    }
+    Some(picked)
+}
+
+fn parse_channel_index_with(fetch: FetchBytes<'_>, url: &str) -> Result<ResolvedSource, AppError> {
+    let bytes = fetch(url, "channels/index.json")?;
+    let index: ChannelIndex = serde_json::from_slice(&bytes)
+        .map_err(|e| AppError::corrupted("版本渠道索引读不出来").with_detail(e.to_string()))?;
+    let picked = pick_channel(&index, crate::runtime::structure::APP_VERSION).ok_or_else(|| {
+        AppError::invalid_argument(format!(
+            "没有适合当前客户端 {} 的预设渠道",
+            crate::runtime::structure::APP_VERSION
+        ))
+    })?;
+    let bootstrap = channel_bootstrap_url(url, &picked.path)?;
+    let mut resolved = parse_source_json_with(fetch, &bootstrap)?;
+    resolved.channel = Some(picked.id.clone());
+    Ok(resolved)
+}
+
+/// 索引地址 + 渠道路径 → 该渠道的 `source.json` 地址。
+///
+/// 只接受索引地址里带 `presets/channels/index.json` 的那一段；拼出来的路径必须是
+/// `presets/...` 且不含 `..`，防止索引把客户端带到仓库外。
+fn channel_bootstrap_url(index_url: &str, channel_path: &str) -> Result<String, AppError> {
+    let base = index_url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(index_url)
+        .strip_suffix("presets/channels/index.json")
+        .ok_or_else(|| {
+            AppError::invalid_argument(format!(
+                "渠道索引地址不认识（要 .../presets/channels/index.json）：{index_url}"
+            ))
+        })?;
+    let path = channel_path.trim_matches('/');
+    if !path.starts_with("presets/")
+        || path.contains("..")
+        || path.contains('\\')
+        || path.split('/').any(|p| p.is_empty() || p == ".")
+    {
+        return Err(AppError::invalid_argument(format!(
+            "渠道路径不合法（必须在 presets/ 下且不含 ..）：{channel_path}"
+        )));
+    }
+    Ok(format!("{base}{path}/source.json"))
 }
 
 /// 解析一份已取回的 Manifest 字节。**交付根 = Manifest 自身所在目录** ——
@@ -823,6 +940,7 @@ pub fn parse_manifest_at(url: &str, bytes: &[u8]) -> Result<ResolvedSource, AppE
         /* 直接解析一份 Manifest 时没有"用户选了哪条源"的上下文；调用方要用
         [`ResolvedSource::with_mode`] 补上。默认 Gitee 只是历史口径，不参与地址拼接。 */
         mode: SourceMode::Gitee,
+        channel: None,
     })
 }
 
@@ -1459,5 +1577,70 @@ mod tests {
                 "拒绝 {raw}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod channel_tests {
+    use super::*;
+
+    fn entry(id: &str, min: &str, max: &str) -> ChannelEntry {
+        ChannelEntry {
+            id: id.to_owned(),
+            path: format!("presets/channels/{id}/delivery"),
+            min_client: min.to_owned(),
+            max_client_exclusive: max.to_owned(),
+            fallback_to: None,
+        }
+    }
+
+    fn index() -> ChannelIndex {
+        ChannelIndex {
+            schema: 1,
+            channels: vec![
+                ChannelEntry {
+                    id: "legacy-0.0.18".to_owned(),
+                    path: "presets/delivery".to_owned(),
+                    min_client: "0.0.1".to_owned(),
+                    max_client_exclusive: "0.0.19".to_owned(),
+                    fallback_to: None,
+                },
+                entry("0.0.19", "0.0.19", "0.0.20"),
+            ],
+        }
+    }
+
+    #[test]
+    fn picks_the_exact_channel_and_falls_back_to_latest_lower() {
+        let i = index();
+        assert_eq!(pick_channel(&i, "0.0.18").unwrap().id, "legacy-0.0.18");
+        assert_eq!(pick_channel(&i, "0.0.19").unwrap().id, "0.0.19");
+        assert_eq!(
+            pick_channel(&i, "0.0.20").unwrap().id,
+            "0.0.19",
+            "没有专属渠道时回落到最新下界渠道"
+        );
+    }
+
+    #[test]
+    fn builds_the_channel_bootstrap_under_presets() {
+        let index_url = "https://raw.githubusercontent.com/o/r/main/presets/channels/index.json";
+        assert_eq!(
+            channel_bootstrap_url(index_url, "presets/channels/0.0.19/delivery").unwrap(),
+            "https://raw.githubusercontent.com/o/r/main/presets/channels/0.0.19/delivery/source.json"
+        );
+        assert!(channel_bootstrap_url(index_url, "presets/../escape/delivery").is_err());
+        assert!(channel_bootstrap_url("https://host/delivery/source.json", "presets/x").is_err());
+    }
+
+    #[test]
+    fn index_url_and_identity_still_point_at_the_same_repo_ref() {
+        let url = "https://raw.githubusercontent.com/o/r/main/presets/channels/index.json";
+        assert!(is_channel_index(url));
+        let id = super::super::source_identity::parse_identity(url).expect("identity");
+        assert_eq!(id.platform, "github");
+        assert_eq!(id.repo, "o/r");
+        assert_eq!(id.git_ref, "main");
+        assert_eq!(id.channel, None, "渠道是解析后补的，不在 URL 身份里");
     }
 }

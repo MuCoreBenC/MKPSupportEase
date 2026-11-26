@@ -2304,3 +2304,16 @@
 [data-theme='dark'] .dDot {
   color: rgb(255 255 255 / 22%);
 }
+
+/* 来源文件夹组头：只做轻量分隔，不改变行密度 */
+.groupRow {
+  background: var(--surface-2);
+}
+.groupCell {
+  padding: 6px 12px;
+  font-size: calc(var(--fs-label) - 1px);
+  color: var(--text-3);
+  letter-spacing: 0.02em;
+  border-top: 1px solid var(--line-1);
+}
+

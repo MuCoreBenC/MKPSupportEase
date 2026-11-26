@@ -177,6 +177,24 @@ pub fn real_workbench_root() -> PathBuf {
 /// 三方都从这一处派生 —— 与 [`crate::workbench::domain::derive`] 的
 /// `product_on_disk` 同一条规矩：根用 `presets.root()`，不许第二处自拼。
 pub fn delivery_root_at(presets_root: &Path) -> PathBuf {
+    /*
+     * CLI / 发布事务可以用 `MKPSE_PRESET_CHANNEL` 指定渠道；不设时保持旧目录，
+     * 工作台现有测试与旧调用不受影响。`legacy-0.0.18` 明确映射回旧地址。
+     */
+    if let Ok(channel) = std::env::var("MKPSE_PRESET_CHANNEL") {
+        let channel = channel.trim();
+        if !channel.is_empty()
+            && channel != "legacy-0.0.18"
+            && !channel.contains("..")
+            && !channel.contains('/')
+            && !channel.contains('\\')
+        {
+            return presets_root
+                .join("channels")
+                .join(channel)
+                .join(DELIVERY_SUBDIR);
+        }
+    }
     presets_root.join(DELIVERY_SUBDIR)
 }
 

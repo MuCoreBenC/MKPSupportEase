@@ -140,6 +140,8 @@ export function usePostprocPrefs(): PostprocPrefsApi {
           glueBottomEnabled: wire.glueBottomEnabled ?? before.resolved.glueBottomEnabled,
           skipVibrationCalibration:
             wire.skipVibrationCalibration ?? before.resolved.skipVibrationCalibration,
+          amsUnloadAfterPrint:
+            wire.amsUnloadAfterPrint ?? before.resolved.amsUnloadAfterPrint,
           beginStageRetractEnabled:
             wire.beginStageRetractEnabled ?? before.resolved.beginStageRetractEnabled,
           beginStageRetractZLiftMm:

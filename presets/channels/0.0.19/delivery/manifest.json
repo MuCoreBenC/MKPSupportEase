@@ -1,0 +1,144 @@
+{
+  "manifestVersion": 3,
+  "channel": "stable",
+  "updated": "2026-11-26T14:39:04Z",
+  "minimumClient": "0.0.19",
+  "version": "",
+  "assets": [
+    {
+      "id": "A1-standard.toml",
+      "resourceType": "mkp_preset",
+      "machineId": "A1",
+      "fileName": "A1-standard.toml",
+      "relativePath": "delivery/mkp/presets/A1-standard.toml",
+      "sha256": "82d2d18b6e4e4213d1e74806eeaf297739cfad06413606d27697d2a273d0e5f6",
+      "size": 5055
+    },
+    {
+      "id": "A1-fast260326.toml",
+      "resourceType": "mkp_preset",
+      "machineId": "A1",
+      "fileName": "A1-fast260326.toml",
+      "relativePath": "delivery/mkp/presets/A1-fast260326.toml",
+      "sha256": "606e22783f999175d17684f302d9341ec6ab31c950133cbca6c28196acdef677",
+      "size": 5060
+    },
+    {
+      "id": "A1-fast261111.toml",
+      "resourceType": "mkp_preset",
+      "machineId": "A1",
+      "fileName": "A1-fast261111.toml",
+      "relativePath": "delivery/mkp/presets/A1-fast261111.toml",
+      "sha256": "1d6b2026a8c58f9cc508f7dfaafed08e88d471f724d10990b593f1f6d03d71ea",
+      "size": 5062
+    },
+    {
+      "id": "A1_MINI-standard.toml",
+      "resourceType": "mkp_preset",
+      "machineId": "A1_MINI",
+      "fileName": "A1_MINI-standard.toml",
+      "relativePath": "delivery/mkp/presets/A1_MINI-standard.toml",
+      "sha256": "92ffd07df74915fdb584582482d17cd0073b3bc2c464f0b98cbbe18d9d82d504",
+      "size": 5063
+    },
+    {
+      "id": "A1_MINI-fast260326.toml",
+      "resourceType": "mkp_preset",
+      "machineId": "A1_MINI",
+      "fileName": "A1_MINI-fast260326.toml",
+      "relativePath": "delivery/mkp/presets/A1_MINI-fast260326.toml",
+      "sha256": "7f508b89ebc2c50ee8a245cc282b88bebdff823552beea128655c16a2ab06a76",
+      "size": 5063
+    },
+    {
+      "id": "A1_MINI-fast261111.toml",
+      "resourceType": "mkp_preset",
+      "machineId": "A1_MINI",
+      "fileName": "A1_MINI-fast261111.toml",
+      "relativePath": "delivery/mkp/presets/A1_MINI-fast261111.toml",
+      "sha256": "d45e2dc339c5c1eee348e8c9cd77a985f65cb390134d467a30b2d1d77c0c42f0",
+      "size": 5065
+    },
+    {
+      "id": "P1S-lite.toml",
+      "resourceType": "mkp_preset",
+      "machineId": "P1S",
+      "fileName": "P1S-lite.toml",
+      "relativePath": "delivery/mkp/presets/P1S-lite.toml",
+      "sha256": "0c0213d18f94e3d037fc93ce1c0b05f3e7d8f365b71e32f311db4341ad60d1fd",
+      "size": 5204
+    },
+    {
+      "id": "X1C-lite.toml",
+      "resourceType": "mkp_preset",
+      "machineId": "X1C",
+      "fileName": "X1C-lite.toml",
+      "relativePath": "delivery/mkp/presets/X1C-lite.toml",
+      "sha256": "d361155ae1b4096d39104f8a803f80c225c7c65c9e107951247252895779c1ff",
+      "size": 5204
+    },
+    {
+      "id": "a1-icon",
+      "resourceType": "icon",
+      "machineId": "A1",
+      "fileName": "a1.svg",
+      "relativePath": "assets/icons/a1.svg",
+      "sha256": "68024611b1c1aaf2ef0f0b3f2476f0e53ec78adade8770d89d6c8a350e0d9d83",
+      "size": 386
+    },
+    {
+      "id": "a1_mini-icon",
+      "resourceType": "icon",
+      "machineId": "A1_MINI",
+      "fileName": "a1_mini.svg",
+      "relativePath": "assets/icons/a1_mini.svg",
+      "sha256": "8cfe37d585d7604d2493a67469e11b4b699784120ff00989ef3338e45caa1046",
+      "size": 363
+    },
+    {
+      "id": "p1s-icon",
+      "resourceType": "icon",
+      "machineId": "P1S",
+      "fileName": "p1s.svg",
+      "relativePath": "assets/icons/p1s.svg",
+      "sha256": "87604671835eeccb73ac11196253e360756e4196382d6b93b48bed1d046db2f7",
+      "size": 324
+    },
+    {
+      "id": "a1-bbs-04-020",
+      "resourceType": "slicerProfile",
+      "machineId": "A1",
+      "fileName": "SupportEASE A1 0.4 0.20.json",
+      "relativePath": "assets/bbs/Process/0.4mm/SupportEASE A1 0.4 0.20.json",
+      "sha256": "d803896236f0fdb9e5127997411825672f16500a3dc522826e9f30ea135590a4",
+      "size": 1372
+    },
+    {
+      "id": "a1_mini-bbs-04-020",
+      "resourceType": "slicerProfile",
+      "machineId": "A1_MINI",
+      "fileName": "SupportEASE A1 mini 0.4 0.20.json",
+      "relativePath": "assets/bbs/Process/0.4mm/SupportEASE A1 mini 0.4 0.20.json",
+      "sha256": "3b38dd49568b72eb6ac82ca6179bc3afc0e5901b362300dcafb31730d5ae2eca",
+      "size": 1344
+    },
+    {
+      "id": "p1s-bbs-04-024",
+      "resourceType": "slicerProfile",
+      "machineId": "P1S",
+      "fileName": "SupportEASE P1S 0.4 0.24.json",
+      "relativePath": "assets/bbs/Process/0.4mm/SupportEASE P1S 0.4 0.24.json",
+      "sha256": "5d2c50d7b18359889f228bf9cf781e20623a8ffddca35cf1ba099ca50eaece35",
+      "size": 1911
+    },
+    {
+      "id": "x1c-bbs-04-024",
+      "resourceType": "slicerProfile",
+      "machineId": "X1C",
+      "fileName": "SupportEASE X1 0.4 0.24.json",
+      "relativePath": "assets/bbs/Process/0.4mm/SupportEASE X1 0.4 0.24.json",
+      "sha256": "a05aca8e2ead6ab737632b98d97c417fe5dcfdfea541ed1fbc204e7afc0932b7",
+      "size": 1965
+    }
+  ]
+}

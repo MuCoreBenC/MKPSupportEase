@@ -148,6 +148,8 @@ mod tests {
             version_id: "standard".to_owned(),
             sha256: None,
             size: None,
+            preset_schema_signature: None,
+            preset_contract_epoch: None,
         }
     }
 

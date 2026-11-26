@@ -34,8 +34,10 @@ use crate::error::AppError;
 /// ★ 这就是"这次发布提交什么"的**唯一答案**。想提交新东西？加到这份清单里来，
 /// 别在这里写 `-A`。交付产物 `presets/delivery/` 是主体；结构规则表与资产台账跟着
 /// 结构 / 资产变化走，一起提交。
-pub const STAGE_ALLOWLIST: [&str; 4] = [
+pub const STAGE_ALLOWLIST: [&str; 6] = [
     "presets/delivery/",
+    "presets/channels/",
+    "presets/legacy/",
     "presets/structure-signatures.toml",
     "presets/assets.toml",
     // 生成台账（2026-10-06 状态机修正）：生成事务把记录直接写进 built.json，

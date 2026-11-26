@@ -127,6 +127,28 @@ pub fn stage(user_root: &Path, sources: &[String]) -> Vec<Staged> {
                     ),
                 };
             }
+            /*
+             * 只读探测一次：合法但结构不兼容的预设**不复制**。
+             * 语法坏的文件保持旧口径（可导入、之后标不可读），
+             * 因为这一层仍然不是“安装 Preset”，只拦“程序明确读不动”的这一类。
+             */
+            let bytes = match std::fs::read(source) {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    return Staged {
+                        source: source.clone(),
+                        file_name,
+                        state: StageState::Rejected("读不出这份文件".to_owned()),
+                    };
+                }
+            };
+            if let Some(reason) = incompat_reason(preset::probe_preset_compat(&bytes)) {
+                return Staged {
+                    source: source.clone(),
+                    file_name,
+                    state: StageState::Rejected(reason),
+                };
+            }
             if reserved.iter().any(|n| n == &file_name) || target_taken(user_root, &file_name) {
                 return Staged {
                     source: source.clone(),
@@ -142,6 +164,24 @@ pub fn stage(user_root: &Path, sources: &[String]) -> Vec<Staged> {
             }
         })
         .collect()
+}
+
+/// 结构不兼容时给用户看的那句话；能导入的（含语法坏）返回 `None`。
+fn incompat_reason(compat: preset::PresetCompat) -> Option<String> {
+    match compat {
+        preset::PresetCompat::Compatible
+        | preset::PresetCompat::Syntax
+        | preset::PresetCompat::MissingMachine => None,
+        preset::PresetCompat::UnknownKey { key } => Some(format!(
+            "这份预设与当前程序不兼容（多了 `{key}`），请用对应版本的 SupportEase"
+        )),
+        preset::PresetCompat::MissingRequired { key } => Some(format!(
+            "这份预设与当前程序不兼容（少了 `{key}`），请用对应版本的 SupportEase"
+        )),
+        preset::PresetCompat::TypeMismatch { key } => Some(format!(
+            "这份预设与当前程序不兼容（`{key}` 类型不匹配），请用对应版本的 SupportEase"
+        )),
+    }
 }
 
 /// 落点已经有东西了吗（含"那儿是个越界的符号链接"—— 那也不能往里写）
@@ -339,6 +379,25 @@ mod tests {
             matches!(&got[5].state, StageState::Rejected(r) if r.contains("没有文件名")),
             "{:?}",
             got[5].state
+        );
+    }
+
+    /// 结构不兼容的预设不许导入（合法 TOML 也不行）；语法坏的文件保持旧口径。
+    #[test]
+    fn staging_rejects_a_preset_from_another_schema() {
+        let user = tempfile::tempdir().unwrap();
+        let ext = tempfile::tempdir().unwrap();
+        write(
+            ext.path(),
+            "旧版.toml",
+            "# machine: A1\n[wiping]\nbed_glue_preheat_temp = 50\n",
+        );
+
+        let got = stage(user.path(), &[src_of(ext.path(), "旧版.toml")]);
+        assert!(
+            matches!(&got[0].state, StageState::Rejected(r) if r.contains("不兼容") && r.contains("bed_glue_preheat_temp")),
+            "{:?}",
+            got[0].state
         );
     }
 

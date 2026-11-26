@@ -41,6 +41,7 @@ pub mod read;
 pub mod registry;
 /// 改注册表的区间与步进（**只在开发态有意义**：注册表编进二进制，见模块头）。
 pub mod registry_edit;
+pub mod schema;
 pub mod validate;
 pub mod write;
 
@@ -59,6 +60,10 @@ pub use read::{
 };
 pub use registry::{
     EffectiveRange, MachineBounds, ParamEntry, RangeSource, Registry, load_param_registry,
+};
+pub use schema::{
+    PRESET_CONTRACT_EPOCH, PRESET_SCHEMA_EPOCH, PresetCompat, preset_contract_epoch,
+    preset_schema_signature, probe_preset_compat,
 };
 pub use write::{Edit, EditValue, KeySnapshot, apply_edits, snapshot};
 

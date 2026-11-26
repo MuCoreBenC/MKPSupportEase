@@ -1,0 +1,12 @@
+{
+  "releaseSchema": 1,
+  "version": "0.0.11-preview.2",
+  "notes": "预设页：盘上指纹与归档恢复；刷新胶囊贴合当前文案；调试弹窗与恢复默认归位",
+  "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.11-preview.2",
+  "asset": {
+    "name": "SupportEase_0.0.11-preview.2_aarch64.app.zip",
+    "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.11-preview.2/SupportEase_0.0.11-preview.2_aarch64.app.zip",
+    "size": 11372616,
+    "sha256": "d9fb7639928009eaadbcf48ba782d2ce7802d6b7ec295a69457a509922872470"
+  }
+}

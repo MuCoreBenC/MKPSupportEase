@@ -172,9 +172,9 @@ describe('云端行的状态', () => {
     },
     { why: '已是最新', row: { localState: 'has', basedOn: 'current' }, action: 'none' },
     {
-      why: '别的分支下载的那份（分支隔离后不再认领）',
+      why: '不同数据源：不比较版本，但允许下载当前源版本',
       row: { localState: 'stale', basedOn: 'elsewhere' },
-      action: 'none',
+      action: 'download',
     },
     {
       why: '云端比本机旧（不给更新，那是往回带）',
@@ -182,14 +182,14 @@ describe('云端行的状态', () => {
       action: 'none',
     },
     {
-      why: '目录自相矛盾',
+      why: '同源同号字节不一致：允许重新下载修复',
       row: { localState: 'stale', basedOn: 'inconsistent' },
-      action: 'none',
+      action: 'download',
     },
     {
-      why: '说不清版本关系',
+      why: '说不清版本关系：允许重新下载',
       row: { localState: 'stale', basedOn: 'unverified' },
-      action: 'none',
+      action: 'download',
     },
     {
       why: '用户自己拷出来的独立一份',

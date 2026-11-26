@@ -522,6 +522,103 @@ pub fn run(
     Ok(report)
 }
 
+/// 发布闸：兼容矩阵必须覆盖当前目录里的每一份预设，且**受支持客户端必须 pass**。
+///
+/// 矩阵由 `npm run compat:matrix` 用真实历史 tag 的解析器生成；
+/// `--dry-run` 也走这里，所以 preflight 就能看见问题。
+fn check_compat_matrix(ctx: &Ctx) -> Result<(), AppError> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Matrix {
+        candidate_revision: String,
+        min_client_version: String,
+        files: Vec<MatrixFile>,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct MatrixFile {
+        file_name: String,
+        sha256: String,
+        clients: Vec<MatrixClient>,
+    }
+
+    #[derive(Deserialize)]
+    struct MatrixClient {
+        version: String,
+        result: String,
+    }
+
+    let delivery = crate::workbench::paths::delivery_root_at(ctx.real_root());
+    let matrix_path = ctx.real_root().join("compat-matrix.json");
+    let bytes = std::fs::read(&matrix_path).map_err(|_| {
+        AppError::invalid_argument(format!(
+            "发布前缺少兼容矩阵：{}。先跑 `npm run compat:matrix`",
+            matrix_path.display()
+        ))
+    })?;
+    let matrix: Matrix = serde_json::from_slice(&bytes)
+        .map_err(|e| AppError::corrupted("兼容矩阵读不出来").with_detail(e.to_string()))?;
+
+    let catalog_bytes = std::fs::read(delivery.join(crate::runtime::source::CATALOG_FILE))
+        .map_err(|e| AppError::not_found("发布目录读不出来").with_detail(e.to_string()))?;
+    let catalog = crate::runtime::Catalog::parse(&catalog_bytes)?;
+    let min_client = catalog
+        .min_client_version
+        .clone()
+        .ok_or_else(|| AppError::invalid_argument("当前目录没有 minClientVersion"))?;
+
+    if matrix.candidate_revision != catalog.revision {
+        return Err(AppError::invalid_argument(format!(
+            "兼容矩阵过期：矩阵基于 {}，当前目录是 {}；重跑 `npm run compat:matrix`",
+            matrix.candidate_revision, catalog.revision
+        )));
+    }
+    if matrix.min_client_version != min_client {
+        return Err(AppError::invalid_argument(format!(
+            "兼容矩阵的 minClient 是 {}，当前目录是 {}；重跑 `npm run compat:matrix`",
+            matrix.min_client_version, min_client
+        )));
+    }
+
+    let mut problems = Vec::new();
+    for file in catalog
+        .files
+        .iter()
+        .filter(|f| f.kind == crate::runtime::catalog::kind::PRESET)
+    {
+        let Some(entry) = matrix.files.iter().find(|m| m.file_name == file.file_name) else {
+            problems.push(format!("{} 没有矩阵记录", file.file_name));
+            continue;
+        };
+        if let Some(want) = file.expected_sha() {
+            if entry.sha256 != want {
+                problems.push(format!("{} 的矩阵 SHA 与目录不一致", file.file_name));
+                continue;
+            }
+        }
+        for client in &entry.clients {
+            if crate::runtime::structure::version_at_least(&client.version, &min_client)
+                && client.result != "pass"
+            {
+                problems.push(format!(
+                    "{} 在 {} 上不是 pass（{}）",
+                    file.file_name, client.version, client.result
+                ));
+            }
+        }
+    }
+
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(AppError::invalid_argument(
+            "兼容矩阵未通过：受支持客户端读不动当前预设，先修矩阵或提高 minClient",
+        )
+        .with_detail(problems.join("；")))
+    }
+}
+
 /// 事务本体。[`run`] 是它的薄壳（只多做一步记账），判据与两个入口都走 `run`。
 fn run_inner(
     ctx: &mut Ctx,
@@ -590,6 +687,8 @@ fn run_inner(
             catalog_id: None,
         });
     }
+
+    check_compat_matrix(ctx)?;
 
     // ② 生成 + ③ 定稿。生成用 `Scope::Stale`（只补该补的）—— 与界面「生成」同一个口子。
     //    生成会重算一份 catalog；定稿再把 manifest / source 落上，两头对上。

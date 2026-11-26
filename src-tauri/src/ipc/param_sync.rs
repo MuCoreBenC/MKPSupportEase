@@ -1241,6 +1241,7 @@ mod tests {
                 platform: "github".to_owned(),
                 repo: "mucoreben/mkpsupportease".to_owned(),
                 git_ref: "main".to_owned(),
+                channel: None,
             };
             let stamp = crate::runtime::source_ledger::CatalogStamp {
                 catalog_id: Some("support-ease"),

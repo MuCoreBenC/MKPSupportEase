@@ -3,18 +3,18 @@
 //! `deny_unknown_fields`：真实预设里出现结构体没有的键 = 解析失败。
 //! 这把 tasks.md 6.1 的「键名逐字对照」从人工核对变成机械判据。
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// `tower_wipe_speed` 的 Go 类型是 `any`（弃用字段，int 或 float 都要接受，
 /// 迁移逻辑在 ir/build.go:976-992，Rust 侧由 Task 7 处理）。
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum IntOrFloat {
     I64(i64),
     F64(f64),
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ToolheadConfig {
     pub speed_limit: f64,
@@ -88,7 +88,7 @@ pub struct ToolheadConfig {
     pub prime_length: f64,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct WipingConfig {
     pub have_wiping_components: String,
@@ -436,7 +436,7 @@ pub struct PresetFile {
     pub raw: String,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TomlConfig {
     pub toolhead: ToolheadConfig,

@@ -33,7 +33,7 @@ pub const CALIBRATION_SAFE_LIFT_MAX_MM: f64 = 20.0;
 /// （`glue_z_lift_height` 是涂胶那趟的账，不许拿来管校准）。
 ///
 /// XY / ZOffset / Repetition 三种校准共用这一个值，不许再按模式分化。
-fn calibration_safe_z(ir_data: &Ir) -> f64 {
+pub(crate) fn calibration_safe_z(ir_data: &Ir) -> f64 {
     let lift = ir_data
         .prefs
         .calibration_safe_lift_mm

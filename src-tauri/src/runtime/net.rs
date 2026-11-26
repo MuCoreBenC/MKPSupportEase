@@ -948,6 +948,8 @@ mod tests {
             version_id: "STANDARD".to_owned(),
             sha256: Some(super::super::catalog::hex(&sha2::Sha256::digest(content))),
             size: Some(content.len() as u64),
+            preset_schema_signature: Some(preset::preset_schema_signature()),
+            preset_contract_epoch: Some(preset::preset_contract_epoch()),
         }
     }
 
@@ -1012,6 +1014,8 @@ mod tests {
             version_id: String::new(),
             sha256: Some(super::super::catalog::hex(&sha2::Sha256::digest(&content))),
             size: Some(content.len() as u64),
+            preset_schema_signature: None,
+            preset_contract_epoch: None,
         };
         let server = TestServer::start(vec![Reply::Bytes(content.clone())]);
         let root = fresh_root();
@@ -1046,6 +1050,8 @@ mod tests {
             version_id: String::new(),
             sha256: Some(super::super::catalog::hex(&sha2::Sha256::digest(&content))),
             size: Some(content.len() as u64),
+            preset_schema_signature: None,
+            preset_contract_epoch: None,
         };
         let server = TestServer::start(vec![Reply::Bytes(content.clone())]);
         let root = fresh_root();
