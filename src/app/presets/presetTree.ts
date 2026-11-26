@@ -2425,6 +2425,79 @@ export function localCountOfAxis(local: LocalPresetFile[], axis: PresetKindAxis)
   return local.filter((f) => f.kind === null || matchesKind(axis, f.kind)).length
 }
 
+/**
+ * 筛选菜单右侧的数字：选了这一档，眼前这张表会有几行。
+ *
+ * 机型那一列维持当前来源档，来源那一列维持当前机型档；两列都与本地表
+ * `localRows` 同一套判据（类型档 / 机型归属 / 来源 / 搜索词）。不拿云端目录树
+ * 或全盘文件充数 —— 那些数会把当前没显示的来源算进来。
+ */
+export interface PresetFilterCounts {
+  /** 按机型 id 记的行数；没标机型的文件在每一档下都算（与本地表一致） */
+  machine: Record<string, number>
+  source: {
+    /** 「当前来源」档（含没有来源记录的文件） */
+    current: number
+    /** 「全部来源」档 */
+    all: number
+    /** 「没有来源」档 */
+    unfiled: number
+    /** 各条具体来源的行数 */
+    byKey: Record<string, number>
+  }
+}
+
+export function filterCountsOf(
+  files: LocalPresetFile[],
+  opts: {
+    machineIds: string[]
+    machineId: string
+    sourceFilter: SourceFilter
+    currentSource: string | null
+    kind: PresetKindAxis
+    query: string
+  },
+): PresetFilterCounts {
+  const { machineIds, machineId, sourceFilter, currentSource, kind, query } = opts
+  const inScope = files
+    .filter((f) => f.kind === null || matchesKind(kind, f.kind))
+    .filter((f) => fileMatchesQuery(f, query))
+  const ownMachine = (f: LocalPresetFile): string | null => f.machineId ?? f.basedOnMachineId
+  const inMachine = (f: LocalPresetFile, id: string): boolean => {
+    const own = ownMachine(f)
+    return id === '' || own === null || own === id
+  }
+  const keptBySource = (f: LocalPresetFile, filter: SourceFilter): boolean =>
+    sourceKept(
+      sourceKeyOf(f.basedOnFacts),
+      f.basedOnFacts.sourceRef != null,
+      filter,
+      currentSource,
+    )
+
+  const forMachine = inScope.filter((f) => keptBySource(f, sourceFilter))
+  const machine: Record<string, number> = {}
+  for (const id of machineIds) {
+    machine[id] = forMachine.filter((f) => inMachine(f, id)).length
+  }
+
+  const forSource = inScope.filter((f) => inMachine(f, machineId))
+  const byKey: Record<string, number> = {}
+  for (const f of forSource) {
+    const key = sourceKeyOf(f.basedOnFacts)
+    if (key !== null) byKey[key] = (byKey[key] ?? 0) + 1
+  }
+  return {
+    machine,
+    source: {
+      current: forSource.filter((f) => keptBySource(f, 'current')).length,
+      all: forSource.length,
+      unfiled: forSource.filter((f) => sourceKeyOf(f.basedOnFacts) === null).length,
+      byKey,
+    },
+  }
+}
+
 /*
  * # 表头排序（2026-10-16 作者：「表头加上排序吧……名称排序，机型排序，所有的都排序，时间也排序」）
  *

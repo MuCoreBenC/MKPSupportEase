@@ -633,28 +633,37 @@ export default function PresetTable({
     : rows.map((row) => ({ row, meta: null }))
 
   /*
-   * 置顶 / 取消置顶会把行从一个位置挪到另一个位置。先量旧位置、再量新位置，
-   * 用 FLIP 让每行从旧位置滑到新位置；新行没有旧位置，直接出现。
+   * 置顶 / 排序 / 筛选会改变数据行的先后顺序：先量旧位置、再量新位置，用 FLIP 滑过去。
+   * 展开 / 收起只插入详情行、不改数据行的顺序 —— 展开时下面的行由详情格撑高带着
+   * 往下走。这里若照跑 FLIP，就会把它们先拉回旧位置再滑下来。只有顺序真变了才演。
    */
   const tbodyRef = useRef<HTMLTableSectionElement | null>(null)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
   const flipTops = useRef<Map<string, number>>(new Map())
+  const flipOrder = useRef<string[]>([])
   useLayoutEffect(() => {
     const body = tbodyRef.current
     if (body === null) return
-    const origin = body.getBoundingClientRect().top
+    const keys = displayRows.map((d) => d.row.rowKey)
+    const reordered =
+      keys.length !== flipOrder.current.length ||
+      keys.some((key, i) => key !== flipOrder.current[i])
+    flipOrder.current = keys
+
     const next = new Map<string, number>()
     const moved: { el: HTMLTableRowElement; delta: number }[] = []
     body
       .querySelectorAll<HTMLTableRowElement>('tr[data-rowkey], tr[data-detail-rowkey]')
       .forEach((el) => {
         const key = el.dataset.rowkey ?? `${el.dataset.detailRowkey ?? ''}::detail`
-        const top = el.getBoundingClientRect().top - origin
+        /* offsetTop 量的是布局位置：上一轮 FLIP 还在播时也不会读到半途的 transform */
+        const top = el.offsetTop
         next.set(key, top)
         const prev = flipTops.current.get(key)
         if (prev !== undefined && Math.abs(prev - top) > 0.5) moved.push({ el, delta: prev - top })
       })
     flipTops.current = next
-    if (moved.length === 0 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    if (!reordered || moved.length === 0 || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     for (const { el, delta } of moved) {
       el.animate([{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }], {
         duration: 260,
@@ -662,6 +671,133 @@ export default function PresetTable({
       })
     }
   }, [displayRows])
+
+  /*
+   * 展开：详情格从 0 高撑到自然高，下面的行顺着下移；内容层同拍落下 + 渐显。
+   * 收起 / 换行：旧卡留住一程把格高收回 0 后再卸载，新卡同时展开 —— 不瞬间换卡。
+   */
+  const [closingKey, setClosingKey] = useState<string | null>(null)
+  const expandedRef = useRef(expandedKey)
+  const foldSeq = useRef(0)
+  const switchingRef = useRef(false)
+  const scrollTimer = useRef<number | null>(null)
+  const detailKey = expandedKey ?? closingKey
+  useLayoutEffect(() => {
+    const prev = expandedRef.current
+    switchingRef.current = prev !== null && prev !== expandedKey
+    expandedRef.current = expandedKey
+    setClosingKey(prev !== null && prev !== expandedKey ? prev : null)
+  }, [expandedKey])
+
+  /*
+   * 自然高量内层：连点时格高可能正被上一轮动画压在 0，量它就等于量了个 0，
+   * 动画会被跳过。每次起新动画前把这一格上残留的动画全取消，不叠着播。
+   */
+  useLayoutEffect(() => {
+    foldSeq.current += 1
+    if (expandedKey === null) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    const body = tbodyRef.current
+    if (body === null) return
+    const detail = Array.from(
+      body.querySelectorAll<HTMLTableRowElement>('tr[data-detail-rowkey]'),
+    ).find((el) => el.dataset.detailRowkey === expandedKey)
+    if (detail === undefined) return
+    const fold = detail.querySelector<HTMLElement>(`.${s.dFold}`)
+    if (fold === null) return
+    const inner = fold.querySelector<HTMLElement>(`.${s.dFoldIn}`)
+    const natural = inner?.getBoundingClientRect().height ?? fold.getBoundingClientRect().height
+    fold.getAnimations().forEach((a) => a.cancel())
+    inner?.getAnimations().forEach((a) => a.cancel())
+
+    /*
+     * 卡片底边越过滚动容器时补上刚够看全的一段。换行时旧卡还占着位置，
+     * 先量会把新卡算到错误的位置 —— 等旧卡收完（200ms）再量终态。
+     */
+    if (scrollTimer.current !== null) window.clearTimeout(scrollTimer.current)
+    const reveal = () => {
+      const wrap = wrapRef.current
+      if (wrap === null) return
+      const below = detail.getBoundingClientRect().bottom - wrap.getBoundingClientRect().bottom
+      if (below > 0) {
+        wrap.scrollTo({
+          top: wrap.scrollTop + below + 12,
+          behavior: reduce ? 'auto' : 'smooth',
+        })
+      }
+    }
+    if (switchingRef.current) scrollTimer.current = window.setTimeout(reveal, 210)
+    else reveal()
+    if (reduce || natural <= 0) {
+      return () => {
+        if (scrollTimer.current !== null) window.clearTimeout(scrollTimer.current)
+      }
+    }
+    const anim = fold.animate([{ height: '0px' }, { height: `${natural}px` }], {
+      duration: 240,
+      easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    })
+    inner?.animate(
+      [
+        { opacity: 0, transform: 'translateY(-10px)', offset: 0 },
+        /* 内容先显出来，末行没有下方行可推时也看得见在展开 */
+        { opacity: 1, offset: 0.58 },
+        { opacity: 1, transform: 'translateY(0)', offset: 1 },
+      ],
+      { duration: 240, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' },
+    )
+    void anim.finished.catch(() => {})
+    return () => {
+      if (scrollTimer.current !== null) window.clearTimeout(scrollTimer.current)
+    }
+  }, [expandedKey])
+
+  useLayoutEffect(() => {
+    const seq = ++foldSeq.current
+    if (
+      closingKey === null ||
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ) {
+      setClosingKey(null)
+      return
+    }
+    const body = tbodyRef.current
+    if (body === null) return
+    const detail = Array.from(
+      body.querySelectorAll<HTMLTableRowElement>('tr[data-detail-rowkey]'),
+    ).find((el) => el.dataset.detailRowkey === closingKey)
+    const fold = detail?.querySelector<HTMLElement>(`.${s.dFold}`)
+    if (fold === undefined || fold === null) {
+      setClosingKey(null)
+      return
+    }
+    const inner = fold.querySelector<HTMLElement>(`.${s.dFoldIn}`)
+    const natural = inner?.getBoundingClientRect().height ?? fold.getBoundingClientRect().height
+    fold.getAnimations().forEach((a) => a.cancel())
+    inner?.getAnimations().forEach((a) => a.cancel())
+    if (natural <= 0) {
+      setClosingKey(null)
+      return
+    }
+    const anim = fold.animate([{ height: `${natural}px` }, { height: '0px' }], {
+      duration: 200,
+      easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+      fill: 'forwards',
+    })
+    inner?.animate(
+      [
+        { opacity: 1, transform: 'translateY(0)' },
+        { opacity: 0, transform: 'translateY(-8px)' },
+      ],
+      { duration: 160, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards' },
+    )
+    void anim.finished.then(
+      () => {
+        if (foldSeq.current === seq) setClosingKey(null)
+      },
+      () => {},
+    )
+  }, [closingKey])
 
   /*
    * 展开卡底部那两条编辑带（备注 / 归属）的开关 —— 2026-10-10 第八轮。
@@ -677,11 +813,11 @@ export default function PresetTable({
   })
   useEffect(() => {
     setBands({ remark: null, attr: null })
-  }, [expandedKey])
+  }, [detailKey])
 
   /*
    * 详情卡双列的**中线自适应**（2026-10-30，作者：「线再往左一点，右边那三行就能
-   * 变两行」）。任何时刻最多一张卡（见下面"收起一律瞬时"那段），所以一只 ref 就够。
+   * 变两行」）。任何时刻最多一张卡（换行同帧换卡），所以一只 ref 就够。
    *
    * 为什么在 `useLayoutEffect` 里量：这一刻 DOM 已挂好、还没绘制 —— 量完立刻定列宽，
    * 用户第一眼看到的就是量过的那版。交给 `useEffect` 会先按 0.5 画一帧再挪线（能看见跳）。
@@ -692,7 +828,7 @@ export default function PresetTable({
     const cols = colsRef.current
     if (cols === null) return
     return fitSplitWhenResized(cols)
-  }, [expandedKey])
+  }, [detailKey])
 
   /*
    * **本地 / 云端各记一条滚动位置**（2026-10-30 作者：「我点了那个来源，如果它是云端，
@@ -705,7 +841,6 @@ export default function PresetTable({
    * 记的时机是**滚动时**（`onScroll`），不是换 scope 时现读：那时读到的已经是新内容
    * 夹过的数字了。
    */
-  const wrapRef = useRef<HTMLDivElement | null>(null)
   const scrollMemo = useRef<Record<string, number>>({})
   useLayoutEffect(() => {
     const el = wrapRef.current
@@ -714,21 +849,9 @@ export default function PresetTable({
   }, [scope])
 
   /*
-   *  /*
-   * **收起没有动画**（2026-10-17 第七轮，作者：「旧的没有收起动画」「我希望是保持高度
-   * 不变……而且只是收起的话，这个动画也不好，先快后慢，最后的慢有点不舒服」）。
-   *
-   * 两条事实叠在一起，才得出这个结论：
-   *   · 行高**本来就是瞬间到位**的（2026-10-16 第四轮：`<table>` 里动行高 = 每帧整表重排，
-   *     见 CSS 那段），所以"收起"能播的动画只剩内容层的淡出 —— 但内容还占着那一整行高度，
-   *     看到的顺序是「先淡一点 → 停一下 → 整行突然消失」，作者说的"最后的慢"就是这一段。
-   *   · 换行时旧那张卡还留在 DOM 里播淡出 ⇒ 那一帧**两张卡同时开着**（作者连拍截到的就是
-   *     它），表也跟着高出一整张。
-   *
-   * 所以收起一律**瞬时**：`onToggleExpand` 直接换键，旧行同帧卸载 —— 任何时刻最多一张卡，
-   * 表高只换一次。要动的只剩入场那一层（CSS `.dFoldIn` 的 opacity / transform）。
-   * 原来那套 `closing / rush / queuedRef`（收起动画 + 点击排队 + 加速收尾）整段退役 ——
-   * 没有收起动画，也就没有"收一半又被点开"要排队。
+   * 收起没有动画：`onToggleExpand` 直接换键，旧行同帧卸载 —— 任何时刻最多一张卡。
+   * 若播淡出，内容还占着整行高度，看到的是「先淡 → 停一下 → 整行突然消失」；
+   * 换行时还会两卡同开。展开才有动画（格高 + 内容同拍），见上面的 effect 与 CSS。
    */
 
   /** 空表三种话，说的是三件不同的事 —— 混成一句「没有数据」就查不出是哪一件 */
@@ -1045,10 +1168,10 @@ export default function PresetTable({
               /* 与参数页同一套交互：点行展开下方的内容，同一时刻只开一行 */
               const expanded = row.rowKey === expandedKey
               /*
-               * 「这一行还热着」= 就它展开着。收起没有动画（见上面那段），
-               * 所以这里没有"正在收"这第三态 —— 行白底与卡片同进同出。
+               * 「这一行还热着」= 展开着，或正在收回（动画播完才卸载）——
+               * 行白底与卡片同进同出，不会先退回普通行再让卡片自己缩。
                */
-              const rowHot = expanded
+              const rowHot = expanded || closingKey === row.rowKey
               /*
                * 备注 / 归属这两块的身份（第八轮）：
                * `localAttr` = 这一行有没有归属可改（我自己那份、认得出的 MKP 预设，
@@ -1559,14 +1682,11 @@ export default function PresetTable({
                      */}
                     <td colSpan={(mkp ? 5 : 6) + (select !== null ? 1 : 0)}>
                       {/*
-                       * —— 展开的小动画（2026-10-16 第四轮：行高不再动）——
-                       * 三段内衬：`.dFold`（撑开格子）→ `.dFoldCut`（裁）→ `.dFoldIn`
-                       * （内容落下 + 渐显 + 内边距 —— 卡片影子要的余地也在这里，
-                       * 贴着裁剪边影子会被切）。
-                       * 动画只跑在 `.dFoldIn` 上（opacity / transform，走合成器）：
-                       * 在 `<table>` 里动行高 = 每帧整表重排，那是不顺的根源。
-                       * **退场没有动画**（2026-10-17 第七轮）：这一行卸载就是收起，
-                       * 同帧换到新那一行，任何时刻最多一张卡（见上面那段说明）。
+                       * 三段内衬：`.dFold`（格高由脚本撑开 / 收回）→ `.dFoldCut`（裁）→
+                       * `.dFoldIn`（内容落下 + 渐显 + 内边距，同样由脚本驱动 ——
+                       * 末行没有下方行可推时，这一层就是看得见的动画）。
+                       * 卡片影子要的余地也在内边距里，贴着裁剪边影子会被切。
+                       * 换行仍是同帧换卡，任何时刻最多一张。
                        */}
                       <div className={s.dFold}>
                         <div className={s.dFoldCut}>

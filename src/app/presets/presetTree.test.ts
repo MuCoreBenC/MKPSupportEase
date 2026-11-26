@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
+import type { LocalPresetFile } from '../../api/contract'
 import {
   familyLayoutOf,
+  filterCountsOf,
   isMainCopy,
   keyOfSourceFilter,
   slicerCloudActionOf,
@@ -70,6 +72,82 @@ describe('来源隔离', () => {
     expect(keyOfSourceFilter('current')).toBeNull()
     expect(keyOfSourceFilter('all')).toBeNull()
     expect(keyOfSourceFilter('unfiled')).toBeNull()
+  })
+})
+
+/*
+ * 菜单右侧的数字要等于"选了这一档会看到几行"：机型列按当前来源档数，
+ * 来源列按当前机型档数。两列都读本地表那套判据，不拿全盘文件或云端目录充数。
+ */
+describe('筛选菜单计数', () => {
+  const current = 'gitee#mucorebenc/mkphelperse@main'
+  const other = 'custom#127.0.0.1:8787/delivery@-'
+  const file = (
+    path: string,
+    machineId: string | null,
+    sourceRef: string | null,
+    kind: 'mkp_preset' | 'bbs_profile' = 'mkp_preset',
+  ) =>
+    ({
+      path,
+      fileName: path,
+      kind,
+      machineId,
+      basedOnMachineId: null,
+      basedOnFacts: { sourceRef },
+    }) as LocalPresetFile
+  const files = [
+    file('fast1.toml', 'A1 mini', current),
+    file('fast2.toml', 'A1 mini', current),
+    file('standard.toml', 'A1 mini', current),
+    file('other.toml', 'A1 mini', other),
+    file('imported.toml', null, null),
+    file('a1.toml', 'A1', current),
+    file('x1c1.toml', 'X1C', other),
+    file('x1c2.toml', 'X1C', other),
+    file('bbs.json', 'A1 mini', current, 'bbs_profile'),
+  ]
+  const opts = {
+    machineIds: ['A1 mini', 'A1', 'X1C'],
+    machineId: 'A1 mini',
+    sourceFilter: 'current' as const,
+    currentSource: current,
+    kind: 'mkp' as const,
+    query: '',
+  }
+
+  it('机型数只算当前来源档的行；未标机型的行在每一档下都算', () => {
+    expect(filterCountsOf(files, opts).machine).toEqual({ 'A1 mini': 4, A1: 2, X1C: 1 })
+    expect(filterCountsOf(files, { ...opts, sourceFilter: 'all' }).machine).toEqual({
+      'A1 mini': 5,
+      A1: 2,
+      X1C: 3,
+    })
+    expect(
+      filterCountsOf(files, { ...opts, sourceFilter: sourceValueOf(other) }).machine,
+    ).toEqual({ 'A1 mini': 1, A1: 0, X1C: 2 })
+  })
+
+  it('来源数的四档都按当前机型算，全部 / 当前档也带数字', () => {
+    expect(filterCountsOf(files, opts).source).toEqual({
+      current: 4,
+      all: 5,
+      unfiled: 1,
+      byKey: { [current]: 3, [other]: 1 },
+    })
+    expect(filterCountsOf(files, { ...opts, machineId: 'X1C' }).source).toEqual({
+      current: 1,
+      all: 3,
+      unfiled: 1,
+      byKey: { [other]: 2 },
+    })
+  })
+
+  it('搜索词与类型档跟着本地表一起收窄', () => {
+    expect(filterCountsOf(files, { ...opts, query: 'standard' }).machine['A1 mini']).toBe(1)
+    expect(
+      filterCountsOf(files, { ...opts, kind: 'slicer', machineId: '' }).source.all,
+    ).toBe(1)
   })
 })
 

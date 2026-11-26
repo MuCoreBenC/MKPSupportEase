@@ -82,6 +82,8 @@ interface FilterOption {
   label: string
   /** 行尾那截灰色小字（机型的 id；喷嘴 / 层高没有这一格） */
   meta?: string
+  /** 悬停才说的补充（当前来源的完整身份 —— 行尾让给数量） */
+  title?: string
 }
 
 /**
@@ -178,6 +180,7 @@ function FilterItems({
           className={s.item}
           data-on={value === o.value}
           tabIndex={hiddenFromTab ? -1 : undefined}
+          title={o.title}
           onClick={() => onPick(o.value)}
         >
           <CheckMark />
@@ -296,8 +299,12 @@ export function PresetMachineFilter({ machines, machineId, onPick, prefix }: Fil
 interface MkpSourceProps {
   /** 当前源的完整身份；没配源 ⇒ `null` */
   current: string | null
-  /** 本机出现过的来源（含当前这一条），按显示名排好 */
+  /** 本机出现过的来源（含当前这一条），按显示名排好；count 是当前机型档下的行数 */
   sources: { key: string; label: string; count: number }[]
+  /** 「当前来源」档在当前机型下的行数 */
+  currentCount: number
+  /** 「全部来源」档在当前机型下的行数 */
+  allCount: number
   unfiledCount: number
   value: SourceFilter
   onPick: (value: SourceFilter) => void
@@ -332,9 +339,10 @@ export function PresetMkpFilter({
     {
       value: 'current',
       label: tr('presets.source.current'),
-      meta: source.current === null ? undefined : (sourceLabelOf(source.current) ?? source.current),
+      meta: String(source.currentCount),
+      title: source.current === null ? undefined : (sourceLabelOf(source.current) ?? source.current),
     },
-    { value: 'all', label: tr('presets.source.all') },
+    { value: 'all', label: tr('presets.source.all'), meta: String(source.allCount) },
     {
       value: 'unfiled',
       label: tr('presets.source.unfiled'),
@@ -447,10 +455,7 @@ export function PresetMkpFilter({
     }
   }, [open, sourceOpen, resizeTick])
 
-  const pick = (action: () => void) => {
-    setOpen(false)
-    action()
-  }
+  /* 来源 / 机型选完不关弹层：两列能连着挑，行尾数字也留在眼前；点空白或 Esc 才关。 */
 
   return (
     <span className={s.hold}>
@@ -516,7 +521,7 @@ export function PresetMkpFilter({
                     value={source.value}
                     withAllOption={false}
                     hiddenFromTab={!sourceOpen}
-                    onPick={(next) => pick(() => source.onPick(next as SourceFilter))}
+                    onPick={(next) => source.onPick(next as SourceFilter)}
                   />
                 </div>
               </div>
@@ -527,7 +532,7 @@ export function PresetMkpFilter({
                 value={machineId}
                 allText={tr('presets.filter.allMachines')}
                 allMeta={tr('presets.filter.machines', { count: machines.length })}
-                onPick={(next) => pick(() => onPick(next))}
+                onPick={(next) => onPick(next)}
               />
             </div>
           </div>

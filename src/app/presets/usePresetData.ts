@@ -97,6 +97,7 @@ import {
   buildPresetTree,
   catalogKindToFileKind,
   cloudRows,
+  filterCountsOf,
   localRows,
   machineNode,
   machinesInScope,
@@ -106,6 +107,7 @@ import {
 } from './presetTree'
 import type {
   PresetCloudRow,
+  PresetFilterCounts,
   PresetKindAxis,
   PresetLocalRow,
   PresetRowsInput,
@@ -1756,6 +1758,8 @@ export interface PresetPage {
   hiddenSourceCount: number
   /** 没有来源记录的文件数，供「没有来源」那一档显示 */
   unfiledCount: number
+  /** 筛选菜单右侧的数字：机型数按当前来源档算，来源数按当前机型档算 */
+  filterCounts: PresetFilterCounts
 
   /**
    * 切片器的喷嘴 / 层高筛选。MKP 没有这两个字段 ——
@@ -1912,29 +1916,46 @@ export function usePresetPage(data: PresetData): PresetPage {
   )
 
   /*
-   * **本机出现过的完整来源**（含当前这一条）—— 决定台账角标与菜单里有哪些档。
+   * 菜单右侧的数字按"另一列维持当前值"算，与本地表同一套判据
+   * （类型档 / 机型归属 / 来源 / 搜索词）。
+   */
+  const filterCounts = useMemo(
+    () =>
+      filterCountsOf(data.local, {
+        machineIds: data.machines.map((m) => m.id),
+        machineId: data.machineId,
+        sourceFilter,
+        currentSource: data.sourceIdentity ?? null,
+        kind,
+        query: deferredQuery,
+      }),
+    [data, deferredQuery, kind, sourceFilter],
+  )
+
+  /*
+   * **本机出现过的完整来源**（含当前这一条）—— 决定菜单里有哪些档。
    * 按身份原文去重：同一 ref、不同仓库或自建源地址/端口/目录都算不同来源。
+   * 行尾的数字是**当前机型档下**的，不是全盘数。
    */
   const sourceInfo = useMemo(() => {
-    const counts = new Map<string, number>()
-    let unfiledCount = 0
+    const keys = new Set<string>()
     for (const f of data.local) {
       const key = sourceKeyOf(f.basedOnFacts)
-      if (key === null) {
-        unfiledCount += 1
-        continue
-      }
-      counts.set(key, (counts.get(key) ?? 0) + 1)
+      if (key !== null) keys.add(key)
     }
     const current = data.sourceIdentity ?? null
-    if (current !== null && !counts.has(current)) counts.set(current, 0)
-    const sources: SourceOption[] = [...counts]
-      .map(([key, count]) => ({ key, label: sourceLabelOf(key) ?? key, count }))
+    if (current !== null) keys.add(current)
+    const sources: SourceOption[] = [...keys]
+      .map((key) => ({
+        key,
+        label: sourceLabelOf(key) ?? key,
+        count: filterCounts.source.byKey[key] ?? 0,
+      }))
       .sort((a, b) => a.label.localeCompare(b.label))
     const hiddenSourceCount =
       current === null ? 0 : sources.reduce((n, s) => n + (s.key === current ? 0 : s.count), 0)
-    return { current, sources, hiddenSourceCount, unfiledCount }
-  }, [data.local, data.sourceIdentity])
+    return { current, sources, hiddenSourceCount }
+  }, [data.local, data.sourceIdentity, filterCounts])
 
   /* 两张表的输入是同一份 —— 拼一次，两个纯函数各取所需 */
   const input = useMemo(
@@ -2090,7 +2111,8 @@ export function usePresetPage(data: PresetData): PresetPage {
     sources: sourceInfo.sources,
     currentSource: sourceInfo.current,
     hiddenSourceCount: sourceInfo.hiddenSourceCount,
-    unfiledCount: sourceInfo.unfiledCount,
+    unfiledCount: filterCounts.source.unfiled,
+    filterCounts,
     slicerFilters: {
       nozzles: slicerValues.nozzles,
       allLayers: slicerValues.layers,
