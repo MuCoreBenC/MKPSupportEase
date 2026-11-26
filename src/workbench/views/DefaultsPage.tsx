@@ -94,7 +94,17 @@ const GROUPS: EditGroup[] = [
     id: 'glue',
     title: '热床预涂胶',
     desc: '可能划伤打印板',
-    sections: [{ note: '', keys: ['BedGlueEnabled', 'BedGlueAllModels'] }],
+    sections: [
+      {
+        note: '',
+        keys: [
+          'BedGlueEnabled',
+          'BedGlueAllModels',
+          'BedGlueSpeedMmS',
+          'BedGluePreheatTempC',
+        ],
+      },
+    ],
   },
   {
     id: 'presets',
@@ -127,6 +137,8 @@ const NUM_META: Record<string, { unit: string; step: number; min: number; max: n
   CalibrationSafeLiftMm: { unit: 'mm', step: 1, min: 6, max: 20 },
   ZCalibrationDwellSec: { unit: '秒', step: 1, min: 1, max: 20 },
   XyCalibrationDwellSec: { unit: '秒', step: 1, min: 1, max: 3 },
+  BedGlueSpeedMmS: { unit: 'mm/s', step: 1, min: 10, max: 100 },
+  BedGluePreheatTempC: { unit: '°C', step: 1, min: 30, max: 60 },
 }
 
 /**

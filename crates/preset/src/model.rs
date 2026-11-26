@@ -183,22 +183,7 @@ pub struct WipingConfig {
     pub glue_z_lift_height_first_layers: f64,
     #[serde(default)]
     pub glue_inter_model_lift_height: f64,
-    /* ---- 预涂胶（2026-11-05 新增，作者：预涂胶速度/段间横移/预热温度/等待/擦笔占位） ---- */
-    /// 预涂胶速度档：`follow`（跟随机型移动速度）/ `glue`（涂胶速度限制）/ `custom`。
-    #[serde(default)]
-    pub bed_glue_speed_mode: String,
-    /// `custom` 档下的速度（mm/s）。
-    #[serde(default)]
-    pub bed_glue_speed: f64,
-    /// 段间横移速度档：同上三档。
-    #[serde(default)]
-    pub glue_travel_speed_mode: String,
-    /// `custom` 档下的段间横移速度（mm/s）。
-    #[serde(default)]
-    pub glue_travel_speed: f64,
-    /// 涂胶前热床预热温度（°C）—— 原来是写死的 50。
-    #[serde(default)]
-    pub bed_glue_preheat_temp: f64,
+    /* ---- 预涂胶（速度与预热温度在客户端偏好里，这里只留工艺项） ---- */
     /// 涂完胶、笔抬起之后先停多久（秒）；0 = 不停。
     #[serde(default)]
     pub bed_glue_wait_seconds: f64,

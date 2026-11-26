@@ -204,22 +204,7 @@ pub struct GlueIr {
     pub z_lift_height: f64,
     pub z_lift_height_first_layers: f64,
     pub inter_model_lift_height: f64,
-    /* ---- 预涂胶（2026-11-05）---- */
-    /// 预涂胶速度档：`follow` / `glue` / `custom`（空串按 `follow`，见 `bed_glue::glue_feed_of`）。
-    #[serde(default)]
-    pub bed_glue_speed_mode: String,
-    /// `custom` 档的速度（mm/s）。
-    #[serde(default)]
-    pub bed_glue_speed: f64,
-    /// 段间横移速度档：同上三档。
-    #[serde(default)]
-    pub glue_travel_speed_mode: String,
-    /// `custom` 档的段间横移速度（mm/s）。
-    #[serde(default)]
-    pub glue_travel_speed: f64,
-    /// 涂胶前热床预热温度（°C）。
-    #[serde(default)]
-    pub bed_glue_preheat_temp: f64,
+    /* ---- 预涂胶（速度与预热温度在客户端偏好里）---- */
     /// 涂胶结束后等待秒数（0 = 不停）。
     #[serde(default)]
     pub bed_glue_wait_seconds: f64,
@@ -575,6 +560,12 @@ pub struct PrefsIr {
     pub bed_glue_enabled: bool,
     /// 热床涂胶是只涂擦料塔位置（false）还是所有模型首层（true）。
     pub bed_glue_all_models: bool,
+    /// 热床预涂胶贴板走笔的速度（mm/s），只在落笔涂胶那段生效。
+    #[serde(default)]
+    pub bed_glue_speed_mm_s: f64,
+    /// 涂胶前把热床降到的温度（°C）。
+    #[serde(default)]
+    pub bed_glue_preheat_temp_c: f64,
     /// **智能塔位置**（2026-11-04 换成三档）：模型与擦料塔相撞时怎么办。
     ///
     /// - [`TowerRelocateModeIr::Ask`]（**出厂档**，2026-11-04 作者定：软件装好就是"问"）：

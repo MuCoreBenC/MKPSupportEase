@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "ad299eba7e250bc3",
+  "revision": "182f1e47beec30f6",
   "publishedAt": "2026-11-19T04:25:52Z",
   "brands": [
     {
@@ -3305,269 +3305,6 @@
         "serialization": null
       },
       {
-        "key": "wiping.bed_glue_speed_mode",
-        "configKey": "BedGlueSpeedMode",
-        "tomlKey": "bed_glue_speed_mode",
-        "jsonKey": "bed_glue_speed_mode",
-        "label": "热床预涂胶速度",
-        "labelEn": "Bed pre-glue speed",
-        "labelJa": "ヒートベッド事前塗布速度",
-        "labelTw": "熱床預塗膠速度",
-        "desc": "跟随切片、用涂胶速度，或自己填。跟随时取切片文件的空驶速度。",
-        "descEn": "Follow the slicer, reuse the glue speed, or enter your own. Follow reads the travel speed from the sliced file.",
-        "descJa": "スライスに追従、塗布速度を使う、自分で入力、から選びます。追従はスライスファイルの移動速度を使います。",
-        "descTw": "跟隨切片、用塗膠速度，或自己填。跟隨時取切片檔案的空駛速度。",
-        "tomlComment": "热床预涂胶速度(follow/glue/custom)",
-        "valueType": "string",
-        "uiComponent": "select",
-        "defaultValue": "follow",
-        "scope": "universal",
-        "section": "wiping",
-        "layout": {
-          "order": 3.0,
-          "sectionId": "glue_params"
-        },
-        "min": null,
-        "max": null,
-        "step": null,
-        "unit": null,
-        "parentKey": null,
-        "showWhen": null,
-        "choices": [
-          {
-            "label": "跟随切片",
-            "labelEn": "Follow slicer",
-            "labelJa": "スライスに追従",
-            "labelTw": "跟隨切片",
-            "value": "follow",
-            "deprecated": false
-          },
-          {
-            "label": "涂胶速度",
-            "labelEn": "Glue speed",
-            "labelJa": "塗布速度",
-            "labelTw": "塗膠速度",
-            "value": "glue",
-            "deprecated": false
-          },
-          {
-            "label": "自定义",
-            "labelEn": "Custom",
-            "labelJa": "カスタム",
-            "labelTw": "自訂",
-            "value": "custom",
-            "deprecated": false
-          }
-        ],
-        "variantMode": null,
-        "machineFilter": [],
-        "deprecated": false,
-        "machineVariants": {},
-        "machineMinVariants": {},
-        "machineMaxVariants": {},
-        "mergeGroup": null,
-        "pinned": false,
-        "omitWhenUnset": false,
-        "serialization": null
-      },
-      {
-        "key": "wiping.bed_glue_speed",
-        "configKey": "BedGlueSpeed",
-        "tomlKey": "bed_glue_speed",
-        "jsonKey": "bed_glue_speed",
-        "label": "热床预涂胶速度·自定义",
-        "labelEn": "Bed pre-glue speed (custom)",
-        "labelJa": "ヒートベッド事前塗布速度（カスタム）",
-        "labelTw": "熱床預塗膠速度（自訂）",
-        "desc": "只在选「自定义」时生效。",
-        "descEn": "Only applies when Custom is selected.",
-        "descJa": "「カスタム」を選んだときだけ有効です。",
-        "descTw": "只在選「自訂」時生效。",
-        "tomlComment": "热床预涂胶速度自定义值(mm/s) 范围:10~300",
-        "valueType": "float",
-        "uiComponent": "number",
-        "defaultValue": 70.0,
-        "scope": "universal",
-        "section": "wiping",
-        "layout": {
-          "order": 4.0,
-          "sectionId": "glue_params"
-        },
-        "min": 10.0,
-        "max": 300.0,
-        "step": 1.0,
-        "unit": "mm/s",
-        "parentKey": "wiping.bed_glue_speed_mode",
-        "showWhen": {
-          "key": "wiping.bed_glue_speed_mode",
-          "op": "eq",
-          "value": "custom"
-        },
-        "choices": [],
-        "variantMode": null,
-        "machineFilter": [],
-        "deprecated": false,
-        "machineVariants": {},
-        "machineMinVariants": {},
-        "machineMaxVariants": {},
-        "mergeGroup": null,
-        "pinned": false,
-        "omitWhenUnset": false,
-        "serialization": null
-      },
-      {
-        "key": "wiping.glue_travel_speed_mode",
-        "configKey": "GlueTravelSpeedMode",
-        "tomlKey": "glue_travel_speed_mode",
-        "jsonKey": "glue_travel_speed_mode",
-        "label": "热床预涂胶段间横移速度",
-        "labelEn": "Bed pre-glue travel speed",
-        "labelJa": "ヒートベッド事前塗布の段間移動速度",
-        "labelTw": "熱床預塗膠段間橫移速度",
-        "desc": "热床预涂胶各段之间移动的速度，笔不抬起。",
-        "descEn": "Speed of moving between bed pre-glue segments with the pen still down.",
-        "descJa": "ヒートベッド事前塗布の区間を移動する速度。ペンは上げません。",
-        "descTw": "熱床預塗膠各段之間移動的速度，筆不抬起。",
-        "tomlComment": "热床预涂胶段间横移速度(follow/glue/custom)",
-        "valueType": "string",
-        "uiComponent": "select",
-        "defaultValue": "follow",
-        "scope": "universal",
-        "section": "wiping",
-        "layout": {
-          "order": 5.0,
-          "sectionId": "glue_params"
-        },
-        "min": null,
-        "max": null,
-        "step": null,
-        "unit": null,
-        "parentKey": null,
-        "showWhen": null,
-        "choices": [
-          {
-            "label": "跟随切片",
-            "labelEn": "Follow slicer",
-            "labelJa": "スライスに追従",
-            "labelTw": "跟隨切片",
-            "value": "follow",
-            "deprecated": false
-          },
-          {
-            "label": "涂胶速度",
-            "labelEn": "Glue speed",
-            "labelJa": "塗布速度",
-            "labelTw": "塗膠速度",
-            "value": "glue",
-            "deprecated": false
-          },
-          {
-            "label": "自定义",
-            "labelEn": "Custom",
-            "labelJa": "カスタム",
-            "labelTw": "自訂",
-            "value": "custom",
-            "deprecated": false
-          }
-        ],
-        "variantMode": null,
-        "machineFilter": [],
-        "deprecated": false,
-        "machineVariants": {},
-        "machineMinVariants": {},
-        "machineMaxVariants": {},
-        "mergeGroup": null,
-        "pinned": false,
-        "omitWhenUnset": false,
-        "serialization": null
-      },
-      {
-        "key": "wiping.glue_travel_speed",
-        "configKey": "GlueTravelSpeed",
-        "tomlKey": "glue_travel_speed",
-        "jsonKey": "glue_travel_speed",
-        "label": "热床预涂胶段间横移速度·自定义",
-        "labelEn": "Bed pre-glue travel speed (custom)",
-        "labelJa": "ヒートベッド事前塗布の段間移動速度（カスタム）",
-        "labelTw": "熱床預塗膠段間橫移速度（自訂）",
-        "desc": "只在选「自定义」时生效。",
-        "descEn": "Only applies when Custom is selected.",
-        "descJa": "「カスタム」を選んだときだけ有効です。",
-        "descTw": "只在選「自訂」時生效。",
-        "tomlComment": "热床预涂胶段间横移速度自定义值(mm/s) 范围:10~300",
-        "valueType": "float",
-        "uiComponent": "number",
-        "defaultValue": 70.0,
-        "scope": "universal",
-        "section": "wiping",
-        "layout": {
-          "order": 6.0,
-          "sectionId": "glue_params"
-        },
-        "min": 10.0,
-        "max": 300.0,
-        "step": 1.0,
-        "unit": "mm/s",
-        "parentKey": "wiping.glue_travel_speed_mode",
-        "showWhen": {
-          "key": "wiping.glue_travel_speed_mode",
-          "op": "eq",
-          "value": "custom"
-        },
-        "choices": [],
-        "variantMode": null,
-        "machineFilter": [],
-        "deprecated": false,
-        "machineVariants": {},
-        "machineMinVariants": {},
-        "machineMaxVariants": {},
-        "mergeGroup": null,
-        "pinned": false,
-        "omitWhenUnset": false,
-        "serialization": null
-      },
-      {
-        "key": "wiping.bed_glue_preheat_temp",
-        "configKey": "BedGluePreheatTemp",
-        "tomlKey": "bed_glue_preheat_temp",
-        "jsonKey": "bed_glue_preheat_temp",
-        "label": "涂胶前热床预热温度",
-        "labelEn": "Bed preheat temperature",
-        "labelJa": "塗布前のベッド予熱温度",
-        "labelTw": "塗膠前熱床預熱溫度",
-        "desc": "涂胶前把热床降到这个温度，避免在热床涂胶时胶水堵在笔尖。",
-        "descEn": "Drops the bed to this temperature before gluing, so glue does not clog the pen tip on a hot bed.",
-        "descJa": "塗布前にベッドをこの温度まで下げます。高温のベッドで塗ると接着剤がペン先に詰まるためです。",
-        "descTw": "塗膠前把熱床降到這個溫度，避免在熱床塗膠時膠水堵在筆尖。",
-        "tomlComment": "涂胶前热床预热温度(°C) 范围:30~60",
-        "valueType": "int",
-        "uiComponent": "number",
-        "defaultValue": 50,
-        "scope": "universal",
-        "section": "wiping",
-        "layout": {
-          "order": 7.0,
-          "sectionId": "glue_params"
-        },
-        "min": 30.0,
-        "max": 60.0,
-        "step": 1.0,
-        "unit": "°C",
-        "parentKey": null,
-        "showWhen": null,
-        "choices": [],
-        "variantMode": null,
-        "machineFilter": [],
-        "deprecated": false,
-        "machineVariants": {},
-        "machineMinVariants": {},
-        "machineMaxVariants": {},
-        "mergeGroup": null,
-        "pinned": false,
-        "omitWhenUnset": false,
-        "serialization": null
-      },
-      {
         "key": "wiping.bed_glue_wait_seconds",
         "configKey": "BedGlueWaitSeconds",
         "tomlKey": "bed_glue_wait_seconds",
@@ -4192,10 +3929,10 @@
         "labelEn": "Edge support skip",
         "labelJa": "エッジ帯の支持による省略",
         "labelTw": "邊緣帶支撐免抬",
-        "desc": "笔下方有支撑、离支撑边超过这个距离时，边缘带不再抬笔。0 关闭。",
-        "descEn": "Skip the edge-band lift where the pen has support and stays this far from the support edge; 0 turns it off.",
-        "descJa": "ペン下に支持があり、支持の端からこの距離以上離れていればエッジ帯の浮かせを省略します。0 で無効。",
-        "descTw": "筆下方有支撐、離支撐邊超過這個距離時，邊緣帶不再抬筆。0 關閉。",
+        "desc": "0 不识别下方支撑，边缘带照范围抬笔；填了才找支撑，超过这个距离才少抬。数值越大越保守。",
+        "descEn": "0 skips the support check, so the whole edge band lifts. Above 0, segments far enough inside the support skip the lift; larger values lift more.",
+        "descJa": "0 は下方サポートを判定せず、エッジ帯の範囲どおりに浮かせます。0 より大きいとサポート内で十分離れた段の浮かせを省きます。値が大きいほど保守的です。",
+        "descTw": "0 不識別下方支撐，邊緣帶照範圍抬筆；填了才找支撐，超過這個距離才少抬。數值越大越保守。",
         "tomlComment": "边缘带支撑免抬(mm) 范围:0~2",
         "valueType": "float",
         "uiComponent": "number",
@@ -6821,26 +6558,6 @@
                 "paramKey": "wiping.glue_pass_count"
               },
               {
-                "id": "item_wiping_bed_glue_speed_mode",
-                "paramKey": "wiping.bed_glue_speed_mode"
-              },
-              {
-                "id": "item_wiping_bed_glue_speed",
-                "paramKey": "wiping.bed_glue_speed"
-              },
-              {
-                "id": "item_wiping_glue_travel_speed_mode",
-                "paramKey": "wiping.glue_travel_speed_mode"
-              },
-              {
-                "id": "item_wiping_glue_travel_speed",
-                "paramKey": "wiping.glue_travel_speed"
-              },
-              {
-                "id": "item_wiping_bed_glue_preheat_temp",
-                "paramKey": "wiping.bed_glue_preheat_temp"
-              },
-              {
                 "id": "item_wiping_bed_glue_wait_seconds",
                 "paramKey": "wiping.bed_glue_wait_seconds"
               },
@@ -6970,8 +6687,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "836dc63f148b57391d84fa1b0a5b23a9e73d4684a1681c8e096bdc836030788a",
-      "size": 5462
+      "sha256": "82d2d18b6e4e4213d1e74806eeaf297739cfad06413606d27697d2a273d0e5f6",
+      "size": 5055
     },
     {
       "kind": "mkp_preset",
@@ -6979,8 +6696,8 @@
       "path": "delivery/mkp/presets/A1-fast260326.toml",
       "machineId": "A1",
       "versionId": "FAST260326",
-      "sha256": "77d4ee09540d01ea3961496ae8b256f41ea3b5590a6f667d36de9d978a95d143",
-      "size": 5467
+      "sha256": "606e22783f999175d17684f302d9341ec6ab31c950133cbca6c28196acdef677",
+      "size": 5060
     },
     {
       "kind": "mkp_preset",
@@ -6988,8 +6705,8 @@
       "path": "delivery/mkp/presets/A1-fast261111.toml",
       "machineId": "A1",
       "versionId": "FAST261111",
-      "sha256": "2dca96e5da5623f37e7a0de83a5ffdc5019b29dcac6dfc87a76c1eb4e8c50fa4",
-      "size": 5469
+      "sha256": "1d6b2026a8c58f9cc508f7dfaafed08e88d471f724d10990b593f1f6d03d71ea",
+      "size": 5062
     },
     {
       "kind": "mkp_preset",
@@ -6997,8 +6714,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "68f97218737f030d7a3863587f4838c58d30b3a9c902cf804c9a09db198d6ceb",
-      "size": 5470
+      "sha256": "92ffd07df74915fdb584582482d17cd0073b3bc2c464f0b98cbbe18d9d82d504",
+      "size": 5063
     },
     {
       "kind": "mkp_preset",
@@ -7006,8 +6723,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast260326.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST260326",
-      "sha256": "fc225f5b4cbd22b2c95542d6e5e4609c143ad27c10249be816138b1b360ebb0e",
-      "size": 5470
+      "sha256": "7f508b89ebc2c50ee8a245cc282b88bebdff823552beea128655c16a2ab06a76",
+      "size": 5063
     },
     {
       "kind": "mkp_preset",
@@ -7015,8 +6732,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast261111.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST261111",
-      "sha256": "9cc056207dfea2815c801a1f95b1dc16b41aaac9e8288e12d223463d01930f53",
-      "size": 5472
+      "sha256": "d45e2dc339c5c1eee348e8c9cd77a985f65cb390134d467a30b2d1d77c0c42f0",
+      "size": 5065
     },
     {
       "kind": "mkp_preset",
@@ -7024,8 +6741,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "84aae1c6bb1509ea2045bf16683b22d27488787f6c394c540fe772e44c414a1c",
-      "size": 5611
+      "sha256": "0c0213d18f94e3d037fc93ce1c0b05f3e7d8f365b71e32f311db4341ad60d1fd",
+      "size": 5204
     },
     {
       "kind": "mkp_preset",
@@ -7033,8 +6750,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "848d94dea454f725c3057e113aa0a2467e1e7a8bccb2a6043bce95c09ffbdef7",
-      "size": 5611
+      "sha256": "d361155ae1b4096d39104f8a803f80c225c7c65c9e107951247252895779c1ff",
+      "size": 5204
     },
     {
       "kind": "icon",

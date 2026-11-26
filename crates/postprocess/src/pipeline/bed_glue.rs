@@ -53,29 +53,15 @@ const TOWER_FOOTPRINT_MARGIN: f64 = 2.0;
 
 /// 挂笔/预抬高度：`Toolhead.ZOffset` 之上 4mm。挂笔那行（`L801`）与进块前的
 /// 预抬都取这一个值 —— 于是装笔时 Z 不用再动，也不会出现两个数各说各话。
-/// 涂胶相关运动的进给（mm/min）。三档：
+/// 贴板走笔的进给（mm/min）。唯一来源是设置页那条偏好（mm/s，这里乘 60）。
 ///
-/// - `follow` = 机型的移动速度（`machine.travel_speed`）
-/// - `glue`   = 「涂胶速度限制」那一档（`toolhead.max_speed`，已在 `build.rs` 里乘过 60）
-/// - `custom` = 参数页填的 mm/s（**这里才**乘 60）
-///
-/// 空串 / 未知值按 `follow`：老预设根本没有这两格，行为必须与加参数之前一致。
-/// 两格（预涂胶速度、段间横移速度）共用这一个出口 —— 不许两处各写一套 if-else，
-/// 否则又会出现"参数页一个数、gcode 另一个数"。
-fn glue_feed_of(ir: &Ir, mode: &str, custom_mm_s: f64) -> f64 {
-    match mode {
-        "glue" => ir.toolhead.max_speed,
-        "custom" => {
-            let v = if custom_mm_s > 0.0 {
-                custom_mm_s
-            } else {
-                ir.toolhead.max_speed / 60.0
-            };
-            v * 60.0
-        }
-        // "follow" 与空串 / 未知值都落这里：老预设没有这一格，不许因此改变行为。
-        "follow" | "" => ir.machine.travel_speed * 60.0,
-        _ => ir.machine.travel_speed * 60.0,
+/// 段间横移、落笔前的空驶都不走这里 —— 它们跟机型空驶速度。
+/// IR 里这一格为空只可能是手写的畸形夹具，退回空驶速度，绝不输出 F0。
+fn glue_feed_of(ir: &Ir) -> f64 {
+    if ir.prefs.bed_glue_speed_mm_s > 0.0 {
+        ir.prefs.bed_glue_speed_mm_s * 60.0
+    } else {
+        ir.machine.travel_speed * 60.0
     }
 }
 
@@ -154,10 +140,9 @@ pub fn apply_bed_glue(
 
     let target_bed_temp = extract_original_bed_temp(&lines);
     /* 只有真的更高才降；降过之后结尾得升回去 */
-    /* 涂胶前热床温度：原来是写死的 50，现随预设（`bed_glue_preheat_temp`）。
-    预设没填（0）⇒ 退回 50，不会因为老预设缺这一格就把热床关掉。 */
-    let pre_heat_temp = if ir.glue.bed_glue_preheat_temp > 0.0 {
-        ir.glue.bed_glue_preheat_temp.round() as i64
+    /* 涂胶前热床温度来自设置页偏好；空值退回 50，不会因为夹具缺这一格就把热床关掉。 */
+    let pre_heat_temp = if ir.prefs.bed_glue_preheat_temp_c > 0.0 {
+        ir.prefs.bed_glue_preheat_temp_c.round() as i64
     } else {
         PRE_HEAT_TEMP
     };
@@ -261,7 +246,7 @@ fn set_feed(line: &str, feed: f64) -> String {
 /// 涂胶路径里这一行该用哪个进给：**带 `E` 的是走笔，不带 `E` 的只是挪笔**。
 ///
 /// 只给「所有模型首层也涂」那条用：段里不带 `E` 的几行是笔贴着胶面挪到下一笔，
-/// 归「段间横移速度」那一格（默认同样是机型移动速度，改过那一格就按改过的走）。
+/// 跟机型空驶速度，不占贴板涂胶的那一格。
 fn segment_feed(line: &str, drawing: f64, travel: f64) -> f64 {
     if has_e_param(line) { drawing } else { travel }
 }
@@ -698,8 +683,8 @@ fn prime_tower_glue_path(ir: &Ir) -> Vec<String> {
     /* 落笔之前还在 Safe Z 上（`;Print Z` 之前）：那一段只有一句"飞到塔心"，是空驶，
     跟机型移动速度走 —— 作者 2026-11-13 揪出来的就是这一句写着涂胶速度、150mm 爬七八秒。 */
     let travel_feed = ir.machine.travel_speed * 60.0;
-    /* 笔的速度：预涂胶速度那一格（`follow` / `glue` / `custom` 三档） */
-    let glue_feed = glue_feed_of(ir, &ir.glue.bed_glue_speed_mode, ir.glue.bed_glue_speed);
+    /* 笔贴板走胶的速度：设置页那一格，段间 / 空驶都不在这里 */
+    let glue_feed = glue_feed_of(ir);
 
     let mut xy: Vec<String> = Vec::new();
     /* 落了笔之后笔就贴着胶面走了，之后每一句都按涂胶速度（收尾那 3mm 也一样） */
@@ -763,13 +748,9 @@ fn all_models_glue_path(ir: &Ir, content: &[String]) -> Vec<String> {
     出厂 2mm 在真机上看着像没抬；换成换笔那个 9.9 又太高（作者 2026-11-13 定 4）。 */
     let lift_z = writing_z + inter_model_lift(ir).max(PRE_PRINT_MIN_HOP);
     let travel_speed = format_speed(ir.machine.travel_speed * 60.0);
-    let glue_feed = glue_feed_of(ir, &ir.glue.bed_glue_speed_mode, ir.glue.bed_glue_speed);
-    /* 段与段之间的横移：单独一格（默认 follow = 机型空驶速度） */
-    let travel_feed = glue_feed_of(
-        ir,
-        &ir.glue.glue_travel_speed_mode,
-        ir.glue.glue_travel_speed,
-    );
+    let glue_feed = glue_feed_of(ir);
+    /* 段间横移不占贴板那一格：跟机型空驶速度 */
+    let travel_feed = ir.machine.travel_speed * 60.0;
 
     /* 擦料塔自己那条由 `prime_tower_glue_path` 涂；可它也在**首层**里（塔先打），
     不剔掉就会把塔涂第二遍（第一段与塔那几十行逐行相同）。 */
@@ -810,7 +791,7 @@ fn all_models_glue_path(ir: &Ir, content: &[String]) -> Vec<String> {
                 if drawn.is_empty() {
                     first_is_travel = !has_e_param(line);
                 }
-                /* 走笔用预涂胶速度；段里不带 E 的那几行是挪笔，用段间横移速度 */
+                /* 走笔用设置页那一个速度；不带 E 的是挪笔，跟机型空驶速度 */
                 drawn.push(set_feed(&p, segment_feed(line, glue_feed, travel_feed)));
             }
         }
@@ -821,7 +802,7 @@ fn all_models_glue_path(ir: &Ir, content: &[String]) -> Vec<String> {
         let (fx, fy) = extract_first_xy(first);
         out.push(format!("G1 Z{} F{}", format_z(lift_z), travel_speed));
         if !fx.is_empty() && !fy.is_empty() {
-            /* 这一段是笔在胶面之间横移（不是抬起来飞）：用「段间横移速度」那一格。 */
+            /* 这一段是笔在胶面之间横移（不是抬起来飞）：跟机型空驶速度。 */
             out.push(format!("G1 X{fx} Y{fy} F{}", format_speed(travel_feed)));
         }
         out.push(format!("G1 Z{} F{}", format_z(writing_z), travel_speed));
@@ -1159,9 +1140,8 @@ mod tests {
         ir.tower.sheath_speed = 100.0;
         ir.tower.first_layer_flow = 1.0;
         ir.toolhead.z_offset = 4.0;
-        ir.toolhead.max_speed = 1200.0; // 涂胶速度 20mm/s
         ir.glue.z_offset = -0.05;
-        ir.glue.bed_glue_speed_mode = "glue".to_owned();
+        ir.prefs.bed_glue_speed_mm_s = 20.0;
         /* 塔摆在床里（默认 wiper 0 会被边界检查剔掉，就看不到"飞过去"那一行） */
         ir.wiping.wiper_x = 100.0;
         ir.wiping.wiper_y = 100.0;
@@ -1231,9 +1211,8 @@ mod tests {
         open_bed(&mut ir);
         ir.machine.travel_speed = 700.0; // F42000
         ir.toolhead.z_offset = 4.0;
-        ir.toolhead.max_speed = 1200.0; // 涂胶速度 20mm/s
         ir.glue.z_offset = -0.05;
-        ir.glue.bed_glue_speed_mode = "glue".to_owned();
+        ir.prefs.bed_glue_speed_mm_s = 20.0;
         /* 本机那一组笔偏移 */
         ir.toolhead.x_offset = -0.9;
         ir.toolhead.y_offset = 23.0;
@@ -1409,27 +1388,17 @@ mod tests {
         );
     }
 
-    /// 三档速度：follow=机型移动速度、glue=涂胶速度限制、custom=填的那个数。
-    /// 空串也落 follow —— 老预设没有这两格，行为必须和加参数之前一致。
+    /// 走笔速度只有一格：设置页那个 mm/s，乘 60 落进 G-code。
+    /// 空值退回机型空驶速度，不许输出 F0。
     #[test]
-    fn glue_feed_resolves_the_three_modes() {
+    fn glue_feed_uses_the_single_pref_speed() {
         let mut ir = Ir::default();
         ir.machine.travel_speed = 200.0;
-        ir.toolhead.max_speed = 4200.0;
+        ir.prefs.bed_glue_speed_mm_s = 25.0;
+        assert_eq!(glue_feed_of(&ir), 1500.0, "25 mm/s ⇒ F1500");
 
-        assert_eq!(
-            glue_feed_of(&ir, "follow", 70.0),
-            12000.0,
-            "机型移动 200mm/s"
-        );
-        assert_eq!(glue_feed_of(&ir, "", 70.0), 12000.0, "空串按 follow");
-        assert_eq!(glue_feed_of(&ir, "glue", 10.0), 4200.0, "涂胶速度 70mm/s");
-        assert_eq!(glue_feed_of(&ir, "custom", 25.0), 1500.0, "自定义 25mm/s");
-        assert_eq!(
-            glue_feed_of(&ir, "custom", 0.0),
-            4200.0,
-            "自定义填 0 ⇒ 退回涂胶速度，不许输出 F0"
-        );
+        ir.prefs.bed_glue_speed_mm_s = 0.0;
+        assert_eq!(glue_feed_of(&ir), 12000.0, "空值退回空驶速度，不许输出 F0");
     }
 
     /// 等待秒数 0（默认）时**一个字节都不输出**；填了才出 `G4 P<毫秒>`。
@@ -1501,9 +1470,9 @@ mod tests {
         );
     }
 
-    /// 预热温度改成读预设：30 度时 `M190` 跟着变成 30，不再是写死的 50。
+    /// 预热温度来自设置页偏好：35 度时 `M190` 跟着变成 35。
     #[test]
-    fn preheat_temp_comes_from_the_preset() {
+    fn preheat_temp_comes_from_the_prefs() {
         let src = lines(&[
             "; EXECUTABLE_BLOCK_START",
             "M190 S70",
@@ -1511,7 +1480,7 @@ mod tests {
         ]);
         let mut ir = Ir::default();
         ir.prefs.bed_glue_enabled = true;
-        ir.glue.bed_glue_preheat_temp = 35.0;
+        ir.prefs.bed_glue_preheat_temp_c = 35.0;
 
         let out = apply_bed_glue(src, &ir, crate::postproc::calibration::Mode::None);
         assert!(

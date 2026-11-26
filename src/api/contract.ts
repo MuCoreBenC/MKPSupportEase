@@ -2629,6 +2629,10 @@ export interface ResolvedPostprocPrefs {
   xyCalibrationDwellSec: number
   bedGlueEnabled: boolean
   bedGlueAllModels: boolean
+  /** 热床预涂胶贴板走笔的速度（mm/s），只作用于落笔涂胶那段 */
+  bedGlueSpeedMmS: number
+  /** 涂胶前热床降到的温度（°C） */
+  bedGluePreheatTempC: number
   /**
    * **强制校准模式**：不看 3MF 里那条身份，只按模型实测外形认校准件。
    *
@@ -2682,6 +2686,8 @@ export interface PostprocPrefsWire {
   xyCalibrationDwellSec?: number | null
   bedGlueEnabled?: boolean | null
   bedGlueAllModels?: boolean | null
+  bedGlueSpeedMmS?: number | null
+  bedGluePreheatTempC?: number | null
   /** **强制校准模式**：`null` = 回到出厂档（关） */
   forceCalibrationMode?: boolean | null
   /** **智能塔位置**（2026-11-04 三档）：`null` = 回到出厂档（`off`） */
@@ -2762,6 +2768,8 @@ export interface PostprocPrefsView {
     glueBottomEnabled: boolean
     bedGlueEnabled: boolean
     bedGlueAllModels: boolean
+    bedGlueSpeedMmS: number
+    bedGluePreheatTempC: number
     autoTowerPosition: string
   }
   /** 量程来自后端，界面**不另写一份** */
@@ -2770,6 +2778,8 @@ export interface PostprocPrefsView {
     xyDwell: { min: number; max: number }
     zLift: { min: number; max: number }
     calibLift: { min: number; max: number }
+    bedGlueSpeedMmS: { min: number; max: number }
+    bedGluePreheatTempC: { min: number; max: number }
   }
 }
 

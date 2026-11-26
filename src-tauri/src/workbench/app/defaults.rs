@@ -180,6 +180,18 @@ const EDITABLE: &[Spec] = &[
         label: "所有模型首层也涂",
         kind: Kind::Bool,
     },
+    Spec {
+        section: Section::Prefs,
+        key: "BedGlueSpeedMmS",
+        label: "热床预涂胶速度",
+        kind: Kind::Number,
+    },
+    Spec {
+        section: Section::Prefs,
+        key: "BedGluePreheatTempC",
+        label: "热床预热温度",
+        kind: Kind::Number,
+    },
     /* ---- 预设 ---- */
     Spec {
         section: Section::Client,
@@ -291,6 +303,8 @@ fn value_of_prefs(prefs: &postprocess::ir::PrefsIr, key: &str) -> Option<Value> 
         "XyCalibrationDwellSec" => Value::from(prefs.xy_calibration_dwell_sec),
         "BedGlueEnabled" => Value::Bool(prefs.bed_glue_enabled),
         "BedGlueAllModels" => Value::Bool(prefs.bed_glue_all_models),
+        "BedGlueSpeedMmS" => Value::from(prefs.bed_glue_speed_mm_s),
+        "BedGluePreheatTempC" => Value::from(prefs.bed_glue_preheat_temp_c),
         "AutoTowerPosition" => Value::String(
             match prefs.auto_tower_position {
                 TowerRelocateModeIr::Off => "off",

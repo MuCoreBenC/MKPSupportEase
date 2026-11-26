@@ -23,6 +23,8 @@ ZCalibrationDwellSec = 2
 XyCalibrationDwellSec = 3
 BedGlueEnabled = false
 BedGlueAllModels = false
+BedGlueSpeedMmS = 30
+BedGluePreheatTempC = 50
 AutoTowerPosition = "ask"
 
 # 客户端壳自己的偏好 —— **不进 G-code**，读者是客户端（`runtime::client_defaults`）。

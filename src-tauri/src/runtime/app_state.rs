@@ -382,6 +382,12 @@ pub struct PostprocPrefs {
     /// 热床涂胶是**只涂擦料塔位置**（`false`，出厂）还是**所有模型首层都涂**（`true`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bed_glue_all_models: Option<bool>,
+    /// 热床预涂胶贴板走笔的速度（mm/s），10–100。`None` = 出厂 30。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bed_glue_speed_mm_s: Option<f64>,
+    /// 涂胶前热床降到的温度（°C），30–60。`None` = 出厂 50。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bed_glue_preheat_temp_c: Option<f64>,
     /// **强制校准模式**（2026-11-12）：不看 3MF 里那条身份，只按模型实测外形认校准件。
     ///
     /// 用途是"手上只有模型文件、不是从我们这里下的"那一类 —— 3MF 里没有
@@ -573,6 +579,14 @@ impl PostprocPrefs {
                 .clamp(XY_DWELL_MIN, XY_DWELL_MAX),
             bed_glue_enabled: self.bed_glue_enabled.unwrap_or(d.bed_glue_enabled),
             bed_glue_all_models: self.bed_glue_all_models.unwrap_or(d.bed_glue_all_models),
+            bed_glue_speed_mm_s: self
+                .bed_glue_speed_mm_s
+                .unwrap_or(d.bed_glue_speed_mm_s)
+                .clamp(BED_GLUE_SPEED_MM_S_MIN, BED_GLUE_SPEED_MM_S_MAX),
+            bed_glue_preheat_temp_c: self
+                .bed_glue_preheat_temp_c
+                .unwrap_or(d.bed_glue_preheat_temp_c)
+                .clamp(BED_GLUE_PREHEAT_TEMP_C_MIN, BED_GLUE_PREHEAT_TEMP_C_MAX),
             force_calibration_mode: self
                 .force_calibration_mode
                 .unwrap_or(c.force_calibration_mode),
@@ -640,6 +654,16 @@ pub const Z_DWELL_MAX: i64 = 20;
 pub const XY_DWELL_DEFAULT: i64 = 3;
 pub const XY_DWELL_MIN: i64 = 1;
 pub const XY_DWELL_MAX: i64 = 10;
+
+/// 热床预涂胶贴板走笔速度的出厂值镜像与量程（mm/s）。
+pub const BED_GLUE_SPEED_MM_S_DEFAULT: f64 = 30.0;
+pub const BED_GLUE_SPEED_MM_S_MIN: f64 = 10.0;
+pub const BED_GLUE_SPEED_MM_S_MAX: f64 = 100.0;
+
+/// 热床预热温度的出厂值镜像与量程（°C）。
+pub const BED_GLUE_PREHEAT_TEMP_C_DEFAULT: f64 = 50.0;
+pub const BED_GLUE_PREHEAT_TEMP_C_MIN: f64 = 30.0;
+pub const BED_GLUE_PREHEAT_TEMP_C_MAX: f64 = 60.0;
 
 /// 开始阶段收笔在原版抬 Z 之上再补抬的相对高度（mm）的**出厂值镜像**与量程。
 ///
@@ -725,6 +749,8 @@ pub struct ResolvedPostprocPrefs {
     pub xy_calibration_dwell_sec: i64,
     pub bed_glue_enabled: bool,
     pub bed_glue_all_models: bool,
+    pub bed_glue_speed_mm_s: f64,
+    pub bed_glue_preheat_temp_c: f64,
     /// **强制校准模式**：只看外形认校准件（见 [`PostprocPrefs::force_calibration_mode`]）
     pub force_calibration_mode: bool,
     /// 撞塔三档（见 [`TowerRelocateMode`]）：`Off` / `Auto` / `Ask`

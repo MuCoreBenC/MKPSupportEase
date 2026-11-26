@@ -742,6 +742,8 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "xyCalibrationDwellSec": r.xy_calibration_dwell_sec,
                 "bedGlueEnabled": r.bed_glue_enabled,
                 "bedGlueAllModels": r.bed_glue_all_models,
+                "bedGlueSpeedMmS": r.bed_glue_speed_mm_s,
+                "bedGluePreheatTempC": r.bed_glue_preheat_temp_c,
                 /* 强制校准模式（2026-11-12）：只按外形认校准件，认不出就停下 */
                 "forceCalibrationMode": r.force_calibration_mode,
                 /* 智能塔位置三档（2026-11-04）：`off` / `auto` / `ask` */
@@ -789,6 +791,8 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "glueBottomEnabled": f.glue_bottom_enabled,
                 "bedGlueEnabled": f.bed_glue_enabled,
                 "bedGlueAllModels": f.bed_glue_all_models,
+                "bedGlueSpeedMmS": f.bed_glue_speed_mm_s,
+                "bedGluePreheatTempC": f.bed_glue_preheat_temp_c,
                 "autoTowerPosition": f.auto_tower_position.wire(),
             },
             /* 量程（界面画数字框要用，**不另写一份**在 TS 里） */
@@ -802,6 +806,14 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "calibLift": {
                     "min": runtime::app_state::CALIBRATION_SAFE_LIFT_MM_MIN,
                     "max": runtime::app_state::CALIBRATION_SAFE_LIFT_MM_MAX,
+                },
+                "bedGlueSpeedMmS": {
+                    "min": runtime::app_state::BED_GLUE_SPEED_MM_S_MIN,
+                    "max": runtime::app_state::BED_GLUE_SPEED_MM_S_MAX,
+                },
+                "bedGluePreheatTempC": {
+                    "min": runtime::app_state::BED_GLUE_PREHEAT_TEMP_C_MIN,
+                    "max": runtime::app_state::BED_GLUE_PREHEAT_TEMP_C_MAX,
                 },
             },
         }))

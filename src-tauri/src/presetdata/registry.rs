@@ -5474,7 +5474,7 @@ order = 2.0
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
-        assert_eq!(r.params().len(), 98, "字段条数");
+        assert_eq!(r.params().len(), 94, "字段条数");
         assert!(!r.tabs().is_empty());
         assert!(!r.updated().is_empty(), "updated 没读到");
 

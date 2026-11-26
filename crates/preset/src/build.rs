@@ -286,25 +286,7 @@ pub fn build(
     }
     ir.glue.swap_hop_height = clamp_float(ir.glue.swap_hop_height, 0.2, 3.0);
 
-    /* ---- 预涂胶（2026-11-05）---- */
-    /* 三档速度：空串 / 未知值一律按 follow（老预设没有这两格时行为不变）。
-    注意不在这里把 mode 归一成某个值 —— 归一在 `bed_glue::glue_feed_of` 里，
-    一处解析、两格共用，避免两个地方各写一套 if-else。 */
-    ir.glue.bed_glue_speed_mode = cfg.wiping.bed_glue_speed_mode.clone();
-    ir.glue.bed_glue_speed = cfg.wiping.bed_glue_speed;
-    if ir.glue.bed_glue_speed <= 0.0 {
-        ir.glue.bed_glue_speed = reg_float(&defaults, "BedGlueSpeed", 70.0);
-    }
-    ir.glue.glue_travel_speed_mode = cfg.wiping.glue_travel_speed_mode.clone();
-    ir.glue.glue_travel_speed = cfg.wiping.glue_travel_speed;
-    if ir.glue.glue_travel_speed <= 0.0 {
-        ir.glue.glue_travel_speed = reg_float(&defaults, "GlueTravelSpeed", 70.0);
-    }
-    /* 预热温度：写死过 50，现在可调。0 = 没写 ⇒ 回落默认 50 */
-    ir.glue.bed_glue_preheat_temp = cfg.wiping.bed_glue_preheat_temp;
-    if ir.glue.bed_glue_preheat_temp <= 0.0 {
-        ir.glue.bed_glue_preheat_temp = reg_float(&defaults, "BedGluePreheatTemp", 50.0);
-    }
+    /* ---- 预涂胶（速度与预热温度在客户端偏好里，这里只装配工艺项）---- */
     /* 等待时间 0 是合法值（= 不等），所以只在负数时回落 */
     ir.glue.bed_glue_wait_seconds = cfg.wiping.bed_glue_wait_seconds.max(0.0);
     /* 擦笔占位：只搬运，不消费 */

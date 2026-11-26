@@ -3537,6 +3537,8 @@ export const mockApi: MkpApi = {
       xyCalibrationDwellSec: mockPostproc.xyCalibrationDwellSec ?? 3,
       bedGlueEnabled: mockPostproc.bedGlueEnabled ?? false,
       bedGlueAllModels: mockPostproc.bedGlueAllModels ?? false,
+      bedGlueSpeedMmS: mockPostproc.bedGlueSpeedMmS ?? 30,
+      bedGluePreheatTempC: mockPostproc.bedGluePreheatTempC ?? 50,
       forceCalibrationMode: mockPostproc.forceCalibrationMode ?? false,
       autoTowerPosition: mockPostproc.autoTowerPosition ?? 'ask',
     }
@@ -3563,6 +3565,8 @@ export const mockApi: MkpApi = {
         glueBottomEnabled: false,
         bedGlueEnabled: false,
         bedGlueAllModels: false,
+        bedGlueSpeedMmS: 30,
+        bedGluePreheatTempC: 50,
         autoTowerPosition: 'ask',
       },
       limits: {
@@ -3570,6 +3574,8 @@ export const mockApi: MkpApi = {
         xyDwell: { min: 1, max: 10 },
         zLift: { min: 5, max: 30 },
         calibLift: { min: 6, max: 20 },
+        bedGlueSpeedMmS: { min: 10, max: 100 },
+        bedGluePreheatTempC: { min: 30, max: 60 },
       },
     }
   },

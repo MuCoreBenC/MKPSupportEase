@@ -39,7 +39,7 @@ import s from './PageSettings.module.css'
 /**
  * 「恢复默认」的那一份补丁：全给 `null`，由后端按出厂重算。
  *
- * 键 = 「有出厂值的那 14 项」（`[Prefs]` 的 10 项 + 通知 / 显示方式 / 置顶 / 强制校准）；
+ * 键 = 「有出厂值的那 16 项」（`[Prefs]` 的 12 项 + 通知 / 显示方式 / 置顶 / 强制校准）；
  * 漏一个就是「那一项恢复不了」。
  */
 const RESET_PATCH = {
@@ -56,10 +56,12 @@ const RESET_PATCH = {
   xyCalibrationDwellSec: null,
   bedGlueEnabled: null,
   bedGlueAllModels: null,
+  bedGlueSpeedMmS: null,
+  bedGluePreheatTempC: null,
   autoTowerPosition: null,
 } as const
 
-/** 对比表里的 14 行（顺序与设置页出现顺序一致；标签走文案表，与设置页同一句） */
+/** 对比表里的 16 行（顺序与设置页出现顺序一致；标签走文案表，与设置页同一句） */
 const ITEMS: { key: keyof PostprocPrefsView['factory']; label: StringKey }[] = [
   { key: 'notifyOnFinish', label: 'settings.postproc.notify' },
   { key: 'uiMode', label: 'settings.postproc.mode' },
@@ -74,6 +76,8 @@ const ITEMS: { key: keyof PostprocPrefsView['factory']; label: StringKey }[] = [
   { key: 'glueBottomEnabled', label: 'settings.postproc.glueBottom' },
   { key: 'bedGlueEnabled', label: 'settings.glue.enable' },
   { key: 'bedGlueAllModels', label: 'settings.glue.allModels' },
+  { key: 'bedGlueSpeedMmS', label: 'settings.glue.speed' },
+  { key: 'bedGluePreheatTempC', label: 'settings.glue.preheat' },
   { key: 'autoTowerPosition', label: 'settings.postproc.tower' },
 ]
 

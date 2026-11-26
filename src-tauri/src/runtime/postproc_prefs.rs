@@ -58,6 +58,8 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
     ir.prefs.xy_calibration_dwell_sec = prefs.xy_calibration_dwell_sec;
     ir.prefs.bed_glue_enabled = prefs.bed_glue_enabled;
     ir.prefs.bed_glue_all_models = prefs.bed_glue_all_models;
+    ir.prefs.bed_glue_speed_mm_s = prefs.bed_glue_speed_mm_s;
+    ir.prefs.bed_glue_preheat_temp_c = prefs.bed_glue_preheat_temp_c;
     ir.prefs.auto_tower_position = tower_mode_to_ir(prefs.auto_tower_position);
 
     /* 底面涂胶实际生效的那一格在 `state`（见模块头那条"特例"） */
@@ -100,7 +102,8 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
 mod tests {
     use super::*;
     use crate::runtime::app_state::{
-        PostprocPrefs, BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT, BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
+        PostprocPrefs, BED_GLUE_PREHEAT_TEMP_C_DEFAULT, BED_GLUE_SPEED_MM_S_DEFAULT,
+        BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT, BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
         BEGIN_STAGE_RETRACT_Z_LIFT_MIN, CALIBRATION_SAFE_LIFT_MM_DEFAULT,
         CALIBRATION_SAFE_LIFT_MM_MAX, CALIBRATION_SAFE_LIFT_MM_MIN, XY_DWELL_DEFAULT,
         Z_DWELL_DEFAULT,
@@ -140,6 +143,11 @@ mod tests {
         );
         assert_eq!(kernel.bed_glue_enabled, client.bed_glue_enabled);
         assert_eq!(kernel.bed_glue_all_models, client.bed_glue_all_models);
+        assert_eq!(kernel.bed_glue_speed_mm_s, client.bed_glue_speed_mm_s);
+        assert_eq!(
+            kernel.bed_glue_preheat_temp_c,
+            client.bed_glue_preheat_temp_c
+        );
         assert_eq!(
             kernel.auto_tower_position,
             tower_mode_to_ir(client.auto_tower_position)
@@ -161,6 +169,14 @@ mod tests {
         assert_eq!(
             kernel.calibration_safe_lift_mm, CALIBRATION_SAFE_LIFT_MM_DEFAULT as f64,
             "校准抬升出厂值两端不一致"
+        );
+        assert_eq!(
+            kernel.bed_glue_speed_mm_s, BED_GLUE_SPEED_MM_S_DEFAULT,
+            "热床预涂胶速度出厂值两端不一致"
+        );
+        assert_eq!(
+            kernel.bed_glue_preheat_temp_c, BED_GLUE_PREHEAT_TEMP_C_DEFAULT,
+            "热床预热温度出厂值两端不一致"
         );
     }
 
@@ -246,6 +262,8 @@ mod tests {
             xy_calibration_dwell_sec: 9,
             bed_glue_enabled: true,
             bed_glue_all_models: true,
+            bed_glue_speed_mm_s: 44.0,
+            bed_glue_preheat_temp_c: 38.0,
             /* 强制校准模式**不进 IR**：它只在钩子那一步参与"这一盘是什么校准件"的定案
              * （`decide_calibration`），管线里没有对应的格 —— 写进来是给人看的。 */
             force_calibration_mode: false,
@@ -270,6 +288,8 @@ mod tests {
         assert_eq!(ir.prefs.xy_calibration_dwell_sec, 9);
         assert!(ir.prefs.bed_glue_enabled);
         assert!(ir.prefs.bed_glue_all_models);
+        assert_eq!(ir.prefs.bed_glue_speed_mm_s, 44.0);
+        assert_eq!(ir.prefs.bed_glue_preheat_temp_c, 38.0);
         assert_eq!(
             ir.prefs.auto_tower_position,
             TowerRelocateModeIr::Auto,

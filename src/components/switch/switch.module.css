@@ -38,10 +38,16 @@
   left: 2px;
   width: 14px;
   height: 14px;
-  margin-top: -7px;
+  /*
+   * 竖直方向比几何中心再高 0.5px：轨道内高 18、钮 14，本来是上下各 2。
+   * 125% 缩放下 14 × 1.25 = 17.5，圆点上下沿总有一条落在半像素上，抗锯齿
+   * 让上下留白看着不一样；这一档把白点整体往上提半像素抵消掉。
+   */
+  margin-top: -7.5px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
+  /* 投影不偏心：带 1px 下偏移时，白点在轨道里整体读起来是往下坠的 */
+  box-shadow: 0 0 2px rgb(0 0 0 / 18%);
 }
 
 .on .knob {

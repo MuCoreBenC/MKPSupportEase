@@ -5,6 +5,7 @@
 //! presets generate [--all]      跑生成器，刷新交付产物与目录（**不推进发布序号**）
 //! presets diff                  报"盘上 vs 真生成会写成什么"（只读）
 //! presets verify                核对 catalog / manifest / 账本 / SHA 一致性（只读）
+//! presets sop [--apply] [--confirm]  按流程顺序串起检查 / 差异 / 生成 / 凭据 / 验证 / 发布预演
 //! presets publish --dry-run     预演正式发布：说出会写成第几号，**一个字节都不写**
 //! presets publish               执行正式发布事务（**唯一能让序号 +1 的动作**）
 //! ```
@@ -38,7 +39,7 @@
 
 use std::path::PathBuf;
 
-use serde_json::json;
+use serde_json::{json, Value};
 
 use mkp_support_ease_lib::error::AppError;
 use mkp_support_ease_lib::workbench::app::{self as app_pkg, publish_book, Ctx};
@@ -80,6 +81,8 @@ fn run_cli() -> Result<i32, AppError> {
     let confirmed = rest.iter().any(|a| a == "--confirm");
     /* `reload --force`：确认丢弃影子树里未保存的编辑（2026-11-01） */
     let force = rest.iter().any(|a| a == "--force");
+    /* `sop --apply` 才写盘；`--confirm` 只在发布最后一步生效，缺它绝不真发 */
+    let apply = rest.iter().any(|a| a == "--apply");
 
     match cmd.as_str() {
         /* 这一条**不读任何文件、不建任何目录**：它只回答「我这个二进制是哪次编的」。
@@ -93,6 +96,8 @@ fn run_cli() -> Result<i32, AppError> {
         "generate" => cmd_generate(all),
         "diff" => cmd_diff(),
         "verify" => cmd_verify(),
+        "credentials" => cmd_credentials(),
+        "sop" => cmd_sop(apply, confirmed),
         "reload" => cmd_reload(force),
         "publish" => cmd_publish(dry_run, republish, confirmed),
         "normalize" => cmd_normalize(dry_run),
@@ -117,6 +122,11 @@ fn usage() {
   presets generate [--all]      跑生成器刷新交付产物（**不推进发布序号**）
   presets diff                  报盘上与真生成结果的差异（只读）
   presets verify                核对 catalog / manifest / 账本 / SHA（只读）
+  presets credentials           按盘上真字节重写 manifest 的 SHA / size（= 工作台「更新发布凭据」）
+                                只写 manifest.json：不推进序号、不发布、不提交
+  presets sop                   按 SOP 顺序只读预演：检查 → 差异 → 验证 → 发布预演
+  presets sop --apply           按 SOP 顺序写盘：生成 → 验证 → 凭据 → 验证 → 发布预演
+  presets sop --apply --confirm 最后一步真发布（序号 +1；必须人当次明确许可）
   presets reload                把工作台影子树对齐到 presets/（= 工作台「重新加载」）
   presets normalize --dry-run   预演源 TOML 重排：说差多少，一个字节都不写
   presets normalize             把 presets/registry/param_registry.toml 重排成机械序
@@ -222,11 +232,17 @@ fn delivery_root(ctx: &Ctx) -> PathBuf {
     mkp_support_ease_lib::workbench::paths::delivery_root_at(ctx.real_root())
 }
 
-/// **检查**：跑发布闸（只读那个入口），把红项列出来。**不写盘**。
-fn cmd_check() -> Result<i32, AppError> {
-    let ctx = open_ctx()?;
-    let audit = app_pkg::audit_check(&ctx)?;
-    let failed: Vec<serde_json::Value> = audit
+/// 编排用的一步结果：给 JSON 的那份、这一步算不算过、有没有写盘。
+struct StepResult {
+    value: Value,
+    ok: bool,
+    changed: bool,
+}
+
+/// 检查那一步（只读）。单条命令与 SOP 编排共用这一段。
+fn step_check(ctx: &Ctx) -> Result<StepResult, AppError> {
+    let audit = app_pkg::audit_check(ctx)?;
+    let failed: Vec<Value> = audit
         .items
         .iter()
         .filter(|i| i.status == app_pkg::AuditStatus::Fail)
@@ -245,18 +261,8 @@ fn cmd_check() -> Result<i32, AppError> {
         .filter(|i| i.status == app_pkg::AuditStatus::Pass)
         .count();
     let ok = audit.can_publish;
-    eprintln!(
-        "{}：{} 项通过 / {} 项红",
-        if ok {
-            "✓ 检查通过"
-        } else {
-            "✗ 有阻断项"
-        },
-        passed,
-        failed.len()
-    );
-    emit(
-        json!({
+    Ok(StepResult {
+        value: json!({
             "command": "check",
             "ok": ok,
             "changed": false,
@@ -264,32 +270,43 @@ fn cmd_check() -> Result<i32, AppError> {
             "blockers": failed,
             "summary": if ok { "检查通过" } else { "有阻断项，不能发布" },
         }),
-        if ok { 0 } else { 2 },
-    )
+        ok,
+        changed: false,
+    })
 }
 
-/// **生成**：跑生成器刷新交付产物与目录。**不推进发布序号**。
-fn cmd_generate(all: bool) -> Result<i32, AppError> {
-    let mut ctx = open_ctx()?;
+/// **检查**：跑发布闸（只读那个入口），把红项列出来。**不写盘**。
+fn cmd_check() -> Result<i32, AppError> {
+    let ctx = open_ctx()?;
+    let step = step_check(&ctx)?;
+    let ok = step.ok;
+    eprintln!(
+        "{}：{}",
+        if ok {
+            "✓ 检查通过"
+        } else {
+            "✗ 有阻断项"
+        },
+        step.value["summary"].as_str().unwrap_or_default()
+    );
+    emit(step.value, if ok { 0 } else { 2 })
+}
+
+/// 生成那一步。单条命令与 SOP 编排共用；**不推进发布序号**。
+fn step_generate(ctx: &mut Ctx, all: bool) -> Result<StepResult, AppError> {
     let scope = if all {
         app_pkg::Scope::All
     } else {
         app_pkg::Scope::Stale
     };
-    let report = app_pkg::generate(&mut ctx, &scope)?;
+    let report = app_pkg::generate(ctx, &scope)?;
     // 生成之后重算目录（与工作台同一条：内容与目录不许各说一代）
-    let root = delivery_root(&ctx);
+    let root = delivery_root(ctx);
     let written = report.written.len();
     let unchanged = report.unchanged.len();
     let serial = publish_book::load(&root)?.map(|b| b.serial);
-    eprintln!(
-        "✓ 生成完成：新写 {written} 份、未变 {unchanged} 份。发布序号仍是 {}（生成不推进序号）",
-        serial
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "未发布".to_owned())
-    );
-    emit(
-        json!({
+    Ok(StepResult {
+        value: json!({
             "command": "generate",
             "ok": true,
             // 写了产物 = 盘上内容变了；调用方据此决定要不要接着 verify / publish
@@ -300,30 +317,68 @@ fn cmd_generate(all: bool) -> Result<i32, AppError> {
             "publishSerial": serial,
             "summary": format!("新写 {written} 份、未变 {unchanged} 份；序号未推进"),
         }),
-        0,
-    )
+        ok: true,
+        changed: written > 0,
+    })
 }
 
-/// **差异**：盘上 vs 真生成会写出什么。**只读**。
-fn cmd_diff() -> Result<i32, AppError> {
-    let ctx = open_ctx()?;
-    let preview = app_pkg::generate_preview(&ctx)?;
-    let changed = !preview.files.is_empty();
+/// **生成**：跑生成器刷新交付产物与目录。**不推进发布序号**。
+fn cmd_generate(all: bool) -> Result<i32, AppError> {
+    let mut ctx = open_ctx()?;
+    let step = step_generate(&mut ctx, all)?;
     eprintln!(
-        "{}：{} 份会变",
-        if changed {
-            "有差异"
-        } else {
-            "✓ 无差异"
-        },
-        preview.files.len()
+        "✓ 生成完成：{}。发布序号仍是 {}（生成不推进序号）",
+        step.value["summary"].as_str().unwrap_or_default(),
+        step.value["publishSerial"]
+            .as_u64()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "未发布".to_owned())
     );
-    /*
-     * ★ **有差异不是失败**（作者要求）：diff 的职责是如实报出来，
-     *   退出码仍然是 0。只有跑不动才是非零。
-     */
-    emit(
-        json!({
+    emit(step.value, 0)
+}
+
+/// **更新发布凭据**：按盘上真字节重写 `manifest.json` 的 SHA / size。
+///
+/// 工作台那颗按钮的同一条内核，命令行也能走 —— 不要求工作区干净、不推进序号、
+/// 不发布、不提交。集合没收敛时内核会拒绝写盘。
+fn step_credentials() -> Result<StepResult, AppError> {
+    let update = mkp_support_ease_lib::workbench::app::build::wb_update_publish_credentials()?;
+    let preview = match serde_json::to_value(&update.preview) {
+        Ok(v) => v,
+        Err(_) => json!({}),
+    };
+    Ok(StepResult {
+        value: json!({
+            "command": "credentials",
+            "ok": true,
+            "changed": update.written,
+            "written": update.written,
+            "entries": update.entries,
+            "changedEntries": update.changed,
+            "preview": preview,
+            "summary": if update.written {
+                format!("已重写 manifest：{} 条，其中 {} 条变化", update.entries, update.changed)
+            } else {
+                "凭据已是最新，未写盘".to_owned()
+            },
+        }),
+        ok: true,
+        changed: update.written,
+    })
+}
+
+fn cmd_credentials() -> Result<i32, AppError> {
+    let step = step_credentials()?;
+    eprintln!("{}", step.value["summary"].as_str().unwrap_or_default());
+    emit(step.value, 0)
+}
+
+/// 差异那一步（只读）。盘上 vs 真生成会写出什么。
+fn step_diff(ctx: &Ctx) -> Result<StepResult, AppError> {
+    let preview = app_pkg::generate_preview(ctx)?;
+    let changed = !preview.files.is_empty();
+    Ok(StepResult {
+        value: json!({
             "command": "diff",
             "ok": true,
             "changed": changed,
@@ -333,45 +388,73 @@ fn cmd_diff() -> Result<i32, AppError> {
             })).collect::<Vec<_>>(),
             "summary": format!("{} 份会变", preview.files.len()),
         }),
-        0,
-    )
+        ok: true,
+        changed,
+    })
 }
 
-/// **验证**：catalog / manifest / 账本 / SHA 一致性。**只读**。
-fn cmd_verify() -> Result<i32, AppError> {
+/// **差异**：盘上 vs 真生成会写出什么。**只读**。
+fn cmd_diff() -> Result<i32, AppError> {
     let ctx = open_ctx()?;
-    let root = delivery_root(&ctx);
+    let step = step_diff(&ctx)?;
+    eprintln!(
+        "{}：{}",
+        if step.changed {
+            "有差异"
+        } else {
+            "✓ 无差异"
+        },
+        step.value["summary"].as_str().unwrap_or_default()
+    );
+    /* ★ 有差异不是失败：diff 只如实报，退出码仍为 0。 */
+    emit(step.value, 0)
+}
+
+/// 验证那一步（只读）。catalog / manifest / 账本 / SHA 一致性。
+fn step_verify(ctx: &Ctx) -> Result<StepResult, AppError> {
+    let root = delivery_root(ctx);
     let report = app_pkg::verify_delivery(&root, ctx.presets.root())?;
     let problems: Vec<String> = report.problems.clone();
-    eprintln!(
-        "{}：核对 {} 份文件",
-        if problems.is_empty() {
-            "✓ 一致"
-        } else {
-            "✗ 不一致"
-        },
-        report.files_checked
-    );
-    for p in &problems {
-        eprintln!("  · {p}");
-    }
-    emit(
-        json!({
+    let ok = problems.is_empty();
+    Ok(StepResult {
+        value: json!({
             "command": "verify",
-            "ok": problems.is_empty(),
+            "ok": ok,
             "changed": false,
             "filesChecked": report.files_checked,
             "publishSerial": report.serial,
             "catalogId": report.catalog_id,
             "problems": problems,
-            "summary": if report.problems.is_empty() {
+            "summary": if ok {
                 "catalog / manifest / 账本 / SHA 全部一致".to_owned()
             } else {
                 format!("{} 处不一致", report.problems.len())
             },
         }),
-        if report.problems.is_empty() { 0 } else { 1 },
-    )
+        ok,
+        changed: false,
+    })
+}
+
+/// **验证**：catalog / manifest / 账本 / SHA 一致性。**只读**。
+fn cmd_verify() -> Result<i32, AppError> {
+    let ctx = open_ctx()?;
+    let step = step_verify(&ctx)?;
+    eprintln!(
+        "{}：{}",
+        if step.ok {
+            "✓ 一致"
+        } else {
+            "✗ 不一致"
+        },
+        step.value["summary"].as_str().unwrap_or_default()
+    );
+    if let Some(ps) = step.value["problems"].as_array() {
+        for p in ps {
+            eprintln!("  · {}", p.as_str().unwrap_or_default());
+        }
+    }
+    emit(step.value, if step.ok { 0 } else { 1 })
 }
 
 /// **源 TOML 的机械化重排**（2026-11-03 作者拍板）。
@@ -559,9 +642,13 @@ fn cmd_follows_migrate(dry_run: bool) -> Result<i32, AppError> {
     )
 }
 
-/// **发布**：`--dry-run` 只说不写；不带就走正式事务。
-fn cmd_publish(dry_run: bool, republish: bool, confirmed: bool) -> Result<i32, AppError> {
-    let mut ctx = open_ctx()?;
+/// 发布那一步。`--dry-run` 只说不写；真发必须 `confirmed`。
+fn step_publish(
+    ctx: &mut Ctx,
+    dry_run: bool,
+    republish: bool,
+    confirmed: bool,
+) -> Result<StepResult, AppError> {
     /*
      * ★ 发布事务用 `TxOptions::default()` 的 dry_run / republish 开关 —— **与工作台同一个
      *   字段**，于是"预演""重发"在 CLI 与工作台两处是同一段代码判的（不是两套开关）。
@@ -572,14 +659,14 @@ fn cmd_publish(dry_run: bool, republish: bool, confirmed: bool) -> Result<i32, A
         confirmed,
         ..Default::default()
     };
-    let target = app_pkg::resolve_target_opt(&ctx)?;
+    let target = app_pkg::resolve_target_opt(ctx)?;
     let hosting = app_pkg::hosting_for(&target)?;
     /* 与工作台**同一个应用数据根**，好让 CLI 这一趟也进「发布历史」面板。
      * `internal_root_headless` 在没窗口时按 APP_IDENTIFIER 认门；取不到就跳过记账
      * （不把一次成功的发布说成失败）。 */
     let history_root = mkp_support_ease_lib::fsx::paths::internal_root_headless();
     let report = app_pkg::publish_tx(
-        &mut ctx,
+        ctx,
         &opts,
         target.as_ref(),
         hosting.as_deref(),
@@ -587,7 +674,6 @@ fn cmd_publish(dry_run: bool, republish: bool, confirmed: bool) -> Result<i32, A
         history_root.as_deref(),
     )?;
 
-    eprintln!("{}", report.summary);
     /*
      * `NoChange` 算**成功**：这一趟的结论就是"没有可发的变化"，不是失败 ——
      * 脚本拿退出码判断时会把它当异常，那就本末倒置了。
@@ -601,27 +687,21 @@ fn cmd_publish(dry_run: bool, republish: bool, confirmed: bool) -> Result<i32, A
             | app_pkg::PublishStage::NoChange
             | app_pkg::PublishStage::Generated
     ) && !(report.stage == app_pkg::PublishStage::Generated && !dry_run);
-    let code = if report.stage == app_pkg::PublishStage::BlockedAudit {
-        2
-    } else if ok {
-        0
-    } else {
-        1
-    };
-    emit(
-        json!({
+    let changed = !dry_run
+        && matches!(
+            report.stage,
+            app_pkg::PublishStage::Committed
+                | app_pkg::PublishStage::Pushed
+                | app_pkg::PublishStage::ReviewOpened
+                | app_pkg::PublishStage::StatusRead
+        );
+    Ok(StepResult {
+        value: json!({
             "command": "publish",
             "dryRun": dry_run,
             "ok": ok,
             /* 只有真写出去了才算 changed —— `NoChange` 与预演都不算 */
-            "changed": !dry_run
-                && matches!(
-                    report.stage,
-                    app_pkg::PublishStage::Committed
-                        | app_pkg::PublishStage::Pushed
-                        | app_pkg::PublishStage::ReviewOpened
-                        | app_pkg::PublishStage::StatusRead
-                ),
+            "changed": changed,
             "stage": report.stage,
             "publishSerial": report.publish_serial,
             "catalogId": report.catalog_id,
@@ -630,6 +710,131 @@ fn cmd_publish(dry_run: bool, republish: bool, confirmed: bool) -> Result<i32, A
             "files": report.files,
             "summary": report.summary,
         }),
-        code,
+        ok,
+        changed,
+    })
+}
+
+/// 发布那一步的退出码：`BlockedAudit` 单独分档，让脚本知道要回去修数据。
+fn publish_code(step: &StepResult) -> i32 {
+    if step.value["stage"] == json!(app_pkg::PublishStage::BlockedAudit) {
+        2
+    } else if step.ok {
+        0
+    } else {
+        1
+    }
+}
+
+/// **发布**：`--dry-run` 只说不写；不带就走正式事务。
+fn cmd_publish(dry_run: bool, republish: bool, confirmed: bool) -> Result<i32, AppError> {
+    let mut ctx = open_ctx()?;
+    let step = step_publish(&mut ctx, dry_run, republish, confirmed)?;
+    eprintln!("{}", step.value["summary"].as_str().unwrap_or_default());
+    let code = publish_code(&step);
+    emit(step.value, code)
+}
+
+/// **预设工作流 SOP**：按固定顺序串起每一步，不让"先更新凭据再生成"这种倒序发生。
+///
+/// 默认整趟只读：检查 → 差异 → 验证 → 发布预演。
+/// `--apply` 才依次写盘：生成 → 验证 → 凭据 → 验证 → 发布预演。
+/// 最后一步真发只在 `--apply --confirm` 同时出现时走，且必须人当次明确许可。
+fn cmd_sop(apply: bool, confirmed: bool) -> Result<i32, AppError> {
+    if confirmed && !apply {
+        return Err(AppError::invalid_argument(
+            "sop --confirm 必须和 --apply 一起用：只读预演不能真发布",
+        ));
+    }
+    let mut ctx = open_ctx()?;
+    let mut steps: Vec<Value> = Vec::new();
+    let mut any_changed = false;
+
+    /* ① 检查（只读）。工作区脏这类阻断留给发布闸去判，这里如实记录、不在此停下来。 */
+    let check = step_check(&ctx)?;
+    steps.push(check.value);
+
+    /* ② 差异（只读）：与真生成同一台预演器。 */
+    let diff = step_diff(&ctx)?;
+    any_changed |= diff.changed;
+    steps.push(diff.value);
+
+    let mut fatal = false;
+    if apply {
+        /* ③ 生成 → ④ 验证 → ⑤ 更新凭据 → ⑥ 验证：凭据必须在生成之后，顺序写死。 */
+        let gen = step_generate(&mut ctx, false)?;
+        any_changed |= gen.changed;
+        steps.push(gen.value);
+
+        let before = step_verify(&ctx)?;
+        steps.push(before.value);
+
+        let cred = step_credentials()?;
+        any_changed |= cred.changed;
+        steps.push(cred.value);
+
+        let after = step_verify(&ctx)?;
+        fatal = !after.ok;
+        steps.push(after.value);
+    } else {
+        for command in ["generate", "verify", "credentials", "verify"] {
+            steps.push(json!({
+                "command": command,
+                "skipped": true,
+                "changed": false,
+                "summary": "只读预演，未写盘",
+            }));
+        }
+    }
+
+    /* ⑦ 发布预演：验证不过就停在这里，不去碰发布事务。 */
+    let mut dry_ok = false;
+    if fatal {
+        steps.push(json!({
+            "command": "publish",
+            "skipped": true,
+            "changed": false,
+            "summary": "验证未过，停在发布前",
+        }));
+    } else {
+        let dry = step_publish(&mut ctx, true, false, false)?;
+        dry_ok = dry.ok;
+        steps.push(dry.value);
+    }
+
+    let mut real_ok = true;
+    if confirmed && apply && !fatal && dry_ok {
+        let real = step_publish(&mut ctx, false, false, true)?;
+        real_ok = real.ok;
+        any_changed |= real.changed;
+        steps.push(real.value);
+    } else if confirmed {
+        steps.push(json!({
+            "command": "publish",
+            "skipped": true,
+            "changed": false,
+            "summary": "前置步骤未过，未真发布",
+        }));
+    }
+
+    let ok = !fatal && dry_ok && real_ok;
+    let summary = if confirmed {
+        "SOP 已按顺序执行到真发布".to_owned()
+    } else if apply {
+        "SOP 已按顺序生成并更新凭据；发布只预演，序号未推进".to_owned()
+    } else {
+        "SOP 只读预演完成；未写盘、未推进序号".to_owned()
+    };
+    emit(
+        json!({
+            "command": "sop",
+            "ok": ok,
+            "changed": any_changed,
+            "apply": apply,
+            "confirmed": confirmed,
+            "steps": steps,
+            "summary": summary,
+        }),
+        if ok { 0 } else { 1 },
     )
 }

@@ -16,6 +16,7 @@ import { useState } from 'react'
 
 import { useT } from '../../i18n'
 import { usePostprocPrefs } from '../state/usePostprocPrefs'
+import NumberField from '../../components/field/NumberField'
 import { Switch } from '../../components/switch'
 import { Tip } from '../../components/tooltip'
 import { SectionHead } from './SectionHead'
@@ -75,22 +76,63 @@ export default function BedGlueSection({ nested = false }: { nested?: boolean })
         />
       </div>
 
-      {/* 只在开着时才问"涂哪儿"：关着的时候问等于让用户配一个不生效的东西。
-          ★ 它由上面那颗开关放出来 ⇒ 缩进（缩进的唯一判据，见 `CalibSection`）。 */}
+      {/* 开关关着时不摆配置：填了也不生效。三行都由它放出来、一起缩进。 */}
       {r.bedGlueEnabled && (
-        <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
-          <div className={s.fieldText}>
-            <div className={s.fieldTitle}>
-              {tr('settings.glue.allModels')}
-              <Tip text={tr('settings.glue.allModelsNote')} />
+        <>
+          <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
+            <div className={s.fieldText}>
+              <div className={s.fieldTitle}>
+                {tr('settings.glue.allModels')}
+                <Tip text={tr('settings.glue.allModelsNote')} />
+              </div>
             </div>
+            <Switch
+              checked={r.bedGlueAllModels}
+              ariaLabel={tr('settings.glue.allModels')}
+              onChange={(next) => void set({ bedGlueAllModels: next }, on)}
+            />
           </div>
-          <Switch
-            checked={r.bedGlueAllModels}
-            ariaLabel={tr('settings.glue.allModels')}
-            onChange={(next) => void set({ bedGlueAllModels: next }, on)}
-          />
-        </div>
+
+          <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
+            <div className={s.fieldText}>
+              <div className={s.fieldTitle}>
+                {tr('settings.glue.speed')}
+                <Tip text={tr('settings.glue.speedNote')} />
+              </div>
+            </div>
+            <span className={s.numBox}>
+              <NumberField
+                label={tr('settings.glue.speed')}
+                unit="mm/s"
+                value={r.bedGlueSpeedMmS}
+                min={prefs.limits.bedGlueSpeedMmS.min}
+                max={prefs.limits.bedGlueSpeedMmS.max}
+                step={1}
+                onChange={(next) => void set({ bedGlueSpeedMmS: next }, on)}
+              />
+            </span>
+          </div>
+
+          <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
+            <div className={s.fieldText}>
+              <div className={s.fieldTitle}>
+                {tr('settings.glue.preheat')}
+                <Tip text={tr('settings.glue.preheatNote')} />
+              </div>
+            </div>
+            <span className={s.numBox}>
+              <NumberField
+                label={tr('settings.glue.preheat')}
+                unit="°C"
+                value={r.bedGluePreheatTempC}
+                min={prefs.limits.bedGluePreheatTempC.min}
+                max={prefs.limits.bedGluePreheatTempC.max}
+                step={1}
+                onChange={(next) => void set({ bedGluePreheatTempC: next }, on)}
+              />
+            </span>
+          </div>
+        </>
       )}
 
       {err !== null && <p className={`${s.note} ${s.noteBad}`}>{err}</p>}

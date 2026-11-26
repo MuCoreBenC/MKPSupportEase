@@ -393,26 +393,6 @@ id = 'item_wiping_glue_pass_count'
 paramKey = 'wiping.glue_pass_count'
 
 [[tabs.sections.items]]
-id = 'item_wiping_bed_glue_speed_mode'
-paramKey = 'wiping.bed_glue_speed_mode'
-
-[[tabs.sections.items]]
-id = 'item_wiping_bed_glue_speed'
-paramKey = 'wiping.bed_glue_speed'
-
-[[tabs.sections.items]]
-id = 'item_wiping_glue_travel_speed_mode'
-paramKey = 'wiping.glue_travel_speed_mode'
-
-[[tabs.sections.items]]
-id = 'item_wiping_glue_travel_speed'
-paramKey = 'wiping.glue_travel_speed'
-
-[[tabs.sections.items]]
-id = 'item_wiping_bed_glue_preheat_temp'
-paramKey = 'wiping.bed_glue_preheat_temp'
-
-[[tabs.sections.items]]
 id = 'item_wiping_bed_glue_wait_seconds'
 paramKey = 'wiping.bed_glue_wait_seconds'
 

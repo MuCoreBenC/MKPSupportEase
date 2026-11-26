@@ -28,14 +28,10 @@ RefillExtrudeCommand = "G1 E5.5 F1000"
 WaitForDryingCommand = ""
 
 [Glue]
-BedGluePreheatTemp = 0.0
-BedGlueSpeed = 0.0
-BedGlueSpeedMode = ""
 BedGlueWaitSeconds = 0.0
 EdgeLift = 0.0
 EdgeLines = 0
-GlueTravelSpeed = 0.0
-GlueTravelSpeedMode = ""
+EdgeSkipMargin = 0.0
 InterModelLiftHeight = 2.0
 PassCount = 1
 SparseRatio = 50.0
@@ -109,11 +105,15 @@ UpdateDate = ""
 AutoTowerPosition = "ask"
 BedGlueAllModels = false
 BedGlueEnabled = false
+BedGluePreheatTempC = 50.0
+BedGlueSpeedMmS = 30.0
 BeginStageRetractEnabled = true
 BeginStageRetractZLiftMm = 5
 CalibrationSafeLiftMm = 10.0
 GlueBottomEnabled = false
 SkipVibrationCalibration = true
+UnderSupportEnabled = false
+UnderSupportMm = 0.0
 XyCalibrationDwellSec = 3
 ZCalibrationDwellSec = 2
 
