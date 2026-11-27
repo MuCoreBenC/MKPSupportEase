@@ -19,6 +19,7 @@ UnderSupportEnabled = true
 UnderSupportMm = 0.5
 SkipVibrationCalibration = true
 SuppressAmsUnload = true
+EndStageRetractEnabled = true
 BeginStageRetractEnabled = true
 BeginStageRetractZLiftMm = 5
 CalibrationSafeLiftMm = 10

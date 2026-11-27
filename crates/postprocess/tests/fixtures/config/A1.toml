@@ -115,6 +115,7 @@ CalibrationSafeLiftMm = 10.0
 GlueBottomEnabled = false
 SkipVibrationCalibration = true
 SuppressAmsUnload = true
+EndStageRetractEnabled = true
 UnderSupportEnabled = true
 UnderSupportMm = 0.5
 XyCalibrationDwellSec = 3

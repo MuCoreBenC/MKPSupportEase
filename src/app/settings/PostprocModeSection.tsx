@@ -203,6 +203,23 @@ export default function PostprocModeSection() {
         />
       </div>
 
+      {/* 收尾收笔：退料段之前把笔送回笔架。与开头那块的区别是不归零、不碰 Z ——
+          收尾开头切片器已经把 Z 抬到最高层之上，再动 Z 就是往下撞。
+          移动与松笔位取自预设 `[toolhead] custom_unmount_gcode`。 */}
+      <div className={`${s.field} ${s.fieldRow}`}>
+        <div className={s.fieldText}>
+          <div className={s.fieldTitle}>
+            {tr('settings.postproc.endRetract')}
+            <Tip text={tr('settings.postproc.endRetractNote')} />
+          </div>
+        </div>
+        <Switch
+          checked={r.endStageRetractEnabled}
+          ariaLabel={tr('settings.postproc.endRetract')}
+          onChange={(next) => void set({ endStageRetractEnabled: next }, on)}
+        />
+      </div>
+
       {/* 智能塔位置（2026-11-04 第二版：**分段选择器**，三档并列）
           作者：「它怎么还是开关呀，它应该像这个怎么显示啊…… 用那个选择切换器啊」——
           三档是并列的选择，不是"开/关"两个方向，所以与上一行「这一趟怎么显示」

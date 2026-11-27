@@ -53,6 +53,7 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
     ir.prefs.under_support_mm = prefs.under_support_mm;
     ir.prefs.skip_vibration_calibration = prefs.skip_vibration_calibration;
     ir.prefs.suppress_ams_unload = prefs.suppress_ams_unload;
+    ir.prefs.end_stage_retract_enabled = prefs.end_stage_retract_enabled;
     ir.prefs.begin_stage_retract_enabled = prefs.begin_stage_retract_enabled;
     ir.prefs.begin_stage_retract_z_lift_mm = prefs.begin_stage_retract_z_lift_mm;
     /* 校准「切笔」的安全抬升量（mm）：内核那侧是 f64，这里一格整数偏好 */
@@ -238,6 +239,7 @@ mod tests {
             under_support_mm: 0.75,
             skip_vibration_calibration: true,
             suppress_ams_unload: true,
+            end_stage_retract_enabled: true,
             begin_stage_retract_enabled: false,
             begin_stage_retract_z_lift_mm: 42,
             calibration_safe_lift_mm: 14,
@@ -283,6 +285,10 @@ mod tests {
         assert!(
             ir.prefs.suppress_ams_unload,
             "屏蔽退料那一格必须真的落到 IR —— 收尾钩子与校准插入点都读它"
+        );
+        assert!(
+            ir.prefs.end_stage_retract_enabled,
+            "收尾收笔那一格必须真的落到 IR —— 收尾钩子读它"
         );
         assert!(!ir.prefs.begin_stage_retract_enabled);
         assert_eq!(ir.prefs.begin_stage_retract_z_lift_mm, 42);

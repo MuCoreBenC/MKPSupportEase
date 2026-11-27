@@ -557,6 +557,12 @@ pub struct PrefsIr {
     /// 喷嘴滴料，会先把目标温度压到 30 °C，紧接着机器自己那段退料就会卡在加热等待上；
     /// 所以这一格为 `false` 时，校准块会被挪到退料之后，让退料趁热先跑完。
     pub suppress_ams_unload: bool,
+    /// **收尾再收一次笔**：AMS 退料段之前把笔送回笔架。
+    ///
+    /// 只移动笔架、松笔（`L802`），**不归零、不碰 Z** —— 收尾开头切片器已经把
+    /// Z 抬到最高层之上，这里再动 Z 就是往下撞。起点与松笔位取自预设
+    /// `[toolhead] custom_unmount_gcode`（每台机器自己的标定值）。
+    pub end_stage_retract_enabled: bool,
     /// 开头插入收笔序列。
     pub begin_stage_retract_enabled: bool,
     /// 收笔时在原版抬 Z 之上再补抬的相对高度（mm）。

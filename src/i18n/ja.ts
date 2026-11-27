@@ -117,6 +117,8 @@ export const ja: Record<StringKey, string> = {
   'settings.postproc.glueBottomNote': 'サポート面の 1 層下にも塗布します。',
   'settings.postproc.amsUnload': 'AMS 戻しを抑制',
   'settings.postproc.amsUnloadNote': '終了時に AMS・AMS lite・BMCU へ戻しません。オフならスライサーどおり。',
+  'settings.postproc.endRetract': '終了時のペン戻し',
+  'settings.postproc.endRetractNote': '戻す前にペンをホルダーへ。原点復帰も Z 移動もしません。開始時は逆で、先に原点復帰して Z を上げます。',
   'settings.postproc.tower': 'スマートタワーの位置',
   'settings.postproc.towerNote': 'タワー衝突時の処理方法。今回のタワー位置だけを変え、プリセットは変更しません。',
   'settings.postproc.towerAria': 'パージタワーと衝突したときの動作',

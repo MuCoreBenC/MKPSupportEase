@@ -9,7 +9,9 @@
 //! bed_glue.go（607 行生成器）默认关且无任何字节参考 —— 刻意未移植本体，
 //! 钩子点保留为 no-op（登记于 HONEST-BOUNDARIES）。
 
-use crate::gcode::{MARKER_PULL_BACK_AMS, command_has_s, format_python_float, has_e_param};
+use crate::gcode::{
+    MARKER_FILAMENT_END, MARKER_PULL_BACK_AMS, command_has_s, format_python_float, has_e_param,
+};
 use crate::ir::Ir;
 
 /// `applySkipVibrationCalibration`（startup_common.go:218）：删除 M970*/M974 行。
@@ -66,6 +68,97 @@ pub fn apply_ams_end_unload(lines: Vec<String>, suppress: bool) -> Vec<String> {
     out.extend(lines[..start].iter().cloned());
     out.extend(lines[end + 1..].iter().cloned());
     out
+}
+
+/// 收尾兜底收笔：AMS 退料段之前把笔送回笔架。
+///
+/// 与开头那一块的区别：**不 `G28`、不抬 Z** —— 收尾开头切片器已经把 Z 抬到
+/// 最高层之上，此时只横向走到笔架；移动与松笔位取自预设
+/// `[toolhead] custom_unmount_gcode`（每台机器自己的标定值）。
+///
+/// 锚点：`; pull back filament to AMS` 之前；退料段被屏蔽时退回
+/// `; filament end gcode` 之后。两处都认不出来就原样返回。
+pub fn apply_end_stage_retract(lines: Vec<String>, ir_data: &Ir, enabled: bool) -> Vec<String> {
+    if !enabled {
+        return lines;
+    }
+    let block = build_end_stage_retract_block(&ir_data.toolhead.custom_unmount_gcode);
+    if block.is_empty() {
+        return lines;
+    }
+    let Some(idx) = end_stage_retract_anchor(&lines) else {
+        return lines;
+    };
+    let mut result = Vec::with_capacity(lines.len() + block.len());
+    let mut tail = lines.into_iter();
+    result.extend(tail.by_ref().take(idx));
+    result.extend(block);
+    result.extend(tail);
+    result
+}
+
+/// 块体：只留横向移动与 `L802` —— 会改状态的 `M106` / `G92` / 任何 Z 行都剔掉。
+///
+/// 没有 `L802` 就不生成块：只把笔搬到笔架却不松开，等于把架子上的笔顶走。
+fn build_end_stage_retract_block(unmount_lines: &[String]) -> Vec<String> {
+    let body: Vec<String> = unmount_lines
+        .iter()
+        .filter(|l| is_end_stage_retract_line(l))
+        .cloned()
+        .collect();
+    if !body.iter().any(|l| l.contains("L802")) {
+        return Vec::new();
+    }
+    let mut block = vec![
+        ";===== end stage retract ===================".to_string(),
+        "G90".to_string(),
+    ];
+    block.extend(body);
+    block.push("M400 ; wait for toolhead retract motion to finish".to_string());
+    block.push(";===== end stage retract end ===============".to_string());
+    block
+}
+
+/// 这一行能不能进收尾收笔块。
+///
+/// 放行：`G90`、`G0/G1` 只带 XY / F 的移动、`F` 速度、`L802`。
+/// 拦住：归零（`G28` / `G29`）、Z 偏置（`M290`）、碰 Z（`G380` 与带 `Z` 参数的移动）、
+/// 挤出（带 `E` 参数的移动）、风扇与温度（`M106` / `M104` / `M140`）、重置挤出机（`G92`）。
+fn is_end_stage_retract_line(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let code = code_before_comment(trimmed);
+    let upper = code.to_ascii_uppercase();
+    if ["G28", "G29", "M290", "G380", "M106", "M104", "M140", "G92"]
+        .iter()
+        .any(|p| upper.starts_with(p))
+    {
+        return false;
+    }
+    if upper.starts_with("G0") || upper.starts_with("G1") {
+        return !code.split_whitespace().skip(1).any(|token| {
+            token
+                .get(..1)
+                .is_some_and(|c| c.eq_ignore_ascii_case("Z") || c.eq_ignore_ascii_case("E"))
+        });
+    }
+    upper.starts_with("L802") || upper.starts_with('F') || upper == "G90"
+}
+
+/// 收尾收笔的锚点：退料段之前；没有退料段就落在 `; filament end gcode` 之后。
+fn end_stage_retract_anchor(lines: &[String]) -> Option<usize> {
+    if let Some(i) = lines
+        .iter()
+        .position(|l| l.contains(MARKER_PULL_BACK_AMS) && !l.contains('='))
+    {
+        return Some(i);
+    }
+    lines
+        .iter()
+        .position(|l| l.contains(MARKER_FILAMENT_END) && !l.contains('='))
+        .map(|i| i + 1)
 }
 
 /// 退料段的起点：注释头优先，模板里没有注释头时退回第一条 `M620 S255`。
@@ -321,6 +414,94 @@ mod tests {
         ir.machine.gcode_machine_type = gcode.to_string();
         ir.wiping.fan_speed = 255.0;
         ir
+    }
+
+    /// 预设里那一套收笔模板（A1 口径），带上会被剔掉的风扇与挤出机重置。
+    fn unmount_template() -> Vec<String> {
+        lines(&[
+            "M106 S255",
+            "G1 X256 F42000",
+            "G1 X271 F10000",
+            "G1 X256 F5000",
+            "L802",
+            "G92 E0",
+            "G1 F30000",
+        ])
+    }
+
+    /// 收尾收笔：插在退料段之前，块里没有归零、没有 Z、没有风扇。
+    #[test]
+    fn end_stage_retract_sits_before_the_ams_segment() {
+        let mut ir = ir_of("A1", "A1");
+        ir.toolhead.custom_unmount_gcode = unmount_template();
+        let content = lines(&[
+            "M104 S0",
+            "; pull back filament to AMS",
+            "M620 S255",
+            "T255",
+            "M621 S255",
+        ]);
+        let out = apply_end_stage_retract(content, &ir, true);
+        let block_start = out
+            .iter()
+            .position(|l| l.contains("end stage retract =="))
+            .expect("没插块");
+        let ams = out
+            .iter()
+            .position(|l| l.contains("pull back filament to AMS"))
+            .expect("退料段没了");
+        assert!(block_start < ams, "必须在退料段之前: {out:?}");
+        assert!(out.iter().any(|l| l == "L802"), "必须松笔: {out:?}");
+        for banned in ["G28", "G92", "M106"] {
+            assert!(
+                !out.iter().any(|l| l.starts_with(banned)),
+                "{banned} 不该进块: {out:?}"
+            );
+        }
+        assert!(
+            !out.iter()
+                .any(|l| l.starts_with("G1") && (l.contains('Z') || l.contains('E'))),
+            "块里不许动 Z、也不许挤出: {out:?}"
+        );
+    }
+
+    /// 关掉就不插。
+    #[test]
+    fn end_stage_retract_off_leaves_the_tail_alone() {
+        let mut ir = ir_of("A1", "A1");
+        ir.toolhead.custom_unmount_gcode = unmount_template();
+        let content = lines(&["M104 S0", "; pull back filament to AMS", "M620 S255"]);
+        assert_eq!(
+            apply_end_stage_retract(content.clone(), &ir, false),
+            content
+        );
+    }
+
+    /// 退料段被屏蔽时退回 `; filament end gcode` 之后。
+    #[test]
+    fn end_stage_retract_falls_back_after_filament_end() {
+        let mut ir = ir_of("A1", "A1");
+        ir.toolhead.custom_unmount_gcode = unmount_template();
+        let content = lines(&["; filament end gcode", "M104 S0"]);
+        let out = apply_end_stage_retract(content, &ir, true);
+        let end = out
+            .iter()
+            .position(|l| l.contains("filament end gcode"))
+            .expect("锚点没了");
+        let block_start = out
+            .iter()
+            .position(|l| l.contains("end stage retract =="))
+            .expect("没插块");
+        assert!(block_start > end, "要落在 filament end 之后: {out:?}");
+    }
+
+    /// 模板里没有 `L802` 就不生成块：只搬不松会把架上的笔顶走。
+    #[test]
+    fn end_stage_retract_needs_the_release_command() {
+        let mut ir = ir_of("A1", "A1");
+        ir.toolhead.custom_unmount_gcode = lines(&["G1 X256 F42000", "G1 X271 F10000"]);
+        let content = lines(&["; filament end gcode", "M104 S0"]);
+        assert_eq!(apply_end_stage_retract(content.clone(), &ir, true), content);
     }
 
     /// 收笔位认 **G-code 机型**：配置写 A1、切出来的是 A1 mini，就必须用 X191。

@@ -2597,6 +2597,11 @@ export interface ResolvedPostprocPrefs {
    * 耗材留在喷头里；关掉时校准块会挪到退料之后，趁热先退料再降温做校准。
    */
   suppressAmsUnload: boolean
+  /**
+   * **收尾再收一次笔**：AMS 退料段之前把笔送回笔架。
+   * 与开头那块相反：不归零、不碰 Z —— 收尾开头已经抬到最高层之上。
+   */
+  endStageRetractEnabled: boolean
   beginStageRetractEnabled: boolean
   beginStageRetractZLiftMm: number
   /**
@@ -2670,6 +2675,8 @@ export interface PostprocPrefsWire {
   skipVibrationCalibration?: boolean | null
   /** 屏蔽 AMS 退料：`null` = 回到出厂档（开） */
   suppressAmsUnload?: boolean | null
+  /** 收尾收笔：`null` = 回到出厂档（开） */
+  endStageRetractEnabled?: boolean | null
   beginStageRetractEnabled?: boolean | null
   beginStageRetractZLiftMm?: number | null
   /** 校准抬升高度（mm）：`null` = 回到出厂档（10） */
@@ -2770,6 +2777,7 @@ export interface PostprocPrefsView {
     forceCalibrationMode: boolean
     skipVibrationCalibration: boolean
     suppressAmsUnload: boolean
+    endStageRetractEnabled: boolean
     beginStageRetractEnabled: boolean
     beginStageRetractZLiftMm: number
     calibrationSafeLiftMm: number

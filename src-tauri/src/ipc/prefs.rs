@@ -738,6 +738,7 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "underSupportMm": r.under_support_mm,
                 "skipVibrationCalibration": r.skip_vibration_calibration,
                 "suppressAmsUnload": r.suppress_ams_unload,
+                "endStageRetractEnabled": r.end_stage_retract_enabled,
                 "beginStageRetractEnabled": r.begin_stage_retract_enabled,
                 "beginStageRetractZLiftMm": r.begin_stage_retract_z_lift_mm,
                 /* 校准「切笔」的安全抬升量（2026-11-19）：三种校准共用一个值 */
@@ -786,6 +787,7 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "forceCalibrationMode": f.force_calibration_mode,
                 "skipVibrationCalibration": f.skip_vibration_calibration,
                 "suppressAmsUnload": f.suppress_ams_unload,
+                "endStageRetractEnabled": f.end_stage_retract_enabled,
                 "beginStageRetractEnabled": f.begin_stage_retract_enabled,
                 "beginStageRetractZLiftMm": f.begin_stage_retract_z_lift_mm,
                 "calibrationSafeLiftMm": f.calibration_safe_lift_mm,

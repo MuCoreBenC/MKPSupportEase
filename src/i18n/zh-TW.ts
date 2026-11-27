@@ -121,6 +121,8 @@ export const zhTW: Record<StringKey, string> = {
   'settings.postproc.glueBottomNote': '支撐面下方一層也塗膠。',
   'settings.postproc.amsUnload': '屏蔽 AMS 退料',
   'settings.postproc.amsUnloadNote': 'AMS、AMS lite、BMCU 收尾時不退料；關掉就照切片器原樣退。',
+  'settings.postproc.endRetract': '收尾收筆',
+  'settings.postproc.endRetractNote': '退料前把筆送回筆架；不歸零、不抬 Z。開頭那次相反：先歸零再抬 Z。',
   'settings.postproc.tower': '智能塔位置',
   'settings.postproc.towerNote': '撞塔時怎麼處理。只挪這一次的塔位置，不動預設檔案。',
   'settings.postproc.towerAria': '撞到擦料塔時怎麼辦',

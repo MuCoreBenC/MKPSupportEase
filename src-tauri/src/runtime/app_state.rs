@@ -315,6 +315,12 @@ pub struct PostprocPrefs {
     /// 留着它机器会卡在加热等待上。关掉这一档时校准块会被挪到退料之后、趁热先退料。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suppress_ams_unload: Option<bool>,
+    /// **收尾再收一次笔**：AMS 退料段之前把笔送回笔架。
+    ///
+    /// 与开头那一块的区别是**不归零、不碰 Z** —— 收尾开头切片器已经抬到最高层之上，
+    /// 这里再动 Z 就是往下撞；只横向走到笔架、松笔。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_stage_retract_enabled: Option<bool>,
     /// **开始阶段收笔**：在原版抬 Z 段之后插入收笔序列（补抬 Z、归零 X、收笔）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub begin_stage_retract_enabled: Option<bool>,
@@ -544,6 +550,9 @@ impl PostprocPrefs {
                 .skip_vibration_calibration
                 .unwrap_or(d.skip_vibration_calibration),
             suppress_ams_unload: self.suppress_ams_unload.unwrap_or(d.suppress_ams_unload),
+            end_stage_retract_enabled: self
+                .end_stage_retract_enabled
+                .unwrap_or(d.end_stage_retract_enabled),
             begin_stage_retract_enabled: self
                 .begin_stage_retract_enabled
                 .unwrap_or(d.begin_stage_retract_enabled),
@@ -723,6 +732,8 @@ pub struct ResolvedPostprocPrefs {
     pub skip_vibration_calibration: bool,
     /// 是否屏蔽收尾退料（AMS / AMS lite / BMCU）
     pub suppress_ams_unload: bool,
+    /// 收尾是否再收一次笔（只动笔架，不归零、不碰 Z）
+    pub end_stage_retract_enabled: bool,
     pub begin_stage_retract_enabled: bool,
     pub begin_stage_retract_z_lift_mm: i64,
     /// 校准「切笔」的安全抬升量（mm），量程 `CALIBRATION_SAFE_LIFT_MM_*`

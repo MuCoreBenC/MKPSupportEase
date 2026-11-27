@@ -126,6 +126,12 @@ const EDITABLE: &[Spec] = &[
     },
     Spec {
         section: Section::Prefs,
+        key: "EndStageRetractEnabled",
+        label: "收尾收笔",
+        kind: Kind::Bool,
+    },
+    Spec {
+        section: Section::Prefs,
         key: "AutoTowerPosition",
         label: "智能塔位置",
         kind: Kind::Choice(&["ask", "auto", "off"]),
@@ -306,6 +312,7 @@ fn value_of_prefs(prefs: &postprocess::ir::PrefsIr, key: &str) -> Option<Value> 
         "GlueBottomEnabled" => Value::Bool(prefs.glue_bottom_enabled),
         "SkipVibrationCalibration" => Value::Bool(prefs.skip_vibration_calibration),
         "SuppressAmsUnload" => Value::Bool(prefs.suppress_ams_unload),
+        "EndStageRetractEnabled" => Value::Bool(prefs.end_stage_retract_enabled),
         "BeginStageRetractEnabled" => Value::Bool(prefs.begin_stage_retract_enabled),
         "BeginStageRetractZLiftMm" => Value::from(prefs.begin_stage_retract_z_lift_mm),
         "CalibrationSafeLiftMm" => Value::from(prefs.calibration_safe_lift_mm),
