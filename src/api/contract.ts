@@ -2598,8 +2598,8 @@ export interface ResolvedPostprocPrefs {
    */
   suppressAmsUnload: boolean
   /**
-   * **收尾再收一次笔**：AMS 退料段之前把笔送回笔架。
-   * 与开头那块相反：不归零、不碰 Z —— 收尾开头已经抬到最高层之上。
+   * **收尾再收一次笔**：AMS 退料段之后把笔送回笔架。
+   * 复用开头那张机型表，区别是不归零、不碰 Z —— 收尾开头已经抬到最高层之上。
    */
   endStageRetractEnabled: boolean
   beginStageRetractEnabled: boolean

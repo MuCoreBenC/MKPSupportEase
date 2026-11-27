@@ -34592,13 +34592,9 @@ M106 P3 S0 ; turn off chamber cooling fan
 
 ;===== end stage retract ===================
 G90
-G1 X256 F42000
-G1 X261 F10000
-G1 X271 F10000
-G1 X256 F5000
-G1 F42000
-L802
-G1 F30000
+G1 X191 F10000
+G1 X20 F10000
+G1 F5000
 M400 ; wait for toolhead retract motion to finish
 ;===== end stage retract end ===============
 

@@ -852,8 +852,8 @@ fn run(
             hooks::apply_skip_vibration_calibration(out_lines, ir.prefs.skip_vibration_calibration);
         /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从原口径移植） */
         out_lines = bed_glue::apply_bed_glue(out_lines, &ir, calib_mode);
-        /* 收尾再收一次笔：只横向走到笔架、松笔，不归零也不碰 Z。
-         * 插在退料段之前 —— `M620 S255` 会把工具头拉到切料位，笔挂着就会撞。 */
+        /* 收尾再收一次笔：复用开头那张机型表，只横向走到笔架，不归零也不碰 Z。
+         * 插在 `M621 S255` 之后 —— 退料那一段要整段走完，不在中间插动作。 */
         out_lines =
             hooks::apply_end_stage_retract(out_lines, &ir, ir.prefs.end_stage_retract_enabled);
         /* 屏蔽 AMS 收尾退料：放在最后 —— 校准块（step 10 已插）与涂胶块都可能落在它前面，

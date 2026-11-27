@@ -126,7 +126,7 @@ export const zhCN = {
   'settings.postproc.amsUnload': '屏蔽 AMS 退料',
   'settings.postproc.amsUnloadNote': 'AMS、AMS lite、BMCU 收尾时不退料；关掉就按切片器原样退。',
   'settings.postproc.endRetract': '收尾收笔',
-  'settings.postproc.endRetractNote': '退料前把笔送回笔架；不归零、不抬 Z。开头那次相反：先归零再抬 Z。',
+  'settings.postproc.endRetractNote': '退料后把笔送回笔架；不归零、不抬 Z。开头那次相反：先归零再抬 Z。',
   'settings.postproc.tower': '智能塔位置',
   'settings.postproc.towerNote': '撞塔时怎么处理。只挪这一次的塔位置，不动预设文件。',
   'settings.postproc.towerAria': '碰撞擦料塔时怎么办',

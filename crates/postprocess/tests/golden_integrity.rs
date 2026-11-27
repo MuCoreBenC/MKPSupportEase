@@ -80,12 +80,12 @@ const VENDORED: &[(&str, &str, u64)] = &[
         // 斜肋段），模型段一行未动；`; LAYER_HEIGHT:` 由名义 0.28/0.2 变成实际片高。
         // 客户端偏好 `SuppressAmsUnload` 出厂开 —— 收尾那一段「把料退回 AMS」
         // （`; pull back filament to AMS` ~ `M621 S255`）整段不写，少 9 行。
-        // 另有 `EndStageRetractEnabled` 出厂开：退料段之前多出收尾收笔块 11 行
-        // （只移动 + `L802`，无 Z、无 E）。两者相抵 851111 → 851211 字节。
+        // 另有 `EndStageRetractEnabled` 出厂开：退料段之后多出收尾收笔块 9 行
+        // （复用开头那张机型表，只移动，无归零、无 Z）。相抵 851111 → 851165 字节。
         // 人工核过 diff：两处之外字节一处未动。
         "42274.2.e2e-A1.config.gcode",
-        "60f4efa0d94fcd0c0aaff71aa9cedf083ed77ca4490a8cb4ae3029a437fbddad",
-        851_211,
+        "f836c50f5229550cb55f20550ab502a838a119a5cec77ddf9a9cf501d9f6a12d",
+        851_165,
     ),
 ];
 

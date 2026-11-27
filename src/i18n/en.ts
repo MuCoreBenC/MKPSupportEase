@@ -116,7 +116,7 @@ export const en: Record<StringKey, string> = {
   'settings.postproc.amsUnload': 'Suppress AMS unload',
   'settings.postproc.amsUnloadNote': 'No AMS, AMS lite or BMCU unload at the end; off follows the slicer.',
   'settings.postproc.endRetract': 'Retract pen at end',
-  'settings.postproc.endRetractNote': 'Returns the pen before AMS unload. No homing, no Z move; the begin-stage one homes first and lifts Z.',
+  'settings.postproc.endRetractNote': 'Returns the pen after AMS unload. No homing, no Z move; the begin-stage one homes first and lifts Z.',
   'settings.postproc.tower': 'Smart tower position',
   'settings.postproc.towerNote': 'What to do on a tower collision. Moves the tower for this run only; presets are untouched.',
   'settings.postproc.towerAria': 'What to do on a wipe-tower collision',

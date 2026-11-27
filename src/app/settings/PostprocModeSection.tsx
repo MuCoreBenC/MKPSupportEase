@@ -203,9 +203,8 @@ export default function PostprocModeSection() {
         />
       </div>
 
-      {/* 收尾收笔：退料段之前把笔送回笔架。与开头那块的区别是不归零、不碰 Z ——
-          收尾开头切片器已经把 Z 抬到最高层之上，再动 Z 就是往下撞。
-          移动与松笔位取自预设 `[toolhead] custom_unmount_gcode`。 */}
+      {/* 收尾收笔：退料段之后把笔送回笔架。与开头那块是同一张机型表，区别是不归零、
+          不碰 Z —— 收尾开头切片器已经把 Z 抬到最高层之上，再动 Z 就是往下撞。 */}
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
           <div className={s.fieldTitle}>
