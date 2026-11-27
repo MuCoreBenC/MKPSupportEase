@@ -186,7 +186,7 @@ export default function PostprocModeSection() {
         />
       </div>
 
-      {/* 打完退料：机身自带收尾里那段「切料 → 挤出 → 回抽」。
+      {/* AMS 退料（AMS / AMS lite / BMCU）：机身自带收尾里那段「切料 → 挤出 → 回抽」。
           出厂关 —— 那一段要热态喷嘴才走得完，而校准件为了让喷嘴不滴料会先降到 30 °C，
           留着它机器就卡在加热等待上。开着时校准块会被挪到退料之后，趁热先退料。 */}
       <div className={`${s.field} ${s.fieldRow}`}>

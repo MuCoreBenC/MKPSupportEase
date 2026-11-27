@@ -309,7 +309,7 @@ pub struct PostprocPrefs {
     /// **跳过震动补偿校准检测**（G-code 里的 M970/M974），省掉打印准备时间。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skip_vibration_calibration: Option<bool>,
-    /// **打完退料**（AMS / bMCU）：出厂关 —— 收尾的退料与切丝段整段不写。
+    /// **打完退料**（AMS / AMS lite / BMCU）：出厂关 —— 收尾的退料与切丝段整段不写。
     ///
     /// 退料那一段要在热态喷嘴下才走得完；校准件为了不让喷嘴滴料会先降到 30 °C，
     /// 留着它机器会卡在加热等待上。开着时校准块会被挪到退料之后、趁热先退料。
@@ -723,7 +723,7 @@ pub struct ResolvedPostprocPrefs {
     /// 余量阈值（mm），量程 `UNDER_SUPPORT_MM_*`
     pub under_support_mm: f64,
     pub skip_vibration_calibration: bool,
-    /// 打完是否退料（AMS / bMCU）
+    /// 打完是否退料（AMS / AMS lite / BMCU）
     pub ams_unload_after_print: bool,
     pub begin_stage_retract_enabled: bool,
     pub begin_stage_retract_z_lift_mm: i64,

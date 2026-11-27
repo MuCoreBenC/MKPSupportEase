@@ -2593,7 +2593,7 @@ export interface ResolvedPostprocPrefs {
   underSupportMm: number
   skipVibrationCalibration: boolean
   /**
-   * **打完退料**（AMS / bMCU）：关（出厂）时收尾的退料与切丝段整段不写，
+   * **打完退料**（AMS / AMS lite / BMCU）：关（出厂）时收尾的退料与切丝段整段不写，
    * 耗材留在喷头里；开着时校准块会挪到退料之后，趁热先退料再降温做校准。
    */
   amsUnloadAfterPrint: boolean

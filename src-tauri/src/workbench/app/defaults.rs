@@ -121,7 +121,7 @@ const EDITABLE: &[Spec] = &[
     Spec {
         section: Section::Prefs,
         key: "AmsUnloadAfterPrint",
-        label: "打完退料",
+        label: "AMS 退料",
         kind: Kind::Bool,
     },
     Spec {
