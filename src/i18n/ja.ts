@@ -115,6 +115,8 @@ export const ja: Record<StringKey, string> = {
   'settings.postproc.topOnAskNote': '回答待ちの間はスライサーの上に表示されます。',
   'settings.postproc.glueBottom': 'サポート下面への接着剤塗布',
   'settings.postproc.glueBottomNote': 'サポート面の 1 層下にも塗布します。',
+  'settings.postproc.amsUnload': '終了後に戻す',
+  'settings.postproc.amsUnloadNote': 'オフならフィラメントはホットエンドに残ります。',
   'settings.postproc.tower': 'スマートタワーの位置',
   'settings.postproc.towerNote': 'タワー衝突時の処理方法。今回のタワー位置だけを変え、プリセットは変更しません。',
   'settings.postproc.towerAria': 'パージタワーと衝突したときの動作',

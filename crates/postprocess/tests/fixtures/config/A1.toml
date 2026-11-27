@@ -114,6 +114,7 @@ BeginStageRetractZLiftMm = 5
 CalibrationSafeLiftMm = 10.0
 GlueBottomEnabled = false
 SkipVibrationCalibration = true
+AmsUnloadAfterPrint = false
 UnderSupportEnabled = true
 UnderSupportMm = 0.5
 XyCalibrationDwellSec = 3

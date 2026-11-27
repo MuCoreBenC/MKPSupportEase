@@ -508,6 +508,91 @@ fn mismatch_code_survives_the_insert_layer() {
     assert!(err.to_string().contains("请勿缩放校准模型"), "{err}");
 }
 
+/// 要打完退料时，校准块挪到退料段之后：退料趁热走完，再降温做校准。
+///
+/// 退料段收尾工具头停在右侧切料位、Z 还是最后一层的高度，所以块前必须
+/// 先抬到校准安全高度再只归 XY —— 这两行就是「能挂上笔」的前提。
+#[test]
+fn unload_first_moves_the_calibration_block_after_the_ams_segment() {
+    let mut ir = fixture_ir();
+    ir.safety.calibration_execution_mode = "print_then_calibrate".to_string();
+    ir.prefs.ams_unload_after_print = true;
+    let content = lines(&[
+        "; FEATURE: Outer wall",
+        "G1 X80.0 Y80.0 E0.5",
+        "; filament end gcode",
+        "; pull back filament to AMS",
+        "M620 S255",
+        "G1 X181 F12000",
+        "T255",
+        "M621 S255",
+        "M104 S0",
+    ]);
+    let out = insert_calibration_gcode(
+        content,
+        Mode::ZOffset,
+        &mut ir,
+        sample_bbox(),
+        centroid(),
+        2,
+        3,
+    )
+    .expect("插入失败");
+    let pos = |needle: &str| {
+        out.iter()
+            .position(|l| l.contains(needle))
+            .unwrap_or_else(|| panic!("找不到 {needle}: {out:?}"))
+    };
+    let unload_end = pos("M621 S255");
+    let runtime = pos("; Calibration Runtime: retract and cool down");
+    let home = pos("G28 X Y");
+    let cool = pos("M104 S30");
+    assert!(runtime > unload_end, "校准块必须在退料段之后: {out:?}");
+    assert!(
+        home > unload_end && home < runtime,
+        "归零要落在退料之后、降温之前"
+    );
+    assert!(cool > home, "先归零再降温");
+    assert!(out[home - 1].starts_with("G1 Z"), "归零前必须先抬 Z");
+    assert!(out.contains(&"M104 S0".to_string()), "收尾其余部分保留");
+}
+
+/// 不退料（出厂档）时插入点不动：还在 `; filament end gcode` 之后。
+#[test]
+fn no_unload_keeps_the_block_on_the_model_tail() {
+    let mut ir = fixture_ir();
+    ir.safety.calibration_execution_mode = "print_then_calibrate".to_string();
+    ir.prefs.ams_unload_after_print = false;
+    let content = lines(&[
+        "; filament end gcode",
+        "; pull back filament to AMS",
+        "M620 S255",
+        "T255",
+        "M621 S255",
+        "M104 S0",
+    ]);
+    let out = insert_calibration_gcode(
+        content,
+        Mode::ZOffset,
+        &mut ir,
+        sample_bbox(),
+        centroid(),
+        2,
+        3,
+    )
+    .expect("插入失败");
+    let runtime = out
+        .iter()
+        .position(|l| l == "; Calibration Runtime: retract and cool down")
+        .expect("应插入 Calibration Runtime 块");
+    let end = out
+        .iter()
+        .position(|l| l.contains("; filament end gcode"))
+        .unwrap();
+    assert!(runtime > end);
+    assert!(!out.iter().any(|l| l.contains("G28 X Y")), "{out:?}");
+}
+
 /// 反面：非形变的生成失败仍然要拿到 `E_CAL_FAILED_001`（穿透不能穿过头）。
 #[test]
 fn other_calibration_failures_still_get_the_generic_code() {

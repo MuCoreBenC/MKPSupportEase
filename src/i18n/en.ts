@@ -113,6 +113,8 @@ export const en: Record<StringKey, string> = {
     'This screen stays above the slicer until the question is answered.',
   'settings.postproc.glueBottom': 'Glue under support surfaces',
   'settings.postproc.glueBottomNote': 'Also glue one layer below the support surface.',
+  'settings.postproc.amsUnload': 'Unload after print',
+  'settings.postproc.amsUnloadNote': 'Off keeps the filament in the hotend.',
   'settings.postproc.tower': 'Smart tower position',
   'settings.postproc.towerNote': 'What to do on a tower collision. Moves the tower for this run only; presets are untouched.',
   'settings.postproc.towerAria': 'What to do on a wipe-tower collision',

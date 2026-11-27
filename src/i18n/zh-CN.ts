@@ -123,6 +123,8 @@ export const zhCN = {
   'settings.postproc.topOnAskNote': '这一屏在等回答时浮在最前，切片器盖不住它。',
   'settings.postproc.glueBottom': '支撑面底面涂胶',
   'settings.postproc.glueBottomNote': '支撑面下方一层也涂胶。',
+  'settings.postproc.amsUnload': '打完退料',
+  'settings.postproc.amsUnloadNote': '关掉时耗材留在喷头，下次直接打。',
   'settings.postproc.tower': '智能塔位置',
   'settings.postproc.towerNote': '撞塔时怎么处理。只挪这一次的塔位置，不动预设文件。',
   'settings.postproc.towerAria': '碰撞擦料塔时怎么办',

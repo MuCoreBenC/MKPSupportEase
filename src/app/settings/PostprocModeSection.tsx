@@ -186,6 +186,23 @@ export default function PostprocModeSection() {
         />
       </div>
 
+      {/* 打完退料：机身自带收尾里那段「切料 → 挤出 → 回抽」。
+          出厂关 —— 那一段要热态喷嘴才走得完，而校准件为了让喷嘴不滴料会先降到 30 °C，
+          留着它机器就卡在加热等待上。开着时校准块会被挪到退料之后，趁热先退料。 */}
+      <div className={`${s.field} ${s.fieldRow}`}>
+        <div className={s.fieldText}>
+          <div className={s.fieldTitle}>
+            {tr('settings.postproc.amsUnload')}
+            <Tip text={tr('settings.postproc.amsUnloadNote')} />
+          </div>
+        </div>
+        <Switch
+          checked={r.amsUnloadAfterPrint}
+          ariaLabel={tr('settings.postproc.amsUnload')}
+          onChange={(next) => void set({ amsUnloadAfterPrint: next }, on)}
+        />
+      </div>
+
       {/* 智能塔位置（2026-11-04 第二版：**分段选择器**，三档并列）
           作者：「它怎么还是开关呀，它应该像这个怎么显示啊…… 用那个选择切换器啊」——
           三档是并列的选择，不是"开/关"两个方向，所以与上一行「这一趟怎么显示」

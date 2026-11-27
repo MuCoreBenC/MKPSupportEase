@@ -18,6 +18,7 @@ GlueBottomEnabled = false
 UnderSupportEnabled = true
 UnderSupportMm = 0.5
 SkipVibrationCalibration = true
+AmsUnloadAfterPrint = false
 BeginStageRetractEnabled = true
 BeginStageRetractZLiftMm = 5
 CalibrationSafeLiftMm = 10

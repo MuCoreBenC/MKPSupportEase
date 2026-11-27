@@ -30,10 +30,12 @@
 use crate::diag::PostprocError;
 use crate::gcode::{
     MARKER_FILAMENT_END, MARKER_GLUE_FINISHED, MARKER_PREPARE_NEXT_TOWER, MARKER_WIPE_END,
-    MARKER_WIPE_START, filter_e_moves, has_slicer_comment_prefix, remove_final_lower_z,
+    MARKER_WIPE_START, command_has_s, filter_e_moves, format_z, has_slicer_comment_prefix,
+    remove_final_lower_z,
 };
 use crate::ir::{CALIBRATION_EXEC_DIRECT_CALIBRATE, Ir};
 
+use crate::postproc::disk::calibration::calibration_safe_z;
 use crate::postproc::disk::{BBox, CentroidResult, generate_calibration_gcode_with_centroid_rec};
 
 /// `Mode`（calibration/mode.go:11）。
@@ -289,9 +291,22 @@ pub fn insert_calibration_gcode_with_receipt(
         content
     };
 
-    let insert_idx = output
-        .iter()
-        .position(|l| l.contains(MARKER_FILAMENT_END) && !l.contains('='));
+    /* 插入点：用户要打完退料时，整块挪到退料段**之后**。
+     *
+     * 退料那一段是「切料 → 挤出 → 回抽」，要热态喷嘴才走得完；而这套校准为了让
+     * 喷嘴不滴料会把目标温度压到 30 °C。趁模型刚打完把退料走完，就不用它自己在
+     * 收尾里等加热。认不出 `M621 S255` 时退回原位，行为与没有这条分支时一致。 */
+    let unload_idx = if is_new_mode && ir_data.prefs.ams_unload_after_print {
+        output.iter().position(|l| command_has_s(l, "M621", "255"))
+    } else {
+        None
+    };
+    let resume_after_unload = unload_idx.is_some();
+    let insert_idx = unload_idx.or_else(|| {
+        output
+            .iter()
+            .position(|l| l.contains(MARKER_FILAMENT_END) && !l.contains('='))
+    });
 
     match insert_idx {
         None => {
@@ -307,6 +322,15 @@ pub fn insert_calibration_gcode_with_receipt(
         Some(idx) => {
             let mut new_lines: Vec<String> = Vec::new();
             if is_new_mode {
+                if resume_after_unload {
+                    /* 退料段收尾时工具头停在右侧切料位、Z 也还是最后一层的高度：
+                     * 先抬到校准安全高度，再只归 XY（归 Z 会重新触板），挂笔才够得着。 */
+                    new_lines.push(format!(
+                        "G1 Z{} F1200",
+                        format_z(calibration_safe_z(ir_data))
+                    ));
+                    new_lines.push("G28 X Y".to_string());
+                }
                 new_lines.push("; Calibration Runtime: retract and cool down".to_string());
                 new_lines.push("G92 E0".to_string());
                 new_lines.push(format!("G1 E-{CALIBRATION_RETRACT_MM:.1} F1800"));

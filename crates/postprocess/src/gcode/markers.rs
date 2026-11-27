@@ -16,6 +16,8 @@ pub const MARKER_PRE_GLUE: &str = ";Pre-glue preparation";
 pub const MARKER_GLUE_FINISHED: &str = ";Glueing Finished";
 pub const MARKER_WAITING_GLUE: &str = ";Waiting for Glue Settling";
 pub const MARKER_FILAMENT_END: &str = "; filament end gcode";
+/// 机器收尾段里「把料退回 AMS」那一段的注释头（段尾是 `M621 S255`）。
+pub const MARKER_PULL_BACK_AMS: &str = "; pull back filament to AMS";
 pub const MARKER_MORE_EXTRUSION: &str = ";MoreExtrusion";
 pub const MARKER_RISING_NOZZLE: &str = ";Rising Nozzle a little";
 pub const MARKER_MICRO_LIFT: &str = ";MICRO_LIFT";
@@ -38,6 +40,25 @@ pub const MKP_OP_OP_END: &str = "OP END";
 pub const MKP_OP_INSERT: &str = "insert";
 pub const MKP_OP_REMOVE: &str = "remove";
 pub const MKP_OP_REPLACE: &str = "replace";
+
+/// 这一行的命令是不是 `cmd` 且带 `S<value>` 参数。
+///
+/// 命令与参数大小写不敏感；`;` 之后的内容不参与（文件头那一格
+/// `; machine_end_gcode = …` 在注释里同样写着 `M620 S255` / `M621 S255`）。
+pub fn command_has_s(line: &str, cmd: &str, value: &str) -> bool {
+    let code = match line.find(';') {
+        Some(idx) => line[..idx].trim(),
+        None => line.trim(),
+    };
+    let mut tokens = code.split_whitespace();
+    if !tokens.next().is_some_and(|t| t.eq_ignore_ascii_case(cmd)) {
+        return false;
+    }
+    tokens.any(|t| {
+        t.get(..1).is_some_and(|s| s.eq_ignore_ascii_case("S"))
+            && t.get(1..).is_some_and(|v| v == value)
+    })
+}
 
 /// `MatchSlicerComment`：trim 后包含 `;<marker>` 或 `; <marker>`。
 ///
