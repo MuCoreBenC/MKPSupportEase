@@ -142,8 +142,8 @@ export function usePostprocPrefs(): PostprocPrefsApi {
           underSupportMm: wire.underSupportMm ?? before.resolved.underSupportMm,
           skipVibrationCalibration:
             wire.skipVibrationCalibration ?? before.resolved.skipVibrationCalibration,
-          amsUnloadAfterPrint:
-            wire.amsUnloadAfterPrint ?? before.resolved.amsUnloadAfterPrint,
+          suppressAmsUnload:
+            wire.suppressAmsUnload ?? before.resolved.suppressAmsUnload,
           beginStageRetractEnabled:
             wire.beginStageRetractEnabled ?? before.resolved.beginStageRetractEnabled,
           beginStageRetractZLiftMm:

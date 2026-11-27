@@ -120,8 +120,8 @@ const EDITABLE: &[Spec] = &[
     },
     Spec {
         section: Section::Prefs,
-        key: "AmsUnloadAfterPrint",
-        label: "AMS 退料",
+        key: "SuppressAmsUnload",
+        label: "屏蔽 AMS 退料",
         kind: Kind::Bool,
     },
     Spec {
@@ -305,7 +305,7 @@ fn value_of_prefs(prefs: &postprocess::ir::PrefsIr, key: &str) -> Option<Value> 
         "UnderSupportMm" => Value::from(prefs.under_support_mm),
         "GlueBottomEnabled" => Value::Bool(prefs.glue_bottom_enabled),
         "SkipVibrationCalibration" => Value::Bool(prefs.skip_vibration_calibration),
-        "AmsUnloadAfterPrint" => Value::Bool(prefs.ams_unload_after_print),
+        "SuppressAmsUnload" => Value::Bool(prefs.suppress_ams_unload),
         "BeginStageRetractEnabled" => Value::Bool(prefs.begin_stage_retract_enabled),
         "BeginStageRetractZLiftMm" => Value::from(prefs.begin_stage_retract_z_lift_mm),
         "CalibrationSafeLiftMm" => Value::from(prefs.calibration_safe_lift_mm),

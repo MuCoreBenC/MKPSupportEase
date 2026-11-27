@@ -186,9 +186,9 @@ export default function PostprocModeSection() {
         />
       </div>
 
-      {/* AMS 退料（AMS / AMS lite / BMCU）：机身自带收尾里那段「切料 → 挤出 → 回抽」。
-          出厂关 —— 那一段要热态喷嘴才走得完，而校准件为了让喷嘴不滴料会先降到 30 °C，
-          留着它机器就卡在加热等待上。开着时校准块会被挪到退料之后，趁热先退料。 */}
+      {/* 屏蔽 AMS 退料（AMS / AMS lite / BMCU）：切片器自带收尾里那段「切料 → 挤出 → 回抽」。
+          出厂开 —— 那一段要热态喷嘴才走得完，而校准件为了让喷嘴不滴料会先降到 30 °C，
+          留着它机器就卡在加热等待上。关掉时校准块会被挪到退料之后，趁热先退料。 */}
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
           <div className={s.fieldTitle}>
@@ -197,9 +197,9 @@ export default function PostprocModeSection() {
           </div>
         </div>
         <Switch
-          checked={r.amsUnloadAfterPrint}
+          checked={r.suppressAmsUnload}
           ariaLabel={tr('settings.postproc.amsUnload')}
-          onChange={(next) => void set({ amsUnloadAfterPrint: next }, on)}
+          onChange={(next) => void set({ suppressAmsUnload: next }, on)}
         />
       </div>
 

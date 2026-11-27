@@ -852,9 +852,9 @@ fn run(
             hooks::apply_skip_vibration_calibration(out_lines, ir.prefs.skip_vibration_calibration);
         /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从原口径移植） */
         out_lines = bed_glue::apply_bed_glue(out_lines, &ir, calib_mode);
-        /* AMS 收尾退料：放在最后 —— 校准块（step 10 已插）与涂胶块都可能落在它前面，
+        /* 屏蔽 AMS 收尾退料：放在最后 —— 校准块（step 10 已插）与涂胶块都可能落在它前面，
          * 这一步只按标记删收尾那一段，与前面几位互不影响。 */
-        out_lines = hooks::apply_ams_end_unload(out_lines, ir.prefs.ams_unload_after_print);
+        out_lines = hooks::apply_ams_end_unload(out_lines, ir.prefs.suppress_ams_unload);
     }
 
     // MKP 标记协议 v1 收尾：ev 按落盘行序重编号 + 文件头 ;MKP_INFO + 文件尾 ;MKP_STATS，

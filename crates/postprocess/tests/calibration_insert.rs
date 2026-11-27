@@ -508,7 +508,7 @@ fn mismatch_code_survives_the_insert_layer() {
     assert!(err.to_string().contains("请勿缩放校准模型"), "{err}");
 }
 
-/// 要打完退料时，校准块挪到退料段之后：退料趁热走完，再降温做校准。
+/// 收尾还会退料时，校准块挪到退料段之后：退料趁热走完，再降温做校准。
 ///
 /// 退料段收尾工具头停在右侧切料位、Z 还是最后一层的高度，所以块前必须
 /// 先抬到校准安全高度再只归 XY —— 这两行就是「能挂上笔」的前提。
@@ -516,7 +516,7 @@ fn mismatch_code_survives_the_insert_layer() {
 fn unload_first_moves_the_calibration_block_after_the_ams_segment() {
     let mut ir = fixture_ir();
     ir.safety.calibration_execution_mode = "print_then_calibrate".to_string();
-    ir.prefs.ams_unload_after_print = true;
+    ir.prefs.suppress_ams_unload = false;
     let content = lines(&[
         "; FEATURE: Outer wall",
         "G1 X80.0 Y80.0 E0.5",
@@ -557,12 +557,12 @@ fn unload_first_moves_the_calibration_block_after_the_ams_segment() {
     assert!(out.contains(&"M104 S0".to_string()), "收尾其余部分保留");
 }
 
-/// 不退料（出厂档）时插入点不动：还在 `; filament end gcode` 之后。
+/// 退料被屏蔽（出厂档）时插入点不动：还在 `; filament end gcode` 之后。
 #[test]
 fn no_unload_keeps_the_block_on_the_model_tail() {
     let mut ir = fixture_ir();
     ir.safety.calibration_execution_mode = "print_then_calibrate".to_string();
-    ir.prefs.ams_unload_after_print = false;
+    ir.prefs.suppress_ams_unload = true;
     let content = lines(&[
         "; filament end gcode",
         "; pull back filament to AMS",

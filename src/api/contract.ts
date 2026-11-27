@@ -2593,10 +2593,10 @@ export interface ResolvedPostprocPrefs {
   underSupportMm: number
   skipVibrationCalibration: boolean
   /**
-   * **打完退料**（AMS / AMS lite / BMCU）：关（出厂）时收尾的退料与切丝段整段不写，
-   * 耗材留在喷头里；开着时校准块会挪到退料之后，趁热先退料再降温做校准。
+   * **屏蔽收尾退料**（AMS / AMS lite / BMCU）：开（出厂）时收尾的退料与切丝段整段不写，
+   * 耗材留在喷头里；关掉时校准块会挪到退料之后，趁热先退料再降温做校准。
    */
-  amsUnloadAfterPrint: boolean
+  suppressAmsUnload: boolean
   beginStageRetractEnabled: boolean
   beginStageRetractZLiftMm: number
   /**
@@ -2668,8 +2668,8 @@ export interface PostprocPrefsWire {
   /** 余量阈值（mm）：`null` = 回到出厂档（0.5） */
   underSupportMm?: number | null
   skipVibrationCalibration?: boolean | null
-  /** 打完退料（AMS）：`null` = 回到出厂档（关） */
-  amsUnloadAfterPrint?: boolean | null
+  /** 屏蔽 AMS 退料：`null` = 回到出厂档（开） */
+  suppressAmsUnload?: boolean | null
   beginStageRetractEnabled?: boolean | null
   beginStageRetractZLiftMm?: number | null
   /** 校准抬升高度（mm）：`null` = 回到出厂档（10） */
@@ -2769,7 +2769,7 @@ export interface PostprocPrefsView {
     autoTopOnAsk: boolean
     forceCalibrationMode: boolean
     skipVibrationCalibration: boolean
-    amsUnloadAfterPrint: boolean
+    suppressAmsUnload: boolean
     beginStageRetractEnabled: boolean
     beginStageRetractZLiftMm: number
     calibrationSafeLiftMm: number

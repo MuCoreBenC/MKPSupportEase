@@ -291,12 +291,12 @@ pub fn insert_calibration_gcode_with_receipt(
         content
     };
 
-    /* 插入点：用户要打完退料时，整块挪到退料段**之后**。
+    /* 插入点：收尾还会退料（没被屏蔽）时，整块挪到退料段**之后**。
      *
      * 退料那一段是「切料 → 挤出 → 回抽」，要热态喷嘴才走得完；而这套校准为了让
      * 喷嘴不滴料会把目标温度压到 30 °C。趁模型刚打完把退料走完，就不用它自己在
      * 收尾里等加热。认不出 `M621 S255` 时退回原位，行为与没有这条分支时一致。 */
-    let unload_idx = if is_new_mode && ir_data.prefs.ams_unload_after_print {
+    let unload_idx = if is_new_mode && !ir_data.prefs.suppress_ams_unload {
         output.iter().position(|l| command_has_s(l, "M621", "255"))
     } else {
         None

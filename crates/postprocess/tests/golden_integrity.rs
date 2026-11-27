@@ -78,11 +78,10 @@ const VENDORED: &[(&str, &str, u64)] = &[
         // 塔片从 11 片变成 42 片，`;MKP_STATS towers=` 同步 11 → 42。
         // 人工核过 diff：新增/改写全在塔块内（`;Tower_Layer_Gcode` ~ `Finished` 与
         // 斜肋段），模型段一行未动；`; LAYER_HEIGHT:` 由名义 0.28/0.2 变成实际片高。
-        // 2026-11-26 再生：新增客户端偏好 `AmsUnloadAfterPrint`，出厂关 ——
-        // 收尾那一段「把料退回 AMS」（`; pull back filament to AMS` ~ `M621 S255`）
-        // 整段不写。这份样本少 9 行（`M620 S255` / `T255` / 切料位移动 / `M73 P98 R0` /
-        // `M621 S255`），851111 → 850983 字节。人工核过 diff：删的正好是这一段，
-        // 其余字节一处未动。
+        // 客户端偏好 `SuppressAmsUnload` 出厂开 —— 收尾那一段「把料退回 AMS」
+        // （`; pull back filament to AMS` ~ `M621 S255`）整段不写。这份样本少 9 行
+        // （`M620 S255` / `T255` / 切料位移动 / `M73 P98 R0` / `M621 S255`），
+        // 851111 → 850983 字节。人工核过 diff：删的正好是这一段，其余字节一处未动。
         "42274.2.e2e-A1.config.gcode",
         "c7b85e1b5318636928348c2fc23d6a28954d57804c7dd2b42f598d1be76191fc",
         850_983,

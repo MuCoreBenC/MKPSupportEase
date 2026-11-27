@@ -45,11 +45,11 @@ pub fn apply_skip_vibration_calibration(lines: Vec<String>, skip: bool) -> Vec<S
 ///
 /// 这一段是「切料 → 挤出 → 回抽」，整段要在热态喷嘴下才走得完。校准件为了不让喷嘴
 /// 滴料，在这之前已经把目标温度压到 30 °C，留着它机器会卡在加热等待上 —— 所以
-/// `unload == false`（出厂档）时整段不写。
+/// `suppress == true`（出厂档）时整段不写；关掉这一档就按切片器原样退。
 ///
 /// 起点与终点任一处认不出来就原样返回：只删掉 `M620 S255` 或 `T255` 会把收尾改坏。
-pub fn apply_ams_end_unload(lines: Vec<String>, unload: bool) -> Vec<String> {
-    if unload {
+pub fn apply_ams_end_unload(lines: Vec<String>, suppress: bool) -> Vec<String> {
+    if !suppress {
         return lines;
     }
     let Some(start) = lines.iter().position(|l| is_ams_unload_start(l)) else {
@@ -396,21 +396,21 @@ mod tests {
             "M104 S0",
         ]);
         assert_eq!(
-            apply_ams_end_unload(content, false),
+            apply_ams_end_unload(content, true),
             lines(&["M140 S0", "M104 S0"])
         );
     }
 
-    /// 开关打开时一个字节都不动。
+    /// 不屏蔽时一个字节都不动。
     #[test]
-    fn ams_end_unload_keeps_everything_when_on() {
+    fn ams_end_unload_keeps_everything_when_not_suppressed() {
         let content = lines(&[
             "; pull back filament to AMS",
             "M620 S255",
             "T255",
             "M621 S255",
         ]);
-        assert_eq!(apply_ams_end_unload(content.clone(), true), content);
+        assert_eq!(apply_ams_end_unload(content.clone(), false), content);
     }
 
     /// 认不出终点就不删：宁可留着，也不能只删半段把收尾改坏。
@@ -422,7 +422,7 @@ mod tests {
             "T255",
             "M104 S0",
         ]);
-        assert_eq!(apply_ams_end_unload(content.clone(), false), content);
+        assert_eq!(apply_ams_end_unload(content.clone(), true), content);
     }
 
     /// 文件头那一格 `; machine_end_gcode = …` 里也写着同一句标记，不能当起点。
@@ -432,7 +432,7 @@ mod tests {
             "; machine_end_gcode = ;pull back filament to AMS\\nM620 S255\\nM621 S255",
             "M104 S0",
         ]);
-        assert_eq!(apply_ams_end_unload(content.clone(), false), content);
+        assert_eq!(apply_ams_end_unload(content.clone(), true), content);
     }
 
     /// 块紧跟原版抬 Z 段（`G380 … G90`）之后，不等到预热与放音。

@@ -309,12 +309,12 @@ pub struct PostprocPrefs {
     /// **跳过震动补偿校准检测**（G-code 里的 M970/M974），省掉打印准备时间。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skip_vibration_calibration: Option<bool>,
-    /// **打完退料**（AMS / AMS lite / BMCU）：出厂关 —— 收尾的退料与切丝段整段不写。
+    /// **屏蔽收尾退料**（AMS / AMS lite / BMCU）：出厂开 —— 收尾的退料与切丝段整段不写。
     ///
     /// 退料那一段要在热态喷嘴下才走得完；校准件为了不让喷嘴滴料会先降到 30 °C，
-    /// 留着它机器会卡在加热等待上。开着时校准块会被挪到退料之后、趁热先退料。
+    /// 留着它机器会卡在加热等待上。关掉这一档时校准块会被挪到退料之后、趁热先退料。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ams_unload_after_print: Option<bool>,
+    pub suppress_ams_unload: Option<bool>,
     /// **开始阶段收笔**：在原版抬 Z 段之后插入收笔序列（补抬 Z、归零 X、收笔）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub begin_stage_retract_enabled: Option<bool>,
@@ -543,9 +543,7 @@ impl PostprocPrefs {
             skip_vibration_calibration: self
                 .skip_vibration_calibration
                 .unwrap_or(d.skip_vibration_calibration),
-            ams_unload_after_print: self
-                .ams_unload_after_print
-                .unwrap_or(d.ams_unload_after_print),
+            suppress_ams_unload: self.suppress_ams_unload.unwrap_or(d.suppress_ams_unload),
             begin_stage_retract_enabled: self
                 .begin_stage_retract_enabled
                 .unwrap_or(d.begin_stage_retract_enabled),
@@ -723,8 +721,8 @@ pub struct ResolvedPostprocPrefs {
     /// 余量阈值（mm），量程 `UNDER_SUPPORT_MM_*`
     pub under_support_mm: f64,
     pub skip_vibration_calibration: bool,
-    /// 打完是否退料（AMS / AMS lite / BMCU）
-    pub ams_unload_after_print: bool,
+    /// 是否屏蔽收尾退料（AMS / AMS lite / BMCU）
+    pub suppress_ams_unload: bool,
     pub begin_stage_retract_enabled: bool,
     pub begin_stage_retract_z_lift_mm: i64,
     /// 校准「切笔」的安全抬升量（mm），量程 `CALIBRATION_SAFE_LIFT_MM_*`
