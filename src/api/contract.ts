@@ -2615,6 +2615,13 @@ export interface ResolvedPostprocPrefs {
    */
   suppressAmsUnload: boolean
   /**
+   * **直接校准不装料**：`direct_calibrate` 时把起始段的 AMS 装料整段去掉
+   * （含耗材判断、切料换号、加热与挤料）。
+   */
+  directSkipLoad: boolean
+  /** **直接校准跳过调平**：`direct_calibrate` 时删掉 `;===== bed leveling =====` 段 */
+  directSkipBedLeveling: boolean
+  /**
    * **收尾再收一次笔**：AMS 退料段之后把笔送回笔架。
    * 复用开头那张机型表，区别是不归零、不碰 Z —— 收尾开头已经抬到最高层之上。
    */
@@ -2692,6 +2699,10 @@ export interface PostprocPrefsWire {
   skipVibrationCalibration?: boolean | null
   /** 屏蔽 AMS 退料：`null` = 回到出厂档（开） */
   suppressAmsUnload?: boolean | null
+  /** 直接校准不装料：`null` = 回到出厂档（开） */
+  directSkipLoad?: boolean | null
+  /** 直接校准跳过调平：`null` = 回到出厂档（开） */
+  directSkipBedLeveling?: boolean | null
   /** 收尾收笔：`null` = 回到出厂档（开） */
   endStageRetractEnabled?: boolean | null
   beginStageRetractEnabled?: boolean | null
@@ -2794,6 +2805,8 @@ export interface PostprocPrefsView {
     forceCalibrationMode: boolean
     skipVibrationCalibration: boolean
     suppressAmsUnload: boolean
+    directSkipLoad: boolean
+    directSkipBedLeveling: boolean
     endStageRetractEnabled: boolean
     beginStageRetractEnabled: boolean
     beginStageRetractZLiftMm: number

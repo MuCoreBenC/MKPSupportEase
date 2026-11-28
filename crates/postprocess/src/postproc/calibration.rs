@@ -283,8 +283,17 @@ pub fn insert_calibration_gcode_with_receipt(
         let preserve =
             machine_type_str == "P1S" || machine_type_str == "A1" || machine_type_str == "A1_MINI";
         let filtered = filter_model_motion_paths(&content, preserve);
-        let loaded = drop_load_filament(&filtered);
-        minimize_startup_gcode(loaded, &machine_type_str)
+        /* 两项都按用户开关来：关掉就按切片器原样保留那一段。 */
+        let loaded = if ir_data.prefs.direct_skip_load {
+            drop_load_filament(&filtered)
+        } else {
+            filtered
+        };
+        minimize_startup_gcode(
+            loaded,
+            &machine_type_str,
+            ir_data.prefs.direct_skip_bed_leveling,
+        )
     } else if ir_data.prefs.skip_vibration_calibration {
         /* ★ 2026-10-17：这一支原来是**无条件**跑的 —— 也就是说"跳过震动检测"从来没听过
         用户的设置，一直被当成开着。现在按设置页那一档来（出厂关 ⇒ 保留 M970/M974）。 */
@@ -415,8 +424,17 @@ pub fn insert_calibration_blocks(
         let preserve =
             machine_type_str == "P1S" || machine_type_str == "A1" || machine_type_str == "A1_MINI";
         let filtered = filter_model_motion_paths(&content, preserve);
-        let loaded = drop_load_filament(&filtered);
-        minimize_startup_gcode(loaded, &machine_type_str)
+        /* 两项都按用户开关来：关掉就按切片器原样保留那一段。 */
+        let loaded = if ir_data.prefs.direct_skip_load {
+            drop_load_filament(&filtered)
+        } else {
+            filtered
+        };
+        minimize_startup_gcode(
+            loaded,
+            &machine_type_str,
+            ir_data.prefs.direct_skip_bed_leveling,
+        )
     } else if ir_data.prefs.skip_vibration_calibration {
         remove_vibration_detection_from_mech_mode(&content)
     } else {
@@ -763,16 +781,20 @@ pub fn remove_vibration_detection_from_mech_mode(lines: &[String]) -> Vec<String
 
 // ---- 启动段最小化（helpers.go:684-1000） ----
 
-pub fn minimize_startup_gcode(lines: Vec<String>, machine_type: &str) -> Vec<String> {
+pub fn minimize_startup_gcode(
+    lines: Vec<String>,
+    machine_type: &str,
+    skip_bed_leveling: bool,
+) -> Vec<String> {
     match machine_type {
-        "P1S" => minimize_startup_gcode_p1(lines),
-        "A1" | "A1_MINI" => minimize_startup_gcode_a1(lines),
-        "X1C" => minimize_startup_gcode_p1(lines), // X1 复用 P1（helpers.go:991）
+        "P1S" => minimize_startup_gcode_p1(lines, skip_bed_leveling),
+        "A1" | "A1_MINI" => minimize_startup_gcode_a1(lines, skip_bed_leveling),
+        "X1C" => minimize_startup_gcode_p1(lines, skip_bed_leveling), // X1 复用 P1（helpers.go:991）
         _ => lines,
     }
 }
 
-fn minimize_startup_gcode_p1(lines: Vec<String>) -> Vec<String> {
+fn minimize_startup_gcode_p1(lines: Vec<String>, skip_bed_leveling: bool) -> Vec<String> {
     let mut result: Vec<String> = Vec::with_capacity(lines.len());
     let mut in_startup_region = false;
     let mut in_prepare_region = false;
@@ -858,6 +880,10 @@ fn minimize_startup_gcode_p1(lines: Vec<String>) -> Vec<String> {
             continue;
         }
         if in_bed_leveling_region {
+            if skip_bed_leveling {
+                continue;
+            }
+            result.push(line.clone());
             continue;
         }
 
@@ -914,7 +940,7 @@ fn minimize_startup_gcode_p1(lines: Vec<String>) -> Vec<String> {
     remove_vibration_detection_from_mech_mode(&result)
 }
 
-fn minimize_startup_gcode_a1(lines: Vec<String>) -> Vec<String> {
+fn minimize_startup_gcode_a1(lines: Vec<String>, skip_bed_leveling: bool) -> Vec<String> {
     let mut result: Vec<String> = Vec::with_capacity(lines.len());
     let mut in_startup_region = false;
     let mut in_prepare_region = false;
@@ -1020,6 +1046,10 @@ fn minimize_startup_gcode_a1(lines: Vec<String>) -> Vec<String> {
             continue;
         }
         if in_bed_leveling_region {
+            if skip_bed_leveling {
+                continue;
+            }
+            result.push(line.clone());
             continue;
         }
 
@@ -1570,5 +1600,27 @@ mod tests {
     fn drop_load_filament_rolls_back_without_the_end() {
         let lines = ls(&["M620 S0A", "    M109 S245", "M400"]);
         assert_eq!(drop_load_filament(&lines), lines);
+    }
+
+    /// 跳过调平那一档关掉时，调平段原样保留。
+    #[test]
+    fn minimize_startup_keeps_bed_leveling_when_switch_is_off() {
+        let lines = ls(&[
+            ";===== machine: A1 mini =====",
+            ";===== bed leveling =====",
+            "G29 ; probe",
+            ";===== bed leveling end =====",
+            "M400",
+        ]);
+        let skipped = minimize_startup_gcode(lines.clone(), "A1_MINI", true);
+        assert!(
+            !skipped.iter().any(|l| l.contains("G29")),
+            "开着就该删干净: {skipped:?}"
+        );
+        let kept = minimize_startup_gcode(lines, "A1_MINI", false);
+        assert!(
+            kept.iter().any(|l| l.contains("G29")),
+            "关掉就该原样保留: {kept:?}"
+        );
     }
 }

@@ -175,7 +175,7 @@ fn a1_direct_mode_drops_the_pre_purge_block_and_keeps_the_lift() {
         "    M109 S245",
     ]);
 
-    let a1 = minimize_startup_gcode(content.clone(), "A1");
+    let a1 = minimize_startup_gcode(content.clone(), "A1", true);
     let pos = |needle: &str| a1.iter().position(|l| l.trim() == needle);
     let g28 = pos("G28").expect("G28 应保留");
     let lift = pos("G1 Z10 F1200").expect("G28 之后应插入抬 Z");
@@ -200,7 +200,7 @@ fn a1_direct_mode_drops_the_pre_purge_block_and_keeps_the_lift() {
     assert!(a1.iter().any(|l| l.contains(";===== extrude cali test")));
 
     // P1 走的是另一条裁剪路径：同样不吃这段准备动作，但不该拿到 A1 那条抬 Z
-    let p1 = minimize_startup_gcode(content, "P1S");
+    let p1 = minimize_startup_gcode(content, "P1S", true);
     assert!(
         !p1.iter().any(|l| l.trim() == "G1 X108.000 Y-0.500 F30000"),
         "P1S 也不该保留这段准备动作：{p1:?}"
@@ -241,7 +241,7 @@ fn mech_mode_moves_leave_together_with_the_vibration_commands() {
         "; TAIL_MARK",
     ]);
 
-    let out = minimize_startup_gcode(content, "A1_MINI");
+    let out = minimize_startup_gcode(content, "A1_MINI", true);
     assert!(
         out.iter().any(|l| l.contains("G0 X25 Y175")),
         "找软地的定位要留：{out:?}"
@@ -292,7 +292,7 @@ fn p1_direct_mode_drops_the_mech_check_and_print_preheat() {
         "; MACHINE_START_GCODE_END",
     ]);
 
-    let p1 = minimize_startup_gcode(content, "P1S");
+    let p1 = minimize_startup_gcode(content, "P1S", true);
     assert!(
         p1.iter().any(|l| l.contains(";===== nozzle load line")),
         "清洗线段落标记必须保留：{p1:?}"
@@ -336,7 +336,7 @@ fn x1c_shares_the_p1_cut_without_leaking_past_the_boundary() {
         "; filament start gcode",
     ]);
 
-    let out = minimize_startup_gcode(content, "X1C");
+    let out = minimize_startup_gcode(content, "X1C", true);
     assert!(
         !out.iter().any(|l| l.contains("M104 S245")),
         "X1C 也要砍掉提前升温：{out:?}"

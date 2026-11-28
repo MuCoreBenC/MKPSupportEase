@@ -277,3 +277,33 @@ fn direct_calibrate_drops_the_model_for_two_plates() {
         "装料段没删掉: {out:?}"
     );
 }
+
+/// 「直接校准不装料」关掉 ⇒ 装料段原样保留（模型路径仍然要删）。
+#[test]
+fn direct_calibrate_keeps_the_load_when_switch_is_off() {
+    let mut ir = fixture_ir();
+    ir.safety.calibration_execution_mode = "direct_calibrate".to_string();
+    ir.prefs.direct_skip_load = false;
+    let content = lines(&[
+        "; CONFIG_BLOCK_START",
+        "; CONFIG_BLOCK_END",
+        "M620 S0A   ; switch material if AMS exist",
+        "    M109 S245",
+        "M621 S0A",
+        "; FEATURE: Outer wall",
+        "G1 X80.0 Y80.0 E0.5",
+        "; filament end gcode",
+        "M104 S0",
+    ]);
+    let (out, _) =
+        insert_calibration_blocks(content, &dual_targets(), &mut ir, 2, 3).expect("插入失败");
+
+    assert!(
+        out.iter().any(|l| l.contains("M620 S0A")),
+        "开关关掉时不该删装料段: {out:?}"
+    );
+    assert!(
+        !out.iter().any(|l| l.contains("X80.0 Y80.0")),
+        "模型路径仍要删: {out:?}"
+    );
+}

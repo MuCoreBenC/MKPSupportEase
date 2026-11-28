@@ -126,6 +126,18 @@ const EDITABLE: &[Spec] = &[
     },
     Spec {
         section: Section::Prefs,
+        key: "DirectSkipLoad",
+        label: "直接校准不装料",
+        kind: Kind::Bool,
+    },
+    Spec {
+        section: Section::Prefs,
+        key: "DirectSkipBedLeveling",
+        label: "直接校准跳过调平",
+        kind: Kind::Bool,
+    },
+    Spec {
+        section: Section::Prefs,
         key: "EndStageRetractEnabled",
         label: "收尾收笔",
         kind: Kind::Bool,
@@ -312,6 +324,8 @@ fn value_of_prefs(prefs: &postprocess::ir::PrefsIr, key: &str) -> Option<Value> 
         "GlueBottomEnabled" => Value::Bool(prefs.glue_bottom_enabled),
         "SkipVibrationCalibration" => Value::Bool(prefs.skip_vibration_calibration),
         "SuppressAmsUnload" => Value::Bool(prefs.suppress_ams_unload),
+        "DirectSkipLoad" => Value::Bool(prefs.direct_skip_load),
+        "DirectSkipBedLeveling" => Value::Bool(prefs.direct_skip_bed_leveling),
         "EndStageRetractEnabled" => Value::Bool(prefs.end_stage_retract_enabled),
         "BeginStageRetractEnabled" => Value::Bool(prefs.begin_stage_retract_enabled),
         "BeginStageRetractZLiftMm" => Value::from(prefs.begin_stage_retract_z_lift_mm),

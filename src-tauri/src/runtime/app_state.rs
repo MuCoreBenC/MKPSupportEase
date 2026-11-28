@@ -315,6 +315,12 @@ pub struct PostprocPrefs {
     /// 留着它机器会卡在加热等待上。关掉这一档时校准块会被挪到退料之后、趁热先退料。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub suppress_ams_unload: Option<bool>,
+    /// **直接校准不装料**：出厂开 —— 那一趟不打模型，起始段的 AMS 装料整段不写。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_skip_load: Option<bool>,
+    /// **直接校准跳过调平**：出厂开 —— 删掉起始段的 `;===== bed leveling =====`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_skip_bed_leveling: Option<bool>,
     /// **收尾再收一次笔**：AMS 退料段之后把笔送回笔架。
     ///
     /// 复用开头那一块的机型表，区别是**不归零、不碰 Z** —— 收尾开头切片器已经
@@ -550,6 +556,10 @@ impl PostprocPrefs {
                 .skip_vibration_calibration
                 .unwrap_or(d.skip_vibration_calibration),
             suppress_ams_unload: self.suppress_ams_unload.unwrap_or(d.suppress_ams_unload),
+            direct_skip_load: self.direct_skip_load.unwrap_or(d.direct_skip_load),
+            direct_skip_bed_leveling: self
+                .direct_skip_bed_leveling
+                .unwrap_or(d.direct_skip_bed_leveling),
             end_stage_retract_enabled: self
                 .end_stage_retract_enabled
                 .unwrap_or(d.end_stage_retract_enabled),
@@ -732,6 +742,10 @@ pub struct ResolvedPostprocPrefs {
     pub skip_vibration_calibration: bool,
     /// 是否屏蔽收尾退料（AMS / AMS lite / BMCU）
     pub suppress_ams_unload: bool,
+    /// 直接校准是否跳过 AMS 装料
+    pub direct_skip_load: bool,
+    /// 直接校准是否跳过热床调平
+    pub direct_skip_bed_leveling: bool,
     /// 收尾是否再收一次笔（只动笔架，不归零、不碰 Z）
     pub end_stage_retract_enabled: bool,
     pub begin_stage_retract_enabled: bool,

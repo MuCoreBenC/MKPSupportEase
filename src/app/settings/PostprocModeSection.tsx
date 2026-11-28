@@ -203,6 +203,37 @@ export default function PostprocModeSection() {
         />
       </div>
 
+      {/* 直接校准不装料：那一趟不打模型、校准全程不出料，起始段的 AMS 装料
+          （含耗材判断、切料换号、加热到 250 与两次 50 mm 挤料）整段去掉。 */}
+      <div className={`${s.field} ${s.fieldRow}`}>
+        <div className={s.fieldText}>
+          <div className={s.fieldTitle}>
+            {tr('settings.postproc.directSkipLoad')}
+            <Tip text={tr('settings.postproc.directSkipLoadNote')} />
+          </div>
+        </div>
+        <Switch
+          checked={r.directSkipLoad}
+          ariaLabel={tr('settings.postproc.directSkipLoad')}
+          onChange={(next) => void set({ directSkipLoad: next }, on)}
+        />
+      </div>
+
+      {/* 直接校准跳过调平：校准靠归零定位（`G28` / `G380` 保留），不用热床网格。 */}
+      <div className={`${s.field} ${s.fieldRow}`}>
+        <div className={s.fieldText}>
+          <div className={s.fieldTitle}>
+            {tr('settings.postproc.directSkipLeveling')}
+            <Tip text={tr('settings.postproc.directSkipLevelingNote')} />
+          </div>
+        </div>
+        <Switch
+          checked={r.directSkipBedLeveling}
+          ariaLabel={tr('settings.postproc.directSkipLeveling')}
+          onChange={(next) => void set({ directSkipBedLeveling: next }, on)}
+        />
+      </div>
+
       {/* 收尾收笔：退料段之后把笔送回笔架。与开头那块是同一张机型表，区别是不归零、
           不碰 Z —— 收尾开头切片器已经把 Z 抬到最高层之上，再动 Z 就是往下撞。 */}
       <div className={`${s.field} ${s.fieldRow}`}>
