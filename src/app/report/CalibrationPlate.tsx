@@ -23,8 +23,13 @@ export default function CalibrationPlate({
   machineType,
   height = 132,
 }: {
-  /** 实测挤出包围盒 `[xMin, xMax, yMin, yMax]`（mm，机器坐标） */
-  measured: [number, number, number, number]
+  /**
+   * 实测挤出包围盒列表（`[xMin, xMax, yMin, yMax]`，mm，机器坐标）。
+   *
+   * 一盘两块校准件（Z + XY）时给两项，**画在同一张板上**两个虚线框；
+   * 单块记录仍是一项。
+   */
+  measured: [number, number, number, number][]
   /** 板上那块可打印区与模型几何（映射基准）；旧记录可能没有 */
   modelMap?: ReportModelMap | null
   machineType: string | null
@@ -32,9 +37,10 @@ export default function CalibrationPlate({
   height?: number
 }) {
   const tr = useT()
-  const [x0, x1, y0, y1] = measured
-  /* 退化框（量成 0）⇒ 不摆：那一趟没有可画的"在哪" */
-  if (!(x1 > x0) || !(y1 > y0)) return null
+  /* 退化框（量成 0）逐个剔掉：那一块没有可画的"在哪" */
+  const valid = measured.filter(([x0, x1, y0, y1]) => x1 > x0 && y1 > y0)
+  if (valid.length === 0) return null
+  const [x0, x1, y0, y1] = valid[0]
 
   const box: ReportBox4 = { xMin: x0, xMax: x1, yMin: y0, yMax: y1 }
   const outlines = modelMap?.modelOutlines ?? []
@@ -60,8 +66,10 @@ export default function CalibrationPlate({
       noTower
       height={height}
       label={tr('report.calibMap.label')}
-      /* 轮廓与实测框贴在一起时只留轮廓（见 plateBox.ts） */
-      box={shouldShowMeasuredBox(measured, outlines) ? box : null}
+      /* 轮廓与实测框贴在一起时只留轮廓（见 plateBox.ts）；多块逐块判 */
+      boxes={valid
+        .filter((m) => shouldShowMeasuredBox(m, outlines))
+        .map(([a, b, c, d]) => ({ xMin: a, xMax: b, yMin: c, yMax: d }))}
     />
   )
 }

@@ -93,6 +93,12 @@ interface Props {
    */
   box?: ReportBox4 | null
   /**
+   * **多块参考框**（2026-11-28）：一盘两块校准件时一次画两个实测框。
+   *
+   * 与 `box` 合并渲染 —— 单块记录仍只给 `box`，双块记录改成给 `boxes`。
+   */
+  boxes?: ReportBox4[] | null
+  /**
    * **越界那一屏的每块模型**（2026-11-19）：轮廓 + 建议位移。
    *
    * 给了就按它画（每块一条凸包，**不按板裁** —— 板外那截正是要标红的东西），
@@ -181,6 +187,7 @@ export default function CollisionMap({
   hideTowerBox = false,
   allowed = null,
   box = null,
+  boxes = null,
   pieces = null,
   pen = null,
   numbered = false,
@@ -658,20 +665,33 @@ export default function CollisionMap({
         />
       )}
 
-      {/* 参考框（校准件的实测包围盒）：只圈位置，不参与任何判据 */}
-      {box != null &&
-        box.xMin !== undefined &&
-        box.xMax !== undefined &&
-        box.yMin !== undefined &&
-        box.yMax !== undefined && (
+      {/* 参考框（校准件的实测包围盒）：只圈位置，不参与任何判据。
+          一盘两块时给 `boxes`，两个框画在同一张板上。 */}
+      {[...(box != null ? [box] : []), ...(boxes ?? [])]
+        .filter(
+          (
+            b,
+          ): b is ReportBox4 & {
+            xMin: number
+            xMax: number
+            yMin: number
+            yMax: number
+          } =>
+            b.xMin !== undefined &&
+            b.xMax !== undefined &&
+            b.yMin !== undefined &&
+            b.yMax !== undefined,
+        )
+        .map((b, i) => (
           <rect
+            key={`guide-${i}`}
             className={s.guide}
-            x={bedPt(box.xMin, box.yMax)[0]}
-            y={bedPt(box.xMin, box.yMax)[1]}
-            width={box.xMax - box.xMin}
-            height={box.yMax - box.yMin}
+            x={bedPt(b.xMin, b.yMax)[0]}
+            y={bedPt(b.xMin, b.yMax)[1]}
+            width={b.xMax - b.xMin}
+            height={b.yMax - b.yMin}
           />
-        )}
+        ))}
 
       {/* 模型轮廓（另一种颜色 + 虚线：一眼和塔分开）。
           ★ **一个模型一块轮廓**，不是矩形（2026-10-18 作者：「图片的都是矩形的看着好像

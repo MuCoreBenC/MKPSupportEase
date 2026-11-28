@@ -2760,31 +2760,36 @@ export default function PageReport({
                                   />
                                 )}
                                 {/* 校准件：同一块画布，画真实外形与实测包围盒。
-                                    多块盘（Z + XY 同盘）逐块各画一张，顺序与执行顺序一致。 */}
+                                    多块盘（Z + XY 同盘）把各块的实测框画在**同一张**上 ——
+                                    轮廓本来就只有一份，画两张只会看到两个一样的板子。 */}
                                 {g.id === 'result' &&
-                                  ((detail.calibration?.plates ?? []).some(
-                                    (p) => p.measured != null,
-                                  )
-                                    ? (detail.calibration?.plates ?? []).map((p, i) =>
-                                        p.measured == null ? null : (
-                                          <div className={s.plate} key={`${p.mode}-${i}`}>
-                                            <CalibrationPlate
-                                              measured={p.measured}
-                                              modelMap={detail.modelMap ?? null}
-                                              machineType={detail.summary.machineType}
-                                            />
-                                          </div>
-                                        ),
+                                  (() => {
+                                    const boxes = (detail.calibration?.plates ?? [])
+                                      .map((p) => p.measured)
+                                      .filter(
+                                        (
+                                          m,
+                                        ): m is [number, number, number, number] =>
+                                          m != null,
                                       )
-                                    : detail.calibration?.measured != null && (
-                                        <div className={s.plate}>
-                                          <CalibrationPlate
-                                            measured={detail.calibration.measured}
-                                            modelMap={detail.modelMap ?? null}
-                                            machineType={detail.summary.machineType}
-                                          />
-                                        </div>
-                                      ))}
+                                    const fallback = detail.calibration?.measured
+                                    const all =
+                                      boxes.length > 0
+                                        ? boxes
+                                        : fallback != null
+                                          ? [fallback]
+                                          : []
+                                    if (all.length === 0) return null
+                                    return (
+                                      <div className={s.plate}>
+                                        <CalibrationPlate
+                                          measured={all}
+                                          modelMap={detail.modelMap ?? null}
+                                          machineType={detail.summary.machineType}
+                                        />
+                                      </div>
+                                    )
+                                  })()}
                                 {/* 越界那一趟：同一块画布，凸出允许范围的那一块标红
                                     （旧记录没有 `boundary` ⇒ 不摆） */}
                                 {g.id === 'result' &&
