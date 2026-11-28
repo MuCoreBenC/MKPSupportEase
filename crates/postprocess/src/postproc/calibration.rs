@@ -283,7 +283,8 @@ pub fn insert_calibration_gcode_with_receipt(
         let preserve =
             machine_type_str == "P1S" || machine_type_str == "A1" || machine_type_str == "A1_MINI";
         let filtered = filter_model_motion_paths(&content, preserve);
-        minimize_startup_gcode(filtered, &machine_type_str)
+        let loaded = drop_load_filament(&filtered);
+        minimize_startup_gcode(loaded, &machine_type_str)
     } else if ir_data.prefs.skip_vibration_calibration {
         /* ★ 2026-10-17：这一支原来是**无条件**跑的 —— 也就是说"跳过震动检测"从来没听过
         用户的设置，一直被当成开着。现在按设置页那一档来（出厂关 ⇒ 保留 M970/M974）。 */
@@ -414,7 +415,8 @@ pub fn insert_calibration_blocks(
         let preserve =
             machine_type_str == "P1S" || machine_type_str == "A1" || machine_type_str == "A1_MINI";
         let filtered = filter_model_motion_paths(&content, preserve);
-        minimize_startup_gcode(filtered, &machine_type_str)
+        let loaded = drop_load_filament(&filtered);
+        minimize_startup_gcode(loaded, &machine_type_str)
     } else if ir_data.prefs.skip_vibration_calibration {
         remove_vibration_detection_from_mech_mode(&content)
     } else {
@@ -506,6 +508,57 @@ pub fn insert_calibration_blocks(
         output = filter_e_moves(&output);
     }
     Ok((output, receipts))
+}
+
+/// 删掉「从 AMS 装料」那一段（`M620 S<n>A` 起、`M621 S<n>A` 止）。
+///
+/// 只给**直接校准**用：那一趟不打模型，校准动作全程不出料（块里先 `M104 S30`，
+/// 后面只有挂笔与探针/视觉），而装料段要加热到 250、挤 100 mm、再擦嘴降温 ——
+/// 纯等一两分钟。
+///
+/// 起止任一认不出来就原样返回：只删半边会把起始段改坏。
+pub fn drop_load_filament(lines: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    let mut skipping = false;
+    for line in lines {
+        if !skipping && is_load_filament_start(line) {
+            skipping = true;
+            continue;
+        }
+        if skipping {
+            if is_load_filament_end(line) {
+                skipping = false;
+            }
+            continue;
+        }
+        out.push(line.clone());
+    }
+    /* 没闭合 ⇒ 判据认错了（只找到起点没有终点），整段回滚，别把后半份文件吃掉。 */
+    if skipping {
+        return lines.to_vec();
+    }
+    out
+}
+
+/// 装料起点：`M620 S0A` / `M620 S1A`（带 `A` 后缀 = 装载；`M620 S255` 是退料）。
+fn is_load_filament_start(line: &str) -> bool {
+    load_filament_command(line, "M620")
+}
+
+/// 装料终点：`M621 S0A`。
+fn is_load_filament_end(line: &str) -> bool {
+    load_filament_command(line, "M621")
+}
+
+fn load_filament_command(line: &str, command: &str) -> bool {
+    let code = code_before_comment(line.trim()).to_ascii_uppercase();
+    let mut fields = code.split_whitespace();
+    if !fields.next().is_some_and(|c| c == command) {
+        return false;
+    }
+    fields
+        .next()
+        .is_some_and(|arg| arg.starts_with('S') && arg.ends_with('A'))
 }
 
 // ---- filterModelMotionPaths（helpers.go:526） ----
@@ -1477,5 +1530,45 @@ mod tests {
         let (line, keep) = should_preserve_nozzle_load_line_line("\tM104 S220");
         assert!(keep);
         assert_eq!(line, "\tM104 S30");
+    }
+
+    fn ls(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// 装料段整段去掉，前后原样。
+    #[test]
+    fn drop_load_filament_removes_the_whole_segment() {
+        let lines = ls(&[
+            "M620 M ;enable remap",
+            "M620 S0A   ; switch material if AMS exist",
+            "    M109 S245",
+            "    G1 E50 F200",
+            "M621 S0A",
+            "M400",
+        ]);
+        assert_eq!(
+            drop_load_filament(&lines),
+            ls(&["M620 M ;enable remap", "M400"])
+        );
+    }
+
+    /// 只认带 `A` 后缀的装载；`M620 S255` 是退料，不许动它。
+    #[test]
+    fn drop_load_filament_keeps_the_unload_segment() {
+        let lines = ls(&[
+            "; pull back filament to AMS",
+            "M620 S255",
+            "T255",
+            "M621 S255",
+        ]);
+        assert_eq!(drop_load_filament(&lines), lines);
+    }
+
+    /// 只找到起点、没有终点 ⇒ 整体回滚，别把后半份文件吃掉。
+    #[test]
+    fn drop_load_filament_rolls_back_without_the_end() {
+        let lines = ls(&["M620 S0A", "    M109 S245", "M400"]);
+        assert_eq!(drop_load_filament(&lines), lines);
     }
 }

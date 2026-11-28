@@ -247,6 +247,10 @@ fn direct_calibrate_drops_the_model_for_two_plates() {
         "; CONFIG_BLOCK_START",
         "; total layer number: 1/1",
         "; CONFIG_BLOCK_END",
+        "M620 S0A   ; switch material if AMS exist",
+        "    M109 S245",
+        "    G1 E50 F200",
+        "M621 S0A",
         "; FEATURE: Outer wall",
         "G1 X80.0 Y80.0 E0.5",
         "G1 X90.0 Y80.0 E0.6",
@@ -266,5 +270,10 @@ fn direct_calibrate_drops_the_model_for_two_plates() {
     assert!(
         out.iter().any(|l| l == "; XY Offset Calibration"),
         "XY 块丢了"
+    );
+    /* 不打印就不装料：`M620 S0A` ~ `M621 S0A` 整段去掉，省掉加热与挤料。 */
+    assert!(
+        !out.iter().any(|l| l.contains("M620 S0A")),
+        "装料段没删掉: {out:?}"
     );
 }
