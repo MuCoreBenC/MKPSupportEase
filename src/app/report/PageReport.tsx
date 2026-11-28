@@ -1197,21 +1197,27 @@ function buildGroups(
           return '—'
         })(),
       ],
-      [tr('report.actions.directSkipLoad'), actionYesNo(actions?.directSkipLoad)],
-      [tr('report.actions.directSkipBedLeveling'), actionYesNo(actions?.directSkipBedLeveling)],
-      [tr('report.actions.directSkipUnload'), actionYesNo(actions?.directSkipUnload)],
-      [tr('report.actions.directDropModel'), actionYesNo(actions?.directDropModel)],
-      /* 有校准时显示模型名（结论那行已经写了是哪两种校准），没有则退回模式串 / — */
-      [
-        tr('report.actions.calibrationBlocks'),
-        actionText(
-          baseName(detail.calibration?.model3mf) ??
-            baseName(detail.calibration?.originPath) ??
-            actions?.calibrationBlocks,
-        ),
-      ],
-      [tr('report.actions.zDwell'), actionNumber(actions?.zCalibrationDwellSec, ' 秒')],
-      [tr('report.actions.xyDwell'), actionNumber(actions?.xyCalibrationDwellSec, ' 秒')],
+      /* 校准专属那几行：**不是校准模式就连行都不摆** —— 空在那里占位置没意义。
+         旧记录没有 `isCalibrationMode` 这一格 ⇒ 同样不摆。 */
+      ...(actions?.isCalibrationMode === true
+        ? ([
+            [tr('report.actions.directSkipLoad'), actionYesNo(actions.directSkipLoad)],
+            [tr('report.actions.directSkipBedLeveling'), actionYesNo(actions.directSkipBedLeveling)],
+            [tr('report.actions.directSkipUnload'), actionYesNo(actions.directSkipUnload)],
+            [tr('report.actions.directDropModel'), actionYesNo(actions.directDropModel)],
+            /* 结论那行已经写了是哪两种校准，这里给模型名 */
+            [
+              tr('report.actions.calibrationBlocks'),
+              actionText(
+                baseName(detail.calibration?.model3mf) ??
+                  baseName(detail.calibration?.originPath) ??
+                  actions.calibrationBlocks,
+              ),
+            ],
+            [tr('report.actions.zDwell'), actionNumber(actions.zCalibrationDwellSec, ' 秒')],
+            [tr('report.actions.xyDwell'), actionNumber(actions.xyCalibrationDwellSec, ' 秒')],
+          ] as [string, string][])
+        : []),
     ],
   })
 
