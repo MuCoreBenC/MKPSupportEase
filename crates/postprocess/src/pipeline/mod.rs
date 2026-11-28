@@ -190,6 +190,8 @@ pub struct ProcessResult {
     /// 调试那一趟的参数；普通那趟是 `None`。归档要写它，所以随结果带出来。
     pub debug: Option<crate::ir::types::DebugIr>,
     pub detail_facts: DetailFacts,
+    /// 本次后处理的 10 条动作事实（报告「本次后处理」分组专用）。
+    pub actions: PostprocActions,
     /// 输入 G-code 头部刮出来的 5 个事实（机型预设名 / 工艺预设名 / 熨平开关 / 3mf 名 /
     /// 3MF 模型名）。
     ///
@@ -218,6 +220,34 @@ pub struct ProcessResult {
 /// | `layer_index_len` | **删，且 `dump-ir` 也给不出**：它需要 pass1 的产物，而 `dump-ir` 不跑 pass1。它唯一的消费者是 GUI 的 `totalLayers` 在 `TotalLayerNumber == 0` 时的回退分支，CLI 没有这个展示面 |
 ///
 /// 剩下这 4 个留着，因为它们是**这条链上才有的事实**，别处无法重算。
+/// 本次后处理的 10 条动作事实 —— 报告里「本次后处理」那一组固定按这个顺序摆。
+///
+/// 每一项都可能是 `None`：表示这一趟没有这件事。报告端**字段不消失**，值用 `—` 占位。
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostprocActions {
+    /// 1 屏蔽 AMS 退料（本次是否真的屏蔽了）
+    pub suppress_ams_unload: Option<bool>,
+    /// 2 收尾横移前抬到的高度（mm）
+    pub end_stage_lift_mm: Option<f64>,
+    /// 3 末尾收笔（`M18` 之前）
+    pub end_stage_retract: Option<bool>,
+    /// 4 开头收笔
+    pub begin_stage_retract: Option<bool>,
+    /// 5 跳过震动检测
+    pub skip_vibration: Option<bool>,
+    /// 6 直接校准不装料（仅 direct）
+    pub direct_skip_load: Option<bool>,
+    /// 7 直接校准跳过调平（仅 direct）
+    pub direct_skip_bed_leveling: Option<bool>,
+    /// 8 直接校准跳过退料（仅 direct，固定例外）
+    pub direct_skip_unload: Option<bool>,
+    /// 9 直接校准移除模型（仅 direct）
+    pub direct_drop_model: Option<bool>,
+    /// 10 校准块（`ZOffset+Precise`；无校准 = `None`）
+    pub calibration_blocks: Option<String>,
+}
+
 pub struct DetailFacts {
     /// 全量 IR 的**最终态**（12 步里被就地修改过）。
     pub ir: crate::ir::Ir,
@@ -903,6 +933,10 @@ fn run(
         out_lines = debug::build_debug_gcode(&content, &dbg);
     }
 
+    /* 本次是不是「直接校准」—— 报告事实与退料段的固定例外都读它。 */
+    let is_direct_calibrate =
+        ir.safety.calibration_execution_mode == crate::ir::CALIBRATION_EXEC_DIRECT_CALIBRATE;
+
     // ---- step 11: write —— 三个 hooks + .part + rename ----
     // 最后一道取消检查点：此后开始落盘，写就写完。
     checkpoint(cancel)?;
@@ -924,12 +958,19 @@ fn run(
         /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从原口径移植） */
         out_lines = bed_glue::apply_bed_glue(out_lines, &ir, calib_mode);
         /* 收尾再收一次笔：复用开头那张机型表，只横向走到笔架，不归零也不碰 Z。
-         * 插在 `M621 S255` 之后 —— 退料那一段要整段走完，不在中间插动作。 */
+         * 抬 Z 在收尾第一条横移之前；收笔块在最后一条 `M18` 之前。 */
         out_lines =
             hooks::apply_end_stage_retract(out_lines, &ir, ir.prefs.end_stage_retract_enabled);
         /* 屏蔽 AMS 收尾退料：放在最后 —— 校准块（step 10 已插）与涂胶块都可能落在它前面，
-         * 这一步只按标记删收尾那一段，与前面几位互不影响。 */
-        out_lines = hooks::apply_ams_end_unload(out_lines, ir.prefs.suppress_ams_unload);
+         * 这一步只按标记删收尾那一段，与前面几位互不影响。
+         *
+         * ★ 直接校准是固定例外：那一趟不打模型，校准块挪到退料段之后，退料段就落到了
+         *   开头，里面的 `X181` 切料位还会碰笔。所以无论开关怎么设都整段不写；
+         *   正常打印完全按 `SuppressAmsUnload` 走，一个字节都不多动。 */
+        out_lines = hooks::apply_ams_end_unload(
+            out_lines,
+            ir.prefs.suppress_ams_unload || is_direct_calibrate,
+        );
     }
 
     // MKP 标记协议 v1 收尾：ev 按落盘行序重编号 + 文件头 ;MKP_INFO + 文件尾 ;MKP_STATS，
@@ -1000,6 +1041,23 @@ fn run(
     };
 
     let step_timings = timer.finish();
+    /* 10 条动作事实：只记「本次生效的设置 + 条件」，不另开通道统计行数。
+     * 收尾抬升只在收笔开关开着时真的写进 G-code，所以同源取这一档。 */
+    let actions = PostprocActions {
+        suppress_ams_unload: Some(ir.prefs.suppress_ams_unload || is_direct_calibrate),
+        end_stage_lift_mm: ir
+            .prefs
+            .end_stage_retract_enabled
+            .then(|| crate::postproc::disk::calibration::calibration_safe_z(&ir)),
+        end_stage_retract: Some(ir.prefs.end_stage_retract_enabled),
+        begin_stage_retract: Some(ir.prefs.begin_stage_retract_enabled),
+        skip_vibration: Some(ir.prefs.skip_vibration_calibration),
+        direct_skip_load: is_direct_calibrate.then_some(ir.prefs.direct_skip_load),
+        direct_skip_bed_leveling: is_direct_calibrate.then_some(ir.prefs.direct_skip_bed_leveling),
+        direct_skip_unload: is_direct_calibrate.then_some(true),
+        direct_drop_model: is_direct_calibrate.then_some(true),
+        calibration_blocks: (!calibration_mode.is_empty()).then(|| calibration_mode.clone()),
+    };
     Ok(ProcessResult {
         output_path: final_output_path,
         stats: Stats {
@@ -1018,6 +1076,7 @@ fn run(
             fallback_objects: wiping_applied.fallback_objects,
             calibration_mode: calibration_mode.to_string(),
         },
+        actions,
         header_facts: header,
         calibration_receipt: calib_receipts,
     })

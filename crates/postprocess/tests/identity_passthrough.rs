@@ -249,3 +249,57 @@ fn no_identity_means_no_calibration_branch() {
         "普通模型的输出里不该出现校准段"
     );
 }
+
+/// 直接校准 +「屏蔽 AMS 退料」**关着**：退料段也必须整段不写。
+///
+/// 正常打印那条路径完全按开关走（关着就原样保留），只有 direct 是固定例外 ——
+/// 那一趟不打模型，校准块挪到退料段之后，退料段就落到开头，`X181` 切料位还会碰笔。
+#[test]
+fn direct_calibration_drops_unload_even_when_not_suppressed() {
+    let dir = tempfile::tempdir().unwrap();
+    let work = copy_input(dir.path());
+    let raw = std::fs::read_to_string(&work).unwrap();
+    /* 给合成件补一段和真机同形的退料段，否则这条判据什么也测不到。 */
+    let with_unload = raw.replace(
+        "; EXECUTABLE_BLOCK_END",
+        "; pull back filament to AMS\nM620 S255\nG1 X181 F12000\nT255\nM621 S255\n; EXECUTABLE_BLOCK_END",
+    );
+    std::fs::write(&work, &with_unload).unwrap();
+
+    let mut ir = z_new_ir(&with_unload);
+    ir.safety.calibration_execution_mode =
+        postprocess::ir::CALIBRATION_EXEC_DIRECT_CALIBRATE.to_string();
+    ir.prefs.suppress_ams_unload = false;
+
+    let cancel = CancelToken::new();
+    let mut sink = NoProgress;
+    let done = process_with_ir_with_tower_ask(
+        IrProcessRequest {
+            calibrations: Vec::new(),
+            gcode_path: work.clone(),
+            ir,
+            output_path: None,
+            calibration: Mode::ZOffset,
+        },
+        None,
+        &mut sink,
+        &cancel,
+    )
+    .expect("direct 校准管线失败");
+
+    /* 报告那 10 条事实里，第 8 条要能回答「这次跳过了退料」 */
+    assert_eq!(done.actions.direct_skip_unload, Some(true));
+    assert_eq!(
+        done.actions.suppress_ams_unload,
+        Some(true),
+        "开关虽然关着，但本次实际屏蔽了退料"
+    );
+
+    let out = std::fs::read_to_string(&work).unwrap();
+    assert!(
+        !out.contains("pull back filament to AMS"),
+        "直接校准不该留退料段: {out:?}"
+    );
+    assert!(!out.contains("M620 S255"), "切料动作没删掉");
+    assert!(!out.contains("G1 X181 F12000"), "切料位 X181 没删掉");
+}

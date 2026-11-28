@@ -541,6 +541,35 @@ export interface ReportSnapshot {
 }
 
 /** 一条执行记录的详情（展开那一屏） */
+/**
+ * 本次后处理的 10 条动作事实（报告「本次后处理」分组，顺序固定）。
+ *
+ * 每一项都可能是 `null`：表示这一趟没有这件事，页面写 `—` 占位，
+ * **字段本身不消失**。
+ */
+export interface ReportPostprocActions {
+  /** 1 屏蔽 AMS 退料（本次是否真的屏蔽了） */
+  suppressAmsUnload: boolean | null
+  /** 2 收尾横移前抬到的高度（mm） */
+  endStageLiftMm: number | null
+  /** 3 末尾收笔（`M18` 之前） */
+  endStageRetract: boolean | null
+  /** 4 开头收笔 */
+  beginStageRetract: boolean | null
+  /** 5 跳过震动检测 */
+  skipVibration: boolean | null
+  /** 6 直接校准不装料（仅 direct） */
+  directSkipLoad: boolean | null
+  /** 7 直接校准跳过调平（仅 direct） */
+  directSkipBedLeveling: boolean | null
+  /** 8 直接校准跳过退料（仅 direct） */
+  directSkipUnload: boolean | null
+  /** 9 直接校准移除模型（仅 direct） */
+  directDropModel: boolean | null
+  /** 10 校准块（`ZOffset+Precise`；无校准 = `null`） */
+  calibrationBlocks: string | null
+}
+
 export interface ReportDetail {
   summary: ReportSummary
   inputFile: ReportFileFact | null
@@ -578,6 +607,12 @@ export interface ReportDetail {
    * 判空一律 `!= null`（Rust 的 `Option` 线上是显式 `null`）。
    */
   calibration?: ReportCalibrationFacts | null
+  /**
+   * 本次后处理的 10 条动作事实（`detail.actions`）。
+   *
+   * 旧记录 / 失败记录没有这一格 ⇒ 报告页 10 行仍固定出现，值用 `—` 占位。
+   */
+  actions?: ReportPostprocActions | null
   /**
    * **调试模式那一趟**（2026-11-11，`_meta.json` 的 `detail.debug`）。
    *

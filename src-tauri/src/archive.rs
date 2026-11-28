@@ -506,6 +506,9 @@ pub struct Detail {
     /// 同一套习惯）。普通模型那一趟恒为 `null`。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub calibration: Option<CalibrationFacts>,
+    /// 本次后处理的 10 条动作事实（`detail.actions`）。旧记录 / 失败记录缺键 ⇒ 前端 10 行全 `—`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actions: Option<postprocess::pipeline::PostprocActions>,
     /// **参数快照**（`detail.snapshot`，2026-10-21）：预设 TOML 读到的全量参数 + IR 终态。
     ///
     /// 只加不改：旧记录没有这个键 ⇒ 报告页整组不摆（不编）。
@@ -2018,6 +2021,7 @@ mod tests {
             /* 成功记录没有越界几何 */
             boundary: None,
             detail: Detail {
+                actions: None,
                 debug: None,
                 input_file: FileFact {
                     path: "/tmp/.63288.1.gcode".into(),
@@ -2162,6 +2166,7 @@ mod tests {
             boundary: None,
             relocation: None,
             detail: Detail {
+                actions: None,
                 debug: None,
                 input_file: FileFact {
                     path: "/tmp/x.gcode".into(),

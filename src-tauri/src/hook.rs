@@ -1762,6 +1762,8 @@ fn archive_success(
         // 证据链：**成功那一趟也写**（原来这些值在 `resolve_profile` 之后就被消费掉了，
         // 成功时一个字都不留 —— "为什么这次用了加长版的基准"永远无法解释）。
         calibration: calibration_facts(identity, done),
+        /* 本次后处理的 10 条动作事实（报告「本次后处理」分组） */
+        actions: Some(done.actions.clone()),
         /* 参数快照：预设 TOML 那一刻的值 + IR 终态（见 `archive::ParamSnapshot`） */
         snapshot: facts.snapshot(),
         /* 调试那一趟的参数 —— 普通那趟是 `None`，这一格就缺键 */
@@ -2024,6 +2026,8 @@ fn archive_failure(
         boundary: err.boundary().cloned(),
         relocation: relocation.cloned(),
         detail: Detail {
+            /* 失败 / 取消那趟没有后处理动作可记；报告页这 10 行用 `—` 占位 */
+            actions: None,
             /* 失败那趟不记调试参数：没写产物，记下来也解释不了什么 */
             debug: None,
             input_file: input_fact(&job.gcode, input_size_bytes, None, ""),

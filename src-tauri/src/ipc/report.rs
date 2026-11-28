@@ -134,6 +134,8 @@ pub struct ReportDetail {
     /// 只有判成校准件那一趟后端才写这一格；普通模型 / 旧记录都是 `null` ⇒
     /// 页面不摆「校准身份」组、结论里也不多那一行。
     pub calibration: Option<serde_json::Value>,
+    /// 本次后处理的 10 条动作事实（`detail.actions`）。旧记录没有 ⇒ `null` ⇒ 页面用 `—` 占位。
+    pub actions: Option<serde_json::Value>,
     /// 切片工艺组（`detail.slicer`）。
     pub slicer: Option<serde_json::Value>,
     /// 管线各步计时（`pipeline`：id / elapsedMs / message / status）
@@ -486,6 +488,7 @@ fn detail_of(summary: ReportSummary, meta: &serde_json::Value) -> ReportDetail {
         ironing: detail.and_then(|d| d.get("ironing")).cloned(),
         tower: detail.and_then(|d| d.get("tower")).cloned(),
         calibration: detail.and_then(|d| d.get("calibration")).cloned(),
+        actions: detail.and_then(|d| d.get("actions")).cloned(),
         slicer: detail.and_then(|d| d.get("slicer")).cloned(),
         snapshot: detail.and_then(|d| d.get("snapshot")).cloned(),
         debug: detail.and_then(|d| d.get("debug")).cloned(),

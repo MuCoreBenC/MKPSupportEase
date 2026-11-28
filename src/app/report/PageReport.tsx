@@ -1137,6 +1137,33 @@ function buildGroups(
     cells: resultCells,
   })
 
+  /* 本次后处理：固定 10 行、顺序固定。没有的事实写 `—` 占位 —— 字段本身不许消失
+     （2026-11-28 作者：「一条横线反正要占位，不要说没有，就它这个字段都不出现」）。 */
+  const actions = detail.actions
+  const actionYesNo = (v: boolean | null | undefined): string =>
+    v == null ? '—' : v ? tr('report.actions.yes') : tr('report.actions.no')
+  const actionNumber = (v: number | null | undefined, unit = ''): string =>
+    v == null ? '—' : `${v}${unit}`
+  const actionText = (v: string | null | undefined): string =>
+    v == null || v === '' ? '—' : v
+  groups.push({
+    id: 'actions',
+    title: tr('report.g.actions'),
+    sum: actions == null ? '—' : tr('report.actions.sum'),
+    cells: [
+      [tr('report.actions.suppressAmsUnload'), actionYesNo(actions?.suppressAmsUnload)],
+      [tr('report.actions.endStageLiftMm'), actionNumber(actions?.endStageLiftMm, ' mm')],
+      [tr('report.actions.endStageRetract'), actionYesNo(actions?.endStageRetract)],
+      [tr('report.actions.beginStageRetract'), actionYesNo(actions?.beginStageRetract)],
+      [tr('report.actions.skipVibration'), actionYesNo(actions?.skipVibration)],
+      [tr('report.actions.directSkipLoad'), actionYesNo(actions?.directSkipLoad)],
+      [tr('report.actions.directSkipBedLeveling'), actionYesNo(actions?.directSkipBedLeveling)],
+      [tr('report.actions.directSkipUnload'), actionYesNo(actions?.directSkipUnload)],
+      [tr('report.actions.directDropModel'), actionYesNo(actions?.directDropModel)],
+      [tr('report.actions.calibrationBlocks'), actionText(actions?.calibrationBlocks)],
+    ],
+  })
+
   /* 警告紧跟结论：出了事要一眼看见；没有就不摆（空组还要占一条横线，等于喊狼来了） */
   if (detail.warnings.length > 0) {
     groups.push({
