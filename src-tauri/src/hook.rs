@@ -1500,6 +1500,9 @@ pub fn run(
             &mut archive_warnings,
             relocation.as_ref(),
             &identity_probe,
+            postproc_prefs
+                .as_ref()
+                .is_some_and(|p| p.force_calibration_mode),
         );
     }
 
@@ -1621,6 +1624,8 @@ fn archive_success(
     relocation: Option<&crate::archive::RelocationRecord>,
     // 校准件身份探测结果（在机型核对之前那一次读盘拿到的，见 `probe_model_identity`）
     identity: &postprocess::gcode::IdentityProbe,
+    // 强制校准模式是宿主偏好、内核 IR 里没有，归档这一层补进报告事实
+    force_calibration_mode: bool,
 ) {
     // 延后模式下：输出的复制与 sha 都交给界面进程 —— 这条路上只写记录，不碰那 26MB。
     let deferred = done.print_time.is_none();
@@ -1762,8 +1767,13 @@ fn archive_success(
         // 证据链：**成功那一趟也写**（原来这些值在 `resolve_profile` 之后就被消费掉了，
         // 成功时一个字都不留 —— "为什么这次用了加长版的基准"永远无法解释）。
         calibration: calibration_facts(identity, done),
-        /* 本次后处理的 10 条动作事实（报告「本次后处理」分组） */
-        actions: Some(done.actions.clone()),
+        /* 本次后处理的动作事实（报告「本次后处理」分组）。
+         * 强制校准模式是宿主偏好、内核 IR 里没有 ⇒ 在这一层补上。 */
+        actions: {
+            let mut a = done.actions.clone();
+            a.force_calibration_mode = Some(force_calibration_mode);
+            Some(a)
+        },
         /* 参数快照：预设 TOML 那一刻的值 + IR 终态（见 `archive::ParamSnapshot`） */
         snapshot: facts.snapshot(),
         /* 调试那一趟的参数 —— 普通那趟是 `None`，这一格就缺键 */

@@ -1158,16 +1158,31 @@ function buildGroups(
     title: tr('report.g.actions'),
     sum: actions == null ? '—' : tr('report.actions.sum'),
     cells: [
+      [tr('report.actions.isCalibrationMode'), actionYesNo(actions?.isCalibrationMode)],
+      [tr('report.actions.forceCalibrationMode'), actionYesNo(actions?.forceCalibrationMode)],
       [tr('report.actions.suppressAmsUnload'), actionYesNo(actions?.suppressAmsUnload)],
-      [tr('report.actions.endStageLiftMm'), actionNumber(actions?.endStageLiftMm, ' mm')],
-      [tr('report.actions.endStageRetract'), actionYesNo(actions?.endStageRetract)],
+      /* 按执行顺序：开头收笔在打印前，收尾收笔在打印后 */
       [tr('report.actions.beginStageRetract'), actionYesNo(actions?.beginStageRetract)],
+      [tr('report.actions.endStageRetract'), actionYesNo(actions?.endStageRetract)],
+      [tr('report.actions.endStageLiftMm'), actionNumber(actions?.endStageLiftMm, ' mm')],
       [tr('report.actions.skipVibration'), actionYesNo(actions?.skipVibration)],
+      /* 只有真的撞了塔、用户做过选择才有值；没碰撞就 `—` 占位 */
+      [
+        tr('report.actions.towerAvoid'),
+        (() => {
+          const choice = detail.relocation?.choice
+          if (choice === 'relocate') return tr('report.actions.towerAuto')
+          if (choice === 'model') return tr('report.actions.towerManual')
+          return '—'
+        })(),
+      ],
       [tr('report.actions.directSkipLoad'), actionYesNo(actions?.directSkipLoad)],
       [tr('report.actions.directSkipBedLeveling'), actionYesNo(actions?.directSkipBedLeveling)],
       [tr('report.actions.directSkipUnload'), actionYesNo(actions?.directSkipUnload)],
       [tr('report.actions.directDropModel'), actionYesNo(actions?.directDropModel)],
       [tr('report.actions.calibrationBlocks'), actionText(actions?.calibrationBlocks)],
+      [tr('report.actions.zDwell'), actionNumber(actions?.zCalibrationDwellSec, ' 秒')],
+      [tr('report.actions.xyDwell'), actionNumber(actions?.xyCalibrationDwellSec, ' 秒')],
     ],
   })
 

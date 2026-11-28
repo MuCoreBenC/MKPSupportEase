@@ -226,7 +226,11 @@ pub struct ProcessResult {
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PostprocActions {
-    /// 1 屏蔽 AMS 退料（本次是否真的屏蔽了）
+    /// 0 本次是不是校准模式（报告里第一行，决定下面校准那些行有没有意义）
+    pub is_calibration_mode: Option<bool>,
+    /// 强制校准模式开没开（宿主偏好，内核不读；由归档那层补上）
+    pub force_calibration_mode: Option<bool>,
+    /// 屏蔽 AMS 退料（本次是否真的屏蔽了）
     pub suppress_ams_unload: Option<bool>,
     /// 2 收尾横移前抬到的高度（mm）
     pub end_stage_lift_mm: Option<f64>,
@@ -244,8 +248,12 @@ pub struct PostprocActions {
     pub direct_skip_unload: Option<bool>,
     /// 9 直接校准移除模型（仅 direct）
     pub direct_drop_model: Option<bool>,
-    /// 10 校准块（`ZOffset+Precise`；无校准 = `None`）
+    /// 校准块（`ZOffset+Precise`；无校准 = `None`）
     pub calibration_blocks: Option<String>,
+    /// Z 轴校准停留时间（秒）
+    pub z_calibration_dwell_sec: Option<i64>,
+    /// XY 轴校准停留时间（秒）
+    pub xy_calibration_dwell_sec: Option<i64>,
 }
 
 pub struct DetailFacts {
@@ -1044,6 +1052,8 @@ fn run(
     /* 10 条动作事实：只记「本次生效的设置 + 条件」，不另开通道统计行数。
      * 收尾抬升只在收笔开关开着时真的写进 G-code，所以同源取这一档。 */
     let actions = PostprocActions {
+        is_calibration_mode: Some(ir.safety.is_calibration_mode),
+        force_calibration_mode: None,
         suppress_ams_unload: Some(ir.prefs.suppress_ams_unload || is_direct_calibrate),
         end_stage_lift_mm: ir
             .prefs
@@ -1057,6 +1067,14 @@ fn run(
         direct_skip_unload: is_direct_calibrate.then_some(true),
         direct_drop_model: is_direct_calibrate.then_some(true),
         calibration_blocks: (!calibration_mode.is_empty()).then(|| calibration_mode.clone()),
+        z_calibration_dwell_sec: ir
+            .safety
+            .is_calibration_mode
+            .then_some(ir.prefs.z_calibration_dwell_sec),
+        xy_calibration_dwell_sec: ir
+            .safety
+            .is_calibration_mode
+            .then_some(ir.prefs.xy_calibration_dwell_sec),
     };
     Ok(ProcessResult {
         output_path: final_output_path,

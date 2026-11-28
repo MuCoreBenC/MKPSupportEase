@@ -548,7 +548,11 @@ export interface ReportSnapshot {
  * **字段本身不消失**。
  */
 export interface ReportPostprocActions {
-  /** 1 屏蔽 AMS 退料（本次是否真的屏蔽了） */
+  /** 本次是不是校准模式（报告第一行，决定下面校准那些行有没有意义） */
+  isCalibrationMode: boolean | null
+  /** 强制校准模式（宿主偏好，归档那一层补进来） */
+  forceCalibrationMode: boolean | null
+  /** 屏蔽 AMS 退料（本次是否真的屏蔽了） */
   suppressAmsUnload: boolean | null
   /** 2 收尾横移前抬到的高度（mm） */
   endStageLiftMm: number | null
@@ -568,6 +572,10 @@ export interface ReportPostprocActions {
   directDropModel: boolean | null
   /** 10 校准块（`ZOffset+Precise`；无校准 = `null`） */
   calibrationBlocks: string | null
+  /** Z 轴校准停留时间（秒；非校准 = `null`） */
+  zCalibrationDwellSec: number | null
+  /** XY 轴校准停留时间（秒；非校准 = `null`） */
+  xyCalibrationDwellSec: number | null
 }
 
 export interface ReportDetail {
