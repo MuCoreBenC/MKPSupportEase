@@ -36941,6 +36941,7 @@ M400 ; wait for buffer to clear
 G92 E0 ; zero the extruder
 G90
 G1 Z8.9 F900 ; lower z a little
+G1 Z14.1 F1200
 G1 X0 Y90 F18000 ; move to safe pos
 G1 X-13.0 F3000 ; move to safe pos
 
@@ -36953,13 +36954,6 @@ M106 P3 S0 ; turn off chamber cooling fan
 
 ;G1 X27 F15000 ; wipe
 
-;===== end stage retract ===================
-G90
-G1 X191 F10000
-G1 X20 F10000
-G1 F5000
-M400 ; wait for toolhead retract motion to finish
-;===== end stage retract end ===============
 
 M104 S0 ; turn off hotend
 
@@ -37010,6 +37004,13 @@ M1006 A0 B20 L100 C37 D20 M100 E37 F20 N100
 M1006 W
 ;=====printer finish  sound=========
 M400 S1
+;===== end stage retract ===================
+G90
+G1 X191 F10000
+G1 X20 F10000
+G1 F5000
+M400 ; wait for toolhead retract motion to finish
+;===== end stage retract end ===============
 M18 X Y Z
 M73 P100 R0
 ; EXECUTABLE_BLOCK_END

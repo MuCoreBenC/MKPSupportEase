@@ -10,9 +10,11 @@
 //! 钩子点保留为 no-op（登记于 HONEST-BOUNDARIES）。
 
 use crate::gcode::{
-    MARKER_FILAMENT_END, MARKER_PULL_BACK_AMS, command_has_s, format_python_float, has_e_param,
+    MARKER_FILAMENT_END, MARKER_PULL_BACK_AMS, command_has_s, format_python_float, format_z,
+    has_e_param,
 };
 use crate::ir::Ir;
+use crate::postproc::disk::calibration::calibration_safe_z;
 
 /// `applySkipVibrationCalibration`（startup_common.go:218）：删除 M970*/M974 行。
 ///
@@ -70,14 +72,20 @@ pub fn apply_ams_end_unload(lines: Vec<String>, suppress: bool) -> Vec<String> {
     out
 }
 
-/// 收尾兜底收笔：AMS 退料段**之后**把笔送回笔架。
+/// 收尾兜底：**先把 Z 抬起来**，最后再把笔送回笔架。
 ///
-/// 复用开头那一块的机型表（[`custom_begin_stage_retract_gcode`]），只去掉
-/// **归零**（`G28` / `G29`）、Z 偏置（`M290`）、抬 Z（`G380`）与相对模式切换（`G91`）：
-/// 收尾开头切片器已经把 Z 抬到最高层之上，这里再动 Z 就是往下撞。
+/// 两件事分开落，因为锚点不同：
 ///
-/// 锚点：`M621 S255` 之后 —— 退料要走完再收笔，别插进切料那一段。
-/// 认不出 `M621 S255` 时退回 `; filament end gcode` 之后。两处都没有就原样返回。
+/// 1. **抬 Z**：切片器收尾只发 `G1 Z{max_layer_z + 0.4}`（0.4 mm 高的校准件就是 Z0.8），
+///    紧接着就横移到左边、再横穿到 X181 切料位。Z0.8 挂着笔走这一段就是贴板面刮，
+///    所以在这句抬 Z 之后立刻补一次到 [`calibration_safe_z`]。
+/// 2. **收笔**：放到 `M18 X Y Z`（关电机）之前 —— 那时打印、退料、校准都做完了，
+///    Z 已经在校准收尾的 Z100 附近，横移去笔架只管 X，不碰 Z。
+///
+/// 收笔块复用开头那一块的机型表（[`custom_begin_stage_retract_gcode`]），只去掉
+/// **归零**（`G28` / `G29`）、Z 偏置（`M290`）、抬 Z（`G380`）与相对模式切换（`G91`）。
+///
+/// 两处锚点各自认不出来就各自跳过；都不认就原样返回。
 pub fn apply_end_stage_retract(lines: Vec<String>, ir_data: &Ir, enabled: bool) -> Vec<String> {
     if !enabled {
         return lines;
@@ -87,13 +95,29 @@ pub fn apply_end_stage_retract(lines: Vec<String>, ir_data: &Ir, enabled: bool) 
         tracing::warn!(machine, "机型没有收笔位数据，跳过收尾收笔块");
         return lines;
     };
-    let Some(idx) = end_stage_retract_anchor(&lines) else {
-        return lines;
+
+    /* ② 先插收笔（靠后），再插抬 Z（靠前）—— 这样抬 Z 的行号不会被收笔顶走。 */
+    let mut out = match end_stage_retract_anchor(&lines) {
+        Some(idx) => insert_lines(lines, idx, block),
+        None => {
+            tracing::warn!("收尾找不到关电机那一行，跳过收笔块");
+            lines
+        }
     };
+    if let Some(idx) = end_stage_lift_anchor(&out) {
+        let lift = format!("G1 Z{} F1200", format_z(calibration_safe_z(ir_data)));
+        out = insert_lines(out, idx + 1, vec![lift]);
+    }
+    out
+}
+
+/// 在一行的**位置**上插入（`at` 是插入点，插在它前面）。
+fn insert_lines(lines: Vec<String>, at: usize, mut block: Vec<String>) -> Vec<String> {
+    let at = at.min(lines.len());
     let mut result = Vec::with_capacity(lines.len() + block.len());
     let mut tail = lines.into_iter();
-    result.extend(tail.by_ref().take(idx));
-    result.extend(block);
+    result.extend(tail.by_ref().take(at));
+    result.append(&mut block);
     result.extend(tail);
     result
 }
@@ -135,16 +159,58 @@ fn build_end_stage_retract_block(machine_type: &str) -> Option<Vec<String>> {
     Some(block)
 }
 
-/// 收尾收笔的锚点：`M621 S255`（退料段终点）之后；没有退料段就落在
-/// `; filament end gcode` 之后。
+/// 收笔的锚点：**最后一条** `M18`（关电机）之前 —— 那时打印、退料、校准都做完了。
+///
+/// 必须取最后一条：A1 的起始段里也有一条 `M18`（让用户能手动挪工具头），
+/// 取第一条会把收笔插到开打之前。
 fn end_stage_retract_anchor(lines: &[String]) -> Option<usize> {
-    if let Some(i) = lines.iter().position(|l| command_has_s(l, "M621", "255")) {
-        return Some(i + 1);
-    }
-    lines
+    lines.iter().rposition(|l| is_motor_off_line(l))
+}
+
+/// 关电机那一行（`M18 X Y Z`）。`M17 S` 是**给电机上电**，别认错。
+fn is_motor_off_line(line: &str) -> bool {
+    let code = code_before_comment(line.trim());
+    code.split_whitespace()
+        .next()
+        .is_some_and(|t| t.eq_ignore_ascii_case("M18"))
+}
+
+/// 抬 Z 的锚点：切片器收尾那**第一处纯 Z 抬升**的行号。
+///
+/// 从 `MACHINE_END_GCODE_START`（没有就 `; filament end gcode`）往后找：收尾段一开头
+/// 就是 `G1 Z{max_layer_z + 0.4}`，紧接着就是横移，插在它后面才能保证任何横移都在
+/// 高位上走。只认带 `Z`、不带 `X`/`Y` 的行 —— 带 XY 的那是斜着走。
+fn end_stage_lift_anchor(lines: &[String]) -> Option<usize> {
+    let start = lines
         .iter()
-        .position(|l| l.contains(MARKER_FILAMENT_END) && !l.contains('='))
-        .map(|i| i + 1)
+        .position(|l| l.contains("MACHINE_END_GCODE_START"))
+        .or_else(|| {
+            lines
+                .iter()
+                .position(|l| l.contains(MARKER_FILAMENT_END) && !l.contains('='))
+        })?;
+    lines[start..]
+        .iter()
+        .position(|l| is_pure_z_lift(l))
+        .map(|i| start + i)
+}
+
+fn is_pure_z_lift(line: &str) -> bool {
+    let code = code_before_comment(line.trim());
+    let upper = code.to_ascii_uppercase();
+    if !upper.starts_with("G1 ") {
+        return false;
+    }
+    let mut has_z = false;
+    for token in upper.split_whitespace().skip(1) {
+        if token.starts_with('X') || token.starts_with('Y') {
+            return false;
+        }
+        if token.starts_with('Z') {
+            has_z = true;
+        }
+    }
+    has_z
 }
 
 /// 退料段的起点：注释头优先，模板里没有注释头时退回第一条 `M620 S255`。
@@ -402,32 +468,59 @@ mod tests {
         ir
     }
 
-    /// 收尾收笔：复用开头那张表，插在 `M621 S255` 之后；块里没有归零、没有 Z。
-    #[test]
-    fn end_stage_retract_sits_after_the_ams_segment() {
-        let ir = ir_of("A1", "A1");
-        let content = lines(&[
+    /// 收尾那一盘的真实形态：切片器只抬到 Z0.8 就横移，切料也在低处。
+    fn end_fixture() -> Vec<String> {
+        lines(&[
+            "; MACHINE_END_GCODE_START",
+            "G90",
+            "G1 Z0.8 F900 ; lower z a little",
+            "G1 X0 Y89.531 F18000 ; move to safe pos",
+            "M140 S0",
             "; pull back filament to AMS",
             "M620 S255",
-            "T255",
+            "G1 X181 F12000",
             "M621 S255",
             "M104 S0",
-        ]);
-        let out = apply_end_stage_retract(content, &ir, true);
-        let ams_end = out
+            "G1 Z180 F600",
+            "M400 S1",
+            "M18 X Y Z",
+        ])
+    }
+
+    /// 抬 Z 要在任何横移之前；收笔块要落在关电机之前。
+    #[test]
+    fn end_stage_retract_lifts_first_and_docks_before_motor_off() {
+        let ir = ir_of("A1", "A1");
+        let out = apply_end_stage_retract(end_fixture(), &ir, true);
+
+        let z08 = out
             .iter()
-            .position(|l| l.contains("M621 S255"))
-            .expect("退料段没了");
+            .position(|l| l.contains("G1 Z0.8 F900"))
+            .expect("切片器抬 Z 没了");
+        let lift = out
+            .iter()
+            .position(|l| l.starts_with("G1 Z") && l.ends_with("F1200"))
+            .expect("没有补抬 Z");
+        let travel = out
+            .iter()
+            .position(|l| l.contains("G1 X0 Y89.531"))
+            .expect("横移没了");
+        assert!(lift > z08 && lift < travel, "抬 Z 要在横移之前: {out:?}");
+
         let block_start = out
             .iter()
             .position(|l| l.contains("end stage retract =="))
-            .expect("没插块");
-        let hotend_off = out
+            .expect("没插收笔块");
+        let motor_off = out
             .iter()
-            .position(|l| l.contains("M104 S0"))
-            .expect("收尾没了");
-        assert!(block_start > ams_end, "必须在退料段之后: {out:?}");
-        assert!(block_start < hotend_off, "要在关热端之前: {out:?}");
+            .position(|l| l.trim() == "M18 X Y Z")
+            .expect("关电机没了");
+        let wipe = out
+            .iter()
+            .position(|l| l.contains("M621 S255"))
+            .expect("退料段没了");
+        assert!(block_start > wipe, "收笔要在退料之后: {out:?}");
+        assert!(block_start < motor_off, "收笔要在关电机之前: {out:?}");
         assert!(
             out.iter().any(|l| l == "G1 X276 F10000"),
             "要用 A1 的收笔位: {out:?}"
@@ -438,46 +531,72 @@ mod tests {
                 "{banned} 不该进块: {out:?}"
             );
         }
-        assert!(
-            !out.iter().any(|l| l.starts_with("G1") && l.contains('Z')),
-            "块里不许动 Z: {out:?}"
-        );
     }
 
-    /// 关掉就不插。
+    /// 关掉就一个字节都不动。
     #[test]
     fn end_stage_retract_off_leaves_the_tail_alone() {
         let ir = ir_of("A1", "A1");
-        let content = lines(&["M621 S255", "M104 S0"]);
+        let content = end_fixture();
         assert_eq!(
             apply_end_stage_retract(content.clone(), &ir, false),
             content
         );
     }
 
-    /// 认不出 `M621 S255` 时退回 `; filament end gcode` 之后。
+    /// 认不出关电机那一行 ⇒ 不插收笔（宁可不动，也不往未知位置塞动作）。
     #[test]
-    fn end_stage_retract_falls_back_after_filament_end() {
+    fn end_stage_retract_needs_the_motor_off_line() {
         let ir = ir_of("A1", "A1");
-        let content = lines(&["; filament end gcode", "M104 S0"]);
+        let content = lines(&[
+            "; MACHINE_END_GCODE_START",
+            "G1 Z0.8 F900",
+            "G1 X0 Y89.531 F18000",
+        ]);
         let out = apply_end_stage_retract(content, &ir, true);
-        let end = out
-            .iter()
-            .position(|l| l.contains("filament end gcode"))
-            .expect("锚点没了");
-        let block_start = out
-            .iter()
-            .position(|l| l.contains("end stage retract =="))
-            .expect("没插块");
-        assert!(block_start > end, "要落在 filament end 之后: {out:?}");
+        assert!(
+            !out.iter().any(|l| l.contains("end stage retract ==")),
+            "没有关电机行就不该插收笔: {out:?}"
+        );
+        /* 抬 Z 仍然有效：它只依赖收尾段开头那处抬升。 */
+        assert!(
+            out.iter()
+                .any(|l| l.starts_with("G1 Z") && l.ends_with("F1200")),
+            "抬 Z 仍要补: {out:?}"
+        );
     }
 
-    /// 机型表里没有这一台就不插：拿另一个机型的收笔位顶替会撞机。
+    /// 机型表里没有这一台就整块跳过：拿另一个机型的收笔位顶替会撞机。
     #[test]
     fn end_stage_retract_skips_unknown_machine() {
         let ir = ir_of("UNKNOWN_MACHINE", "UNKNOWN_MACHINE");
-        let content = lines(&["M621 S255", "M104 S0"]);
+        let content = end_fixture();
         assert_eq!(apply_end_stage_retract(content.clone(), &ir, true), content);
+    }
+
+    /// 起始段里也有一条 `M18`（A1 让用户手动挪工具头）：收笔必须落在**最后**那条之前。
+    #[test]
+    fn end_stage_retract_uses_the_last_motor_off() {
+        let ir = ir_of("A1", "A1");
+        let content = lines(&[
+            "M18 ; startup: 让用户手动挪工具头",
+            "; MACHINE_END_GCODE_START",
+            "G1 Z0.8 F900",
+            "G1 X0 Y89.531 F18000",
+            "M104 S0",
+            "M18 X Y Z",
+        ]);
+        let out = apply_end_stage_retract(content, &ir, true);
+        let block = out
+            .iter()
+            .position(|l| l.contains("end stage retract =="))
+            .expect("没插块");
+        assert!(block > 2, "不能插到起始段那条 M18 后面: {out:?}");
+        let last_motor = out
+            .iter()
+            .rposition(|l| l.trim().starts_with("M18"))
+            .expect("没有 M18");
+        assert!(block < last_motor, "收笔要在最后一条 M18 之前: {out:?}");
     }
 
     /// 收笔位认 **G-code 机型**：配置写 A1、切出来的是 A1 mini，就必须用 X191。
