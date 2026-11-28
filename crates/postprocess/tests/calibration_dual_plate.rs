@@ -76,6 +76,39 @@ fn plate_lines(plates: &[Vec<String>]) -> Vec<String> {
     out
 }
 
+/// 两块插入目标：Z 板与 XY 板，各带自己的包围盒。
+fn dual_targets() -> Vec<CalibrationTarget> {
+    let z_bbox = BBox {
+        x_min: 30.20,
+        x_max: 149.71,
+        y_min: 121.00,
+        y_max: 136.27,
+    };
+    let xy_bbox = BBox {
+        x_min: 63.48,
+        x_max: 119.06,
+        y_min: 42.79,
+        y_max: 98.37,
+    };
+    let centroid = |b: &BBox| CentroidResult {
+        centroid_x: (b.x_min + b.x_max) / 2.0,
+        centroid_y: (b.y_min + b.y_max) / 2.0,
+        valid: true,
+    };
+    vec![
+        CalibrationTarget {
+            mode: Mode::ZOffset,
+            bbox: Some(z_bbox),
+            centroid: centroid(&z_bbox),
+        },
+        CalibrationTarget {
+            mode: Mode::XyPrecise,
+            bbox: Some(xy_bbox),
+            centroid: centroid(&xy_bbox),
+        },
+    ]
+}
+
 /// 单 Z：只认出一块，列表长度 1。
 #[test]
 fn a_lone_z_plate_is_still_recognised() {
@@ -139,35 +172,7 @@ fn two_plates_touching_each_other_still_split() {
 #[test]
 fn two_blocks_are_inserted_z_before_xy() {
     let mut ir = fixture_ir();
-    let z_bbox = BBox {
-        x_min: 30.20,
-        x_max: 149.71,
-        y_min: 121.00,
-        y_max: 136.27,
-    };
-    let xy_bbox = BBox {
-        x_min: 63.48,
-        x_max: 119.06,
-        y_min: 42.79,
-        y_max: 98.37,
-    };
-    let centroid = |b: &BBox| CentroidResult {
-        centroid_x: (b.x_min + b.x_max) / 2.0,
-        centroid_y: (b.y_min + b.y_max) / 2.0,
-        valid: true,
-    };
-    let targets = vec![
-        CalibrationTarget {
-            mode: Mode::ZOffset,
-            bbox: Some(z_bbox),
-            centroid: centroid(&z_bbox),
-        },
-        CalibrationTarget {
-            mode: Mode::XyPrecise,
-            bbox: Some(xy_bbox),
-            centroid: centroid(&xy_bbox),
-        },
-    ];
+    let targets = dual_targets();
     let content = lines(&[
         "; FEATURE: Outer wall",
         "G1 X80.0 Y80.0 E0.5",
@@ -231,4 +236,35 @@ fn two_blocks_are_inserted_z_before_xy() {
         .parse()
         .unwrap_or(f64::MAX);
     assert!(z < 20.0, "XY 块不能在 Z100 上空跑：{z_line}");
+}
+
+/// 「直接校准」一盘两块：模型路径必须整段去掉，只留两块校准。
+#[test]
+fn direct_calibrate_drops_the_model_for_two_plates() {
+    let mut ir = fixture_ir();
+    ir.safety.calibration_execution_mode = "direct_calibrate".to_string();
+    let content = lines(&[
+        "; CONFIG_BLOCK_START",
+        "; total layer number: 1/1",
+        "; CONFIG_BLOCK_END",
+        "; FEATURE: Outer wall",
+        "G1 X80.0 Y80.0 E0.5",
+        "G1 X90.0 Y80.0 E0.6",
+        "; filament end gcode",
+        "M104 S0",
+    ]);
+    let (out, receipts) =
+        insert_calibration_blocks(content, &dual_targets(), &mut ir, 2, 3).expect("插入失败");
+
+    assert_eq!(receipts.len(), 2, "两块各一条回执");
+    assert!(
+        !out.iter()
+            .any(|l| l.contains("X80.0 Y80.0") || l.contains("X90.0 Y80.0")),
+        "模型路径没删掉: {out:?}"
+    );
+    assert!(out.iter().any(|l| l == "; ZOffset Calibration"), "Z 块丢了");
+    assert!(
+        out.iter().any(|l| l == "; XY Offset Calibration"),
+        "XY 块丢了"
+    );
 }

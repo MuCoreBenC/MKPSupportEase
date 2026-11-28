@@ -405,10 +405,21 @@ pub fn insert_calibration_blocks(
     crate::ir::fill_defaults(ir_data);
     let machine_type_str = ir_data.machine.machine_type.clone();
 
-    let mut output = content;
-    if ir_data.prefs.skip_vibration_calibration {
-        output = remove_vibration_detection_from_mech_mode(&output);
-    }
+    let is_direct_calibrate =
+        ir_data.safety.calibration_execution_mode == CALIBRATION_EXEC_DIRECT_CALIBRATE;
+
+    /* 「直接校准」要把打印件整段拿掉，多块与单块同一口径：先删模型运动路径与起始段，
+     * 插完校准块再 `filter_e_moves` 收尾。漏掉这一步，多块那条路径会连模型一起打出来。 */
+    let mut output = if is_direct_calibrate {
+        let preserve =
+            machine_type_str == "P1S" || machine_type_str == "A1" || machine_type_str == "A1_MINI";
+        let filtered = filter_model_motion_paths(&content, preserve);
+        minimize_startup_gcode(filtered, &machine_type_str)
+    } else if ir_data.prefs.skip_vibration_calibration {
+        remove_vibration_detection_from_mech_mode(&content)
+    } else {
+        content
+    };
 
     /* 锚点只算一次：第一块插在退料段之后（或 `; filament end gcode` 之后），
      * 后面的块接着上一块的尾巴插 —— 不能都用同一个锚点，那样顺序会反过来。 */
@@ -491,6 +502,9 @@ pub fn insert_calibration_blocks(
      * 划危险区，两块时第一块收尾的 `G1 X100 Y100 Z100` 会被当成那处抬升，于是
      * **第二块入口的 `G1 Z<safe>` 被当「最终降 Z」删掉** —— XY 块就留在 Z100 上空跑。
      * 每块结尾自己会抬到 Z100，不存在需要清掉的收尾降 Z。 */
+    if is_direct_calibrate {
+        output = filter_e_moves(&output);
+    }
     Ok((output, receipts))
 }
 
