@@ -16,6 +16,11 @@
 
 /// 塔片之间最小的 Z 增量：小于它就算同一片（浮点伪影）。
 pub const SLICE_EPS: f64 = 1e-6;
+/// 最后一次涂胶的层顶与模型层顶的比较容差。
+///
+/// `;MKP_BEGIN paint` 的 z 按 3 位小数印，与 `; Z_HEIGHT:` 原文最多差 5e-4；
+/// 取 1e-3 只吃掉这点印刷误差，远小于任何真实层高。
+pub const GLUE_STOP_EPS: f64 = 1e-3;
 /// 一层最多拆几片：再厚也不会把塔打成一摞几十片。
 pub const MAX_SLICES_PER_LAYER: i64 = 32;
 
@@ -91,6 +96,22 @@ pub fn plan_sequence(layer_zs: &[f64], start_z: f64, bounds: Bounds) -> Vec<Towe
         out.extend(slices);
     }
     out
+}
+
+/// 这一层还出不出塔片。
+///
+/// 塔只服务涂胶与换笔：最后一次涂胶的「落笔 → 涂胶 → 收笔 → 打塔」走完，
+/// 后面没有换笔，塔就停在那一片。`last_glue_z = None`（整份没有涂胶）⇒ 照旧出片。
+pub fn prints_at_layer(last_glue_z: Option<f64>, layer_top_z: f64) -> bool {
+    match last_glue_z {
+        None => true,
+        Some(z) => layer_top_z <= z + GLUE_STOP_EPS,
+    }
+}
+
+/// 这一层是不是最后涂胶层：差得再少也要出片，把塔补满到层顶。
+pub fn must_reach_at(last_glue_z: Option<f64>, layer_top_z: f64) -> bool {
+    last_glue_z.is_some_and(|z| (layer_top_z - z).abs() <= GLUE_STOP_EPS)
 }
 
 #[cfg(test)]
@@ -244,5 +265,27 @@ mod tests {
                 .iter()
                 .all(|s| s.height.is_finite() && s.height > 0.0)
         );
+    }
+
+    /// ⑩ 塔停在最后一次涂胶层：那一层照出片并补满，往上不再出片；没涂胶就照旧。
+    #[test]
+    fn the_tower_stops_after_the_last_glue_layer() {
+        // 最后一次涂胶在第 6.52 层顶。
+        assert!(prints_at_layer(Some(6.52), 6.52));
+        assert!(prints_at_layer(Some(6.52), 6.5204));
+        assert!(!prints_at_layer(Some(6.52), 6.6));
+
+        // 没有涂胶：每一层都出片。
+        assert!(prints_at_layer(None, 22.44));
+
+        // 最后涂胶层要补满（哪怕本层差值小于片高下限）。
+        assert!(must_reach_at(Some(6.52), 6.52));
+        assert!(must_reach_at(Some(6.52), 6.5204));
+        assert!(!must_reach_at(Some(6.52), 6.44));
+        let slices = plan_layer(6.44, 6.52, B, must_reach_at(Some(6.52), 6.52));
+        assert_eq!(slices.len(), 1);
+        assert!((slices[0].z - 6.52).abs() < 1e-9);
+        // 不是最后涂胶层时，0.05 这种细层会被并掉（等下一层一起打）。
+        assert!(plan_layer(6.47, 6.52, B, must_reach_at(Some(6.52), 6.47)).is_empty());
     }
 }

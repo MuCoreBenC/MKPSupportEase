@@ -67,6 +67,16 @@ pub fn paint_begin(ev: i64, z: f64) -> String {
     format!("{BEGIN_PREFIX}paint ev={ev} z={}", format_z(z))
 }
 
+/// 从 `;MKP_BEGIN paint ev=<ev> z=<z>` 取涂胶层的层顶；不是这一行 ⇒ `None`。
+///
+/// 塔停在哪一层要靠它（见 `tower::plan::prints_at_layer`）。
+pub fn paint_z(trimmed: &str) -> Option<f64> {
+    let rest = trimmed.strip_prefix(BEGIN_PREFIX)?.strip_prefix("paint ")?;
+    rest.split_whitespace()
+        .find_map(|tok| tok.strip_prefix("z="))
+        .and_then(|v| v.parse::<f64>().ok())
+}
+
 /// `;MKP_END <kind>`。
 pub fn end(kind: &str) -> String {
     format!("{END_PREFIX}{kind}")
@@ -485,6 +495,14 @@ mod tests {
         );
         assert_eq!(paint_begin(3, 2.6), ";MKP_BEGIN paint ev=3 z=2.6");
         assert_eq!(end("swap"), ";MKP_END swap");
+    }
+
+    #[test]
+    fn paint_z_reads_only_paint_begins() {
+        assert_eq!(paint_z(";MKP_BEGIN paint ev=24 z=6.52"), Some(6.52));
+        assert_eq!(paint_z(";MKP_BEGIN swap ev=24 to=print z=6.52"), None);
+        assert_eq!(paint_z(";MKP_END paint"), None);
+        assert_eq!(paint_z(";MKP_BEGIN paint ev=1"), None);
     }
 
     #[test]

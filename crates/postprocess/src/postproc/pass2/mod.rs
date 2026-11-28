@@ -30,7 +30,7 @@ use crate::postproc::disk::wipe::{
 };
 use crate::postproc::offset::process_gcode_offset;
 use crate::postproc::pass1::{LineSink, MM_PER_MINUTE, Pass1Output, ProcessStats};
-use crate::postproc::tower;
+use crate::postproc::{marks, tower};
 
 pub(crate) const TOWER_SUGGESTED_LAYER_COEFF: f64 = 0.7;
 pub(crate) const TOWER_MIN_LAYER_COEFF: f64 = 0.2;
@@ -683,8 +683,10 @@ pub fn second_pass(
         ir_data.machine.first_layer_height,
     );
 
-    // 预扫描：涂胶事件标记 + 按层收集未来碰撞墙体
+    // 预扫描：涂胶事件标记 + 最后一次涂胶的层顶 + 按层收集未来碰撞墙体
     let mut has_glue_event = false;
+    // 最后一次涂胶所在层的层顶：塔只长到这一片（见 `tower::plan::prints_at_layer`）。
+    let mut last_glue_z: Option<f64> = None;
     let mut future_collision_layers: Vec<FutureCollisionLayer> = Vec::new();
     /* 每层「切片器自己写过的那个 Z 字面量」：塔块要原样复用它，不许自己算一个
     （差 0.001 就会被 Bambu 数成多一层，见 `format_layer_z`）。 */
@@ -697,6 +699,11 @@ pub fn second_pass(
         for text in &pass1_lines {
             if text.contains(crate::gcode::MARKER_RISING_NOZZLE) {
                 has_glue_event = true;
+            }
+            // 底面涂胶块没进 pass1 行（由 pass2 插入），但它的层顶永远低于主涂胶，
+            // 不会成为「最后一次」；只认主涂胶事件即可。
+            if let Some(z) = marks::paint_z(text.trim()) {
+                last_glue_z = Some(last_glue_z.map_or(z, |m| m.max(z)));
             }
             let trimmed = text.trim();
             if match_slicer_comment(trimmed, "Z_HEIGHT: ") {
@@ -1154,11 +1161,13 @@ pub fn second_pass(
             && ctx.ir_data.tower.use_towers
             && !ctx.first_layer_tower_flag
             && ctx.current_layer_height != ctx.ir_data.machine.first_layer_height
+            && tower::plan::prints_at_layer(last_glue_z, ctx.layer_z())
         {
             let layer_top_z = ctx.layer_z();
             let bounds = tower_slice_bounds(ctx.ir_data.machine.nozzle_diameter);
-            // 最后一层差得再少也要打：塔必须跟到件顶。
-            let must_reach = ctx.layer_seq + 1 >= ctx.layer_z_literals.len();
+            // 最后一层差得再少也要打（塔跟到件顶）；塔停的那一层同样要补满到层顶。
+            let must_reach = ctx.layer_seq + 1 >= ctx.layer_z_literals.len()
+                || tower::plan::must_reach_at(last_glue_z, layer_top_z);
             // 塔自己决定这一层怎么长：细层并到下一层，超上限的层拆成几片
             // （见 `tower::plan`）。模型只负责报层顶，不负责说这一片多厚。
             let slices = tower::plan_layer(ctx.last_tower_z, layer_top_z, bounds, must_reach);

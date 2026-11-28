@@ -1,17 +1,18 @@
-//! 擦料塔的 Z 连续性：**每一层都要有塔片，片与片之间不许留空**。
+//! 擦料塔的 Z 连续性：**从首层底盘到最后一次涂胶层，每层一片、片与片之间不许留空**。
 //!
 //! 判据的来历：塔片原来按「名义层高」（fast 档 0.28）自己往上记账，模型层高只有 0.2，
 //! 于是大约每 1.4 层才出一片；而塔片又打在模型层顶上、给料按名义层高算 —— 相邻两片
 //! 之间就留下 0.1~0.26mm 的空气缝（实测一份 323 层的样件：141 对里有 31 对悬空、
 //! 整根塔累计 5.38mm 空隙）。预览里看就是一摞互不相连的薄环。
 //!
-//! 这里钉三件事：
-//! 1. 模型层除了首层（首层是底盘）以外，层**层**都有塔片；
+//! 这里钉四件事：
+//! 1. 模型层除了首层（首层是底盘）到最后一次涂胶层，层**层**都有塔片；
 //! 2. 塔片的 Z 就是本层模型层的 Z（容差与 `marks::check_tower_prints_at_layer_z` 同源）；
-//! 3. 每片声明的层高 = 它与上一片的 Z 差 —— 不是名义值。
+//! 3. 每片声明的层高 = 它与上一片的 Z 差 —— 不是名义值；
+//! 4. 最后一次涂胶层之后不再出片（塔只服务涂胶与换笔，那一片就是收笔后打的那片）。
 //!
 //! 反空转：抽掉中间一整层（模型从 1.1 直接跳到 1.5），那一片就比上限厚，
-//! 内核必须报出「塔片比上限还厚」那条警告。没有它的话，上面三条在"压根没出片"的
+//! 内核必须报出「塔片比上限还厚」那条警告。没有它的话，上面几条在"压根没出片"的
 //! 输入上也会绿。
 
 use std::path::PathBuf;
@@ -129,19 +130,39 @@ fn layer_zs(gcode: &str) -> Vec<f64> {
 /// 塔片层高上限：0.7 × 喷嘴。fixture 是 A1（0.4 喷嘴）⇒ 0.28。
 const MAX_LH: f64 = 0.28;
 
+/// 最后一次涂胶所在层的层顶（`;MKP_BEGIN paint … z=<层顶>` 的最大值）。
+fn last_glue_z(gcode: &str) -> f64 {
+    gcode
+        .lines()
+        .filter_map(|l| {
+            let rest = l.trim().strip_prefix(";MKP_BEGIN paint ")?;
+            rest.split_whitespace()
+                .find_map(|tok| tok.strip_prefix("z="))
+                .and_then(|v| v.parse::<f64>().ok())
+        })
+        .fold(0.0_f64, f64::max)
+}
+
 #[test]
 fn every_layer_gets_one_slice_and_slices_touch() {
     let (gcode, stdout) = run(&golden_input(), "same");
     let layers = layer_zs(&gcode);
     let slices = tower_slices(&gcode);
+    let glue_top = last_glue_z(&gcode);
 
     assert!(layers.len() > 10, "样本层数太少，判据没有意义");
-    // 首层是底盘（`Trapezoidal Sheath`），从第二层起每层一片。
+    assert!(glue_top > 0.0, "样本里应当有涂胶事件");
+    // 首层是底盘（`Trapezoidal Sheath`）；到最后一次涂胶层为止每层一片，之后停。
+    let covered: Vec<f64> = layers
+        .iter()
+        .copied()
+        .filter(|z| *z <= glue_top + 1e-3)
+        .collect();
     assert_eq!(
         slices.len(),
-        layers.len() - 1,
-        "除首层底盘外每层都该有塔片（层 {} / 片 {}）",
-        layers.len(),
+        covered.len() - 1,
+        "除首层底盘外、到最后一次涂胶层（{glue_top}）每层都该有塔片（层 {} / 片 {}）",
+        covered.len(),
         slices.len()
     );
 
@@ -153,7 +174,19 @@ fn every_layer_gets_one_slice_and_slices_touch() {
             s.tower_z,
             s.layer_z
         );
+        assert!(
+            s.layer_z <= glue_top + 1e-3,
+            "最后涂胶层 {glue_top} 之后不该再有塔片，却在层 {} 出了一片",
+            s.layer_z
+        );
     }
+    // 最后一片就是最后涂胶层顶（收笔后打的那片塔）。
+    let last = slices.last().expect("至少要有塔片");
+    assert!(
+        (last.tower_z - glue_top).abs() <= 1e-3,
+        "塔顶应停在最后涂胶层顶 {glue_top}，实际 {}",
+        last.tower_z
+    );
 
     for pair in slices.windows(2) {
         let dz = pair[1].tower_z - pair[0].tower_z;
