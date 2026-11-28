@@ -94,6 +94,7 @@ fn check_mode(mode: &str) {
         centroid,
         input.z_dwell_sec,
         input.xy_dwell_sec,
+        postprocess::postproc::disk::BlockOrnaments::FULL,
     )
     .unwrap_or_else(|e| panic!("{mode}: 生成失败: {e}"))
     .unwrap_or_else(|| panic!("{mode}: 参考输出非空，生成器却返回空"));

@@ -71,6 +71,34 @@ fn push_calibration_home(output: &mut Vec<String>, ir_data: &Ir) {
     output.push("; FEATURE: Custom".to_string());
 }
 
+/// 一块校准的「外壳装饰」。
+///
+/// 同盘两块连续跑（Z + XY）时只保留最外层一次：第一块带落笔与开始音乐，最后一块带
+/// 收笔、结束音乐与抬到 Z100；中间的块两头都关掉，笔一直挂着。
+///
+/// **定位动作不在这里**（`push_calibration_home` / `push_safe_z` 永远输出）——
+/// 上一块收尾被裁掉之后，下一块必须自己把 Z 放回工作高度。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BlockOrnaments {
+    /// 落笔 + 开始音乐
+    pub head: bool,
+    /// 收笔 + 结束音乐 + 抬到 Z100
+    pub tail: bool,
+}
+
+impl BlockOrnaments {
+    /// 单块校准：两头都要。
+    pub const FULL: Self = Self {
+        head: true,
+        tail: true,
+    };
+    /// 多块中间的块：只留校准动作。
+    pub const NONE: Self = Self {
+        head: false,
+        tail: false,
+    };
+}
+
 const CALIBE_SING: &str = "\
 ;Calibration Start Music
 M17
@@ -265,6 +293,7 @@ fn append_calibe_sing(mut output: Vec<String>, mt: &str) -> Vec<String> {
 /// 四模式分派。`Precise/Rough/ZOffset` 三个模式各有经典与 New 两条路：
 /// **IR 里写着 `"new"` 且拿到了模型 BBox 才走 New**。缺 BBox 就落经典 ——
 /// 那是非动态路径（`is_dynamic` 为假时上游传 `None`），不是错误。
+#[allow(clippy::too_many_arguments)]
 pub fn generate_calibration_gcode_with_centroid(
     mode: &str,
     machine_type_str: &str,
@@ -273,6 +302,7 @@ pub fn generate_calibration_gcode_with_centroid(
     centroid: CentroidResult,
     z_dwell_sec: i64,
     xy_dwell_sec: i64,
+    ornaments: BlockOrnaments,
 ) -> Result<Option<Vec<String>>, PostprocError> {
     generate_calibration_gcode_with_centroid_rec(
         mode,
@@ -282,6 +312,7 @@ pub fn generate_calibration_gcode_with_centroid(
         centroid,
         z_dwell_sec,
         xy_dwell_sec,
+        ornaments,
         None,
     )
 }
@@ -299,6 +330,7 @@ pub fn generate_calibration_gcode_with_centroid_rec(
     centroid: CentroidResult,
     z_dwell_sec: i64,
     xy_dwell_sec: i64,
+    ornaments: BlockOrnaments,
     receipt: Option<&mut CalibrationReceipt>,
 ) -> Result<Option<Vec<String>>, PostprocError> {
     let mt = parse_machine_type(machine_type_str);
@@ -317,19 +349,20 @@ pub fn generate_calibration_gcode_with_centroid_rec(
                     centroid,
                     xy_dwell_ms,
                     receipt,
+                    ornaments,
                 );
             }
-            generate_xy_calibration(mode, mt, ir_data, xy_dwell_ms)
+            generate_xy_calibration(mode, mt, ir_data, xy_dwell_ms, ornaments)
         }
         "ZOffset" => {
             if ir_data.safety.z_calibration == "new"
                 && let Some(bbox) = model_bbox
             {
                 return generate_z_offset_calibration_new(
-                    mt, ir_data, bbox, centroid, z_dwell_ms, receipt,
+                    mt, ir_data, bbox, centroid, z_dwell_ms, receipt, ornaments,
                 );
             }
-            generate_z_offset_calibration(mt, ir_data, z_dwell_ms)
+            generate_z_offset_calibration(mt, ir_data, z_dwell_ms, ornaments)
         }
         "Repetition" => generate_repetition_calibration(mt, ir_data, model_bbox, receipt),
         _ => Ok(None),
@@ -359,6 +392,7 @@ fn generate_xy_calibration(
     mt: &str,
     ir_data: &Ir,
     _xy_dwell_ms: i64,
+    ornaments: BlockOrnaments,
 ) -> Result<Option<Vec<String>>, PostprocError> {
     let mut output: Vec<String> = Vec::new();
 
@@ -371,11 +405,13 @@ fn generate_xy_calibration(
     push_calibration_home(&mut output, ir_data);
     output.push(";Rising nozzle to avoid collision".to_string());
     push_safe_z(&mut output, ir_data);
-    output.push(";Mounting Toolhead".to_string());
     let (mount, unmount) = mount_unmount_lines(ir_data);
-    output.extend(mount);
-    output.push(";Toolhead Mounted".to_string());
-    output = append_calibe_sing(output, mt);
+    if ornaments.head {
+        output.push(";Mounting Toolhead".to_string());
+        output.extend(mount);
+        output.push(";Toolhead Mounted".to_string());
+        output = append_calibe_sing(output, mt);
+    }
 
     let mut cali_accumulate = match mode {
         "Precise" => -1.0,
@@ -517,12 +553,14 @@ fn generate_xy_calibration(
         ));
     }
 
-    push_safe_z(&mut output, ir_data);
-    output.push(";Unmounting Toolhead".to_string());
-    output.extend(unmount);
-    output.push(";Toolhead Unmounted".to_string());
-    output = append_calibe_sing(output, mt);
-    output.push("G1 X100 Y100 Z100".to_string());
+    if ornaments.tail {
+        push_safe_z(&mut output, ir_data);
+        output.push(";Unmounting Toolhead".to_string());
+        output.extend(unmount);
+        output.push(";Toolhead Unmounted".to_string());
+        output = append_calibe_sing(output, mt);
+        output.push("G1 X100 Y100 Z100".to_string());
+    }
 
     Ok(Some(output))
 }
@@ -531,6 +569,7 @@ fn generate_z_offset_calibration(
     mt: &str,
     ir_data: &Ir,
     z_dwell_ms: i64,
+    ornaments: BlockOrnaments,
 ) -> Result<Option<Vec<String>>, PostprocError> {
     let mut output: Vec<String> = Vec::new();
 
@@ -547,11 +586,13 @@ fn generate_z_offset_calibration(
     push_calibration_home(&mut output, ir_data);
     output.push(";Rising nozzle to avoid collision".to_string());
     push_safe_z(&mut output, ir_data);
-    output.push(";Mounting Toolhead".to_string());
     let (mount, unmount) = mount_unmount_lines(ir_data);
-    output.extend(mount);
-    output.push(";Toolhead Mounted".to_string());
-    output = append_calibe_sing(output, mt);
+    if ornaments.head {
+        output.push(";Mounting Toolhead".to_string());
+        output.extend(mount);
+        output.push(";Toolhead Mounted".to_string());
+        output = append_calibe_sing(output, mt);
+    }
 
     if mt == "A1_MINI" || mt == "A1" {
         output.push(";Floating Z Calibration".to_string());
@@ -625,12 +666,14 @@ fn generate_z_offset_calibration(
         output.push(format!("G4 P{z_dwell_ms}"));
     }
 
-    push_safe_z(&mut output, ir_data);
-    output.push(";Unmounting Toolhead".to_string());
-    output.extend(unmount);
-    output.push(";Toolhead Unmounted".to_string());
-    output = append_calibe_sing(output, mt);
-    output.push("G1 X100 Y100 Z100".to_string());
+    if ornaments.tail {
+        push_safe_z(&mut output, ir_data);
+        output.push(";Unmounting Toolhead".to_string());
+        output.extend(unmount);
+        output.push(";Toolhead Unmounted".to_string());
+        output = append_calibe_sing(output, mt);
+        output.push("G1 X100 Y100 Z100".to_string());
+    }
 
     Ok(Some(output))
 }
@@ -896,6 +939,7 @@ fn generate_xy_calibration_new(
     centroid: CentroidResult,
     xy_dwell_ms: i64,
     receipt: Option<&mut CalibrationReceipt>,
+    ornaments: BlockOrnaments,
 ) -> Result<Option<Vec<String>>, PostprocError> {
     let profile = resolve_profile(mode, model_bbox, "generate_xy_calibration_new")?;
     if let Some(r) = receipt {
@@ -925,11 +969,13 @@ fn generate_xy_calibration_new(
     push_calibration_home(&mut output, ir_data);
     output.push(";Rising nozzle to avoid collision".to_string());
     push_safe_z(&mut output, ir_data);
-    output.push(";Mounting Toolhead".to_string());
     let (mount, unmount) = filtered_mount_unmount_lines(ir_data);
-    output.extend(mount);
-    output.push(";Toolhead Mounted".to_string());
-    output = append_calibe_sing(output, mt);
+    if ornaments.head {
+        output.push(";Mounting Toolhead".to_string());
+        output.extend(mount);
+        output.push(";Toolhead Mounted".to_string());
+        output = append_calibe_sing(output, mt);
+    }
 
     let cali_start = match mode {
         "Precise" => -1.0,
@@ -1072,12 +1118,14 @@ fn generate_xy_calibration_new(
         ));
     }
 
-    push_safe_z(&mut output, ir_data);
-    output.push(";Unmounting Toolhead".to_string());
-    output.extend(unmount);
-    output.push(";Toolhead Unmounted".to_string());
-    output = append_calibe_sing(output, mt);
-    output.push("G1 X100 Y100 Z100".to_string());
+    if ornaments.tail {
+        push_safe_z(&mut output, ir_data);
+        output.push(";Unmounting Toolhead".to_string());
+        output.extend(unmount);
+        output.push(";Toolhead Unmounted".to_string());
+        output = append_calibe_sing(output, mt);
+        output.push("G1 X100 Y100 Z100".to_string());
+    }
 
     Ok(Some(output))
 }
@@ -1100,6 +1148,7 @@ fn generate_z_offset_calibration_new(
     centroid: CentroidResult,
     z_dwell_ms: i64,
     receipt: Option<&mut CalibrationReceipt>,
+    ornaments: BlockOrnaments,
 ) -> Result<Option<Vec<String>>, PostprocError> {
     let profile = resolve_profile("ZOffset", model_bbox, "generate_z_offset_calibration_new")?;
     if let Some(r) = receipt {
@@ -1131,11 +1180,13 @@ fn generate_z_offset_calibration_new(
     push_calibration_home(&mut output, ir_data);
     output.push(";Rising nozzle to avoid collision".to_string());
     push_safe_z(&mut output, ir_data);
-    output.push(";Mounting Toolhead".to_string());
     let (mount, unmount) = filtered_mount_unmount_lines(ir_data);
-    output.extend(mount);
-    output.push(";Toolhead Mounted".to_string());
-    output = append_calibe_sing(output, mt);
+    if ornaments.head {
+        output.push(";Mounting Toolhead".to_string());
+        output.extend(mount);
+        output.push(";Toolhead Mounted".to_string());
+        output = append_calibe_sing(output, mt);
+    }
 
     if mt == "A1_MINI" || mt == "A1" {
         output.push(";Floating Z Calibration".to_string());
@@ -1206,12 +1257,14 @@ fn generate_z_offset_calibration_new(
         output.push(format!("G4 P{z_dwell_ms}"));
     }
 
-    push_safe_z(&mut output, ir_data);
-    output.push(";Unmounting Toolhead".to_string());
-    output.extend(unmount);
-    output.push(";Toolhead Unmounted".to_string());
-    output = append_calibe_sing(output, mt);
-    output.push("G1 X100 Y100 Z100".to_string());
+    if ornaments.tail {
+        push_safe_z(&mut output, ir_data);
+        output.push(";Unmounting Toolhead".to_string());
+        output.extend(unmount);
+        output.push(";Toolhead Unmounted".to_string());
+        output = append_calibe_sing(output, mt);
+        output.push("G1 X100 Y100 Z100".to_string());
+    }
 
     Ok(Some(output))
 }
@@ -1377,9 +1430,18 @@ mod tests {
     }
 
     fn xy_new(mode: &str, mt: &str, ir: &Ir, bbox: &BBox) -> Vec<String> {
-        generate_xy_calibration_new(mode, mt, ir, bbox, CentroidResult::default(), 3000, None)
-            .expect("生成失败")
-            .expect("New 变体不该返回空")
+        generate_xy_calibration_new(
+            mode,
+            mt,
+            ir,
+            bbox,
+            CentroidResult::default(),
+            3000,
+            None,
+            BlockOrnaments::FULL,
+        )
+        .expect("生成失败")
+        .expect("New 变体不该返回空")
     }
 
     /// 结构与坐标：22 轮（11 横 + 11 竖），每轮 7 行，头 6 尾 4。
@@ -1518,6 +1580,7 @@ mod tests {
             CentroidResult::default(),
             3000,
             Some(&mut receipt),
+            BlockOrnaments::FULL,
         )
         .expect("生成失败")
         .expect("New 变体不该返回空");
@@ -1545,6 +1608,7 @@ mod tests {
             CentroidResult::default(),
             2,
             3,
+            BlockOrnaments::FULL,
         )
         .expect("经典分支生成失败")
         .expect("经典分支返回空");
@@ -1579,6 +1643,7 @@ mod tests {
             CentroidResult::default(),
             3000,
             None,
+            BlockOrnaments::FULL,
         )
         .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_002");
@@ -1603,7 +1668,8 @@ mod tests {
                 &noisy,
                 CentroidResult::default(),
                 3000,
-                None
+                None,
+                BlockOrnaments::FULL,
             )
             .is_ok()
         );
@@ -1621,8 +1687,17 @@ mod tests {
             centroid_y: cy + (cy - 82.5736),
             valid: true,
         };
-        let err = generate_xy_calibration_new("Precise", "P1S", &ir, &b, mirrored, 3000, None)
-            .unwrap_err();
+        let err = generate_xy_calibration_new(
+            "Precise",
+            "P1S",
+            &ir,
+            &b,
+            mirrored,
+            3000,
+            None,
+            BlockOrnaments::FULL,
+        )
+        .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_001");
 
         // valid=false 时不判（调用方语义）
@@ -1632,7 +1707,17 @@ mod tests {
             valid: false,
         };
         assert!(
-            generate_xy_calibration_new("Precise", "P1S", &ir, &b, ignored, 3000, None).is_ok(),
+            generate_xy_calibration_new(
+                "Precise",
+                "P1S",
+                &ir,
+                &b,
+                ignored,
+                3000,
+                None,
+                BlockOrnaments::FULL
+            )
+            .is_ok(),
             "valid=false 的质心不该参与判定"
         );
     }
@@ -1736,9 +1821,17 @@ mod tests {
     }
 
     fn z_new(mt: &str, ir: &Ir, bbox: &BBox) -> Vec<String> {
-        generate_z_offset_calibration_new(mt, ir, bbox, CentroidResult::default(), 2000, None)
-            .expect("生成失败")
-            .expect("New 变体不该返回空")
+        generate_z_offset_calibration_new(
+            mt,
+            ir,
+            bbox,
+            CentroidResult::default(),
+            2000,
+            None,
+            BlockOrnaments::FULL,
+        )
+        .expect("生成失败")
+        .expect("New 变体不该返回空")
     }
 
     /// 结构与原点：11 个方块，原点 = bbox 左下角 + (0.079, 3.755)。
@@ -1803,6 +1896,7 @@ mod tests {
                 CentroidResult::default(),
                 2,
                 3,
+                BlockOrnaments::FULL,
             )
             .expect("生成失败")
             .expect("参考机型不该返回空");
@@ -1838,6 +1932,7 @@ mod tests {
                 CentroidResult::default(),
                 2,
                 3,
+                BlockOrnaments::FULL,
             )
             .expect("生成失败")
             .expect("A1_MINI 有 Z 校准位");
@@ -1905,6 +2000,7 @@ mod tests {
             CentroidResult::default(),
             2,
             3,
+            BlockOrnaments::FULL,
         )
         .expect("经典分支生成失败")
         .expect("经典分支返回空");
@@ -1937,6 +2033,7 @@ mod tests {
             CentroidResult::default(),
             2000,
             None,
+            BlockOrnaments::FULL,
         )
         .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_001");
@@ -1960,6 +2057,7 @@ mod tests {
             CentroidResult::default(),
             2000,
             None,
+            BlockOrnaments::FULL,
         )
         .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_002");
@@ -2006,6 +2104,7 @@ mod tests {
             CentroidResult::default(),
             2000,
             None,
+            BlockOrnaments::FULL,
         )
         .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_002");
@@ -2049,8 +2148,16 @@ mod tests {
             centroid_y: cy + (cy - 91.0501),
             valid: true,
         };
-        let err =
-            generate_z_offset_calibration_new("P1S", &ir, &b, mirrored, 2000, None).unwrap_err();
+        let err = generate_z_offset_calibration_new(
+            "P1S",
+            &ir,
+            &b,
+            mirrored,
+            2000,
+            None,
+            BlockOrnaments::FULL,
+        )
+        .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_001");
     }
 
@@ -2067,6 +2174,7 @@ mod tests {
             CentroidResult::default(),
             2,
             3,
+            BlockOrnaments::FULL,
         )
         .expect("XY New 分派仍在报错")
         .expect("XY New 分派返回空");
@@ -2084,6 +2192,7 @@ mod tests {
             CentroidResult::default(),
             2,
             3,
+            BlockOrnaments::FULL,
         )
         .expect("Z New 分派仍在报错")
         .expect("Z New 分派返回空");
@@ -2106,6 +2215,7 @@ mod tests {
             CentroidResult::default(),
             2,
             3,
+            BlockOrnaments::FULL,
         )
         .expect("经典分支报错")
         .expect("经典分支返回空");

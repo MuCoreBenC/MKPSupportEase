@@ -31,6 +31,9 @@ fn fixture_ir() -> Ir {
     ir.safety.calibration_execution_mode = "print_then_calibrate".to_string();
     ir.safety.z_calibration = "new".to_string();
     ir.safety.xy_calibration = "new".to_string();
+    /* 落笔 / 收笔模板：夹具 IR 是普通模型那一份，没有这两段。 */
+    ir.toolhead.custom_mount_gcode = lines(&["L801", "G1 X168 F30000"]);
+    ir.toolhead.custom_unmount_gcode = lines(&["G1 X168 F30000", "L802", "G92 E0"]);
     ir
 }
 
@@ -185,18 +188,35 @@ fn two_blocks_are_inserted_z_before_xy() {
         .position(|l| l == "; XY Offset Calibration")
         .expect("没有 XY 校准块");
     assert!(z_at < xy_at, "Z 必须排在 XY 前面: {z_at} vs {xy_at}");
-    assert_eq!(
-        out.iter()
-            .filter(|l| l.as_str() == "; Calibration Runtime: retract and cool down")
-            .count(),
-        2,
-        "两块各带一段运行时头"
-    );
 
-    assert!(
-        out.iter().any(|l| l.trim() == "G1 X100 Y100 Z100"),
-        "第一块收尾应抬到 Z100 —— 这也是第二块容易被顶上天的原因"
+    /* 只在最外层各做一次：第一块落笔、最后一块收笔，中间什么都不做。
+     * 「Runtime」那套（回抽 + 降温）也只给第一块 —— 第二块接着跑时笔还挂着。 */
+    let count = |needle: &str| out.iter().filter(|l| l.as_str() == needle).count();
+    assert_eq!(
+        count("; Calibration Runtime: retract and cool down"),
+        1,
+        "运行时头只给第一块"
     );
+    assert_eq!(count(";Mounting Toolhead"), 1, "只落一次笔");
+    assert_eq!(count(";Toolhead Mounted"), 1);
+    assert_eq!(count(";Unmounting Toolhead"), 1, "只收一次笔");
+    assert_eq!(count("L802"), 1, "只松一次笔");
+    assert_eq!(
+        count(";Calibration Start Music"),
+        2,
+        "只留第一块的开场与最后一块的结束（各一次）"
+    );
+    assert_eq!(count("G1 X100 Y100 Z100"), 1, "只在最后抬到 Z100");
+
+    /* 两块之间不许出现「收笔 / 松笔 / 抬 Z100」—— 这些是用户点出来的中间那几段。
+     * 第一块的落笔与开场音乐本来就在这段区间里，不算。 */
+    let between = &out[z_at..xy_at];
+    for banned in [";Unmounting Toolhead", "L802", "G1 X100 Y100 Z100"] {
+        assert!(
+            !between.iter().any(|l| l.as_str() == banned),
+            "两块之间不该有 {banned}"
+        );
+    }
 
     /* 第二块入口必须自己把 Z 放回工作高度：第一块收尾会抬到 Z100，
      * 不重新定位的话 XY 块就在 Z100 上空跑（真机 2026-11-28 撞到过）。 */

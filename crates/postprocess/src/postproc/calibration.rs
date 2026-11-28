@@ -256,6 +256,7 @@ pub fn insert_calibration_gcode_with_receipt(
         centroid,
         z_dwell_sec,
         xy_dwell_sec,
+        crate::postproc::disk::BlockOrnaments::FULL,
         receipt,
     );
     let calibration_lines = generated
@@ -422,11 +423,18 @@ pub fn insert_calibration_blocks(
         .map(|i| i + 1)
         .unwrap_or(output.len());
 
+    let last = targets.len() - 1;
     let mut receipts = Vec::with_capacity(targets.len());
 
     for (i, target) in targets.iter().enumerate() {
         let mode_str = mode_to_calibration_string(target.mode);
         let mut receipt = CalibrationReceipt::default();
+        /* 装饰只给最外层：第一块落笔 + 开始音乐，最后一块收笔 + 结束音乐 + 抬到 Z100。
+         * 中间的块两头都关掉 —— 笔一直挂着，Z 只回到各自的校准安全高度。 */
+        let ornaments = crate::postproc::disk::BlockOrnaments {
+            head: i == 0,
+            tail: i == last,
+        };
         let generated = generate_calibration_gcode_with_centroid_rec(
             mode_str,
             &machine_type_str,
@@ -435,6 +443,7 @@ pub fn insert_calibration_blocks(
             target.centroid,
             z_dwell_sec,
             xy_dwell_sec,
+            ornaments,
             Some(&mut receipt),
         )
         .map_err(|e| match e {
@@ -457,11 +466,15 @@ pub fn insert_calibration_blocks(
             ));
             block.push("G28 X Y".to_string());
         }
-        block.push("; Calibration Runtime: retract and cool down".to_string());
-        block.push("G92 E0".to_string());
-        block.push(format!("G1 E-{CALIBRATION_RETRACT_MM:.1} F1800"));
-        block.push("G92 E0".to_string());
-        block.push("M104 S30".to_string());
+        /* 「从收尾状态重开一次校准」：回抽 + 降温。只给第一块 —— 第二块接着跑时
+         * 笔还挂在工具头上、喷嘴已经在 30 °C，再做一遍纯属多余。 */
+        if i == 0 {
+            block.push("; Calibration Runtime: retract and cool down".to_string());
+            block.push("G92 E0".to_string());
+            block.push(format!("G1 E-{CALIBRATION_RETRACT_MM:.1} F1800"));
+            block.push("G92 E0".to_string());
+            block.push("M104 S30".to_string());
+        }
         block.extend(generated);
 
         let at = cursor.min(output.len());

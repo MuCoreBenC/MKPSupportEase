@@ -765,6 +765,8 @@ fn run(
                 centroid,
                 DEFAULT_Z_DWELL_SEC,
                 DEFAULT_XY_DWELL_SEC,
+                /* dry-run 只拿回执，装饰与落盘无关 */
+                crate::postproc::disk::BlockOrnaments::FULL,
                 Some(&mut receipt),
             )?;
             calib_receipts.push(receipt);
