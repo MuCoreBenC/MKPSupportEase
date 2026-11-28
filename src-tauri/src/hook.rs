@@ -1124,63 +1124,65 @@ pub fn run(
      *   · 其余按 3MF 身份跑，并用外形纠正合并文件里读错的那一盘（见 `decide_calibration`）。
      */
     let mut preflight_err: Option<HookError> = None;
-    let calib_mode = if ir.debug.is_some() {
-        calibration::Mode::None
+    let calib_modes: Vec<calibration::Mode> = if ir.debug.is_some() {
+        Vec::new()
     } else {
         let force = postproc_prefs
             .as_ref()
             .is_some_and(|p| p.force_calibration_mode);
         let verdict = match postprocess::postproc::machine_dims::tables().calibration_models() {
-            Some(profiles) => postprocess::postproc::calib_models::decide_calibration(
-                force,
-                mode_of(&identity_probe),
-                calibration_size(&content),
-                profiles,
-            ),
+            Some(profiles) => {
+                /* 按对象分段认板：一盘里两块校准板时，整盘合并盒子对不上任何一档。 */
+                let plates = postprocess::postproc::calib_models::detect_plates(&content, profiles);
+                postprocess::postproc::calib_models::decide_calibrations(
+                    force,
+                    mode_of(&identity_probe),
+                    &plates,
+                    calibration_size(&content),
+                    profiles,
+                )
+            }
             /* 档表没装载（预设目录缺）：强制模式下无从判断 ⇒ 与「对不上」同一条路；
              * 否则保持 3MF 那条原判。 */
-            None if force => postprocess::postproc::calib_models::CalibVerdict::Unrecognized,
-            None => postprocess::postproc::calib_models::decide_calibration(
+            None if force => postprocess::postproc::calib_models::CalibVerdicts::Unrecognized,
+            None => postprocess::postproc::calib_models::decide_calibrations(
                 false,
                 mode_of(&identity_probe),
+                &[],
                 None,
                 &[],
             ),
         };
         match verdict {
-            postprocess::postproc::calib_models::CalibVerdict::Calibration(m) => m,
-            postprocess::postproc::calib_models::CalibVerdict::NotCalibration => {
-                calibration::Mode::None
-            }
+            postprocess::postproc::calib_models::CalibVerdicts::Calibrations(list) => list,
+            postprocess::postproc::calib_models::CalibVerdicts::NotCalibration => Vec::new(),
             /* 强制模式下认不出 ⇒ 停下：静默降级成普通模型会把校准板当模型打出来。 */
-            postprocess::postproc::calib_models::CalibVerdict::Unrecognized => {
+            postprocess::postproc::calib_models::CalibVerdicts::Unrecognized => {
                 preflight_err = Some(HookError::bad_input(Reason::new(
                     keys::CALIB_NOT_RECOGNIZED,
                 )));
-                calibration::Mode::None
+                Vec::new()
             }
             /* 校准 3MF 里的非校准模型：由用户点「强制打印」才降级，答复只改这一趟。 */
-            postprocess::postproc::calib_models::CalibVerdict::NotCalibrationModel => {
+            postprocess::postproc::calib_models::CalibVerdicts::NotCalibrationModel => {
                 match ui.client() {
                     Some(client) => {
                         let question = Reason::new(keys::CALIB_NOT_MODEL_QUESTION).text();
                         let mut asker = ChannelAsker { client };
                         match asker.ask_calibration_not_a_model(&question) {
-                            Some(id) if id == crate::hook_ipc::CHOICE_FORCE_PRINT => {
-                                calibration::Mode::None
-                            }
+                            Some(id) if id == crate::hook_ipc::CHOICE_FORCE_PRINT => Vec::new(),
                             _ => {
                                 preflight_err = Some(HookError::stopped(Reason::new(
                                     keys::CALIB_NOT_MODEL_STOPPED,
                                 )));
-                                calibration::Mode::None
+                                Vec::new()
                             }
                         }
                     }
                     None => {
                         preflight_err =
                             Some(HookError::bad_input(Reason::new(keys::CALIB_NOT_MODEL)));
-                        calibration::Mode::None
+                        Vec::new()
                     }
                 }
             }
@@ -1216,16 +1218,18 @@ pub fn run(
         );
         return Err(err);
     }
-    if let (true, Some(client)) = (
-        postprocess::postproc::calibration::is_any(calib_mode),
-        ui.client(),
-    ) {
+    if let (false, Some(client)) = (calib_modes.is_empty(), ui.client()) {
         let mut calib_asker = ChannelAsker { client };
-        let kind = postprocess::postproc::calibration::mode_display_name(calib_mode);
+        let kind = calib_modes
+            .iter()
+            .copied()
+            .map(postprocess::postproc::calibration::mode_display_name)
+            .collect::<Vec<_>>()
+            .join(" + ");
         {
             let asker = &mut calib_asker;
             let question = Reason::new(keys::CALIB_MODE_QUESTION)
-                .with("kind", kind)
+                .with("kind", kind.as_str())
                 .text();
             let answer = asker.ask_calibration(&question);
             /*
@@ -1248,8 +1252,9 @@ pub fn run(
                 }
                 /* 超时 / 没有界面 / 按了停止：停下，原文件一字不动 */
                 None => {
-                    let err =
-                        HookError::stopped(Reason::new(keys::CALIB_STOPPED).with("kind", kind));
+                    let err = HookError::stopped(
+                        Reason::new(keys::CALIB_STOPPED).with("kind", kind.as_str()),
+                    );
                     let ff = FailureFacts::capture(
                         &ir,
                         &content,
@@ -1379,7 +1384,11 @@ pub fn run(
                 ir,
                 output_path: None,
                 // 身份从钩子带进管线：**管线不许自己再认一遍**（认也认不出来，G-code 里没有）
-                calibration: calib_mode,
+                calibration: calib_modes
+                    .first()
+                    .copied()
+                    .unwrap_or(calibration::Mode::None),
+                calibrations: calib_modes.clone(),
             },
             ask,
             &mut steps,
@@ -1392,7 +1401,11 @@ pub fn run(
                 ir,
                 output_path: None,
                 // 身份从钩子带进管线：**管线不许自己再认一遍**（认也认不出来，G-code 里没有）
-                calibration: calib_mode,
+                calibration: calib_modes
+                    .first()
+                    .copied()
+                    .unwrap_or(calibration::Mode::None),
+                calibrations: calib_modes.clone(),
             },
             ask,
             &mut steps,
@@ -1438,7 +1451,12 @@ pub fn run(
                 &content,
                 &raw,
                 job,
-                postprocess::postproc::calibration::mode_to_calibration_string(calib_mode),
+                &calib_modes
+                    .iter()
+                    .copied()
+                    .map(postprocess::postproc::calibration::mode_to_calibration_string)
+                    .collect::<Vec<_>>()
+                    .join("+"),
                 &opening_slicer,
                 opening_layer_height,
                 opening_nozzle,
@@ -1700,7 +1718,7 @@ fn archive_success(
         nozzle_diameter: opening_nozzle,
         header: &done.header_facts,
         calibration_mode: &done.detail_facts.calibration_mode,
-        calibration_receipt: done.calibration_receipt.as_ref(),
+        calibration_receipt: done.calibration_receipt.as_slice(),
         /* 这一趟挪过塔 ⇒ 「避让检查」多一行"已挪塔 A → B"（与 `Meta.relocation` 同一份）。
         ★ `archive_success` 的入参本来就是 `Option<&RelocationRecord>`，别再 `as_ref()` */
         relocation,
@@ -1896,7 +1914,7 @@ impl FailureFacts {
             calibration_mode: &self.calibration_mode,
             preset_params: None,
             preset_missing: &[],
-            calibration_receipt: None,
+            calibration_receipt: &[],
             relocation,
         }
     }
@@ -2068,9 +2086,9 @@ fn calibration_facts(
     identity: &postprocess::gcode::IdentityProbe,
     done: &postprocess::pipeline::ProcessResult,
 ) -> Option<crate::archive::CalibrationFacts> {
-    let receipt = done.calibration_receipt.as_ref();
+    let receipts = done.calibration_receipt.as_slice();
     // 既没身份、又没回执 ⇒ 这就是一盘普通模型，别给报告页添一块空表。
-    if identity.verdict == postprocess::gcode::IdentityVerdict::Absent && receipt.is_none() {
+    if identity.verdict == postprocess::gcode::IdentityVerdict::Absent && receipts.is_empty() {
         return None;
     }
     /* 「最终用的身份」取**内核实际跑的那个**（`detail_facts.calibration_mode`），
@@ -2079,7 +2097,7 @@ fn calibration_facts(
     let ran = done.detail_facts.calibration_mode.as_str();
     Some(build_calibration_facts(
         identity,
-        receipt,
+        receipts,
         (!ran.is_empty()).then_some(ran),
     ))
 }
@@ -2092,27 +2110,43 @@ fn calibration_facts_failed(
     if identity.verdict == postprocess::gcode::IdentityVerdict::Absent {
         return None;
     }
-    Some(build_calibration_facts(identity, None, None))
+    Some(build_calibration_facts(identity, &[], None))
 }
 
 fn build_calibration_facts(
     identity: &postprocess::gcode::IdentityProbe,
-    receipt: Option<&postprocess::postproc::calibration::CalibrationReceipt>,
-    mode: Option<&str>,
+    receipts: &[postprocess::postproc::calibration::CalibrationReceipt],
+    modes: Option<&str>,
 ) -> crate::archive::CalibrationFacts {
-    let mode = mode.filter(|m| !m.is_empty()).map(str::to_string);
+    let modes = modes.filter(|m| !m.is_empty());
+    /* 身份串按 `+` 拆开，与回执一一对应（两边都是执行顺序）。 */
+    let labels: Vec<&str> = modes.map(|m| m.split('+').collect()).unwrap_or_default();
+    let first = receipts.first();
     crate::archive::CalibrationFacts {
         origin: identity.origin.clone(),
         identity_3mf: identity.identity_3mf.clone(),
         verdict: identity.verdict.as_str().to_string(),
         note: identity.note.clone(),
-        measured: receipt
+        measured: first
             .and_then(|r| r.measured)
             .map(|b| [b.x_min, b.x_max, b.y_min, b.y_max]),
-        profile_id: receipt.and_then(|r| r.profile_id.clone()),
-        tolerance: receipt.and_then(|r| r.tolerance),
-        footprint: receipt.and_then(|r| r.footprint).map(|(w, h)| [w, h]),
-        mode,
+        profile_id: first.and_then(|r| r.profile_id.clone()),
+        tolerance: first.and_then(|r| r.tolerance),
+        footprint: first.and_then(|r| r.footprint).map(|(w, h)| [w, h]),
+        mode: modes.map(str::to_string),
+        plates: (!receipts.is_empty()).then(|| {
+            receipts
+                .iter()
+                .enumerate()
+                .map(|(i, r)| crate::archive::CalibrationPlateFacts {
+                    mode: labels.get(i).copied().unwrap_or_default().to_string(),
+                    measured: r.measured.map(|b| [b.x_min, b.x_max, b.y_min, b.y_max]),
+                    profile_id: r.profile_id.clone(),
+                    tolerance: r.tolerance,
+                    footprint: r.footprint.map(|(w, h)| [w, h]),
+                })
+                .collect()
+        }),
     }
 }
 
@@ -3037,7 +3071,8 @@ mod tests {
             footprint: Some((119.58, 16.063)),
         };
 
-        let facts = build_calibration_facts(&identity, Some(&receipt), Some("ZOffset"));
+        let facts =
+            build_calibration_facts(&identity, std::slice::from_ref(&receipt), Some("ZOffset"));
         assert_eq!(facts.mode.as_deref(), Some("ZOffset"), "实际跑的就是它");
         assert_eq!(facts.identity_3mf.as_deref(), Some("ZOffset"));
         assert_eq!(facts.profile_id.as_deref(), Some("zoffset-ext"));
@@ -3047,7 +3082,7 @@ mod tests {
         assert_eq!(facts.verdict, "from_3mf");
 
         /* 普通模型那一趟：内核给的是 `""` ⇒ 存档 `mode` 必须是 null，不能是空串 */
-        let plain = build_calibration_facts(&identity, None, Some(""));
+        let plain = build_calibration_facts(&identity, &[], Some(""));
         assert_eq!(plain.mode, None, "空串不是身份，别原样写进记录");
         assert!(plain.profile_id.is_none());
     }

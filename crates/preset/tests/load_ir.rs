@@ -117,6 +117,7 @@ fn run_chain(preset_path: &Path, tag: &str) -> String {
     ir.prefs.skip_vibration_calibration = true;
     pipeline::process_with_ir_with_tower_ask(
         IrProcessRequest {
+            calibrations: Vec::new(),
             gcode_path: work.clone(),
             ir,
             output_path: None,

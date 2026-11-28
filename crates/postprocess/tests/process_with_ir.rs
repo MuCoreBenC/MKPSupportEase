@@ -89,6 +89,7 @@ fn run_in_place(with_ir: bool) -> Vec<u8> {
         "零产品调用方"一起删除 —— 判据若还指着它们，守的就是一条没人走的路。 */
         pipeline::process_with_ir_with_tower_ask(
             IrProcessRequest {
+                calibrations: Vec::new(),
                 gcode_path: work.clone(),
                 ir,
                 output_path: None, // 原地

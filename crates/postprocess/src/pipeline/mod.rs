@@ -109,6 +109,10 @@ pub struct IrProcessRequest {
     ///
     /// 缺省 `Mode::None`（普通模型）：`Default` 就取它，免得每个构造点都得写一遍。
     pub calibration: crate::postproc::calibration::Mode,
+    /// **一盘里有多块校准板时**用这个（顺序即执行顺序，调用方已排好 Z → XY）。
+    ///
+    /// 空 = 退回上面那格单值。单块场景两者等价，保留单值是让旧调用点一个字都不用改。
+    pub calibrations: Vec<crate::postproc::calibration::Mode>,
 }
 
 impl Default for IrProcessRequest {
@@ -118,6 +122,18 @@ impl Default for IrProcessRequest {
             ir: Ir::default(),
             output_path: None,
             calibration: crate::postproc::calibration::Mode::None,
+            calibrations: Vec::new(),
+        }
+    }
+}
+
+impl IrProcessRequest {
+    /// 这一趟要跑的校准模式列表：`calibrations` 优先，空则退回单值。
+    fn calibration_modes(&self) -> Vec<Mode> {
+        if self.calibrations.is_empty() {
+            vec![self.calibration]
+        } else {
+            self.calibrations.clone()
         }
     }
 }
@@ -153,8 +169,9 @@ struct Job<'a> {
     /// 生命周期只活在本文件里：几张嘴（CLI / 钩子 / 判据）都是**并列入口**，
     /// `IrProcessRequest` 那个按值传的公开结构体一个字都不用动。
     tower_ask: Option<&'a mut dyn TowerAsk>,
-    /// 这一盘是什么校准件 —— **调用方定案**，管线只消费（见 [`IrProcessRequest::calibration`]）。
-    calibration: Mode,
+    /// 这一盘要跑哪几块校准 —— **调用方定案**，管线只消费（见 [`IrProcessRequest::calibration`]）。
+    /// 顺序即执行顺序；空 = 不比。单块盘长度为 1。
+    calibration: Vec<Mode>,
 }
 
 /// 处理产物（printtime 只填字段，不作为 transform）。
@@ -179,11 +196,11 @@ pub struct ProcessResult {
     /// 管线自己不消费它（见 [`HeaderFacts`]），但**执行记录要**：`_meta.json` 的
     /// `detail.slicer` 里那几个键就住在这里 —— 搭车出门，调用方不用为它再扫一遍输入。
     pub header_facts: HeaderFacts,
-    /// 校准这一趟**用了什么**（认到哪一档、实测多大、容差多少）。
+    /// 校准这一趟**用了什么**（认到哪一档、实测多大、容差多少）。一块一条。
     ///
-    /// 非校准件那一趟恒为 `None`。管线自己不消费它 —— 它是给执行记录的证据：
+    /// 非校准件那一趟恒为空。管线自己不消费它 —— 它是给执行记录的证据：
     /// 原来这些值在 `resolve_profile` 之后就被消费掉了，成功那趟一个字都不出门。
-    pub calibration_receipt: Option<crate::postproc::calibration::CalibrationReceipt>,
+    pub calibration_receipt: Vec<crate::postproc::calibration::CalibrationReceipt>,
 }
 
 /// 出口事实集 —— **只搬运，不新算**。
@@ -363,6 +380,7 @@ pub fn process_with_ir_with_tower_ask(
     sink: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<ProcessResult, PostprocError> {
+    let calibration = request.calibration_modes();
     run(
         Job {
             gcode_path: request.gcode_path,
@@ -371,8 +389,8 @@ pub fn process_with_ir_with_tower_ask(
             compute_print_time: true,
             tower_ask: ask,
             /* ★ 透传 —— **这是 SupportEase 的正式主链**（`hook.rs` 非延后那一支）。
-            写死 `None` 等于把校准件当普通模型跑，且不会有任何报错。 */
-            calibration: request.calibration,
+            写死空列表等于把校准件当普通模型跑，且不会有任何报错。 */
+            calibration,
         },
         sink,
         cancel,
@@ -402,6 +420,7 @@ pub fn process_with_ir_deferred_print_time_with_tower_ask(
     sink: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<ProcessResult, PostprocError> {
+    let calibration = request.calibration_modes();
     run(
         Job {
             gcode_path: request.gcode_path,
@@ -411,7 +430,7 @@ pub fn process_with_ir_deferred_print_time_with_tower_ask(
             tower_ask: ask,
             /* ★ 透传 —— SupportEase 正式主链的另一支（`defer_print_time` 为真的那次）。
             "打印时间延后算"与"这是什么校准件"是两件事，别顺手把后者也置空。 */
-            calibration: request.calibration,
+            calibration,
         },
         sink,
         cancel,
@@ -443,7 +462,7 @@ pub fn process_with_cancel_interval(
             },
             compute_print_time: true,
             tower_ask: None,
-            calibration: Mode::None,
+            calibration: Vec::new(),
         },
         sink,
         cancel,
@@ -466,8 +485,16 @@ fn run(
         ir_source,
         compute_print_time,
         tower_ask,
-        calibration: calib_mode,
+        calibration: calib_modes,
     } = job;
+
+    /* 单值消费点（碰撞检测、涂胶边界、报告标题）用第一块校准；多块的真跑在
+     * step 7 / step 10 里循环。列表为空 = 普通模型。 */
+    let calib_mode = calib_modes
+        .iter()
+        .copied()
+        .find(|m| *m != Mode::None)
+        .unwrap_or(Mode::None);
 
     /*
      * 边缘带调试转储的落点（2026-11-16）：`MKP_EDGE_DEBUG=1` 时写到**这一趟产物旁边** ——
@@ -561,12 +588,29 @@ fn run(
     G-code 里再不会有身份，扫也只会得到 `None`，那正是"钩子认对了、管线却当普通模型跑"
     的来路。擦料决策仍要扫正文，所以这一步照样和它并行。 */
     let decision = crate::postproc::support::decide_wiping(&preferred, calib_mode, &content);
-    ir.safety.is_calibration_mode = crate::postproc::calibration::is_any(calib_mode);
-    // **无条件**取一次校准模式串（只在 is_dynamic 分支里算 ⇒ 非动态模式下出口没有
-    // 这个事实）。零新计算，只是提早取。
-    let calibration_mode = crate::postproc::calibration::mode_to_calibration_string(calib_mode);
-    /* 第 7 步认档的回执（非校准件恒为 `None`）。只承载事实，不参与任何判定。 */
-    let mut calib_receipt: Option<crate::postproc::calibration::CalibrationReceipt> = None;
+    ir.safety.is_calibration_mode = calib_modes
+        .iter()
+        .any(|m| crate::postproc::calibration::is_any(*m));
+    /* 无条件取一次校准模式串（只在 is_dynamic 分支里算 ⇒ 非动态模式下出口没有
+     * 这个事实）。多块时按执行顺序拼成 `ZOffset+Precise`，报告那边直接当字符串用。 */
+    let calibration_mode = calib_modes
+        .iter()
+        .copied()
+        .filter(|m| crate::postproc::calibration::is_any(*m))
+        .map(crate::postproc::calibration::mode_to_calibration_string)
+        .collect::<Vec<_>>()
+        .join("+");
+    /* 第 7 步与第 10 步认档的回执（非校准件恒为空）。只承载事实，不参与任何判定。 */
+    let mut calib_receipts: Vec<crate::postproc::calibration::CalibrationReceipt> = Vec::new();
+    /* 多块盘才按对象分段取每块自己的盒子；单块保持整盘口径，输出与改动前逐字节一致。 */
+    let plate_matches: Vec<crate::postproc::calib_models::PlateMatch> = if calib_modes.len() > 1 {
+        crate::postproc::machine_dims::tables()
+            .calibration_models()
+            .map(|ps| crate::postproc::calib_models::detect_plates(&content, ps))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
     // ---- step 5: support —— ApplyWipingDecision ----
     checkpoint(cancel)?;
@@ -699,24 +743,32 @@ fn run(
     // 容差多少。原来这些全在内核里被消费掉，执行记录只能记"校准模式: ZOffset"，
     // 于是"为什么这次用了加长版的基准"永远无法解释（2026-10-18 补的证据链）。
     checkpoint(cancel)?;
-    if crate::postproc::calibration::is_dynamic(calib_mode, &ir) {
+    if calib_modes
+        .iter()
+        .any(|m| crate::postproc::calibration::is_dynamic(*m, &ir))
+    {
         timer.begin(Step::CalibCheck, "校准模型检测...");
         executed.push(Step::CalibCheck);
-        let bbox = crate::postproc::disk::compute_bbox(&content)?;
-        let centroid = centroid_of(&content);
-        let mode_str = crate::postproc::calibration::mode_to_calibration_string(calib_mode);
-        let mut receipt = crate::postproc::calibration::CalibrationReceipt::default();
-        crate::postproc::disk::generate_calibration_gcode_with_centroid_rec(
-            mode_str,
-            &machine_type,
-            &ir,
-            Some(&bbox),
-            centroid,
-            DEFAULT_Z_DWELL_SEC,
-            DEFAULT_XY_DWELL_SEC,
-            Some(&mut receipt),
-        )?;
-        calib_receipt = Some(receipt);
+        for mode in calib_modes
+            .iter()
+            .copied()
+            .filter(|m| crate::postproc::calibration::is_dynamic(*m, &ir))
+        {
+            let (bbox, centroid) = target_geometry(mode, &plate_matches, &content)?;
+            let mode_str = crate::postproc::calibration::mode_to_calibration_string(mode);
+            let mut receipt = crate::postproc::calibration::CalibrationReceipt::default();
+            crate::postproc::disk::generate_calibration_gcode_with_centroid_rec(
+                mode_str,
+                &machine_type,
+                &ir,
+                bbox.as_ref(),
+                centroid,
+                DEFAULT_Z_DWELL_SEC,
+                DEFAULT_XY_DWELL_SEC,
+                Some(&mut receipt),
+            )?;
+            calib_receipts.push(receipt);
+        }
     }
 
     // ---- step 8: pass1 ----
@@ -789,17 +841,29 @@ fn run(
 
     // ---- step 10: calibration —— 校准插入（内存行序列）----
     checkpoint(cancel)?;
-    if crate::postproc::calibration::is_any(calib_mode) {
+    if calib_modes
+        .iter()
+        .any(|m| crate::postproc::calibration::is_any(*m))
+    {
         timer.begin(Step::Calibration, "校准 G-code 插入...");
         executed.push(Step::Calibration);
-        let (bbox, centroid) = if crate::postproc::calibration::is_dynamic(calib_mode, &ir) {
-            (
-                Some(crate::postproc::disk::compute_bbox(&content)?),
-                centroid_of(&content),
-            )
-        } else {
-            (None, crate::postproc::disk::CentroidResult::default())
-        };
+        let mut targets: Vec<crate::postproc::calibration::CalibrationTarget> = Vec::new();
+        for mode in calib_modes
+            .iter()
+            .copied()
+            .filter(|m| crate::postproc::calibration::is_any(*m))
+        {
+            let (bbox, centroid) = if crate::postproc::calibration::is_dynamic(mode, &ir) {
+                target_geometry(mode, &plate_matches, &content)?
+            } else {
+                (None, crate::postproc::disk::CentroidResult::default())
+            };
+            targets.push(crate::postproc::calibration::CalibrationTarget {
+                mode,
+                bbox,
+                centroid,
+            });
+        }
         /* 停留秒数读**用户设置**（2026-10-17 之前这里是写死的两个常量，
         于是设置页那两格"改了也不生效"）。量程已在 `PrefsIr` 那层夹过。
         先取出来再传：`&mut ir` 已经借出去了，表达式里不能再读它的字段。 */
@@ -807,9 +871,14 @@ fn run(
             ir.prefs.z_calibration_dwell_sec,
             ir.prefs.xy_calibration_dwell_sec,
         );
-        out_lines = crate::postproc::calibration::insert_calibration_gcode(
-            out_lines, calib_mode, &mut ir, bbox, centroid, z_dwell, xy_dwell,
+        let (lines, receipts) = crate::postproc::calibration::insert_calibration_blocks(
+            out_lines, &targets, &mut ir, z_dwell, xy_dwell,
         )?;
+        out_lines = lines;
+        /* 第 7 步没跑（静态校准）时这里才拿得到回执；两边都有就以后者为准（同一次认档）。 */
+        if !receipts.is_empty() {
+            calib_receipts = receipts;
+        }
     }
 
     /* 调试模式：把前面那套结果整段换成「只跑动作」的骨架。
@@ -948,8 +1017,32 @@ fn run(
             calibration_mode: calibration_mode.to_string(),
         },
         header_facts: header,
-        calibration_receipt: calib_receipt,
+        calibration_receipt: calib_receipts,
     })
+}
+
+/// 一块校准用哪份几何：多块盘优先用它自己的分段盒子，认不出来才退回整盘口径。
+///
+/// 整盘合并盒子喂给两块中的任何一块都会让形变检测（`E_CAL_MISMATCH_002`）误报 ——
+/// 两块板叠在一起的外形对不上任何一档。
+fn target_geometry(
+    mode: Mode,
+    plates: &[crate::postproc::calib_models::PlateMatch],
+    content: &[String],
+) -> Result<
+    (
+        Option<crate::postproc::disk::BBox>,
+        crate::postproc::disk::CentroidResult,
+    ),
+    PostprocError,
+> {
+    if let Some(p) = plates.iter().find(|p| p.mode == mode) {
+        return Ok((Some(p.bbox), p.centroid));
+    }
+    Ok((
+        Some(crate::postproc::disk::compute_bbox(content)?),
+        centroid_of(content),
+    ))
 }
 
 fn centroid_of(content: &[String]) -> crate::postproc::disk::CentroidResult {

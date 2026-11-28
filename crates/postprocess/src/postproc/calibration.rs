@@ -357,6 +357,134 @@ pub fn insert_calibration_gcode_with_receipt(
     Ok(output)
 }
 
+/// 一盘里要跑的一块校准。
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CalibrationTarget {
+    pub mode: Mode,
+    /// **这一块自己的**包围盒：形变检测与图案落点都按它算。
+    /// 传整盘的合并盒子会让两块都报 `E_CAL_MISMATCH_002`。
+    pub bbox: Option<BBox>,
+    pub centroid: CentroidResult,
+}
+
+/// 一次插多块校准，顺序**就是 `targets` 的顺序**（调用方已按 Z → XY 排好）。
+///
+/// 单块时与 [`insert_calibration_gcode_with_receipt`] 逐字节等价；多块时：
+/// - 第一块仍带「退料后抬 Z + 归零」那段，后面的块直接接在上一块之后；
+/// - `remove_final_lower_z` 这类全局后处理只做一次；
+/// - 每块用自己的包围盒。
+///
+/// `direct_calibrate`（去掉打印件只留校准）对多块没有意义 —— 两块本来就都是校准模型，
+/// 这一支按普通路径走，不做模型路径过滤。
+pub fn insert_calibration_blocks(
+    content: Vec<String>,
+    targets: &[CalibrationTarget],
+    ir_data: &mut Ir,
+    z_dwell_sec: i64,
+    xy_dwell_sec: i64,
+) -> Result<(Vec<String>, Vec<CalibrationReceipt>), PostprocError> {
+    if targets.is_empty() {
+        return Ok((content, Vec::new()));
+    }
+    if targets.len() == 1 {
+        let mut receipt = CalibrationReceipt::default();
+        let out = insert_calibration_gcode_with_receipt(
+            content,
+            targets[0].mode,
+            ir_data,
+            targets[0].bbox,
+            targets[0].centroid,
+            z_dwell_sec,
+            xy_dwell_sec,
+            Some(&mut receipt),
+        )?;
+        return Ok((out, vec![receipt]));
+    }
+
+    crate::ir::fill_defaults(ir_data);
+    let machine_type_str = ir_data.machine.machine_type.clone();
+
+    let mut output = content;
+    if ir_data.prefs.skip_vibration_calibration {
+        output = remove_vibration_detection_from_mech_mode(&output);
+    }
+
+    /* 锚点只算一次：第一块插在退料段之后（或 `; filament end gcode` 之后），
+     * 后面的块接着上一块的尾巴插 —— 不能都用同一个锚点，那样顺序会反过来。 */
+    let unload_idx = output.iter().position(|l| command_has_s(l, "M621", "255"));
+    let resume_after_unload = unload_idx.is_some();
+    let mut cursor = unload_idx
+        .or_else(|| {
+            output
+                .iter()
+                .position(|l| l.contains(MARKER_FILAMENT_END) && !l.contains('='))
+        })
+        .map(|i| i + 1)
+        .unwrap_or(output.len());
+
+    let mut receipts = Vec::with_capacity(targets.len());
+    let mut any_new_mode = false;
+
+    for (i, target) in targets.iter().enumerate() {
+        let mode_str = mode_to_calibration_string(target.mode);
+        let mut receipt = CalibrationReceipt::default();
+        let generated = generate_calibration_gcode_with_centroid_rec(
+            mode_str,
+            &machine_type_str,
+            ir_data,
+            target.bbox.as_ref(),
+            target.centroid,
+            z_dwell_sec,
+            xy_dwell_sec,
+            Some(&mut receipt),
+        )
+        .map_err(|e| match e {
+            PostprocError::CalibrationMismatch { .. } => e,
+            other => PostprocError::Calibration {
+                message: format!("mode={mode_str}：{other}"),
+            },
+        })?
+        .ok_or_else(|| PostprocError::Calibration {
+            message: format!("无输出，mode={mode_str}"),
+        })?;
+
+        if is_new_calibration_mode(mode_str, target.bbox.as_ref()) {
+            any_new_mode = true;
+        }
+
+        let mut block: Vec<String> = Vec::new();
+        /* 退料段收尾时工具头停在切料位、Z 还是最后一层的高度 —— 只有**第一块**需要
+         * 先抬到校准安全高度再只归 XY；后面的块接在上一块之后，位置已经对了。 */
+        if i == 0 && resume_after_unload {
+            block.push(format!(
+                "G1 Z{} F1200",
+                format_z(calibration_safe_z(ir_data))
+            ));
+            block.push("G28 X Y".to_string());
+        }
+        block.push("; Calibration Runtime: retract and cool down".to_string());
+        block.push("G92 E0".to_string());
+        block.push(format!("G1 E-{CALIBRATION_RETRACT_MM:.1} F1800"));
+        block.push("G92 E0".to_string());
+        block.push("M104 S30".to_string());
+        block.extend(generated);
+
+        let at = cursor.min(output.len());
+        let mut result = Vec::with_capacity(output.len() + block.len());
+        result.extend(output[..at].iter().cloned());
+        result.extend(block.iter().cloned());
+        result.extend(output[at..].iter().cloned());
+        output = result;
+        cursor = at + block.len();
+        receipts.push(receipt);
+    }
+
+    if any_new_mode {
+        output = remove_final_lower_z(&output);
+    }
+    Ok((output, receipts))
+}
+
 // ---- filterModelMotionPaths（helpers.go:526） ----
 
 /// 删除模型区域的移动命令（direct_calibrate 模式），保留涂胶/活化/擦拭/收尾段。

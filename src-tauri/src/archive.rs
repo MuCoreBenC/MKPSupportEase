@@ -581,7 +581,26 @@ pub struct CalibrationFacts {
     /// 该档声明的标称外形 `[宽, 高]`。
     pub footprint: Option<[f64; 2]>,
     /// 最终采用的校准身份（`ZOffset` / `Precise` / `Rough` / `Repetition`；无 = `null`）。
+    ///
+    /// 多块盘时按 `+` 拼起来（`ZOffset+Precise`）—— 旧消费方按字符串读，不必改；
+    /// 逐块细节在 [`Self::plates`]。
     pub mode: Option<String>,
+    /// 多块盘时逐块的认档结果（顺序即执行顺序）；单块盘只有一项，旧记录是 `null`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plates: Option<Vec<CalibrationPlateFacts>>,
+}
+
+/// 一块校准板的认档结果（[`CalibrationFacts::plates`] 的一项）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalibrationPlateFacts {
+    /// 这一块用的身份（`ZOffset` / `Precise` / `Rough` / `Repetition`）。
+    pub mode: String,
+    /// 这一块自己的实测包围盒 `[xMin, xMax, yMin, yMax]`。
+    pub measured: Option<[f64; 4]>,
+    pub profile_id: Option<String>,
+    pub tolerance: Option<f64>,
+    pub footprint: Option<[f64; 2]>,
 }
 
 /// **挪塔这件事的记录**（2026-10-18）。
@@ -789,8 +808,8 @@ pub struct ReportFacts<'a> {
     pub preset_params: Option<&'a std::collections::BTreeMap<String, String>>,
     /// 这一份预设里**读不出来的参数**（中文名，相对最初的原文镜像比；空 = 一项不缺）。
     pub preset_missing: &'a [String],
-    /// 第 7 步认档的回执（实测尺寸 / 命中档 / 容差）。非校准件是 `None`。
-    pub calibration_receipt: Option<&'a postprocess::postproc::calibration::CalibrationReceipt>,
+    /// 第 7 步认档的回执（实测尺寸 / 命中档 / 容差），一块一条。非校准件为空。
+    pub calibration_receipt: &'a [postprocess::postproc::calibration::CalibrationReceipt],
     /// **这一趟挪过塔的记录**（2026-11-04）—— 「避让检查」那一组据此多一行
     /// 「已挪塔 X/Y → X/Y（多少 mm）」。
     ///
@@ -1081,7 +1100,7 @@ impl ReportFacts<'_> {
                 /* 这一步原来恒为 `None`（只跑 dry-run、什么事实都不留）。现在把认档结果
                 摆出来：**成功那趟也写** —— 否则"为什么这次用了加长版的基准"没法解释。
                 只写事实，不写结论（结论在 `detail.calibration` 那一组里）。 */
-                let r = self.calibration_receipt?;
+                let r = self.calibration_receipt.first()?;
                 let mut lines = Vec::new();
                 if let Some(b) = r.measured {
                     lines.push(line(
@@ -1565,7 +1584,7 @@ mod tests {
                 nozzle_diameter: self.ir.machine.nozzle_diameter,
                 header: &self.header,
                 calibration_mode: "",
-                calibration_receipt: None,
+                calibration_receipt: &[],
                 /* 判据不摆快照（要摆的那条专门测，见 `snapshot_carries_toml_and_ir`） */
                 preset_params: None,
                 preset_missing: &[],
@@ -1824,7 +1843,7 @@ mod tests {
             tolerance: Some(0.5),
             footprint: Some((119.58, 16.063)),
         };
-        facts.calibration_receipt = Some(&receipt);
+        facts.calibration_receipt = std::slice::from_ref(&receipt);
 
         let lines = facts.step_detail_lines(Step::CalibCheck).unwrap();
         let box_line = lines

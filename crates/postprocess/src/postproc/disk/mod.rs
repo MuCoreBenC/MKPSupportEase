@@ -25,13 +25,21 @@ pub use collision::{
 /// processor.ComputeBBox（对照 bbox_compute.go / model_z_map.go:59）：
 /// 绝对定位模式下挤出移动（G1 带 E）的 2D 包围盒；找不到有效坐标报错。
 pub fn compute_bbox(lines: &[String]) -> Result<BBox, crate::diag::PostprocError> {
+    compute_bbox_range(lines, 0..lines.len())
+}
+
+/// 只在一段行区间里算包围盒 —— 口径与 [`compute_bbox`] 完全一致，只是范围受限。
+pub fn compute_bbox_range(
+    lines: &[String],
+    range: std::ops::Range<usize>,
+) -> Result<BBox, crate::diag::PostprocError> {
     let mut min_x = f64::MAX;
     let mut min_y = f64::MAX;
     let mut max_x = f64::MIN;
     let mut max_y = f64::MIN;
     let mut found = false;
     let mut relative_mode = false;
-    for line in lines {
+    for line in &lines[range] {
         let trimmed = line.trim();
         if trimmed == "G90" {
             relative_mode = false;
@@ -86,6 +94,14 @@ pub fn compute_bbox(lines: &[String]) -> Result<BBox, crate::diag::PostprocError
 pub fn compute_extrusion_centroid(
     lines: &[String],
 ) -> Result<(f64, f64), crate::diag::PostprocError> {
+    compute_extrusion_centroid_range(lines, 0..lines.len())
+}
+
+/// 只在一段行区间里算挤出质心 —— 与 [`compute_extrusion_centroid`] 同一口径。
+pub fn compute_extrusion_centroid_range(
+    lines: &[String],
+    range: std::ops::Range<usize>,
+) -> Result<(f64, f64), crate::diag::PostprocError> {
     let mut sum_x = 0.0;
     let mut sum_y = 0.0;
     let mut sum_e = 0.0;
@@ -97,7 +113,7 @@ pub fn compute_extrusion_centroid(
     let mut has_y = false;
     let mut relative_mode = false;
 
-    for line in lines {
+    for line in &lines[range] {
         let trimmed = line.trim();
         if trimmed == "G90" {
             relative_mode = false;
@@ -142,4 +158,150 @@ pub fn compute_extrusion_centroid(
         });
     }
     Ok((sum_x / sum_e, sum_y / sum_e))
+}
+
+/// 一盘中按对象分段后的一块（`; start printing object, unique label id: N` 起、
+/// `; stop printing object` 止）。同一个 label 出现多段时合并成一块。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlateSegment {
+    pub label: String,
+    pub bbox: BBox,
+    pub centroid: CentroidResult,
+}
+
+/// 按对象标签分段，逐块算包围盒与挤出质心。
+///
+/// 只统计绝对定位下带 `E` 的 `G1`（与 [`compute_bbox`] 同一条规矩）。
+/// 没有分段标记 ⇒ 返回空，调用方退回整盘口径。
+/// 缺 `stop` 的那一段整个丢掉：宁可少一块，也不把两段算成一块。
+pub fn segment_objects(lines: &[String]) -> Vec<PlateSegment> {
+    struct Acc {
+        label: String,
+        closed: bool,
+        min_x: f64,
+        min_y: f64,
+        max_x: f64,
+        max_y: f64,
+        sum_x: f64,
+        sum_y: f64,
+        sum_e: f64,
+        found: bool,
+    }
+
+    let mut accs: Vec<Acc> = Vec::new();
+    let mut active: Option<usize> = None;
+    let mut relative_mode = false;
+    /* 质心按 ΔE 加权：E 是整条流连续的，跨段不能重置 —— 所以这一遍就顺带算完。 */
+    let mut current_e = 0.0;
+    let mut has_e = false;
+    let mut current_x = 0.0;
+    let mut current_y = 0.0;
+    let mut has_x = false;
+    let mut has_y = false;
+
+    for line in lines {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("; start printing object") {
+            let label = rest.rsplit(':').next().map(str::trim).unwrap_or_default();
+            if label.is_empty() {
+                active = None;
+                continue;
+            }
+            let idx = match accs.iter().position(|a| a.label == label) {
+                Some(i) => i,
+                None => {
+                    accs.push(Acc {
+                        label: label.to_string(),
+                        closed: false,
+                        min_x: f64::MAX,
+                        min_y: f64::MAX,
+                        max_x: f64::MIN,
+                        max_y: f64::MIN,
+                        sum_x: 0.0,
+                        sum_y: 0.0,
+                        sum_e: 0.0,
+                        found: false,
+                    });
+                    accs.len() - 1
+                }
+            };
+            active = Some(idx);
+            continue;
+        }
+        if trimmed.starts_with("; stop printing object") {
+            if let Some(i) = active.take() {
+                accs[i].closed = true;
+            }
+            continue;
+        }
+        if trimmed == "G90" {
+            relative_mode = false;
+            continue;
+        }
+        if trimmed == "G91" {
+            relative_mode = true;
+            continue;
+        }
+        if !line.starts_with("G1 ") || relative_mode {
+            continue;
+        }
+        let Some(e_val) = crate::gcode::extract_coord(line.as_bytes(), b'E') else {
+            continue;
+        };
+        let x = crate::gcode::extract_coord(line.as_bytes(), b'X');
+        let y = crate::gcode::extract_coord(line.as_bytes(), b'Y');
+        if let Some(v) = x {
+            current_x = v;
+            has_x = true;
+        }
+        if let Some(v) = y {
+            current_y = v;
+            has_y = true;
+        }
+        if let Some(i) = active {
+            let a = &mut accs[i];
+            if let Some(v) = x {
+                a.min_x = a.min_x.min(v);
+                a.max_x = a.max_x.max(v);
+                a.found = true;
+            }
+            if let Some(v) = y {
+                a.min_y = a.min_y.min(v);
+                a.max_y = a.max_y.max(v);
+                a.found = true;
+            }
+            if has_e && has_x && has_y {
+                let delta_e = e_val - current_e;
+                if delta_e > 0.0 {
+                    a.sum_x += current_x * delta_e;
+                    a.sum_y += current_y * delta_e;
+                    a.sum_e += delta_e;
+                }
+            }
+        }
+        current_e = e_val;
+        has_e = true;
+    }
+
+    accs.into_iter()
+        .filter(|a| a.closed && a.found)
+        .map(|a| PlateSegment {
+            label: a.label,
+            bbox: BBox {
+                x_min: a.min_x,
+                x_max: a.max_x,
+                y_min: a.min_y,
+                y_max: a.max_y,
+            },
+            centroid: if a.sum_e > 0.0 {
+                CentroidResult {
+                    centroid_x: a.sum_x / a.sum_e,
+                    centroid_y: a.sum_y / a.sum_e,
+                    valid: true,
+                }
+            } else {
+                CentroidResult::default()
+            },
+        })
+        .collect()
 }

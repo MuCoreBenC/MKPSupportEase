@@ -2759,16 +2759,32 @@ export default function PageReport({
                                     slicerTower={detail.tower?.slicerTower}
                                   />
                                 )}
-                                {/* 校准件：同一块画布，画真实外形与实测包围盒 */}
-                                {g.id === 'result' && detail.calibration?.measured != null && (
-                                  <div className={s.plate}>
-                                    <CalibrationPlate
-                                      measured={detail.calibration.measured}
-                                      modelMap={detail.modelMap ?? null}
-                                      machineType={detail.summary.machineType}
-                                    />
-                                  </div>
-                                )}
+                                {/* 校准件：同一块画布，画真实外形与实测包围盒。
+                                    多块盘（Z + XY 同盘）逐块各画一张，顺序与执行顺序一致。 */}
+                                {g.id === 'result' &&
+                                  ((detail.calibration?.plates ?? []).some(
+                                    (p) => p.measured != null,
+                                  )
+                                    ? (detail.calibration?.plates ?? []).map((p, i) =>
+                                        p.measured == null ? null : (
+                                          <div className={s.plate} key={`${p.mode}-${i}`}>
+                                            <CalibrationPlate
+                                              measured={p.measured}
+                                              modelMap={detail.modelMap ?? null}
+                                              machineType={detail.summary.machineType}
+                                            />
+                                          </div>
+                                        ),
+                                      )
+                                    : detail.calibration?.measured != null && (
+                                        <div className={s.plate}>
+                                          <CalibrationPlate
+                                            measured={detail.calibration.measured}
+                                            modelMap={detail.modelMap ?? null}
+                                            machineType={detail.summary.machineType}
+                                          />
+                                        </div>
+                                      ))}
                                 {/* 越界那一趟：同一块画布，凸出允许范围的那一块标红
                                     （旧记录没有 `boundary` ⇒ 不摆） */}
                                 {g.id === 'result' &&

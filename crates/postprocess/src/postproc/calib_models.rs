@@ -241,6 +241,21 @@ pub fn detect_mode_by_size(
     width: f64,
     height: f64,
 ) -> Option<crate::postproc::calibration::Mode> {
+    find_profile_by_size(profiles, width, height)?
+        .mode
+        .first()
+        .and_then(|m| crate::postproc::calibration::parse_mode_id(m))
+}
+
+/// 按实测外形找命中的那一档（宽高互换也算）。
+///
+/// 与 [`detect_mode_by_size`] 同一判据，区别是连档一起返回 —— 认板之后还要知道
+/// 这一档的 id 与容差写进回执。
+pub fn find_profile_by_size<'a>(
+    profiles: &'a [ModelProfile],
+    width: f64,
+    height: f64,
+) -> Option<&'a ModelProfile> {
     /* 宽高互换也算命中：板子在切片器里转 90° 时实测出来就是转过来的
      * （与 `find_profile` 的 `ProfileMatch::Swapped` 同一条规矩） */
     let hit = |p: &&ModelProfile, w: f64, h: f64| {
@@ -248,12 +263,9 @@ pub fn detect_mode_by_size(
             && (p.footprint_w - w).abs() <= p.tolerance
             && (p.footprint_h - h).abs() <= p.tolerance
     };
-    let p = profiles
+    profiles
         .iter()
-        .find(|p| hit(p, width, height) || hit(p, height, width))?;
-    p.mode
-        .first()
-        .and_then(|m| crate::postproc::calibration::parse_mode_id(m))
+        .find(|p| hit(p, width, height) || hit(p, height, width))
 }
 
 /// 「这一盘是什么校准件」的判定结果。
@@ -267,6 +279,151 @@ pub enum CalibVerdict {
     Unrecognized,
     /// **3MF 带着校准身份、但这一盘外形不是任何一块校准板** —— 调用方问用户要不要按普通模型继续。
     NotCalibrationModel,
+}
+
+/// 盘中认出来的一块校准板：模式 + 它自己的包围盒与质心。
+///
+/// 包围盒必须是**这一块自己的** —— 第 7 步的形变检测与第 10 步的图案落点都按它算，
+/// 拿整盘的合并盒子会让两块都报 `E_CAL_MISMATCH_002`。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlateMatch {
+    pub mode: crate::postproc::calibration::Mode,
+    pub label: String,
+    pub bbox: crate::postproc::disk::BBox,
+    pub centroid: crate::postproc::disk::CentroidResult,
+    pub profile_id: String,
+    pub tolerance: f64,
+    /// 实测外形（宽, 高），写回执用。
+    pub measured: (f64, f64),
+}
+
+/// 逐段认板：命中档的留下，按 **Z → XY → 其他** 排序；同一模式只留第一块。
+///
+/// 一块都没命中 ⇒ 空列表，由 [`decide_calibrations`] 决定是「不是校准件」还是
+/// 「校准文件里不是校准板」。
+pub fn detect_plates(lines: &[String], profiles: &[ModelProfile]) -> Vec<PlateMatch> {
+    use crate::postproc::calibration::{Mode, mode_to_calibration_string};
+
+    let mut out: Vec<PlateMatch> = Vec::new();
+    for seg in crate::postproc::disk::segment_objects(lines) {
+        let w = seg.bbox.x_max - seg.bbox.x_min;
+        let h = seg.bbox.y_max - seg.bbox.y_min;
+        let Some(profile) = find_profile_by_size(profiles, w, h) else {
+            continue;
+        };
+        let Some(mode) = profile
+            .mode
+            .first()
+            .and_then(|m| crate::postproc::calibration::parse_mode_id(m))
+        else {
+            continue;
+        };
+        if out.iter().any(|x| x.mode == mode) {
+            tracing::warn!(
+                label = %seg.label,
+                mode = mode_to_calibration_string(mode),
+                "同一盘里两块同型校准板，只跑第一块"
+            );
+            continue;
+        }
+        out.push(PlateMatch {
+            mode,
+            label: seg.label,
+            bbox: seg.bbox,
+            centroid: seg.centroid,
+            profile_id: profile.id.clone(),
+            tolerance: profile.tolerance,
+            measured: (w, h),
+        });
+    }
+    out.sort_by_key(|m| match m.mode {
+        Mode::ZOffset => 0,
+        Mode::XyPrecise | Mode::XyRough => 1,
+        _ => 2,
+    });
+    out
+}
+
+/// 多块定案的结果（[`CalibVerdict`] 的列表版）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum CalibVerdicts {
+    /// 普通模型 —— 按正常后处理跑。
+    NotCalibration,
+    /// 是校准件，按这些模式**依次**跑（顺序已排好：Z 先、XY 后）。
+    Calibrations(Vec<crate::postproc::calibration::Mode>),
+    /// 强制校准模式开着、但外形对不上任何一块板 —— 调用方必须停下。
+    Unrecognized,
+    /// 3MF 带着校准身份、但没有一块外形是校准板 —— 调用方问用户。
+    NotCalibrationModel,
+}
+
+impl CalibVerdicts {
+    /// 定案的模式列表（只有 [`CalibVerdicts::Calibrations`] 非空）。
+    pub fn modes(&self) -> &[crate::postproc::calibration::Mode] {
+        match self {
+            CalibVerdicts::Calibrations(list) => list,
+            _ => &[],
+        }
+    }
+}
+
+/// 身份 + 分段外形一起定案（多块版）。
+///
+/// - `force`：不看身份，只看分段外形；一块都没命中 ⇒ [`CalibVerdicts::Unrecognized`]。
+/// - 身份 `Combined`：这一盘可能是多块校准件；命中 ≥1 块就按列表跑，一块都没命中 ⇒
+///   [`CalibVerdicts::NotCalibrationModel`]（继续问「要不要强制打印」）。
+/// - 身份是具体某一档：有分段就按分段（`Precise` / `Rough` 用身份定），没有分段就退回
+///   整盘外形纠正，与原单值口径一致。
+/// - 没有身份：普通模型，分段再像也不认。
+pub fn decide_calibrations(
+    force: bool,
+    marker: crate::postproc::calibration::Mode,
+    plates: &[PlateMatch],
+    overall: Option<(f64, f64)>,
+    profiles: &[ModelProfile],
+) -> CalibVerdicts {
+    use crate::postproc::calibration::{Mode, is_any};
+
+    let modes = |plates: &[PlateMatch]| -> Vec<Mode> { plates.iter().map(|p| p.mode).collect() };
+    /* 单块盘**没有**按对象分段标记：Bambu 单对象切片不写
+     * `; start printing object`，这时只能退回整盘外形（旧口径）。 */
+    let by_overall = || overall.and_then(|(w, h)| detect_mode_by_size(profiles, w, h));
+
+    if force {
+        if !plates.is_empty() {
+            return CalibVerdicts::Calibrations(modes(plates));
+        }
+        return match by_overall() {
+            Some(m) => CalibVerdicts::Calibrations(vec![m]),
+            None => CalibVerdicts::Unrecognized,
+        };
+    }
+    if marker == Mode::Combined {
+        if !plates.is_empty() {
+            return CalibVerdicts::Calibrations(modes(plates));
+        }
+        return match by_overall() {
+            Some(m) => CalibVerdicts::Calibrations(vec![m]),
+            None => CalibVerdicts::NotCalibrationModel,
+        };
+    }
+    if !is_any(marker) {
+        return CalibVerdicts::NotCalibration;
+    }
+    if plates.is_empty() {
+        let by_shape = overall.and_then(|(w, h)| detect_mode_by_size(profiles, w, h));
+        return CalibVerdicts::Calibrations(vec![by_shape.unwrap_or(marker)]);
+    }
+    /* 身份只带「精度 / 粗」这一层信息：外形定「是不是 XY 板」，身份定是哪一档。 */
+    let mut list = modes(plates);
+    if matches!(marker, Mode::XyPrecise | Mode::XyRough) {
+        for m in list.iter_mut() {
+            if matches!(m, Mode::XyPrecise | Mode::XyRough) {
+                *m = marker;
+            }
+        }
+    }
+    CalibVerdicts::Calibrations(list)
 }
 
 /// 身份定案：**强制开关 + 3MF 身份 + 实测外形** 三者一起说。
@@ -640,5 +797,112 @@ mod tests {
         let p = profile("xy-square-50", &["Precise", "Rough"], 50.5, 50.5);
         let err = validate(&p).unwrap_err();
         assert!(err.contains("pattern"), "{err}");
+    }
+
+    /// 造一段对象区间：只给矩形四角的挤出点，包围盒就是这块板的实测外形。
+    fn object_segment(label: &str, x: f64, y: f64, w: f64, h: f64) -> Vec<String> {
+        vec![
+            format!("; start printing object, unique label id: {label}"),
+            format!("G1 X{x:.3} Y{y:.3} E0.1"),
+            format!("G1 X{:.3} Y{y:.3} E0.2", x + w),
+            format!("G1 X{:.3} Y{:.3} E0.3", x + w, y + h),
+            format!("G1 X{x:.3} Y{:.3} E0.4", y + h),
+            format!("; stop printing object, unique label id: {label}"),
+        ]
+    }
+
+    fn dual_plate_profiles() -> Vec<ModelProfile> {
+        vec![
+            profile("zoffset-ext", &["ZOffset"], 119.58, 15.272),
+            profile("xy-square-55", &["Precise", "Rough"], 55.5, 55.5),
+        ]
+    }
+
+    /// 一盘两块：按对象分段各认一块，Z 排在 XY 前面。
+    #[test]
+    fn detect_plates_reads_two_plates_apart() {
+        use crate::postproc::calibration::Mode;
+
+        let mut lines = vec!["G90".to_string()];
+        lines.extend(object_segment("105", 30.2, 121.0, 119.5, 15.2));
+        lines.extend(object_segment("94", 63.4, 42.7, 55.5, 55.5));
+
+        let plates = detect_plates(&lines, &dual_plate_profiles());
+        assert_eq!(plates.len(), 2, "{plates:?}");
+        assert_eq!(plates[0].mode, Mode::ZOffset);
+        assert_eq!(plates[0].label, "105");
+        assert_eq!(plates[1].mode, Mode::XyPrecise);
+        assert_eq!(plates[1].label, "94");
+    }
+
+    /// 两块贴在一起也分得开：边界是标签，不是间距。
+    #[test]
+    fn detect_plates_does_not_depend_on_the_gap() {
+        let mut lines = vec!["G90".to_string()];
+        lines.extend(object_segment("1", 0.0, 0.0, 119.5, 15.2));
+        lines.extend(object_segment("2", 119.6, 0.0, 55.5, 55.5));
+
+        let plates = detect_plates(&lines, &dual_plate_profiles());
+        assert_eq!(plates.len(), 2, "{plates:?}");
+    }
+
+    /// 缺 `stop` 的那一段整个丢掉，不把两段算成一块。
+    #[test]
+    fn detect_plates_drops_an_unclosed_segment() {
+        let mut lines = vec!["G90".to_string()];
+        lines.extend(object_segment("1", 0.0, 0.0, 119.5, 15.2));
+        lines.push("; start printing object, unique label id: 2".to_string());
+        lines.push("G1 X200.0 Y200.0 E1.0".to_string());
+
+        let plates = detect_plates(&lines, &dual_plate_profiles());
+        assert_eq!(plates.len(), 1, "{plates:?}");
+    }
+
+    /// 定案：`Combined` + 两块 ⇒ 两块都跑；一块都认不出 ⇒ 仍走「问用户」那条路。
+    #[test]
+    fn decide_calibrations_handles_combined() {
+        use crate::postproc::calibration::Mode;
+
+        let ps = dual_plate_profiles();
+        let mut lines = vec!["G90".to_string()];
+        lines.extend(object_segment("105", 30.2, 121.0, 119.5, 15.2));
+        lines.extend(object_segment("94", 63.4, 42.7, 55.5, 55.5));
+        let plates = detect_plates(&lines, &ps);
+
+        assert_eq!(
+            decide_calibrations(false, Mode::Combined, &plates, None, &ps),
+            CalibVerdicts::Calibrations(vec![Mode::ZOffset, Mode::XyPrecise])
+        );
+        assert_eq!(
+            decide_calibrations(false, Mode::Combined, &[], None, &ps),
+            CalibVerdicts::NotCalibrationModel
+        );
+        /* 没有身份就是普通模型：分段再像也不认 */
+        assert_eq!(
+            decide_calibrations(false, Mode::None, &plates, None, &ps),
+            CalibVerdicts::NotCalibration
+        );
+    }
+
+    /// 单块盘没有对象分段标记（Bambu 单对象切片不写 `start printing object`）：
+    /// 退回整盘外形，单 Z / 单 XY 都照样认得出。
+    #[test]
+    fn decide_calibrations_falls_back_to_the_whole_plate_for_a_single_part() {
+        use crate::postproc::calibration::Mode;
+
+        let ps = dual_plate_profiles();
+        assert_eq!(
+            decide_calibrations(false, Mode::Combined, &[], Some((119.51, 15.27)), &ps),
+            CalibVerdicts::Calibrations(vec![Mode::ZOffset])
+        );
+        assert_eq!(
+            decide_calibrations(false, Mode::Combined, &[], Some((55.58, 55.58)), &ps),
+            CalibVerdicts::Calibrations(vec![Mode::XyPrecise])
+        );
+        /* 整盘也对不上任何一档：仍然走「问用户要不要强制打印」 */
+        assert_eq!(
+            decide_calibrations(false, Mode::Combined, &[], Some((80.0, 80.0)), &ps),
+            CalibVerdicts::NotCalibrationModel
+        );
     }
 }

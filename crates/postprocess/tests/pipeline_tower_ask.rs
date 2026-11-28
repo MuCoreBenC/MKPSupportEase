@@ -165,6 +165,7 @@ fn run_with_mode(
     ir.prefs.auto_tower_position = mode;
     pipeline::process_with_ir_with_tower_ask(
         IrProcessRequest {
+            calibrations: Vec::new(),
             gcode_path: path,
             ir,
             output_path: None,
@@ -184,6 +185,7 @@ fn no_asker_keeps_the_old_behaviour() {
     let cancel = CancelToken::new();
     let old = process_with_ir_with_tower_ask(
         IrProcessRequest {
+            calibrations: Vec::new(),
             gcode_path: path.clone(),
             ir: ir_at([20.0, 20.0]),
             output_path: None,
@@ -313,6 +315,7 @@ fn progress_never_goes_backwards() {
     ir.prefs.auto_tower_position = TowerRelocateModeIr::Ask;
     let done = pipeline::process_with_ir_with_tower_ask(
         IrProcessRequest {
+            calibrations: Vec::new(),
             gcode_path: path,
             ir,
             output_path: None,

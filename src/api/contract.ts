@@ -471,6 +471,23 @@ export interface ReportCalibrationFacts {
   footprint: [number, number] | null
   /** 最终采用的校准身份（`ZOffset` / `Precise` / `Rough` / `Repetition`） */
   mode: string | null
+  /**
+   * 多块盘时逐块的认档结果（顺序即执行顺序，Z 在前）。
+   *
+   * 单块盘只有一项；旧记录没有这一格 ⇒ 退回上面那组单值字段。
+   */
+  plates?: ReportCalibrationPlate[] | null
+}
+
+/** 一块校准板的认档结果（`ReportCalibrationFacts.plates` 的一项） */
+export interface ReportCalibrationPlate {
+  /** 这一块用的身份（`ZOffset` / `Precise` / `Rough` / `Repetition`） */
+  mode: string
+  /** 这一块自己的实测挤出包围盒 `[xMin, xMax, yMin, yMax]`（mm） */
+  measured: [number, number, number, number] | null
+  profileId: string | null
+  tolerance: number | null
+  footprint: [number, number] | null
 }
 
 /** 一次执行的摘要（报告页列表行）。字段与 `_meta.json`（schema v2）一一对应 */

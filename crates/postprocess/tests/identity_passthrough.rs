@@ -135,7 +135,7 @@ fn assert_passthrough(
     );
     let receipt = done
         .calibration_receipt
-        .as_ref()
+        .first()
         .unwrap_or_else(|| panic!("{label}：认档回执为空 —— 第 7 步跑了却没带回事实"));
     assert!(receipt.measured.is_some(), "{label}：回执里没有实测包围盒");
 
@@ -167,6 +167,7 @@ fn the_tower_ask_wrapper_passes_the_identity_through() {
     assert_passthrough(
         "process_with_ir_with_tower_ask",
         IrProcessRequest {
+            calibrations: Vec::new(),
             gcode_path: work.clone(),
             ir: z_new_ir(&raw),
             output_path: None,
@@ -189,6 +190,7 @@ fn the_deferred_wrapper_with_ask_passes_the_identity_through() {
     assert_passthrough(
         "process_with_ir_deferred_print_time_with_tower_ask",
         IrProcessRequest {
+            calibrations: Vec::new(),
             gcode_path: work.clone(),
             ir: z_new_ir(&raw),
             output_path: None,
@@ -216,6 +218,7 @@ fn no_identity_means_no_calibration_branch() {
 
     let done = process_with_ir_with_tower_ask(
         IrProcessRequest {
+            calibrations: Vec::new(),
             gcode_path: work.clone(),
             ir: z_new_ir(&raw),
             output_path: None,
@@ -235,7 +238,10 @@ fn no_identity_means_no_calibration_branch() {
         !done.step_timings.iter().any(|s| s.step == Step::CalibCheck),
         "普通模型不该跑第 7 步认档"
     );
-    assert!(done.calibration_receipt.is_none(), "普通模型不该有认档回执");
+    assert!(
+        done.calibration_receipt.is_empty(),
+        "普通模型不该有认档回执"
+    );
 
     let out = std::fs::read_to_string(&work).unwrap();
     assert!(
