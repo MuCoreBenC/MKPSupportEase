@@ -445,6 +445,13 @@ const GROUP_SHAPES: Record<string, ReactNode> = {
       <path d="M8.5 12.5l2.5 2.5 4.5-5" />
     </>
   ),
+  /* 本次后处理＝一张做完的清单：几道短横 + 右下角一个勾 */
+  actions: (
+    <>
+      <path d="M4 6.5h9M4 12h9M4 17.5h5.5" />
+      <path d="M14 17.5l2 2 4-4.5" />
+    </>
+  ),
   print: (
     <>
       <path d="M7 8.5V3.5h10v5" />
