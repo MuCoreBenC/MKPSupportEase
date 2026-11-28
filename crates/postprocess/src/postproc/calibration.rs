@@ -423,7 +423,6 @@ pub fn insert_calibration_blocks(
         .unwrap_or(output.len());
 
     let mut receipts = Vec::with_capacity(targets.len());
-    let mut any_new_mode = false;
 
     for (i, target) in targets.iter().enumerate() {
         let mode_str = mode_to_calibration_string(target.mode);
@@ -447,10 +446,6 @@ pub fn insert_calibration_blocks(
         .ok_or_else(|| PostprocError::Calibration {
             message: format!("无输出，mode={mode_str}"),
         })?;
-
-        if is_new_calibration_mode(mode_str, target.bbox.as_ref()) {
-            any_new_mode = true;
-        }
 
         let mut block: Vec<String> = Vec::new();
         /* 退料段收尾时工具头停在切料位、Z 还是最后一层的高度 —— 只有**第一块**需要
@@ -479,9 +474,10 @@ pub fn insert_calibration_blocks(
         receipts.push(receipt);
     }
 
-    if any_new_mode {
-        output = remove_final_lower_z(&output);
-    }
+    /* 多块路径**不做** `remove_final_lower_z`：它按「第一处校准锚点 + 之后的安全抬升」
+     * 划危险区，两块时第一块收尾的 `G1 X100 Y100 Z100` 会被当成那处抬升，于是
+     * **第二块入口的 `G1 Z<safe>` 被当「最终降 Z」删掉** —— XY 块就留在 Z100 上空跑。
+     * 每块结尾自己会抬到 Z100，不存在需要清掉的收尾降 Z。 */
     Ok((output, receipts))
 }
 

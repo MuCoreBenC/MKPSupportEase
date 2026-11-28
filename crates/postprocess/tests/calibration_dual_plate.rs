@@ -192,4 +192,23 @@ fn two_blocks_are_inserted_z_before_xy() {
         2,
         "两块各带一段运行时头"
     );
+
+    assert!(
+        out.iter().any(|l| l.trim() == "G1 X100 Y100 Z100"),
+        "第一块收尾应抬到 Z100 —— 这也是第二块容易被顶上天的原因"
+    );
+
+    /* 第二块入口必须自己把 Z 放回工作高度：第一块收尾会抬到 Z100，
+     * 不重新定位的话 XY 块就在 Z100 上空跑（真机 2026-11-28 撞到过）。 */
+    let z_line = out[xy_at..]
+        .iter()
+        .find(|l| l.starts_with("G1 Z"))
+        .expect("XY 块入口没有 Z 定位");
+    let z: f64 = z_line[4..]
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .parse()
+        .unwrap_or(f64::MAX);
+    assert!(z < 20.0, "XY 块不能在 Z100 上空跑：{z_line}");
 }

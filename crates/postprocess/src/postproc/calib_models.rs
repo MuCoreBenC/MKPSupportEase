@@ -251,11 +251,11 @@ pub fn detect_mode_by_size(
 ///
 /// 与 [`detect_mode_by_size`] 同一判据，区别是连档一起返回 —— 认板之后还要知道
 /// 这一档的 id 与容差写进回执。
-pub fn find_profile_by_size<'a>(
-    profiles: &'a [ModelProfile],
+pub fn find_profile_by_size(
+    profiles: &[ModelProfile],
     width: f64,
     height: f64,
-) -> Option<&'a ModelProfile> {
+) -> Option<&ModelProfile> {
     /* 宽高互换也算命中：板子在切片器里转 90° 时实测出来就是转过来的
      * （与 `find_profile` 的 `ProfileMatch::Swapped` 同一条规矩） */
     let hit = |p: &&ModelProfile, w: f64, h: f64| {
