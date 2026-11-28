@@ -633,6 +633,27 @@ function elapsedText(tr: Tr, ms: number | null): string {
   return tr('report.dur.mSec', { m, s: Math.round(sec - m * 60) })
 }
 
+/** 结论里那一串内部模式名翻成人话：`ZOffset+Precise` → `Z 校准 + XY 校准`。 */
+function calibrationModeText(tr: Tr, mode: string | null | undefined): string {
+  if (mode == null || mode === '') return '—'
+  return mode
+    .split('+')
+    .map((token): string => {
+      const t = token.trim()
+      if (/^ZOffset$/i.test(t)) return tr('report.calib.modeZ')
+      if (/^(Precise|Rough)$/i.test(t)) return tr('report.calib.modeXy')
+      if (/^Repetition$/i.test(t)) return tr('report.calib.modeRepetition')
+      return t
+    })
+    .join(' + ')
+}
+
+/** 取路径最后那一段：`…/Calibration_Combined.3mf` → `Calibration_Combined.3mf`。 */
+function baseName(path: string | null | undefined): string | null {
+  if (path == null || path === '') return null
+  return path.split(/[\\/]/).pop() ?? path
+}
+
 function printTimeText(tr: Tr, sec: number | undefined): string {
   if (sec === undefined || !Number.isFinite(sec)) return '—'
   const h = Math.floor(sec / 3600)
@@ -1130,7 +1151,7 @@ function buildGroups(
     const c = detail.calibration
     const what =
       c.mode != null && c.mode !== ''
-        ? c.mode
+        ? calibrationModeText(tr, c.mode)
         : c.verdict === 'from_3mf'
           ? tr('report.calib.verdict3mf')
           : tr('report.calib.verdictAbsent')
@@ -1180,7 +1201,15 @@ function buildGroups(
       [tr('report.actions.directSkipBedLeveling'), actionYesNo(actions?.directSkipBedLeveling)],
       [tr('report.actions.directSkipUnload'), actionYesNo(actions?.directSkipUnload)],
       [tr('report.actions.directDropModel'), actionYesNo(actions?.directDropModel)],
-      [tr('report.actions.calibrationBlocks'), actionText(actions?.calibrationBlocks)],
+      /* 有校准时显示模型名（结论那行已经写了是哪两种校准），没有则退回模式串 / — */
+      [
+        tr('report.actions.calibrationBlocks'),
+        actionText(
+          baseName(detail.calibration?.model3mf) ??
+            baseName(detail.calibration?.originPath) ??
+            actions?.calibrationBlocks,
+        ),
+      ],
       [tr('report.actions.zDwell'), actionNumber(actions?.zCalibrationDwellSec, ' 秒')],
       [tr('report.actions.xyDwell'), actionNumber(actions?.xyCalibrationDwellSec, ' 秒')],
     ],
